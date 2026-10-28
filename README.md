@@ -1,8 +1,13 @@
-# Bank Nifty Radar
+# Stockway
 
-A Mac app (runs in your browser, on your own computer) that learns from 10+ years of
-Bank Nifty prices, India VIX, global markets, scheduled events and news, and tells you every
-evening whether **tomorrow is likely to be a big-move day**.
+A Mac app (runs in your browser, on your own computer) with two parts:
+
+- **Live market** – streams Nifty, Bank Nifty, Fin Nifty, Midcap Select and every F&O stock with
+  their options (CE and PE) from Upstox, checks everything every second, and alerts you the moment
+  something big happens. Includes a scanner, option chains, AI explanations, Telegram alerts and
+  automatic paper trading.
+- **Daily radar** – learns from 10+ years of Bank Nifty prices, India VIX, global markets, events
+  and news, and tells you every evening whether **tomorrow is likely to be a big-move day**.
 
 Not financial advice. Paper trade the signals before using real money.
 
@@ -39,10 +44,53 @@ Go to **Data & settings** and click:
 
 Then open **Tomorrow** and click **Update forecast**.
 
+## Live market (Upstox)
+
+Setup once, in the app under **Live setup**:
+
+1. Open https://account.upstox.com/developer/apps, click **New app**, name it Stockway.
+2. Redirect URL: `http://127.0.0.1:8765/upstox/callback` (exactly).
+3. Paste the app's API key and secret into Live setup and save.
+4. Click **Log in with Upstox**. Upstox ends every login at 3:30 AM, so log in once each morning.
+   The scanner then starts by itself at 9:00 AM and stops after 3:30 PM.
+
+No Upstox account yet? Click **Run simulator** on the Live page: a made-up trading day with the
+same screens, to learn the app. Simulator results are kept separate and mean nothing for real trading.
+
+What it watches (about 2,300 instruments on one Upstox connection):
+
+| Signal | Meaning |
+|---|---|
+| Sharp move | 5-minute move far bigger than what option prices expect |
+| Opening-range breakout | Price clears the first 15 minutes' high or low, with volume |
+| New day high / low, VWAP cross | Key intraday levels taken out |
+| Volume surge | Volume running 3×+ its normal pace with a real move |
+| Futures OI buildup | Long buildup, short buildup, short covering, long unwinding |
+| Unusual options | One strike trading 5×+ its pace with big money (₹ lakh), buying vs writing |
+| OI wall shift | Biggest call OI (resistance) or put OI (support) moved |
+| PCR shift, IV spike, VIX jump | Positioning and fear changing fast |
+| Bigger than priced | Day's move exceeds what options priced for the whole day |
+| News | Headlines that name an F&O stock |
+
+Each alert suggests the at-the-money option in its direction. Strong alerts are paper-traded
+automatically (1 lot, +30% target, −20% stop, exit by 3:15 PM, real charges). The **Paper trades**
+page shows which alert types actually make money. Use that before risking real money.
+
+Optional: a free Google Gemini key (https://aistudio.google.com/apikey) adds a written market pulse
+and a "Why?" answer on alerts. Only prices and public headlines are sent.
+
+Costs: Upstox data is free with an account. Gemini free tier is free. Telegram is free.
+
 ## Pages
 
 | Page | What it answers |
 |---|---|
+| Live | Index cards (PCR, max pain, support/resistance from option OI, IV, expected move, bias), live alerts with option ideas, market pulse, movers, news. |
+| Scanner | Every F&O stock ranked by activity, with buildup, volume pace, IV, PCR, unusual options, bias. Filters and sorting. |
+| Option chain | Full chain for any index or stock with OI bars, OI change, IV, greeks, walls, max pain, intraday chart. |
+| Alerts | Every alert saved by day. |
+| Paper trades | Automatic and manual paper trades, P&L after charges, win rate by alert type. |
+| Live setup | Upstox keys and login, alert levels, Telegram, AI, paper trading settings. |
 | Tomorrow | Will the next session be a big-move day? Expected range in points, direction lean, scheduled events, why the model thinks so, and how your recent calls turned out. |
 | History | Every big day on the chart: flagged, missed, or false alarm. Click any point for that day's story. |
 | Biggest days | The 60 widest-range days in 10 years, and whether the model saw them coming. |

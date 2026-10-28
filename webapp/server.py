@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from radar import features, model, news, pipeline, report
 from radar.dates import ns_col, ns_frame
-from radar.config import ROOT, editable_values, load_config, save_user_settings
+from radar.config import ROOT, SECRET_KEYS, editable_values, load_config, save_user_settings
 
 STATIC = Path(__file__).resolve().parent / "static"
 app = FastAPI(title="Bank Nifty Radar", docs_url=None, redoc_url=None)
@@ -413,9 +413,17 @@ def performance():
 
 
 # ----------------------------------------------------------------- API: settings & uploads
+def masked_settings():
+    v = editable_values(cfg())
+    for k in SECRET_KEYS:
+        if v.get(k):
+            v[k] = "••••" + str(v[k])[-4:]
+    return clean(v)
+
+
 @app.get("/api/settings")
 def get_settings():
-    return clean(editable_values(cfg()))
+    return masked_settings()
 
 
 @app.post("/api/settings")
@@ -425,10 +433,11 @@ async def post_settings(req: Request):
         if "schedule.time" in body:
             hh, mm = str(body["schedule.time"]).split(":")
             assert 0 <= int(hh) < 24 and 0 <= int(mm) < 60
+        body = {k: v for k, v in body.items() if not (isinstance(v, str) and v.startswith("••••"))}
         save_user_settings(body)
     except (ValueError, AssertionError) as e:
         raise HTTPException(400, str(e) or "Time must look like 18:30")
-    return clean(editable_values(cfg()))
+    return masked_settings()
 
 
 @app.post("/api/upload/{kind}")
@@ -474,6 +483,17 @@ def full_report():
     if not f.exists():
         raise HTTPException(404, "Train the model first to create the report.")
     return FileResponse(f)
+
+
+# ----------------------------------------------------------------- live scanner
+from webapp.live_api import engine as live_engine, router as live_router  # noqa: E402
+
+app.include_router(live_router)
+
+
+@app.on_event("startup")
+def _start_live():
+    threading.Thread(target=live_engine, daemon=True).start()   # starts the 9:00 auto-start watcher
 
 
 # ----------------------------------------------------------------- UI

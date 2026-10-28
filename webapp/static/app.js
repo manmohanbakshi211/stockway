@@ -562,12 +562,12 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawe
 /* ---------------- router */
 const PAGES = { tomorrow: pageTomorrow, history: pageHistory, biggest: pageBiggest, drivers: pageDrivers, check: pageCheck, data: pageData };
 async function route() {
-  const page = (location.hash.replace("#/", "") || "tomorrow").split("?")[0];
-  const fn = PAGES[page] || pageTomorrow;
+  const page = (location.hash.replace("#/", "") || "live").split("?")[0];
+  const fn = PAGES[page] || PAGES.live || pageTomorrow;
   document.querySelectorAll(".rail a[data-page]").forEach((a) => { if (a.dataset.page === page) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
   if (state.page !== page) { main.innerHTML = `<p class="muted">Loading…</p>`; window.scrollTo(0, 0); }
   state.page = page;
   try { await fn(); } catch (e) { main.innerHTML = `<div class="empty"><h2>This page couldn't load</h2><p>${esc(e.message)}</p><button class="btn" onclick="location.reload()">Reload</button></div>`; }
 }
 window.addEventListener("hashchange", () => { route(); main.focus({ preventScroll: true }); });
-(async () => { await loadStatus(); await route(); setInterval(loadStatus, 30000); })();
+document.addEventListener("DOMContentLoaded", async () => { await loadStatus(); await route(); setInterval(loadStatus, 30000); });

@@ -107,3 +107,33 @@ schedule:
 telegram:
   bot_token: ""
   chat_id: ""
+
+# Live scanner (Upstox real-time data). Most of these can be changed in the app's Settings.
+live:
+  source: "upstox"             # upstox | sim (built-in market simulator for testing)
+  upstox_api_key: ""
+  upstox_api_secret: ""
+  redirect_uri: "http://127.0.0.1:8765/upstox/callback"
+  auto_start: true             # start at 9:00 on market days when logged in
+  sim_speed: 10                # simulator: 10 = a full trading day in ~38 minutes
+  option_budget: 1900          # options streamed live (Upstox limit is 2000 with greeks)
+  index_strikes: 12            # strikes each side of ATM for indices
+  top_stock_strikes: 3         # strikes each side of ATM for the most liquid stocks (others: ATM only)
+  cooldown_min: 15             # same alert for the same stock at most once in this many minutes
+  telegram_min_severity: 3     # 1 = everything, 2 = important, 3 = only the biggest
+  news: true
+  detectors: {}                # override thresholds, see live/detectors.py DEFAULTS
+  paper:
+    auto: true
+    lots: 1
+    target_pct: 30
+    stop_pct: 20
+
+# AI explanations and market pulse (optional). provider: gemini (free tier) or claude
+ai:
+  provider: "gemini"
+  api_key: ""
+  model: ""
+  pulse_every_min: 15
+  explain_min_severity: 3
+  daily_limit: 200

@@ -12,3 +12,5 @@ uvicorn>=0.29
 # Optional, for better news sentiment (large download, CPU is fine):
 # transformers>=4.40
 # torch>=2.2
+websocket-client>=1.8
+protobuf>=4.25

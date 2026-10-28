@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bank Nifty Radar</title>
+<title>Stockway</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
@@ -13,10 +13,20 @@
 <body>
 <div class="shell">
   <nav class="rail" aria-label="Main">
-    <a class="brand" href="#/tomorrow">
+    <a class="brand" href="#/live">
       <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" /><circle cx="16" cy="16" r="7" /><circle cx="16" cy="16" r="2.5" class="dot"/><path d="M16 16 L27 9" /></svg>
-      <span><b>Radar</b><small>Bank Nifty</small></span>
+      <span><b>Stockway</b><small>F&amp;O live radar</small></span>
     </a>
+    <p class="rail-group">Live market <span id="rail-live" class="rail-live"></span></p>
+    <ul>
+      <li><a href="#/live" data-page="live">Live</a></li>
+      <li><a href="#/scanner" data-page="scanner">Scanner</a></li>
+      <li><a href="#/sym" data-page="sym">Option chain</a></li>
+      <li><a href="#/alerts" data-page="alerts">Alerts</a></li>
+      <li><a href="#/paper" data-page="paper">Paper trades</a></li>
+      <li><a href="#/connect" data-page="connect">Live setup</a></li>
+    </ul>
+    <p class="rail-group">Daily radar <small>Bank Nifty</small></p>
     <ul>
       <li><a href="#/tomorrow" data-page="tomorrow">Tomorrow</a></li>
       <li><a href="#/history" data-page="history">History</a></li>
@@ -51,5 +61,6 @@
 
 <script src="/static/vendor/plotly.min.js"></script>
 <script src="/static/app.js"></script>
+<script src="/static/live.js"></script>
 </body>
 </html>

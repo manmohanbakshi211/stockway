@@ -20,7 +20,25 @@ EDITABLE = {
     "schedule.weekly_retrain": bool,
     "telegram.bot_token": str,
     "telegram.chat_id": str,
+    # live scanner
+    "live.source": str,
+    "live.upstox_api_key": str,
+    "live.upstox_api_secret": str,
+    "live.auto_start": bool,
+    "live.sim_speed": float,
+    "live.telegram_min_severity": int,
+    "live.news": bool,
+    "live.paper.auto": bool,
+    "live.paper.lots": int,
+    "live.paper.target_pct": float,
+    "live.paper.stop_pct": float,
+    "ai.provider": str,
+    "ai.api_key": str,
+    "ai.model": str,
+    "ai.pulse_every_min": int,
+    "ai.explain_min_severity": int,
 }
+SECRET_KEYS = {"telegram.bot_token", "live.upstox_api_secret", "ai.api_key"}
 
 
 def _set(d: dict, dotted: str, value):
