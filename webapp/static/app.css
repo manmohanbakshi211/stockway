@@ -460,3 +460,10 @@ dl.kvs dt { color: var(--muted); } dl.kvs dd { margin: 0; text-align: right; fon
 .live-grid > *, .live-grid aside > * { min-width: 0; }
 .sectors > .sec { min-width: 0; }
 .ic-grid dt, .ic-grid dd { white-space: nowrap; }
+.rail-version { margin-bottom: 8px; line-height: 1.4; }
+.rail-version b { color: var(--ink); }
+.v-state { margin-top: 2px; }
+.v-state small { display: block; color: var(--amber); }
+.v-ok { color: var(--up); font-weight: 650; }
+.v-new { color: var(--amber); font-weight: 700; }
+.link-btn.small { font-size: 12px; }

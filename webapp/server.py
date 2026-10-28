@@ -192,13 +192,47 @@ def _startup():
 # ----------------------------------------------------------------- API: status & jobs
 def app_version():
     import subprocess
+    name = (ROOT / "VERSION").read_text().strip() if (ROOT / "VERSION").exists() else "1.0"
     try:
-        out = subprocess.run(["git", "log", "-1", "--format=%h|%cd", "--date=format:%d %b %Y"], cwd=ROOT,
+        out = subprocess.run(["git", "log", "-1", "--format=%H|%h|%cd", "--date=format:%d %b %Y"], cwd=ROOT,
                              capture_output=True, text=True, timeout=5)
-        h, d = out.stdout.strip().split("|")
-        return {"commit": h, "date": d}
+        full, h, d = out.stdout.strip().split("|")
+        return {"name": name, "commit": h, "full": full, "date": d}
     except Exception:
-        return None
+        return {"name": name, "commit": None, "full": None, "date": None}
+
+
+_VERSION_CHECK = {"at": 0.0, "result": None}
+RUNNING_VERSION = app_version()       # what this running app was started with
+
+
+@app.get("/api/version")
+def version_check(force: bool = False):
+    """Compare this copy with the latest version on GitHub (checked at most every 15 minutes)."""
+    import subprocess
+    disk = app_version()
+    if force or time.time() - _VERSION_CHECK["at"] > 900:
+        remote = None
+        try:
+            out = subprocess.run(["git", "ls-remote", "origin", "HEAD"], cwd=ROOT, capture_output=True, text=True,
+                                 timeout=12, env={**__import__("os").environ, "GIT_TERMINAL_PROMPT": "0"})
+            remote = out.stdout.split()[0] if out.returncode == 0 and out.stdout.strip() else None
+        except Exception:
+            remote = None
+        _VERSION_CHECK.update(at=time.time(), result=remote)
+    remote = _VERSION_CHECK["result"]
+    running = RUNNING_VERSION or {}
+    if not running.get("full"):
+        state = "unknown"
+    elif remote and remote != running["full"]:
+        state = "update"            # newer version on GitHub
+    elif disk.get("full") and disk["full"] != running["full"]:
+        state = "restart"           # downloaded but this window still runs the old one
+    elif remote:
+        state = "latest"
+    else:
+        state = "offline"
+    return {**running, "state": state, "checked_at": _VERSION_CHECK["at"], "latest": remote[:7] if remote else None}
 
 
 @app.get("/api/status")

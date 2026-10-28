@@ -70,15 +70,31 @@ const plotLayout = (extra = {}) => Object.assign({
 const plotCfg = { displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d", "toggleSpikelines"] };
 
 /* ---------------- status + rail */
+async function loadVersion(force = false) {
+  const el = $("#rail-version");
+  if (!el) return;
+  let v;
+  try { v = await api(`/api/version${force ? "?force=true" : ""}`); } catch (e) { return; }
+  const msg = {
+    latest: `<span class="v-ok">✓ Up to date</span>`,
+    update: `<span class="v-new">⬆ Update available</span><small>Close the Terminal window, then double-click Start Radar.command again.</small>`,
+    restart: `<span class="v-new">⬆ Update downloaded</span><small>Close the Terminal window, then double-click Start Radar.command again.</small>`,
+    offline: `<span class="muted">Couldn't check for updates (offline)</span>`,
+    unknown: `<span class="muted">Version check not available</span>`,
+  }[v.state] || "";
+  el.innerHTML = `<b>Stockway ${esc(v.name || "")}</b> <span class="muted">· ${esc(v.commit || "")}${v.date ? ", " + esc(v.date) : ""}</span>
+    <div class="v-state">${msg} <button class="link-btn small" id="v-check" type="button">Check now</button></div>`;
+  $("#v-check").onclick = async (e) => { e.target.textContent = "Checking…"; await loadVersion(true); };
+}
+
 async function loadStatus() {
   try { state.status = await api("/api/status"); } catch (e) { state.status = null; }
   const s = state.status, el = $("#rail-status");
   if (!s) { el.textContent = "Can't reach the app server."; return; }
-  if (!s.model) { el.innerHTML = "No model yet" + (s.version ? `<br>Version ${esc(s.version.commit)}, ${esc(s.version.date)}` : ""); return; }
+  if (!s.model) { el.innerHTML = "Daily radar: no model yet"; return; }
   el.innerHTML = `Model trained <b>${dateTime(s.model.trained_at)}</b><br>Data to ${shortDate(s.model.data_end)}` +
     (s.model.demo ? `<br><span class="badge b-demo">Demo data</span>` : "") +
-    (s.schedule.enabled ? `<br>Auto forecast ${esc(s.schedule.time)}, Mon–Fri` : "") +
-    (s.version ? `<br>Version ${esc(s.version.commit)}, ${esc(s.version.date)}` : "");
+    (s.schedule.enabled ? `<br>Auto forecast ${esc(s.schedule.time)}, Mon–Fri` : "");
   if (s.job && s.job.status === "running" && !state.pollTimer) watchJob();
 }
 
@@ -570,4 +586,4 @@ async function route() {
   try { await fn(); } catch (e) { main.innerHTML = `<div class="empty"><h2>This page couldn't load</h2><p>${esc(e.message)}</p><button class="btn" onclick="location.reload()">Reload</button></div>`; }
 }
 window.addEventListener("hashchange", () => { route(); main.focus({ preventScroll: true }); });
-document.addEventListener("DOMContentLoaded", async () => { await loadStatus(); await route(); setInterval(loadStatus, 30000); });
+document.addEventListener("DOMContentLoaded", async () => { await loadStatus(); loadVersion(); await route(); setInterval(loadStatus, 30000); setInterval(loadVersion, 15 * 60000); });

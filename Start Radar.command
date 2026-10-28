@@ -14,7 +14,7 @@ if [ -d .git ] && command -v git >/dev/null 2>&1; then
   REQ_BEFORE=$(git rev-parse HEAD:requirements.txt 2>/dev/null)
   echo "Checking for updates..."
   if GIT_TERMINAL_PROMPT=0 git pull --ff-only --quiet 2>/tmp/radar_git_err.txt; then
-    echo "Up to date ($(git log -1 --format='%h, %cd' --date=format:'%d %b %Y'))."
+    echo "Up to date: Stockway $(cat VERSION 2>/dev/null || echo 1.0) ($(git log -1 --format='%h, %cd' --date=format:'%d %b %Y'))."
   else
     echo "Couldn't update right now (offline or GitHub login needed). Starting the current version."
     head -2 /tmp/radar_git_err.txt
