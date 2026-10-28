@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from radar import features, model, news, pipeline, report
+from radar.dates import ns_col, ns_frame
 from radar.config import ROOT, editable_values, load_config, save_user_settings
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -56,7 +57,7 @@ def bn_labels(c: dict) -> pd.DataFrame | None:
     f = Path(c["output_dir"]) / "banknifty.parquet"
     if not f.exists():
         return None
-    return features.labels({"banknifty": pd.read_parquet(f)}, c)
+    return features.labels({"banknifty": ns_frame(pd.read_parquet(f))}, c)
 
 
 def outcome(flag, big):
@@ -209,7 +210,7 @@ def status():
     for name, sym in c["tickers"].items():
         f = Path(c["cache_dir"]) / f"mkt_{name}.parquet"
         if f.exists():
-            d = pd.read_parquet(f)
+            d = ns_frame(pd.read_parquet(f))
             data.append({"name": name, "symbol": sym, "days": len(d),
                          "from": str(d.index.min().date()), "to": str(d.index.max().date())})
         else:
@@ -299,10 +300,10 @@ def history():
     f = out / "banknifty.parquet"
     if not f.exists():
         return {"dates": []}
-    bn = pd.read_parquet(f)
+    bn = ns_frame(pd.read_parquet(f))
     lab = features.labels({"banknifty": bn}, c)
     oos_f = out / "oos_predictions.csv"
-    oos = pd.read_csv(oos_f, parse_dates=["date"]) if oos_f.exists() else pd.DataFrame(columns=["date", "target"])
+    oos = pd.read_csv(oos_f, parse_dates=["date"]).assign(date=lambda d: ns_col(d["date"])) if oos_f.exists() else pd.DataFrame(columns=["date", "target"])
     bm = oos[oos["target"] == "big_move"].set_index("date")
     df = bn.join(lab[["big_move", "range_pct"]]).join(bm[["prob", "flag", "threshold"]])
     return clean({
@@ -322,7 +323,7 @@ def day(date: str):
     bn_f = out / "banknifty.parquet"
     if not bn_f.exists():
         raise HTTPException(404, "No data yet. Train the model first.")
-    bn = pd.read_parquet(bn_f)
+    bn = ns_frame(pd.read_parquet(bn_f))
     if d not in bn.index:
         raise HTTPException(404, f"{date} is not a trading day in the data.")
     lab = features.labels({"banknifty": bn}, c)
@@ -330,12 +331,12 @@ def day(date: str):
     oos_f = out / "oos_predictions.csv"
     prob = flag = None
     if oos_f.exists():
-        o = pd.read_csv(oos_f, parse_dates=["date"])
+        o = pd.read_csv(oos_f, parse_dates=["date"]).assign(date=lambda d: ns_col(d["date"]))
         o = o[(o["target"] == "big_move") & (o["date"] == d)]
         if len(o):
             prob, flag = float(o["prob"].iloc[0]), bool(o["flag"].iloc[0])
     drivers, cues, news_rows = [], [], []
-    X = pd.read_parquet(out / "features.parquet") if (out / "features.parquet").exists() else None
+    X = ns_frame(pd.read_parquet(out / "features.parquet")) if (out / "features.parquet").exists() else None
     bundle = model.load_bundle(c)
     if X is not None and d in X.index:
         xr = X.loc[[d]]
@@ -349,7 +350,7 @@ def day(date: str):
     heads = []
     hp = Path(c["cache_dir"]) / "headlines_scored.parquet"
     if hp.exists():
-        h = pd.read_parquet(hp)
+        h = ns_frame(pd.read_parquet(hp))
         h = h[(h["date"] >= d - pd.Timedelta(days=1)) & (h["date"] <= d)]
         h = h.reindex(h["score"].abs().sort_values(ascending=False).index).head(8)
         heads = [{"date": str(r["date"].date()), "text": r["headline_text"], "score": float(r["score"])}
@@ -381,7 +382,7 @@ def factors():
     fac = pd.read_csv(out / "crucial_factors.csv") if (out / "crucial_factors.csv").exists() else pd.DataFrame()
     imp = pd.read_csv(out / "importance.csv", index_col=0)["importance"] if (out / "importance.csv").exists() else pd.Series(dtype=float)
     lab_path = out / "labels.parquet"
-    base = float(pd.read_parquet(lab_path)["big_move"].mean()) if lab_path.exists() else None
+    base = float(ns_frame(pd.read_parquet(lab_path))["big_move"].mean()) if lab_path.exists() else None
     rows = []
     if not fac.empty:
         hi_col = [c for c in fac.columns if "when high" in c][0]
@@ -403,7 +404,7 @@ def performance():
     bt_f = out / "backtest_proxy.csv"
     eq = {}
     if bt_f.exists():
-        bt = pd.read_csv(bt_f, index_col=0, parse_dates=True)
+        bt = ns_frame(pd.read_csv(bt_f, index_col=0, parse_dates=True))
         fl = bt[bt["flag"] == 1]
         eq = {"all_dates": [str(d.date()) for d in bt.index], "all": (bt["pnl_pct"].cumsum() * 100).round(3).tolist(),
               "flag_dates": [str(d.date()) for d in fl.index], "flag": (fl["pnl_pct"].cumsum() * 100).round(3).tolist()}

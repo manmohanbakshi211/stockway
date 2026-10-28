@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .dates import ns, ns_col, ns_frame
 from .events import event_features
 from .news import news_features
 
@@ -46,6 +47,7 @@ def next_session(last: pd.Timestamp) -> pd.Timestamp:
 
 def india_features(mkt: dict) -> pd.DataFrame:
     """Features computed at the close of day t (to be shifted to t+1)."""
+    mkt = {k: ns_frame(v) for k, v in mkt.items()}
     bn = mkt["banknifty"]
     idx = bn.index
     o, h, l, c = bn["Open"], bn["High"], bn["Low"], bn["Close"]
@@ -93,6 +95,7 @@ def india_features(mkt: dict) -> pd.DataFrame:
 
 
 def global_features(mkt: dict, target_days: pd.DatetimeIndex) -> pd.DataFrame:
+    target_days = ns(target_days)
     out = pd.DataFrame(index=target_days)
     left = pd.DataFrame({"date": target_days}).sort_values("date")
     for name, df in mkt.items():
@@ -107,8 +110,11 @@ def global_features(mkt: dict, target_days: pd.DatetimeIndex) -> pd.DataFrame:
         else:
             g[f"{name}_ret1"] = c.pct_change()
             g[f"{name}_ret5"] = c.pct_change(5)
+        g.index = ns(g.index)
         g.index.name = "src_date"
-        m = pd.merge_asof(left, g.reset_index().sort_values("src_date"), left_on="date",
+        right = g.reset_index()
+        right["src_date"] = ns_col(right["src_date"])
+        m = pd.merge_asof(left, right.sort_values("src_date"), left_on="date",
                           right_on="src_date", allow_exact_matches=False, direction="backward",
                           tolerance=pd.Timedelta(days=6))
         out = out.join(m.drop(columns=["src_date"]).set_index("date"))
@@ -116,7 +122,7 @@ def global_features(mkt: dict, target_days: pd.DatetimeIndex) -> pd.DataFrame:
 
 
 def labels(mkt: dict, cfg: dict) -> pd.DataFrame:
-    bn = mkt["banknifty"]
+    bn = ns_frame(mkt["banknifty"])
     o, h, l, c = bn["Open"], bn["High"], bn["Low"], bn["Close"]
     lab = pd.DataFrame(index=bn.index)
     lab["open"], lab["close"] = o, c
@@ -134,6 +140,8 @@ def labels(mkt: dict, cfg: dict) -> pd.DataFrame:
 
 def build_dataset(mkt: dict, news_daily: pd.DataFrame, cfg: dict, include_next: bool = False):
     """Returns X (features), y (labels), meta. If include_next, X has one extra row for the next session."""
+    mkt = {k: ns_frame(v) for k, v in mkt.items()}
+    news_daily = ns_frame(news_daily)
     bn_idx = mkt["banknifty"].index
     target = bn_idx[1:]
     if include_next:

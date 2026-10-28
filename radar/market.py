@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from .dates import ns, ns_frame
+
 COLS = ["Open", "High", "Low", "Close"]
 
 
@@ -18,7 +20,7 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
     idx = pd.to_datetime(df.index)
     if getattr(idx, "tz", None) is not None:
         idx = idx.tz_localize(None)
-    df.index = idx.normalize()
+    df.index = ns(idx.normalize())
     df.index.name = "date"
     df = df[~df.index.duplicated(keep="last")].sort_index()
     df = df.dropna(subset=["Close"])
@@ -40,7 +42,7 @@ def _download(symbol: str, start: str) -> pd.DataFrame:
 
 def load_ticker(name: str, symbol: str, start: str, cache_dir: str, refresh: bool = True) -> pd.DataFrame:
     path = Path(cache_dir) / f"mkt_{name}.parquet"
-    cached = pd.read_parquet(path) if path.exists() else None
+    cached = ns_frame(pd.read_parquet(path)) if path.exists() else None
     if cached is not None and not refresh:
         return cached
     if cached is not None and not cached.empty:
@@ -48,7 +50,7 @@ def load_ticker(name: str, symbol: str, start: str, cache_dir: str, refresh: boo
         if last.date() >= dt.date.today() - dt.timedelta(days=1):
             return cached
         fresh = _download(symbol, (last - pd.Timedelta(days=10)).strftime("%Y-%m-%d"))
-        df = pd.concat([cached, fresh])
+        df = pd.concat([cached, ns_frame(fresh)])
         df = df[~df.index.duplicated(keep="last")].sort_index()
     else:
         df = _download(symbol, start)

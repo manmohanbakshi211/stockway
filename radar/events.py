@@ -85,7 +85,7 @@ def event_features(target_days: pd.DatetimeIndex, trading: pd.DatetimeIndex, cfg
     ev_path = cfg.get("events_csv")
     if ev_path and Path(ev_path).exists():
         ev = pd.read_csv(ev_path)
-        ev["date"] = pd.to_datetime(ev["date"])
+        ev["date"] = pd.to_datetime(ev["date"]).astype("datetime64[ns]")
         for name, grp in ev.groupby("event"):
             col = "is_" + "".join(ch if ch.isalnum() else "_" for ch in str(name).lower())
             days = set(grp["date"])

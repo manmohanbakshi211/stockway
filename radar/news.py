@@ -16,6 +16,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .dates import ns, ns_col, ns_frame
+
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 GDELT_START = pd.Timestamp("2017-01-01")
 
@@ -94,7 +96,7 @@ def _to_daily(points: list, agg: str = "mean") -> pd.Series:
         return pd.Series(dtype=float)
     s = pd.Series(
         [p.get("value", np.nan) for p in points],
-        index=pd.to_datetime([p["date"][:8] for p in points], format="%Y%m%d"),
+        index=ns(pd.to_datetime([p["date"][:8] for p in points], format="%Y%m%d")),
         dtype=float,
     )
     g = s.groupby(level=0)
@@ -268,7 +270,7 @@ def headlines_daily(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
         h = pd.read_parquet(cache)
     else:
         h = pd.read_csv(path, usecols=["publish_date", "headline_text"], dtype=str)
-        h["date"] = pd.to_datetime(h["publish_date"].str[:8], format="%Y%m%d", errors="coerce")
+        h["date"] = pd.to_datetime(h["publish_date"].str[:8], format="%Y%m%d", errors="coerce").astype("datetime64[ns]")
         h = h[h["date"] >= pd.Timestamp(cfg["start_date"]) - pd.Timedelta(days=30)]
         h = h[h["headline_text"].fillna("").str.contains(FIN_KEYWORDS)]
         h = h[["date", "headline_text"]].dropna().reset_index(drop=True)
@@ -288,8 +290,10 @@ def headlines_daily(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
 # ---------------------------------------------------------------- features
 def news_features(news_daily: pd.DataFrame, target_days: pd.DatetimeIndex) -> pd.DataFrame:
     """Rolling news features on calendar days, then take the last value strictly before T."""
+    target_days = ns(target_days)
     if news_daily is None or news_daily.empty:
         return pd.DataFrame(index=target_days)
+    news_daily = ns_frame(news_daily)
     cal = pd.date_range(news_daily.index.min(), max(news_daily.index.max(), target_days.max()), freq="D")
     nd = news_daily.reindex(cal)
     feats = pd.DataFrame(index=cal)
@@ -305,7 +309,9 @@ def news_features(news_daily: pd.DataFrame, target_days: pd.DatetimeIndex) -> pd
             feats[f"{c}_chg7"] = s.rolling(3, min_periods=1).mean() - s.rolling(30, min_periods=10).mean()
     feats.index.name = "news_date"
     left = pd.DataFrame({"date": target_days}).sort_values("date")
-    right = feats.reset_index().sort_values("news_date")
+    right = feats.reset_index()
+    right["news_date"] = ns_col(right["news_date"])
+    right = right.sort_values("news_date")
     merged = pd.merge_asof(left, right, left_on="date", right_on="news_date",
                            allow_exact_matches=False, direction="backward")
     return merged.drop(columns=["news_date"]).set_index("date")
