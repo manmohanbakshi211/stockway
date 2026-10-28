@@ -519,6 +519,137 @@ def full_report():
     return FileResponse(f)
 
 
+# ----------------------------------------------------------------- strategy lab
+def _lab_cfg():
+    return cfg().get("lab") or {}
+
+
+def _lab_progress(log, label):
+    state = {"last": -1}
+    def p(done, total):
+        pct = int(done / max(1, total) * 100)
+        if pct // 5 != state["last"]:
+            state["last"] = pct // 5
+            log(f"Step 1/2: {label} {pct}%")
+    return p
+
+
+def _clear_synthetic():
+    from lab.data import hist_dir
+    hd = hist_dir(ROOT / "data")
+    if (hd / "SYNTHETIC").exists():
+        import shutil
+        for d in hd.iterdir():
+            if d.is_dir():
+                shutil.rmtree(d, ignore_errors=True)
+        (hd / "SYNTHETIC").unlink(missing_ok=True)
+
+
+def _lab_reload():
+    try:
+        from webapp.live_api import engine as _eng
+        _eng().desk.load_plan()
+    except Exception:
+        pass
+
+
+@app.get("/api/lab/status")
+def lab_status():
+    from lab.data import have_data, hist_dir
+    from lab.walk import lab_dir
+    c = _lab_cfg()
+    d = lab_dir(ROOT / "data")
+    res = None
+    if (d / "results.json").exists():
+        r = json.loads((d / "results.json").read_text())
+        res = {"generated": r.get("generated"), "summary": r.get("summary"), "period": r.get("period")}
+    return clean({"data": have_data(ROOT / "data"), "synthetic": (hist_dir(ROOT / "data") / "SYNTHETIC").exists(),
+                  "dhan": bool(c.get("dhan_client_id") and c.get("dhan_token")), "results": res,
+                  "years": c.get("years", 3)})
+
+
+@app.get("/api/lab/results")
+def lab_results():
+    from lab.walk import lab_dir
+    f = lab_dir(ROOT / "data") / "results.json"
+    if not f.exists():
+        raise HTTPException(404, "No backtest yet.")
+    r = json.loads(f.read_text())
+    from lab.data import hist_dir
+    r["synthetic"] = (hist_dir(ROOT / "data") / "SYNTHETIC").exists()
+    return clean(r)
+
+
+@app.post("/api/lab/dhan/test")
+def lab_dhan_test():
+    from lab.dhan import Dhan
+    c = _lab_cfg()
+    if not (c.get("dhan_client_id") and c.get("dhan_token")):
+        raise HTTPException(400, "Add your Dhan client ID and access token first.")
+    try:
+        p = Dhan(c["dhan_client_id"], c["dhan_token"]).profile()
+    except PermissionError as e:
+        raise HTTPException(401, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"Dhan did not answer: {e}")
+    return {"ok": True, "profile": {k: p.get(k) for k in ("dhanClientId", "tokenValidity", "activeSegment", "dataPlan", "dataValidity")}}
+
+
+@app.post("/api/lab/download")
+def lab_download_start():
+    from lab.dhan import Dhan
+    from lab.data import download
+    c = _lab_cfg()
+    if not (c.get("dhan_client_id") and c.get("dhan_token")):
+        raise HTTPException(400, "Add your Dhan client ID and access token in the Strategy desk settings first.")
+    years = int(c.get("years") or 3)
+
+    def job(log, stop):
+        _clear_synthetic()
+        d = Dhan(c["dhan_client_id"], c["dhan_token"])
+        end = dt.date.today() - dt.timedelta(days=1)
+        start = dt.date(end.year - years, end.month, 1)
+        log(f"Downloading {years} years of 1-minute Nifty and Bank Nifty options ({start:%b %Y} to {end:%b %Y})")
+        download(d, ROOT / "data", start=start, end=end, log=log, should_stop=stop,
+                 progress=_lab_progress(log, "Downloading history"))
+    return {"id": JOBS.start("lab_download", "Downloading option history from Dhan", job)["id"]}
+
+
+@app.post("/api/lab/backtest")
+def lab_backtest_start():
+    from lab.walk import run_all
+    c = _lab_cfg()
+    ucfg = {k: float(c[k]) for k in ("capital", "risk_pct", "alloc_pct") if c.get(k)}
+
+    def job(log, stop):
+        run_all(ROOT / "data", ucfg, log=log, should_stop=stop)
+        _lab_reload()
+    return {"id": JOBS.start("lab_backtest", "Testing strategies on history", job)["id"]}
+
+
+@app.post("/api/lab/demo")
+def lab_demo_start():
+    from lab.data import have_data
+    from lab.synth import generate
+    from lab.walk import run_all
+    if any(v["months"] for v in have_data(ROOT / "data").values()) and not (ROOT / "data" / "history" / "SYNTHETIC").exists():
+        raise HTTPException(400, "Real history is already downloaded. The demo would replace it, so it is disabled.")
+
+    def job(log, stop):
+        log("Step 1/5: making 15 months of synthetic (fake) option data for a demo")
+        _clear_synthetic()
+        generate(ROOT / "data", dt.date(2025, 1, 1), dt.date(2026, 3, 31))
+        run_all(ROOT / "data", {"train_months": 4}, log=log, should_stop=stop)
+        _lab_reload()
+    return {"id": JOBS.start("lab_backtest", "Demo backtest on synthetic data", job)["id"]}
+
+
+@app.get("/api/lab/desk")
+def lab_desk(source: str | None = None):
+    from webapp.live_api import engine as _eng
+    return clean(_eng().desk.view(source))
+
+
 # ----------------------------------------------------------------- live scanner
 from webapp.live_api import engine as live_engine, router as live_router  # noqa: E402
 

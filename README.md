@@ -102,10 +102,38 @@ and a "Why?" answer on alerts. Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Gemini free tier is free. Telegram is free.
 
+## Strategy desk (aim: a positive average day)
+
+Institution-style intraday strategies on Nifty and Bank Nifty, every one with a capped worst case:
+
+| Strategy | When it earns |
+|---|---|
+| Iron fly (sell ATM straddle + wings, a stop on each side) | Calm days: options lose value faster than the index moves |
+| Iron condor (sell OTM call + put + wings, combined stop and target) | Range days |
+| Expiry-day iron condor | Expiry days, when time decay is fastest |
+| Opening-range breakout debit spread | Days that break out after 9:30 |
+| Trend-day debit spread | Clean one-way days |
+
+How it decides, the way a desk does:
+
+1. **Test on real history.** Dhan's historical option data (₹499 / 30 days): 1-minute prices for
+   at-the-money ±10 strikes. Fixed-strike prices are rebuilt so positions are held exactly as they would be.
+   All charges (brokerage, STT 0.15%, exchange, SEBI, GST, stamp) and slippage are included.
+2. **Walk forward.** About 100 variants (entry time, strike distance, stops, filters). Each month, only the
+   previous 6 months are used to choose; only the following month counts. A variant must have enough trades,
+   a profit factor of 1.15+ and profit about 2 standard errors above zero. Otherwise the desk stays in cash.
+3. **Size and guard.** Lots are sized so that a trade hitting its stops loses about 1.5% of capital, with a hard
+   cap on the theoretical worst case and on margin. Everything closes for the day after a 2% loss.
+4. **Paper trade the plan** live every day (same rules as the backtest) and compare with the backtest.
+
+Setup: Strategy desk page → paste your Dhan client ID and access token → Download history (~40 min for 3
+years) → Run backtest. Re-run monthly.
+
 ## Pages
 
 | Page | What it answers |
 |---|---|
+| Strategy desk | Today's strategy plan and positions, paper P&L by day, out-of-sample backtest results, Dhan data setup. |
 | Live | Index cards (PCR, max pain, support/resistance from option OI, IV, expected move, bias), live alerts with option ideas, market pulse, movers, news. |
 | Scanner | Every F&O stock ranked by activity, with buildup, volume pace, IV, PCR, unusual options, bias. Filters and sorting. |
 | Option chain | Full chain for any index or stock with OI bars, OI change, IV, greeks, walls, max pain, intraday chart. |

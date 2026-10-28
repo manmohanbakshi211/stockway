@@ -145,3 +145,14 @@ ai:
   pulse_every_min: 15
   explain_min_severity: 3
   daily_limit: 200
+
+# Strategy lab: backtests on Dhan historical option data, and the live strategy desk (paper)
+lab:
+  dhan_client_id: ""
+  dhan_token: ""
+  years: 3                     # history to download
+  capital: 500000              # sizing for backtest and the live desk
+  risk_pct: 1.5                # planned loss of one trade (stops hit + 50% buffer), % of capital
+  alloc_pct: 25                # max margin one strategy may use, % of capital
+  daily_stop_pct: 2.0          # close everything for the day after losing this % of capital
+  auto_trade: true             # paper-trade today's plan automatically

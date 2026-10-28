@@ -71,6 +71,8 @@ class LiveEngine:
         self.status = {"state": "stopped", "message": "Not started", "source": None, "since": time.time()}
         Tracker(self.store, "init")              # make sure the outcomes table exists
         self._reset()
+        from lab.live import StrategyDesk
+        self.desk = StrategyDesk(self)
         threading.Thread(target=self._watch, daemon=True, name="live-watch").start()
         threading.Thread(target=self._news_loop, daemon=True, name="live-news").start()
         threading.Thread(target=self.context.run_forever, args=(self._filings_wanted,), daemon=True,
@@ -237,6 +239,7 @@ class LiveEngine:
         if len(self.daily) < len(self.uni.underlyings) * 0.8:
             threading.Thread(target=self._load_daily, daemon=True, name="daily-history").start()
         self._attach_iv_history()
+        self.desk.load_plan()
         self._recenter()
         self.set_status("running", f"Live: {len(self.uni.indices)} indices, {len(self.uni.stocks)} stocks, "
                                    f"{len(self.opt_subs)} options streaming")
@@ -346,7 +349,7 @@ class LiveEngine:
             exp, ks = strikes_for(u, n_top)
             used += 2 * (len(ks) - len(plan[u.symbol][1]))
             plan[u.symbol] = (exp, ks)
-        want, windows = set(), {}
+        want, windows = set(getattr(self, "desk", None).needed_keys() if getattr(self, "desk", None) else ()), {}
         for sym, (exp, ks) in plan.items():
             u = self.uni.underlyings[sym]
             windows[sym] = ks
@@ -489,6 +492,11 @@ class LiveEngine:
                     except Exception as e:
                         self.log(f"Next-expiry chain {sym} failed: {e}")
             self._compute_all(now, mins, emit=True, lc=lc)
+            try:
+                self.desk.tick(now)
+            except Exception as e:
+                if self._every("desk_err", 300, clock_time=False):
+                    self.log(f"Strategy desk error: {e}")
             self._big_prints(now, lc)
             self.tracker.update(self.state, self.clock.ts())
             self.paper.update(self.state, now)
@@ -506,6 +514,10 @@ class LiveEngine:
 
     def _end_of_day(self, now, mins):
         self.paper.update(self.state, now, force_close=True)
+        try:
+            self.desk.end_of_day(now)
+        except Exception as e:
+            self.log(f"Strategy desk close failed: {e}")
         self._compute_all(now, mins, emit=False)
         self._market_view()
         self.tracker.update(self.state, self.clock.ts(), force=True)

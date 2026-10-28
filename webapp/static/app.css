@@ -467,3 +467,17 @@ dl.kvs dt { color: var(--muted); } dl.kvs dd { margin: 0; text-align: right; fon
 .v-ok { color: var(--up); font-weight: 650; }
 .v-new { color: var(--amber); font-weight: 700; }
 .link-btn.small { font-size: 12px; }
+
+/* ---------- strategy desk */
+.kpis.kpi6 { grid-template-columns: repeat(3, 1fr); }
+.kpis.kpi6 .kpi:nth-child(4) { border-left: 0; }
+.kpis.kpi6 .kpi:nth-child(n+4) { border-top: 1px solid var(--rule-soft); }
+.plan-list { display: grid; gap: 8px; }
+.plan-item { display: grid; grid-template-columns: 1fr 220px; gap: 14px; background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius); padding: 12px 14px; }
+.pi-status { font-size: 13px; font-weight: 650; color: var(--signal); align-self: center; text-align: right; }
+.months { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
+.mcell { border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+.mcell span { display: block; color: var(--muted); font-size: 12px; }
+.mcell.pos { background: color-mix(in srgb, var(--up) calc(var(--a) * 35%), var(--paper)); }
+.mcell.neg { background: color-mix(in srgb, var(--down) calc(var(--a) * 35%), var(--paper)); }
+@media (max-width: 900px) { .plan-item { grid-template-columns: 1fr; } .pi-status { text-align: left; } .kpis.kpi6 { grid-template-columns: 1fr; } }

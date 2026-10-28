@@ -42,7 +42,7 @@ const KIND = {
 };
 
 /* ---------------- polling + notifications */
-function livePage() { return ["live", "scanner", "sym", "alerts", "paper", "connect", "context", "scorecard", "briefs"].includes(state.page); }
+function livePage() { return ["live", "desk", "scanner", "sym", "alerts", "paper", "connect", "context", "scorecard", "briefs"].includes(state.page); }
 
 async function pollSnapshot() {
   try {
@@ -783,8 +783,141 @@ async function pageBriefs() {
   });
 }
 
+
+/* ---------------- page: Strategy desk */
+const SNAME = { iron_fly: "Iron fly", iron_condor: "Iron condor", expiry_condor: "Expiry-day condor", orb_spread: "Breakout debit spread", trend_spread: "Trend debit spread" };
+async function pageDesk() {
+  stopPageTimer();
+  const [st, settings] = await Promise.all([api("/api/lab/status"), api("/api/settings")]);
+  let res = null;
+  if (st.results) { try { res = await api("/api/lab/results"); } catch (_) {} }
+  const q = (v) => (v == null ? "" : esc(v));
+  const dataRows = Object.entries(st.data).map(([k, v]) => `<tr><td>${k === "BANKNIFTY" ? "Bank Nifty" : "Nifty"}</td><td class="r">${v.months}</td><td>${v.first || "–"} → ${v.last || "–"}</td><td class="r">${v.mb} MB</td></tr>`).join("");
+  const S = res && res.summary;
+  main.innerHTML = `<h1 class="page-title">Strategy desk</h1>
+    <p class="lede">Institution-style intraday strategies on Nifty and Bank Nifty: hedged option selling on calm days, debit spreads on trending days. Every strategy is tested on years of real 1-minute option prices, and only out-of-sample results count.</p>
+    ${st.synthetic ? `<div class="banner">⚠️ You are looking at a <b>demo on synthetic (fake) data</b>. It shows how the desk works, not whether it makes money. Download real history from Dhan below.</div>` : ""}
+    <div id="desk-live"></div>
+    ${S ? deskResults(res) : `<div class="empty" style="max-width:none"><h2>No backtest yet</h2><p>Connect Dhan (₹499/month data plan), download history, then run the backtest. Or see a quick demo on synthetic data first.</p>
+      <div class="btn-row"><button class="btn" id="lab-demo">See a demo (synthetic data)</button></div></div>`}
+    <h2>Data and settings</h2>
+    <div class="split">
+      <div class="panel"><h3>1. Dhan historical data</h3>
+        <ol class="steps"><li>Open a free Dhan account if you don't have one.</li>
+          <li>On <a href="https://web.dhan.co" target="_blank" rel="noopener">web.dhan.co</a> → Profile → <b>Access DhanHQ APIs</b>: subscribe to <b>Data APIs</b> (₹499 / 30 days).</li>
+          <li>On the same page, <b>generate an access token</b>. Copy it and your <b>Client ID</b> here.</li></ol>
+        <div class="form-grid" style="margin-top:12px">
+          <label class="field">Dhan client ID<input type="text" id="l-cid" value="${q(settings["lab.dhan_client_id"])}" autocomplete="off"></label>
+          <label class="field">Access token<input type="password" id="l-tok" value="${q(settings["lab.dhan_token"])}" autocomplete="off"><small>Tokens expire; paste a new one when Dhan asks.</small></label>
+          <label class="field">History to download<select id="l-years">${[1, 2, 3, 4, 5].map((v) => `<option value="${v}" ${Number(settings["lab.years"] || 3) === v ? "selected" : ""}>${v} year${v > 1 ? "s" : ""}</option>`).join("")}</select><small>3 years ≈ 6,000 requests, about 40 minutes.</small></label>
+        </div>
+        <div class="btn-row" style="margin-top:14px"><button class="btn" id="l-save">Save</button><button class="btn" id="l-test">Test connection</button>
+          <button class="btn primary" id="l-dl" ${st.dhan ? "" : "disabled"}>Download history</button></div>
+        <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Index</th><th class="r">Months</th><th>Range</th><th class="r">Size</th></tr></thead><tbody>${dataRows}</tbody></table></div>
+        <div class="btn-row" style="margin-top:12px"><button class="btn primary" id="l-bt" ${Object.values(st.data).some((v) => v.months) ? "" : "disabled"}>Run backtest</button>
+          ${!st.synthetic && !Object.values(st.data).some((v) => v.months) ? `<button class="btn" id="lab-demo2">Demo on synthetic data</button>` : ""}</div>
+        <p class="note">Re-run the backtest once a month (download first): the plan picks strategies on the latest 6 months.</p></div>
+      <div class="panel"><h3>2. Money and risk</h3><div class="form-grid">
+        <label class="field">Capital (₹)<input type="text" id="l-cap" value="${q(settings["lab.capital"] ?? 500000)}" inputmode="numeric"></label>
+        <label class="field">Risk per trade<select id="l-risk">${[0.5, 1, 1.5, 2].map((v) => `<option value="${v}" ${Number(settings["lab.risk_pct"] ?? 1.5) === v ? "selected" : ""}>${v}% of capital</option>`).join("")}</select><small>Loss if the stops hit, plus a 50% buffer.</small></label>
+        <label class="field">Daily loss limit<select id="l-stop">${[1, 1.5, 2, 3].map((v) => `<option value="${v}" ${Number(settings["lab.daily_stop_pct"] ?? 2) === v ? "selected" : ""}>${v}% of capital</option>`).join("")}</select><small>Everything closes for the day at this loss.</small></label>
+        <label class="check"><input type="checkbox" id="l-auto" ${settings["lab.auto_trade"] !== false ? "checked" : ""}><span>Paper-trade the plan automatically<small>On live or simulator prices, every market day.</small></span></label>
+      </div><div class="btn-row" style="margin-top:14px"><button class="btn" id="l-save2">Save</button></div>
+      <p class="note">Changing capital or risk: run the backtest again to re-size.</p></div>
+    </div>`;
+  const save = async () => {
+    try {
+      await post("/api/settings", { "lab.dhan_client_id": $("#l-cid").value.trim(), "lab.dhan_token": $("#l-tok").value.trim(),
+        "lab.years": Number($("#l-years").value), "lab.capital": Number(String($("#l-cap").value).replace(/[^0-9.]/g, "")) || 500000,
+        "lab.risk_pct": Number($("#l-risk").value), "lab.daily_stop_pct": Number($("#l-stop").value), "lab.auto_trade": $("#l-auto").checked });
+      toast("Saved"); return true;
+    } catch (e) { toast(e.message); return false; }
+  };
+  const job = async (path) => { try { await post(path, {}); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
+  $("#l-save").onclick = async () => { if (await save()) pageDesk(); };
+  $("#l-save2").onclick = save;
+  $("#l-test").onclick = async () => { if (!(await save())) return; try { const r = await post("/api/lab/dhan/test", {}); toast(`Dhan connected (${r.profile.dhanClientId || "ok"}${r.profile.dataPlan ? ", data plan: " + r.profile.dataPlan : ""})`); pageDesk(); } catch (e) { toast(e.message); } };
+  $("#l-dl").onclick = async () => { if (await save()) job("/api/lab/download"); };
+  $("#l-bt").onclick = async () => { if (await save()) job("/api/lab/backtest"); };
+  ["#lab-demo", "#lab-demo2"].forEach((id) => { if ($(id)) $(id).onclick = () => job("/api/lab/demo"); });
+  if (res) drawDeskCharts(res);
+  const tick = async () => {
+    if (state.page !== "desk") return;
+    try { drawDeskLive(await api("/api/lab/desk")); } catch (_) {}
+    L.pageTimer = setTimeout(tick, 3000);
+  };
+  tick();
+}
+
+function legsText(legs) {
+  return legs.map((l) => `${l.q > 0 ? "Buy" : "Sell"} ${fk(l.strike)} ${l.side} @ ${fx(l.entry)}${l.exit != null ? ` → ${fx(l.exit)}` : ""}`).join(" · ");
+}
+
+function drawDeskLive(d) {
+  const el = $("#desk-live"); if (!el) return;
+  const s = d.stats || {};
+  const plan = d.plan.map((p) => `<div class="plan-item"><div><b>${esc(SNAME[p.family] || p.family)}</b> <span class="pill p-idx">${esc(p.sym)}</span>
+      <span class="pill ${p.selling ? "p-sig" : "p-amber"}">${p.selling ? "Sell premium" : "Directional"}</span>
+      <p class="small muted" style="margin:4px 0 0">${esc(p.describe || "")}</p>
+      <p class="small" style="margin:2px 0 0">Last 6 months: ${p.train && p.train.n ? `${p.train.n} trades, ${Math.round(p.train.win)}% winners, avg ₹${fk(Math.round(p.train.mean))} per lot, profit factor ${p.train.pf.toFixed(2)}` : "–"}</p></div>
+      <div class="pi-status">${esc(p.status)}</div></div>`).join("");
+  const open = d.today.map((t) => `<tr><td><b>${esc(SNAME[t.family] || t.family)}</b> ${esc(t.sym)}<br><small class="muted">${t.lots} lot${t.lots > 1 ? "s" : ""} · max loss ₹${fk(Math.round(t.max_loss))} · margin ~₹${fk(Math.round(t.margin))}</small></td>
+    <td class="small">${esc(legsText(t.legs))}</td><td>${t.status === "open" ? `<span class="pill p-sig">Open</span>` : esc(t.reason || "")}</td>
+    <td class="r"><b class="${((t.status === "open" ? t.mtm : t.net) || 0) >= 0 ? "up" : "down"}">${rupees(t.status === "open" ? t.mtm : t.net)}</b></td></tr>`).join("");
+  el.innerHTML = `<div class="kpis"><div class="kpi"><b class="${d.today_pnl >= 0 ? "up" : "down"}">${rupees(d.today_pnl)}</b><span>Today (${esc(d.source === "sim" ? "simulator" : "live paper")})</span></div>
+      <div class="kpi"><b>${s.avg_day != null ? rupees(s.avg_day) : "–"}</b><span>Average day, ${s.days || 0} paper days</span></div>
+      <div class="kpi"><b>${s.green_pct != null ? Math.round(s.green_pct) + "%" : "–"}</b><span>Green days</span></div>
+      <div class="kpi"><b>${rupees(s.total || 0)}</b><span>Total paper P&amp;L</span></div></div>
+    ${d.halted ? `<div class="banner" style="margin-top:12px">⛔ ${esc(d.halted)}</div>` : `<p class="note">Daily loss limit: ₹${fk(Math.round((d.config.capital || 0) * (d.config.daily_stop_pct || 2) / 100))}. Capital ₹${fk(Math.round(d.config.capital || 0))}.${d.config.enabled === false ? " <b>Auto paper trading is off.</b>" : ""}</p>`}
+    <h2>Today's plan ${d.plan_info.generated ? `<span class="muted small">from the backtest of ${new Date(d.plan_info.generated).toLocaleDateString("en-IN")}</span>` : ""}</h2>
+    <div class="plan-list">${plan || `<p class="muted" style="padding:14px">No strategy qualifies yet. Run the backtest; only strategies that made money reliably in the last 6 months are traded.</p>`}</div>
+    ${(d.inactive || []).length ? `<p class="note">Not traded now (didn't pass the bar in the last 6 months): ${d.inactive.map((p) => `${esc(SNAME[p.family] || p.family)} ${esc(p.sym)}`).join(", ")}.</p>` : ""}
+    ${d.today.length ? `<h2>Positions today</h2><div class="table-wrap"><table><thead><tr><th>Strategy</th><th>Legs</th><th>Status</th><th class="r">P&amp;L</th></tr></thead><tbody>${open}</tbody></table></div>` : ""}
+    ${d.days.length ? `<h2>Paper P&amp;L by day</h2><div class="chart" id="desk-days" style="height:200px"></div>` : ""}`;
+  if (d.days.length && window.Plotly) {
+    Plotly.react($("#desk-days"), [{ type: "bar", x: d.days.map((x) => x.day), y: d.days.map((x) => x.pnl), marker: { color: d.days.map((x) => (x.pnl >= 0 ? C.up : C.down)) } }],
+      plotLayout({ margin: { l: 60, r: 10, t: 8, b: 30 }, yaxis: { gridcolor: "#EEF1F4", tickprefix: "₹" } }), plotCfg);
+  }
+}
+
+function deskResults(r) {
+  const S = r.summary, cfgc = r.config || {};
+  const pct = (v) => (v == null ? "–" : `${v.toFixed(0)}%`);
+  const months = r.monthly.map((m) => `<div class="mcell ${m.pnl >= 0 ? "pos" : "neg"}" style="--a:${Math.min(1, Math.abs(m.pnl) / Math.max(1, ...r.monthly.map((x) => Math.abs(x.pnl))))}" title="${m.days} trading days, ${m.green} green"><span>${esc(m.month)}</span><b>${rupees(m.pnl)}</b></div>`).join("");
+  const by = r.by_strategy.map((b) => `<tr><td><b>${esc(SNAME[b.family] || b.family)}</b> <span class="muted small">${esc(b.sym)}</span></td><td class="r">${b.n}</td><td class="r">${pct(b.win)}</td>
+    <td class="r">${b.pf >= 99 ? "∞" : b.pf.toFixed(2)}</td><td class="r">${rupees(b.mean)}</td><td class="r">${b.avg_lots.toFixed(1)}</td><td class="r muted">${rupees(b.costs)}</td><td class="r"><b class="${b.sum >= 0 ? "up" : "down"}">${rupees(b.sum)}</b></td></tr>`).join("");
+  const reg = r.regimes.map((g) => `<tr><td>${esc(g.bucket)}</td><td class="r">${g.trades}</td><td class="r">${pct(g.win)}</td><td class="r">${rupees(g.avg)}</td><td class="r"><b class="${g.pnl >= 0 ? "up" : "down"}">${rupees(g.pnl)}</b></td></tr>`).join("");
+  const ins = r.insample.filter((x) => x.hindsight_best || x.walk_forward).map((x) => `<tr><td>${esc(SNAME[x.family] || x.family)} <span class="muted small">${esc(x.sym)}</span></td><td class="r">${rupees(x.hindsight_best)}</td><td class="r"><b class="${x.walk_forward >= 0 ? "up" : "down"}">${rupees(x.walk_forward)}</b></td></tr>`).join("");
+  return `<h2>Backtest: out-of-sample results <span class="muted small">${esc(r.period.test_from || "")} to ${esc(r.period.to)} · ${r.variants} strategy variants tested · capital ₹${fk(Math.round(cfgc.capital))}</span></h2>
+    <div class="kpis kpi6">
+      <div class="kpi"><b class="${S.avg_day >= 0 ? "up" : "down"}">${rupees(S.avg_day)}</b><span>Average per day (all ${S.days} days)</span></div>
+      <div class="kpi"><b>${pct(S.green_pct)}</b><span>Green days (of ${S.trade_days} days with trades)</span></div>
+      <div class="kpi"><b>${S.pf >= 99 ? "∞" : S.pf.toFixed(2)}</b><span>Profit factor (₹ won ÷ ₹ lost)</span></div>
+      <div class="kpi"><b class="down">${rupees(S.max_dd)}</b><span>Worst drawdown (${S.max_dd_pct.toFixed(1)}% of capital)</span></div>
+      <div class="kpi"><b class="${S.annual_pct >= 0 ? "up" : "down"}">${S.annual_pct.toFixed(1)}%</b><span>Per year on capital</span></div>
+      <div class="kpi"><b>${S.losing_months ?? "–"} / ${S.months ?? "–"}</b><span>Losing months</span></div></div>
+    <p class="note">Worst day ${rupees(S.worst_day)}, best day ${rupees(S.best_day)}, Sharpe ${S.sharpe.toFixed(2)}. Each month used only strategies chosen on the 6 months before it.</p>
+    <div class="split" style="margin-top:16px"><div class="chart" id="bt-eq" style="height:260px"></div><div class="chart" id="bt-hist" style="height:260px"></div></div>
+    <h2>Month by month</h2><div class="months">${months}</div>
+    <h2>By strategy</h2><div class="table-wrap"><table><thead><tr><th>Strategy</th><th class="r">Trades</th><th class="r">Winners</th><th class="r">Profit factor</th><th class="r">Avg trade</th><th class="r">Avg lots</th><th class="r">Charges</th><th class="r">Total</th></tr></thead><tbody>${by || `<tr><td colspan="8" class="muted">No strategy passed the selection in any month.</td></tr>`}</tbody></table></div>
+    <div class="split" style="margin-top:22px">
+      <div><h2 style="margin-top:0">By market condition</h2><div class="table-wrap"><table><thead><tr><th>Condition</th><th class="r">Trades</th><th class="r">Winners</th><th class="r">Avg</th><th class="r">Total</th></tr></thead><tbody>${reg}</tbody></table></div></div>
+      <div><h2 style="margin-top:0">Honesty check</h2><div class="table-wrap"><table><thead><tr><th>Strategy</th><th class="r">Best variant in hindsight</th><th class="r">What walk-forward got</th></tr></thead><tbody>${ins}</tbody></table></div>
+        <p class="note">Hindsight always looks better. A big gap means a strategy only works if you know the future.</p></div></div>
+    <ul class="note" style="padding-left:18px">${(r.caveats || []).map((c) => `<li>${esc(c)}</li>`).join("")}</ul>`;
+}
+
+function drawDeskCharts(r) {
+  if (!window.Plotly) return;
+  const eq = r.equity;
+  if ($("#bt-eq") && eq.length) Plotly.react($("#bt-eq"), [{ x: eq.map((e) => e.date), y: eq.map((e) => e.eq), type: "scatter", mode: "lines", line: { color: C.signal, width: 2 }, fill: "tozeroy", fillcolor: "rgba(61,47,168,.08)" }],
+    plotLayout({ margin: { l: 64, r: 10, t: 26, b: 30 }, title: { text: "Out-of-sample equity (₹)", font: { size: 12 }, x: 0 }, yaxis: { gridcolor: "#EEF1F4", tickprefix: "₹" } }), plotCfg);
+  if ($("#bt-hist") && r.hist.length) Plotly.react($("#bt-hist"), [{ type: "bar", x: r.hist.map((h) => (h.from + h.to) / 2), y: r.hist.map((h) => h.n), marker: { color: r.hist.map((h) => ((h.from + h.to) / 2 >= 0 ? C.up : C.down)) } }],
+    plotLayout({ margin: { l: 40, r: 10, t: 26, b: 30 }, title: { text: "Daily P&L on days with trades (number of days)", font: { size: 12 }, x: 0 }, xaxis: { tickprefix: "₹", gridcolor: "#EEF1F4" }, bargap: 0.05 }), plotCfg);
+}
+
 /* ---------------- register */
 Object.assign(PAGES, { live: pageLive, scanner: pageScanner, sym: pageSym, alerts: pageAlerts, paper: pagePaper, connect: pageConnect,
-  context: pageContext, scorecard: pageScorecard, briefs: pageBriefs });
+  context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk });
 window.addEventListener("hashchange", () => { stopPageTimer(); });
 pollSnapshot();

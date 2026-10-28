@@ -22,3 +22,5 @@ data/recordings/
 data/ranker_*.joblib
 data/context_cache.json
 data/index_weights.json
+data/history/
+data/lab/

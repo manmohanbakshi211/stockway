@@ -156,7 +156,8 @@ function watchJob() {
     }
     const m = (j.step || "").match(/Step (\d)\/(\d)/);
     const nm = j.kind === "news" && state.newsLine ? state.newsLine.match(/news (\d+)\/(\d+)/) : null;
-    let frac = j.status === "done" ? 1 : m ? (Number(m[1]) - 0.5) / Number(m[2]) : 0.03;
+    const pm = (j.step || "").match(/(\d+)%/);
+    let frac = j.status === "done" ? 1 : m ? (Number(m[1]) - (pm ? 1 - Number(pm[1]) / 100 : 0.5)) / Number(m[2]) : 0.03;
     if (nm && j.status === "running") frac = Math.max(0.03, Number(nm[1]) / Number(nm[2]));
     $("#job-progress").style.width = `${Math.round(frac * 100)}%`;
     const running = j.kind === "news" && state.newsLine ? state.newsLine.replace(/^news /, "") : (j.step || "Starting");
@@ -174,7 +175,7 @@ function watchJob() {
         toast("Stopped");
         setTimeout(() => { if (!state.pollTimer) box.hidden = true; }, 6000);
       } else {
-        toast(j.kind === "train" ? "Training finished" : j.kind === "news" ? "News download finished" : "Forecast updated");
+        toast(j.kind === "train" ? "Training finished" : j.kind === "news" ? "News download finished" : j.kind === "lab_download" ? "History downloaded. Now run the backtest." : j.kind === "lab_backtest" ? "Backtest finished" : "Forecast updated");
         setTimeout(() => { if (!state.pollTimer) box.hidden = true; }, 6000);
       }
       await loadStatus();

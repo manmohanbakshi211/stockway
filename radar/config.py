@@ -39,13 +39,20 @@ EDITABLE = {
     "live.filings": bool,
     "live.briefs": bool,
     "live.mute_hit_rate": float,
+    "lab.dhan_client_id": str,
+    "lab.dhan_token": str,
+    "lab.capital": float,
+    "lab.risk_pct": float,
+    "lab.daily_stop_pct": float,
+    "lab.years": int,
+    "lab.auto_trade": bool,
     "ai.provider": str,
     "ai.api_key": str,
     "ai.model": str,
     "ai.pulse_every_min": int,
     "ai.explain_min_severity": int,
 }
-SECRET_KEYS = {"telegram.bot_token", "live.upstox_api_secret", "ai.api_key"}
+SECRET_KEYS = {"telegram.bot_token", "live.upstox_api_secret", "ai.api_key", "lab.dhan_token"}
 
 
 def _set(d: dict, dotted: str, value):
