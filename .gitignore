@@ -1,0 +1,17 @@
+# App environment and machine-specific files
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Your data, trained models and results (stay on your Mac, never uploaded)
+data/cache/
+data/*.csv
+!data/events_template.csv
+data/*.uploading
+output/
+models/
+user_settings.json
+
+# Generated at startup
+webapp/static/vendor/

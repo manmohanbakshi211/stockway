@@ -1,0 +1,109 @@
+# Bank Nifty Opportunity Radar - configuration
+# Edit values here; no code changes needed.
+
+start_date: "2015-01-01"        # ~10+ years of history
+cache_dir: "data/cache"
+output_dir: "output"
+model_dir: "models"
+
+# Yahoo Finance symbols (free daily data)
+tickers:
+  banknifty: "^NSEBANK"
+  nifty: "^NSEI"
+  india_vix: "^INDIAVIX"
+  sp500: "^GSPC"
+  nasdaq: "^IXIC"
+  us_vix: "^VIX"
+  us10y: "^TNX"
+  dxy: "DX-Y.NYB"
+  brent: "BZ=F"
+  usdinr: "INR=X"
+  gold: "GC=F"
+  nikkei: "^N225"
+  hangseng: "^HSI"
+
+# What counts as a "big move" day for Bank Nifty
+labels:
+  big_move_quantile: 0.80     # day's high-low range in top 20% of the past year = big move
+  lookback_days: 250          # rolling window for that threshold (uses only past data)
+
+# Walk-forward model settings
+model:
+  first_test_year: 2019       # train on everything before a year, test on that year, repeat
+  min_train_years: 3
+  flag_rate: 0.25             # flag the top 25% most likely days as "opportunity"
+  params:                     # scikit-learn HistGradientBoostingClassifier
+    max_iter: 300
+    learning_rate: 0.04
+    max_leaf_nodes: 15
+    min_samples_leaf: 40
+    l2_regularization: 1.0
+    random_state: 0
+
+# Option-buying proxy backtest (see README: this is a proxy, not real option P&L)
+backtest:
+  straddle_factor: 0.8        # expected |move| of a normal distribution = 0.8 x daily sigma
+  cost_frac_of_implied: 0.15  # costs + slippage as a fraction of the implied daily move
+
+# Expiry calendars (approximate; holidays handled by moving to previous trading day)
+# weekday: MON TUE WED THU FRI, or null = no expiry in that era
+expiry_rules:
+  monthly:
+    - {from: "2015-01-01", weekday: "THU"}
+    - {from: "2025-09-01", weekday: "TUE"}
+  weekly:
+    - {from: "2015-01-01", weekday: null}
+    - {from: "2016-05-27", weekday: "THU"}
+    - {from: "2023-09-04", weekday: "WED"}
+    - {from: "2024-11-14", weekday: null}
+
+# Union Budget days (big scheduled volatility events)
+budget_days:
+  - "2015-02-28"
+  - "2016-02-29"
+  - "2017-02-01"
+  - "2018-02-01"
+  - "2019-02-01"
+  - "2019-07-05"
+  - "2020-02-01"
+  - "2021-02-01"
+  - "2022-02-01"
+  - "2023-02-01"
+  - "2024-02-01"
+  - "2024-07-23"
+  - "2025-02-01"
+  - "2026-02-01"
+
+# Optional: your own event list (RBI policy, FOMC, elections...). CSV columns: date,event
+# Each distinct event name becomes a feature (is_<event>). Leave blank if none.
+events_csv: "data/events.csv"
+
+news:
+  # GDELT DOC API: free daily news tone + volume since 2017
+  use_gdelt: true
+  gdelt_queries:
+    rbi: '"Reserve Bank of India"'
+    indian_banks: '("HDFC Bank" OR "ICICI Bank" OR "State Bank of India" OR "Axis Bank" OR "Kotak Mahindra")'
+    india_market: '(Sensex OR Nifty) sourcecountry:IN'
+    india_inflation: '(inflation OR "repo rate") sourcecountry:IN'
+    fed: '"Federal Reserve"'
+    geo_risk: '(war OR missile OR "terror attack") sourcecountry:IN'
+  gdelt_sleep_sec: 6          # GDELT asks for at least 5 s between requests
+  gdelt_timeout_sec: 30
+  gdelt_backoff_sec: 30       # wait after a 'too many requests' reply before one retry
+  train_fetch_budget_min: 0   # minutes training may spend downloading news (0 = use saved news only)
+  # Optional headlines file (e.g. India News Headlines dataset from Kaggle)
+  # columns: publish_date (YYYYMMDD), headline_category, headline_text
+  headlines_csv: "data/india-news-headlines.csv"
+  sentiment_backend: "auto"   # auto | finbert | lexicon
+
+# Daily auto-forecast while the app is open (local time, Mon-Fri)
+schedule:
+  enabled: true
+  time: "18:30"
+  weekly_retrain: true        # retrain every Saturday at the same time
+
+# Optional Telegram alert for predict_today.py
+telegram:
+  bot_token: ""
+  chat_id: ""

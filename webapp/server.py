@@ -1,0 +1,484 @@
+"""Bank Nifty Radar - local web app (FastAPI). Start with:  python app.py"""
+from __future__ import annotations
+
+import contextlib
+import datetime as dt
+import io
+import json
+import threading
+import time
+import traceback
+import uuid
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from radar import features, model, news, pipeline, report
+from radar.config import ROOT, editable_values, load_config, save_user_settings
+
+STATIC = Path(__file__).resolve().parent / "static"
+app = FastAPI(title="Bank Nifty Radar", docs_url=None, redoc_url=None)
+
+
+# ----------------------------------------------------------------- helpers
+def cfg() -> dict:
+    return load_config()
+
+
+def out_dir() -> Path:
+    return Path(cfg()["output_dir"])
+
+
+def clean(o):
+    return pipeline._jsonable(o)
+
+
+def read_json(p: Path, default=None):
+    try:
+        return json.loads(p.read_text()) if p.exists() else default
+    except Exception:
+        return default
+
+
+def _num(v):
+    try:
+        v = float(v)
+        return v if np.isfinite(v) else None
+    except Exception:
+        return None
+
+
+def bn_labels(c: dict) -> pd.DataFrame | None:
+    f = Path(c["output_dir"]) / "banknifty.parquet"
+    if not f.exists():
+        return None
+    return features.labels({"banknifty": pd.read_parquet(f)}, c)
+
+
+def outcome(flag, big):
+    if big is None or pd.isna(big):
+        return "Pending"
+    if flag:
+        return "Caught" if big else "False alarm"
+    return "Missed" if big else "Quiet, as expected"
+
+
+# ----------------------------------------------------------------- jobs
+class _LogWriter(io.TextIOBase):
+    def __init__(self, job):
+        self.job, self.buf = job, ""
+
+    def write(self, s):
+        self.buf += s
+        while "\n" in self.buf:
+            line, self.buf = self.buf.split("\n", 1)
+            if line.strip():
+                self.job["log"].append(line.rstrip())
+        return len(s)
+
+
+class Jobs:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.current: dict | None = None
+
+    def busy(self) -> bool:
+        return bool(self.current and self.current["status"] == "running")
+
+    def start(self, kind: str, label: str, fn) -> dict:
+        with self.lock:
+            if self.busy():
+                raise HTTPException(409, "Another job is running. Wait for it to finish or stop it.")
+            stop = threading.Event()
+            job = {"id": uuid.uuid4().hex[:8], "kind": kind, "label": label, "status": "running",
+                   "started": dt.datetime.now().isoformat(timespec="seconds"), "finished": None,
+                   "log": [], "error": None, "_stop": stop}
+            self.current = job
+
+        def run():
+            w = _LogWriter(job)
+            try:
+                with contextlib.redirect_stdout(w):
+                    fn(lambda m: print(m), stop.is_set)
+                job["status"] = "done"
+            except news.Stopped:
+                job["status"] = "stopped"
+                job["log"].append("Stopped. Anything already downloaded is saved.")
+            except Exception as e:
+                job["status"] = "failed"
+                job["error"] = str(e) or type(e).__name__
+                job["log"].append("Error: " + job["error"])
+                job["log"].extend(l for l in traceback.format_exc().splitlines()[-6:])
+            finally:
+                if w.buf.strip():
+                    job["log"].append(w.buf.strip())
+                job["finished"] = dt.datetime.now().isoformat(timespec="seconds")
+
+        threading.Thread(target=run, daemon=True).start()
+        return job
+
+    def stop(self) -> bool:
+        j = self.current
+        if j and j["status"] == "running":
+            j["_stop"].set()
+            j["log"].append("Stopping…")
+            return True
+        return False
+
+
+JOBS = Jobs()
+
+
+def start_train(demo: bool, use_news: bool = True, label: str | None = None):
+    lab = label or ("Training on demo data" if demo else "Training on 10 years of real data")
+    return JOBS.start("train", lab, lambda log, stop: pipeline.train(cfg(), demo=demo, use_news=use_news,
+                                                                    log=log, should_stop=stop))
+
+
+def start_forecast(label="Updating forecast"):
+    return JOBS.start("forecast", label, lambda log, stop: pipeline.forecast(cfg(), log=log, should_stop=stop))
+
+
+def start_news(label="Downloading news"):
+    return JOBS.start("news", label, lambda log, stop: pipeline.download_news(cfg(), log=log, should_stop=stop))
+
+
+# ----------------------------------------------------------------- scheduler
+SCHED_FILE = "scheduler_state.json"
+
+
+def scheduler_loop():
+    while True:
+        try:
+            c = cfg()
+            s = c.get("schedule", {})
+            state_f = Path(c["output_dir"]) / SCHED_FILE
+            state = read_json(state_f, {}) or {}
+            now = dt.datetime.now()
+            hh, mm = (int(x) for x in str(s.get("time", "18:30")).split(":"))
+            due = now.hour * 60 + now.minute >= hh * 60 + mm
+            today = now.date().isoformat()
+            has_model = model.load_bundle(c) is not None
+            if s.get("enabled") and due and has_model and not JOBS.busy():
+                if now.weekday() < 5 and state.get("last_forecast") != today:
+                    state["last_forecast"] = today
+                    state_f.write_text(json.dumps(state))
+                    start_forecast("Scheduled daily forecast")
+                elif now.weekday() == 5 and s.get("weekly_retrain") and state.get("last_retrain") != today:
+                    state["last_retrain"] = today
+                    state_f.write_text(json.dumps(state))
+                    demo = bool(model.load_bundle(c).get("demo"))
+                    start_train(demo, True, "Scheduled weekly retrain")
+        except Exception:
+            pass
+        time.sleep(30)
+
+
+@app.on_event("startup")
+def _startup():
+    vendor = STATIC / "vendor" / "plotly.min.js"
+    if not vendor.exists():
+        from plotly.offline import get_plotlyjs
+        vendor.parent.mkdir(parents=True, exist_ok=True)
+        vendor.write_text(get_plotlyjs(), encoding="utf-8")
+    threading.Thread(target=scheduler_loop, daemon=True).start()
+
+
+# ----------------------------------------------------------------- API: status & jobs
+def app_version():
+    import subprocess
+    try:
+        out = subprocess.run(["git", "log", "-1", "--format=%h|%cd", "--date=format:%d %b %Y"], cwd=ROOT,
+                             capture_output=True, text=True, timeout=5)
+        h, d = out.stdout.strip().split("|")
+        return {"commit": h, "date": d}
+    except Exception:
+        return None
+
+
+@app.get("/api/status")
+def status():
+    c = cfg()
+    out = Path(c["output_dir"])
+    bundle = model.load_bundle(c)
+    data = []
+    for name, sym in c["tickers"].items():
+        f = Path(c["cache_dir"]) / f"mkt_{name}.parquet"
+        if f.exists():
+            d = pd.read_parquet(f)
+            data.append({"name": name, "symbol": sym, "days": len(d),
+                         "from": str(d.index.min().date()), "to": str(d.index.max().date())})
+        else:
+            data.append({"name": name, "symbol": sym, "days": 0, "from": None, "to": None})
+    hl = Path(c["news"]["headlines_csv"])
+    ev = Path(c["events_csv"]) if c.get("events_csv") else None
+    s = c.get("schedule", {})
+    return clean({
+        "model": None if bundle is None else {k: bundle.get(k) for k in ("trained_at", "data_end", "demo", "news")},
+        "training": read_json(out / "last_training.json"),
+        "has_forecast": (out / "forecast_latest.json").exists(),
+        "job": job_summary(),
+        "data": data,
+        "news": {"gdelt": news.gdelt_progress(c), "gdelt_queries": len(c["news"].get("gdelt_queries", {})),
+                 "headlines_file": hl.exists(), "headlines_mb": round(hl.stat().st_size / 1e6, 1) if hl.exists() else 0,
+                 "events_file": bool(ev and ev.exists()),
+                 "events_rows": int(len(pd.read_csv(ev))) if ev and ev.exists() else 0},
+        "schedule": {"enabled": s.get("enabled"), "time": s.get("time"), "weekly_retrain": s.get("weekly_retrain")},
+        "version": app_version(),
+    })
+
+
+def job_summary(since: int = 0):
+    j = JOBS.current
+    if not j:
+        return None
+    steps = [l for l in j["log"] if l.startswith("Step ")]
+    return {k: j[k] for k in ("id", "kind", "label", "status", "started", "finished", "error")} | {
+        "step": steps[-1] if steps else None, "lines": j["log"][since:], "total_lines": len(j["log"])}
+
+
+@app.get("/api/jobs/current")
+def job_current(since: int = 0):
+    return job_summary(since) or {}
+
+
+@app.post("/api/jobs")
+async def job_start(req: Request):
+    body = await req.json()
+    kind = body.get("kind")
+    if kind == "train":
+        job = start_train(bool(body.get("demo")), True)
+    elif kind == "forecast":
+        if model.load_bundle(cfg()) is None:
+            raise HTTPException(400, "Train the model first, then update the forecast.")
+        job = start_forecast()
+    elif kind == "news":
+        job = start_news()
+    else:
+        raise HTTPException(400, "Unknown job")
+    return {"id": job["id"]}
+
+
+@app.post("/api/jobs/stop")
+def job_stop():
+    return {"stopping": JOBS.stop()}
+
+
+# ----------------------------------------------------------------- API: forecast
+@app.get("/api/forecast")
+def forecast():
+    c = cfg()
+    out = Path(c["output_dir"])
+    fc = read_json(out / "forecast_latest.json")
+    calls = []
+    logf = out / "forecast_log.csv"
+    if logf.exists():
+        lg = pd.read_csv(logf, dtype={"for_date": str}).sort_values("for_date", ascending=False).head(30)
+        lab = bn_labels(c)
+        for _, r in lg.iterrows():
+            d = pd.Timestamp(r["for_date"])
+            big = rng = None
+            if lab is not None and d in lab.index:
+                big = lab.at[d, "big_move"]
+                rng = lab.at[d, "range_pct"]
+            calls.append({"date": r["for_date"], "prob_big": r["prob_big"], "flag": bool(r["flag"]),
+                          "range_pct": _num(rng), "big": None if big is None or pd.isna(big) else bool(big),
+                          "outcome": outcome(bool(r["flag"]), big), "demo": bool(r.get("demo", 0))})
+    return clean({"forecast": fc, "calls": calls})
+
+
+# ----------------------------------------------------------------- API: history
+@app.get("/api/history")
+def history():
+    c = cfg()
+    out = Path(c["output_dir"])
+    f = out / "banknifty.parquet"
+    if not f.exists():
+        return {"dates": []}
+    bn = pd.read_parquet(f)
+    lab = features.labels({"banknifty": bn}, c)
+    oos_f = out / "oos_predictions.csv"
+    oos = pd.read_csv(oos_f, parse_dates=["date"]) if oos_f.exists() else pd.DataFrame(columns=["date", "target"])
+    bm = oos[oos["target"] == "big_move"].set_index("date")
+    df = bn.join(lab[["big_move", "range_pct"]]).join(bm[["prob", "flag", "threshold"]])
+    return clean({
+        "dates": [str(d.date()) for d in df.index],
+        "open": df["Open"].round(2).tolist(), "high": df["High"].round(2).tolist(),
+        "low": df["Low"].round(2).tolist(), "close": df["Close"].round(2).tolist(),
+        "big": df["big_move"].tolist(), "range": df["range_pct"].tolist(),
+        "prob": df["prob"].tolist(), "flag": df["flag"].tolist(), "threshold": df["threshold"].tolist(),
+    })
+
+
+@app.get("/api/day/{date}")
+def day(date: str):
+    c = cfg()
+    out = Path(c["output_dir"])
+    d = pd.Timestamp(date)
+    bn_f = out / "banknifty.parquet"
+    if not bn_f.exists():
+        raise HTTPException(404, "No data yet. Train the model first.")
+    bn = pd.read_parquet(bn_f)
+    if d not in bn.index:
+        raise HTTPException(404, f"{date} is not a trading day in the data.")
+    lab = features.labels({"banknifty": bn}, c)
+    row = lab.loc[d]
+    oos_f = out / "oos_predictions.csv"
+    prob = flag = None
+    if oos_f.exists():
+        o = pd.read_csv(oos_f, parse_dates=["date"])
+        o = o[(o["target"] == "big_move") & (o["date"] == d)]
+        if len(o):
+            prob, flag = float(o["prob"].iloc[0]), bool(o["flag"].iloc[0])
+    drivers, cues, news_rows = [], [], []
+    X = pd.read_parquet(out / "features.parquet") if (out / "features.parquet").exists() else None
+    bundle = model.load_bundle(c)
+    if X is not None and d in X.index:
+        xr = X.loc[[d]]
+        if bundle is not None:
+            drivers = [{"feature": f, "label": report.nice(f), "value": v, "effect": e}
+                       for f, v, e in model.drivers(bundle, xr, top=8)[0]]
+        cues = [{"feature": f, "label": report.nice(f), "value": _num(xr[f].iloc[0])}
+                for f in pipeline.KEY_FEATURES if f in xr.columns]
+        news_rows = [{"feature": f, "label": report.nice(f), "value": _num(xr[f].iloc[0])}
+                     for f in xr.columns if f.startswith("gd_") and f.endswith(("_tone_1d", "_vol_z3"))]
+    heads = []
+    hp = Path(c["cache_dir"]) / "headlines_scored.parquet"
+    if hp.exists():
+        h = pd.read_parquet(hp)
+        h = h[(h["date"] >= d - pd.Timedelta(days=1)) & (h["date"] <= d)]
+        h = h.reindex(h["score"].abs().sort_values(ascending=False).index).head(8)
+        heads = [{"date": str(r["date"].date()), "text": r["headline_text"], "score": float(r["score"])}
+                 for _, r in h.iterrows()]
+    big = row["big_move"]
+    return clean({
+        "date": date, "open": row["open"], "close": row["close"],
+        "high": float(bn.at[d, "High"]), "low": float(bn.at[d, "Low"]),
+        "range_pct": row["range_pct"], "oc_pct": row["oc_pct"], "gap_pct": row["gap_pct"],
+        "ret_pct": row["ret_pct"], "threshold": row["big_threshold"],
+        "big": None if pd.isna(big) else bool(big), "prob": prob, "flag": flag,
+        "outcome": outcome(flag, big) if flag is not None else None,
+        "drivers": drivers, "cues": cues, "news": news_rows, "headlines": heads,
+    })
+
+
+@app.get("/api/biggest")
+def biggest():
+    f = out_dir() / "biggest_days.csv"
+    if not f.exists():
+        return []
+    df = pd.read_csv(f)
+    return clean(df.replace({np.nan: None}).to_dict(orient="records"))
+
+
+@app.get("/api/factors")
+def factors():
+    out = out_dir()
+    fac = pd.read_csv(out / "crucial_factors.csv") if (out / "crucial_factors.csv").exists() else pd.DataFrame()
+    imp = pd.read_csv(out / "importance.csv", index_col=0)["importance"] if (out / "importance.csv").exists() else pd.Series(dtype=float)
+    lab_path = out / "labels.parquet"
+    base = float(pd.read_parquet(lab_path)["big_move"].mean()) if lab_path.exists() else None
+    rows = []
+    if not fac.empty:
+        hi_col = [c for c in fac.columns if "when high" in c][0]
+        lo_col = [c for c in fac.columns if "when low" in c][0]
+        for _, r in fac.iterrows():
+            rows.append({"feature": r["feature"], "label": report.nice(r["feature"]),
+                         "high": _num(r[hi_col]), "low": _num(r[lo_col])})
+    return clean({"base": base, "factors": rows,
+                  "importance": [{"feature": f, "label": report.nice(f), "value": _num(v)}
+                                 for f, v in imp.head(20).items()]})
+
+
+@app.get("/api/performance")
+def performance():
+    out = out_dir()
+    mets = read_json(out / "metrics.json")
+    if not mets:
+        return {}
+    bt_f = out / "backtest_proxy.csv"
+    eq = {}
+    if bt_f.exists():
+        bt = pd.read_csv(bt_f, index_col=0, parse_dates=True)
+        fl = bt[bt["flag"] == 1]
+        eq = {"all_dates": [str(d.date()) for d in bt.index], "all": (bt["pnl_pct"].cumsum() * 100).round(3).tolist(),
+              "flag_dates": [str(d.date()) for d in fl.index], "flag": (fl["pnl_pct"].cumsum() * 100).round(3).tolist()}
+    return clean({"metrics": mets, "backtest": read_json(out / "backtest_summary.json", []), "equity": eq,
+                  "training": read_json(out / "last_training.json")})
+
+
+# ----------------------------------------------------------------- API: settings & uploads
+@app.get("/api/settings")
+def get_settings():
+    return clean(editable_values(cfg()))
+
+
+@app.post("/api/settings")
+async def post_settings(req: Request):
+    body = await req.json()
+    try:
+        if "schedule.time" in body:
+            hh, mm = str(body["schedule.time"]).split(":")
+            assert 0 <= int(hh) < 24 and 0 <= int(mm) < 60
+        save_user_settings(body)
+    except (ValueError, AssertionError) as e:
+        raise HTTPException(400, str(e) or "Time must look like 18:30")
+    return clean(editable_values(cfg()))
+
+
+@app.post("/api/upload/{kind}")
+async def upload(kind: str, req: Request):
+    c = cfg()
+    if kind == "headlines":
+        dest, need = Path(c["news"]["headlines_csv"]), {"publish_date", "headline_text"}
+    elif kind == "events":
+        dest, need = Path(c["events_csv"]), {"date", "event"}
+    else:
+        raise HTTPException(400, "Unknown upload")
+    tmp = dest.with_suffix(".uploading")
+    with open(tmp, "wb") as f:
+        async for chunk in req.stream():
+            f.write(chunk)
+    try:
+        head = pd.read_csv(tmp, nrows=5)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(400, "That file isn't a readable CSV.")
+    missing = need - set(head.columns)
+    if missing:
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(400, f"The CSV needs these columns: {', '.join(sorted(need))}. Missing: {', '.join(sorted(missing))}.")
+    tmp.replace(dest)
+    if kind == "headlines":
+        (Path(c["cache_dir"]) / "headlines_scored.parquet").unlink(missing_ok=True)
+    return {"ok": True, "mb": round(dest.stat().st_size / 1e6, 1)}
+
+
+@app.post("/api/telegram/test")
+def telegram_test():
+    lines = []
+    ok = pipeline.send_telegram(cfg(), "Bank Nifty Radar: test message. Alerts are working.", lines.append)
+    if not ok:
+        raise HTTPException(400, (lines[-1] if lines else "Telegram failed").strip())
+    return {"ok": True}
+
+
+@app.get("/report")
+def full_report():
+    f = out_dir() / "report.html"
+    if not f.exists():
+        raise HTTPException(404, "Train the model first to create the report.")
+    return FileResponse(f)
+
+
+# ----------------------------------------------------------------- UI
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return FileResponse(STATIC / "index.html")
