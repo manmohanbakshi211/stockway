@@ -314,9 +314,14 @@ class SimMarket:
                  "day_o": tick_round(x.o), "day_h": tick_round(x.h), "day_l": tick_round(x.l)}
             if not x.und.is_index:
                 sp = max(0.05, tick_round(x.S * 0.0002))
-                t.update(vol=int(x.vol), atp=round(x.pv / x.vol, 2) if x.vol else None, oi=0,
+                lean = 1 if x.S >= x.hist[-2 if len(x.hist) > 1 else -1] else -1
+                ltq = self.rng.randint(1, 400)
+                if x.shock and self.rng.random() < 0.04:
+                    ltq = int(self.rng.uniform(6e7, 3e8) / x.S)      # a block-size print during a shock
+                t.update(vol=int(x.vol), atp=round(x.pv / x.vol, 2) if x.vol else None, oi=0, ltq=ltq,
                          bid=tick_round(x.S - sp), ask=tick_round(x.S + sp), bidq=self.rng.randint(50, 3000),
-                         askq=self.rng.randint(50, 3000), tbq=self.rng.randint(100000, 900000), tsq=self.rng.randint(100000, 900000))
+                         askq=self.rng.randint(50, 3000), tbq=int(self.rng.randint(100000, 900000) * (1.3 if lean > 0 else 0.8)),
+                         tsq=int(self.rng.randint(100000, 900000) * (1.3 if lean < 0 else 0.8)))
             return t
         if kind == "FUT":
             F = x.S * (1 + R * self._T(x.und.fut_expiry, now))
@@ -399,14 +404,25 @@ class SimREST:
         return rows
 
     def daily_candles(self, key, days=40):
+        """A year of made-up daily candles ending at yesterday's close, with realistic volatility."""
         kind, sym, _ = self.m.key_index[key]
-        x = self.m.u[sym]
-        today = self.m.today
+        rng = random.Random(hash(key) & 0xffffffff)
+        if kind == "VIX":
+            last, sig, adv = self.m.vix_cp, 0.6, 0
+        else:
+            x = self.m.u[sym]
+            last, sig, adv = x.cp, x.sig * rng.uniform(0.75, 1.25), x.adv
+        n = min(days, 260)
+        px, closes = last, [last]
+        for _ in range(n - 1):
+            px = px / math.exp(rng.gauss(0, sig / math.sqrt(252)))
+            closes.append(px)
+        closes.reverse()
         out = []
-        for i in range(1, 21):
-            d = today - dt.timedelta(days=i)
-            v = int(x.adv * self.m.rng.uniform(0.7, 1.3))
-            out.append([f"{d.isoformat()}T00:00:00+05:30", x.cp, x.cp, x.cp, x.cp, v, 0])
+        for i, c in enumerate(reversed(closes)):
+            d = self.m.today - dt.timedelta(days=i + 1)
+            v = int(adv * rng.uniform(0.7, 1.3))
+            out.append([f"{d.isoformat()}T00:00:00+05:30", c, c * 1.01, c * 0.99, round(c, 2), v, 0])
         return out
 
 

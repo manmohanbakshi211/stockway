@@ -168,7 +168,7 @@ def decode(msg_bytes: bytes, pb) -> tuple[str, list]:
         t = {"key": key}
         if which == "ltpc":
             lt = feed.ltpc
-            t.update(ltp=lt.ltp, cp=lt.cp, ltt=lt.ltt)
+            t.update(ltp=lt.ltp, cp=lt.cp, ltt=lt.ltt, ltq=lt.ltq)
         elif which == "firstLevelWithGreeks":
             g = feed.firstLevelWithGreeks
             t.update(ltp=g.ltpc.ltp, cp=g.ltpc.cp, ltt=g.ltpc.ltt, vol=g.vtt, oi=g.oi, iv=g.iv,
@@ -180,8 +180,8 @@ def decode(msg_bytes: bytes, pb) -> tuple[str, list]:
             sub = ff.WhichOneof("FullFeedUnion")
             if sub == "marketFF":
                 m = ff.marketFF
-                t.update(ltp=m.ltpc.ltp, cp=m.ltpc.cp, ltt=m.ltpc.ltt, vol=m.vtt, oi=m.oi, iv=m.iv, atp=m.atp,
-                         tbq=m.tbq, tsq=m.tsq)
+                t.update(ltp=m.ltpc.ltp, cp=m.ltpc.cp, ltt=m.ltpc.ltt, ltq=m.ltpc.ltq, vol=m.vtt, oi=m.oi, iv=m.iv,
+                         atp=m.atp, tbq=m.tbq, tsq=m.tsq)
                 if m.marketLevel.bidAskQuote:
                     q = m.marketLevel.bidAskQuote[0]
                     t.update(bid=q.bidP, ask=q.askP, bidq=q.bidQ, askq=q.askQ)

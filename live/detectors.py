@@ -10,6 +10,9 @@ DEFAULTS = {
     "unusual_min_value": 5e5,     # option premium traded in 5 min, rupees (important)
     "unusual_top_value": 5e6,     # act-now level
     "wall_lead": 1.1,             # new OI wall must be 10% bigger than the next strike
+    "flow_delta_pct": 40,         # buy-minus-sell share of 5-min volume for an order-flow alert
+    "flow_rel_vol": 2.5,          # and 5-min volume this many times its own pace
+    "flow_min_updates": 25,       # enough separate trades in 5 min to trust the buy/sell split
     "volume_surge_x": 3.0,        # relative volume vs normal pace
     "volume_surge_move_pct": 1.5,
     "oi_buildup_oi_pct": 5.0,     # futures OI change since previous day
@@ -24,9 +27,10 @@ DEFAULTS = {
 
 # how long the same alert (symbol + kind + direction) stays quiet, in minutes
 COOLDOWN = {"orb": 999, "day_high": 30, "day_low": 30, "vwap_cross": 30, "oi_wall": 20, "pcr_shift": 60,
-            "iv_spike": 30, "beyond_priced": 999, "oi_buildup": 60, "news": 60, "unusual_options": 10}
+            "iv_spike": 30, "beyond_priced": 999, "oi_buildup": 60, "news": 60, "unusual_options": 10,
+            "order_flow": 15, "absorption": 20, "gamma_flip": 30, "big_print": 10, "filing": 5}
 # for these, the cooldown ignores direction (they tend to flip back and forth)
-NO_DIRECTION_COOLDOWN = {"oi_wall", "vwap_cross"}
+NO_DIRECTION_COOLDOWN = {"oi_wall", "vwap_cross", "gamma_flip"}
 
 
 def _a(m, kind, direction, sev, title, detail, /, **data):
@@ -147,6 +151,33 @@ def run(m: dict, prev: dict | None, cfg: dict, mins: float) -> list:
                       f"ATM IV now {_fmt(opt.get('atm_iv'), 1)}%. Options got expensive: a move is expected, or fear is rising.",
                       iv=opt.get("atm_iv"), iv_chg=iv15))
     # 11. day's move beyond what options priced
+    # 12. order flow: aggressive one-sided trading, or absorption (heavy aggression but price won't move)
+    fl, pfl = m.get("flow") or {}, prev.get("flow") or {}
+    dp, rv5, r5 = fl.get("delta_pct_5m"), fl.get("rel_5m"), m.get("ret_5m")
+    pdp = pfl.get("delta_pct_5m")
+    enough = (fl.get("trades_5m") or 0) >= c["flow_min_updates"]
+    if enough and dp is not None and rv5 and r5 is not None and mins >= 10 and abs(dp) >= c["flow_delta_pct"] and rv5 >= c["flow_rel_vol"]:
+        was = pdp is not None and abs(pdp) >= c["flow_delta_pct"] and (pdp > 0) == (dp > 0)
+        side = "buying" if dp > 0 else "selling"
+        if not was and (r5 > 0) == (dp > 0) and abs(r5) >= (0.08 if idx else 0.15):
+            out.append(_a(m, "order_flow", "up" if dp > 0 else "down", 2, f"Aggressive {side} in {name}",
+                          f"{abs(dp):.0f}% more volume {'at the ask' if dp > 0 else 'at the bid'} in 5 min, on {rv5:.1f}× its pace. "
+                          f"Price {r5:+.2f}%.", delta_pct=dp, rel_5m=rv5))
+        elif not was and abs(r5) < (0.03 if idx else 0.06):
+            out.append(_a(m, "absorption", "down" if dp > 0 else "up", 1, f"{name}: {side} absorbed",
+                          f"Heavy aggressive {side} ({abs(dp):.0f}% one-sided, {rv5:.1f}× pace) but price is stuck at "
+                          f"{_fmt(spot)}. A big {'seller' if dp > 0 else 'buyer'} is defending.", delta_pct=dp, rel_5m=rv5))
+    # 13. index crossed the dealer gamma flip level
+    g, pg = m.get("gex") or {}, prev.get("gex") or {}
+    fl_lvl = g.get("flip") or pg.get("flip")
+    if idx and fl_lvl and spot and pspot and mins >= 20:
+        if pspot >= fl_lvl > spot:
+            out.append(_a(m, "gamma_flip", "down", 2, f"{name} fell below the gamma flip {_fmt(fl_lvl, 0)}",
+                          "Below this level dealers sell into falls: moves can speed up.", level=fl_lvl))
+        elif pspot <= fl_lvl < spot:
+            out.append(_a(m, "gamma_flip", "up", 2, f"{name} rose above the gamma flip {_fmt(fl_lvl, 0)}",
+                          "Above this level dealers dampen moves: expect calmer, pinned trading.", level=fl_lvl))
+
     mv, pmv = m.get("move_vs_priced"), prev.get("move_vs_priced")
     if mv is not None and mv >= 1.0 and (pmv is None or pmv < 1.0) and mins >= 20:
         d = "up" if (m.get("spot") or 0) > (m.get("day_o") or 0) else "down"

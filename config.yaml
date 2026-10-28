@@ -123,11 +123,19 @@ live:
   telegram_min_severity: 3     # 1 = everything, 2 = important, 3 = only the biggest
   news: true
   detectors: {}                # override thresholds, see live/detectors.py DEFAULTS
+  filings: true                # live NSE company filings (results, orders, M&A...)
+  briefs: true                 # pre-market brief 8:45, post-market review at close
+  mute_hit_rate: 35            # alert types that work less than this % (30+ cases) are demoted
+  keep_recordings_days: 365
   paper:
     auto: true
     lots: 1
     target_pct: 30
     stop_pct: 20
+    capital: 200000            # risk guard: lots sized so a stop loses ~risk_pct of capital
+    risk_pct: 1.0
+    max_daily_loss_pct: 3.0
+    max_trades_day: 12
 
 # AI explanations and market pulse (optional). provider: gemini (free tier) or claude
 ai:

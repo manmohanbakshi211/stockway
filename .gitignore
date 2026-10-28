@@ -18,3 +18,7 @@ webapp/static/vendor/
 data/live.db*
 data/upstox_token.json
 data/instruments/
+data/recordings/
+data/ranker_*.joblib
+data/context_cache.json
+data/index_weights.json

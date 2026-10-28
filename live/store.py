@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 """
 
 ALERT_COLS = ("id", "ts", "day", "source", "sym", "kind", "direction", "severity", "title", "detail",
-              "price", "data", "option", "ai")
+              "price", "data", "option", "ai", "story")
 
 
 class Store:
@@ -33,6 +33,9 @@ class Store:
         self.lock = threading.Lock()
         with self.lock:
             self.db.executescript(SCHEMA)
+            cols = {r[1] for r in self.db.execute("PRAGMA table_info(alerts)").fetchall()}
+            if "story" not in cols:
+                self.db.execute("ALTER TABLE alerts ADD COLUMN story INTEGER")
             self.db.commit()
 
     # ---------------- kv
@@ -57,6 +60,11 @@ class Store:
                  json.dumps(a.get("option"), default=str) if a.get("option") else None))
             self.db.commit()
             return cur.lastrowid
+
+    def set_alert_story(self, alert_id: int, story: int):
+        with self.lock:
+            self.db.execute("UPDATE alerts SET story=? WHERE id=?", (story, alert_id))
+            self.db.commit()
 
     def set_alert_ai(self, alert_id: int, text: str):
         with self.lock:

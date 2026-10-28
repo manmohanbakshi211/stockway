@@ -17,6 +17,11 @@ DEFAULTS = {
     "exit_time": "15:15",
     "no_entry_after": "14:45",
     "max_open": 6,
+    "capital": 200000,          # risk guard
+    "risk_pct": 1.0,            # rupees at risk per trade = capital x risk_pct, sizes the lots
+    "max_lots": 5,
+    "max_daily_loss_pct": 3.0,  # stop new auto trades after this loss in a day
+    "max_trades_day": 12,
 }
 
 
@@ -55,11 +60,14 @@ class PaperBook:
         opens = self.open_trades()
         if any(t["sym"] == alert["sym"] for t in opens) or (not manual and len(opens) >= c["max_open"]):
             return None
+        g = self.guard(now)
+        if not manual and g["blocked"]:
+            return None
         inst = state.get(opt["key"])
         if not inst or not inst.ltp:
             return None
         entry = inst.ask or inst.ltp
-        lots = int(c["lots"])
+        lots = self.size(entry, opt["lot"])
         t = {"alert_id": alert.get("id"), "source": self.source, "day": now.date().isoformat(), "sym": alert["sym"],
              "kind": alert["kind"], "opt_key": opt["key"], "label": opt["label"], "side": opt["side"],
              "lot": opt["lot"], "lots": lots, "entry_ts": now.timestamp(), "entry": entry,
@@ -68,6 +76,29 @@ class PaperBook:
         tid = self.store.add_trade(t)
         self.log(f"Paper BUY {opt['label']} @ {entry:.2f} ({alert['title']})")
         return tid
+
+    def size(self, entry, lot) -> int:
+        """Lots so that hitting the stop loses about risk_pct of capital (at least 1 lot)."""
+        c = self.cfg
+        per_lot_risk = entry * lot * float(c["stop_pct"]) / 100
+        budget = float(c["capital"]) * float(c["risk_pct"]) / 100
+        if per_lot_risk <= 0:
+            return int(c["lots"])
+        return max(1, min(int(c["max_lots"]), int(budget // per_lot_risk) or 1))
+
+    def guard(self, now) -> dict:
+        c = self.cfg
+        day = now.date().isoformat()
+        today = [t for t in self.store.trades(source=self.source, limit=500) if t["day"] == day]
+        booked = sum(t["net"] or 0 for t in today if t["status"] == "closed")
+        limit = -float(c["capital"]) * float(c["max_daily_loss_pct"]) / 100
+        blocked, why = False, None
+        if booked <= limit:
+            blocked, why = True, f"Daily loss limit hit (₹{booked:,.0f}). No new trades today."
+        elif len(today) >= int(c["max_trades_day"]):
+            blocked, why = True, f"{len(today)} trades today: over-trading guard reached."
+        return {"blocked": blocked, "why": why, "booked_today": round(booked, 2), "trades_today": len(today),
+                "loss_limit": round(limit, 0), "risk_per_trade": round(float(c["capital"]) * float(c["risk_pct"]) / 100, 0)}
 
     def update(self, state, now: dt.datetime, force_close=False):
         c = self.cfg
@@ -141,4 +172,5 @@ class PaperBook:
         return {"open": opened, "closed": closed[:200], "by_kind": sorted(by.values(), key=lambda b: -b["net"]),
                 "equity": eq, "n": n, "win_rate": round(wins / n * 100) if n else None,
                 "net": round(sum(t["net"] for t in closed), 2), "costs": round(sum(t["costs"] or 0 for t in closed), 2),
-                "unreal": round(sum(t["unreal"] for t in opened), 2), "settings": self.cfg}
+                "unreal": round(sum(t["unreal"] for t in opened), 2), "settings": self.cfg,
+                "guard": self.guard(dt.datetime.now(IST) if state is None else (state.clock.now() if getattr(state, "clock", None) else dt.datetime.now(IST)))}

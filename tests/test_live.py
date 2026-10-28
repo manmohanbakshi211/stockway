@@ -111,3 +111,75 @@ def test_universe_build():
     assert u.fut_key == "NSE_FO|F1" and u.expiries == [exp] and u.name == "Xcorp"
     assert set(u.chains[exp][100.0]) == {"CE", "PE"}
     assert uni.by_key["NSE_FO|C1"][0] == "OPT"
+
+
+# ---------------- P1-P5
+def test_order_flow_classification():
+    from live.state import MarketState
+    st = MarketState()
+    st.flow_keys = {"K"}
+    st.apply([{"key": "K", "ltp": 100.0, "vol": 1000, "bid": 99.9, "ask": 100.1}], 60)
+    st.apply([{"key": "K", "ltp": 100.1, "vol": 1500, "bid": 100.0, "ask": 100.2, "ltq": 10}], 61)   # at ask: buy
+    st.apply([{"key": "K", "ltp": 100.0, "vol": 1700, "bid": 99.9, "ask": 100.1}], 62)               # at bid: sell
+    i = st.get("K")
+    assert i.cvd == 500 - 200
+    b, s, n = i.flow_window(5, 60)
+    assert (b, s, n) == (500, 200, 2)
+
+
+def test_big_print_detected():
+    from live.state import MarketState
+    st = MarketState()
+    st.flow_keys = {"K"}
+    st.apply([{"key": "K", "ltp": 1000.0, "vol": 0, "bid": 999, "ask": 1001}], 60)
+    st.apply([{"key": "K", "ltp": 1001.0, "vol": 600000, "bid": 1000, "ask": 1002, "ltq": 600000}], 61)
+    assert st.prints and st.prints[-1][2] == 600000 and st.prints[-1][4] == 1
+
+
+def test_gex_signs_and_flip():
+    import datetime as dt
+    from live.clock import IST
+    from live.vol import gex
+    now = dt.datetime(2026, 10, 28, 11, 0, tzinfo=IST)
+    rows = [{"strike": k, "CE": {"oi": 1e6 if k >= 100 else 1e5, "iv": 15.0},
+             "PE": {"oi": 3e6 if k <= 96 else 1e5, "iv": 15.0}} for k in range(90, 111)]
+    g = gex({"rows": rows, "expiry": "2026-11-03"}, 100.0, now)
+    assert g and g["call_wall"] >= 100 and g["put_wall"] <= 96
+    assert g["flip"] is None or 90 <= g["flip"] <= 110
+
+
+def test_levels_and_score():
+    from live.record import evidence, levels, signal_score
+    from live.state import MarketState
+    m = {"sym": "X", "spot": 100.0, "vwap": 99.0, "vs_vwap_pct": 1.0, "ret_15m": 0.5, "or_high": 99.5, "or_low": 98.0,
+         "sigma_1m": 0.05, "day_h": 101.5, "day_l": 97.0, "opt": {"support": 98.0, "resistance": 102.0}, "fut": {}}
+    lv = levels(m, "up", MarketState())
+    assert lv["stop"] < 100 < lv["target"] and lv["rr"] > 0
+    ev = evidence(m, "up")
+    assert sum(e["agree"] for e in ev) >= 3
+    assert signal_score(2, ev, {"n": 40, "hit_rate": 60}) > signal_score(2, [], None)
+
+
+def test_regime_trend():
+    from live.learn import regime
+    m = {"spot": 101.0, "day_o": 100.0, "day_h": 101.1, "day_l": 99.9, "vwap": 100.5, "opt": {"daily_move_pct": 1.0}}
+    r = regime(m, 120, {})
+    assert r["code"] == "trend_up"
+
+
+def test_filing_classifier():
+    from live.context import classify_filing
+    assert classify_filing("Outcome of Board Meeting", "submitted the financial results for the period")[0] == "Results"
+    assert classify_filing("Investor Presentation", "results presentation") is None
+    assert classify_filing("Bagging/Receiving of orders/contracts", "received an order worth Rs 500 crore")[0] == "Order win"
+
+
+def test_risk_sizing():
+    import datetime as dt
+    from live.paper import PaperBook
+    class S:  # minimal store
+        def trades(self, **k): return []
+    b = PaperBook(S(), "sim", {"capital": 200000, "risk_pct": 1.0, "stop_pct": 20, "max_lots": 5})
+    assert b.size(10.0, 75) == 5          # 150/lot risk vs 2000 budget, capped at 5
+    assert b.size(1000.0, 35) == 1        # 7000/lot risk > budget: still 1 lot
+    assert b.guard(dt.datetime(2026, 10, 28, 10, 0))["blocked"] is False

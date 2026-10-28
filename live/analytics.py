@@ -74,7 +74,7 @@ def _opt_view(o, inst, lot):
 
 
 def compute(u, state, now: dt.datetime, window: list, full_chain: dict | None, avg_vol: float | None,
-            open_marks: dict, vix: float | None = None) -> dict | None:
+            open_marks: dict, vix: float | None = None, daily: dict | None = None) -> dict | None:
     """Metrics for one underlying. `window`: subscribed strikes of the near expiry.
     `open_marks`: mutable per-symbol dict for values first seen after the open (pcr_open, iv_open)."""
     und = state.get(u.key)
@@ -206,6 +206,8 @@ def compute(u, state, now: dt.datetime, window: list, full_chain: dict | None, a
         m["move_vs_priced"] = abs(pct(spot, m["day_o"])) / opt["daily_move_pct"]
     else:
         m["move_vs_priced"] = None
+    m["flow"] = order_flow(und if und and und.vol else fut, now, mins)
+    m["vol"] = vol_context(m, daily or {})
     m["score"], m["reasons"] = bias_score(m)
     m["heat"] = heat(m)
     return m
@@ -218,6 +220,40 @@ def _wall(side_map: dict, side: str):
         return None, None
     lead = (xs[0][0] / xs[1][0]) if len(xs) > 1 and xs[1][0] else None
     return xs[0][1], (round(lead, 3) if lead else None)
+
+
+def order_flow(inst, now, mins) -> dict | None:
+    """Buyer- vs seller-initiated volume over the last 5 minutes, and order-book pressure."""
+    if inst is None or not inst.flow:
+        return None
+    minute = int(now.timestamp() // 60) * 60
+    b5, s5, n5 = inst.flow_window(5, minute)
+    v5 = b5 + s5
+    out = {"delta_5m": b5 - s5, "delta_pct_5m": round((b5 - s5) / v5 * 100, 1) if v5 and n5 >= 3 else None,
+           "vol_5m": v5, "trades_5m": n5, "cvd": inst.cvd}
+    if inst.vol and mins > 6:
+        pace = (inst.vol - v5) / max(1.0, (mins - 5) / 5)
+        out["rel_5m"] = round(v5 / pace, 2) if pace > 0 else None
+    if inst.tbq and inst.tsq:
+        out["book_imb"] = round((inst.tbq - inst.tsq) / (inst.tbq + inst.tsq) * 100, 1)
+    return out
+
+
+def vol_context(m, daily) -> dict:
+    o = m.get("opt") or {}
+    iv = o.get("atm_iv")
+    hv20 = daily.get("hv20")
+    out = {"hv20": hv20, "hv_pct": daily.get("hv_pct"), "iv": iv,
+           "iv_hv": round(iv / hv20, 2) if iv and hv20 else None, "skew": None, "iv_pct": None}
+    hist = daily.get("iv_hist") or []
+    if iv and len(hist) >= 15:
+        out["iv_pct"] = round(sum(1 for h in hist if h <= iv) / len(hist) * 100)
+    try:
+        from .vol import skew
+        out["skew"] = skew(o.get("rows") or [])
+    except Exception:
+        pass
+    return out
 
 
 def unusual_activity(rows, state, mins) -> list:

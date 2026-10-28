@@ -72,6 +72,27 @@ What it watches (about 2,300 instruments on one Upstox connection):
 | Bigger than priced | Day's move exceeds what options priced for the whole day |
 | News | Headlines that name an F&O stock |
 
+Also: order flow (buyer vs seller initiated volume, absorption, ₹5 cr+ single trades), dealer gamma flip
+for indices, and live NSE company filings (results, order wins, M&A, pledges, resignations).
+
+Every alert carries:
+- a **signal score** (how many independent facts agree, the alert type's track record, today's market type,
+  and a learned model once it has enough history)
+- its **track record**: "worked 58% of 41 times"
+- a **target** and the level where the **idea is wrong**, from real chart and option levels
+- the **trade structure**: buy the option, use a debit spread (when options are expensive), or skip
+- related alerts on the same stock grouped into one **story**
+
+Every alert is followed for 60 minutes and graded (**Scorecard** page). Alert types that work under 35% of
+the time are demoted automatically. Everything streamed is recorded on your Mac (compressed daily), and a
+model retrains every evening on graded alerts.
+
+**Market context** page: FII / DII / Pro / Client positioning in index futures and options (NSE, daily),
+FII/DII cash flows, F&O ban and near-ban stocks, bulk and block deals, live company filings, global markets.
+**Briefs**: a pre-market plan at 8:45 AM and a post-market review at close, on screen and on Telegram.
+**Paper trading risk guard**: lots sized to 1% risk of your capital, stops for the day after a 3% loss or
+12 trades.
+
 Each alert suggests the at-the-money option in its direction. Strong alerts are paper-traded
 automatically (1 lot, +30% target, −20% stop, exit by 3:15 PM, real charges). The **Paper trades**
 page shows which alert types actually make money. Use that before risking real money.
@@ -88,7 +109,10 @@ Costs: Upstox data is free with an account. Gemini free tier is free. Telegram i
 | Live | Index cards (PCR, max pain, support/resistance from option OI, IV, expected move, bias), live alerts with option ideas, market pulse, movers, news. |
 | Scanner | Every F&O stock ranked by activity, with buildup, volume pace, IV, PCR, unusual options, bias. Filters and sorting. |
 | Option chain | Full chain for any index or stock with OI bars, OI change, IV, greeks, walls, max pain, intraday chart. |
+| Market context | FII/DII/Pro/Client positioning, cash flows, ban list, big deals, company filings, global markets. |
+| Briefs | Pre-market plan and post-market review. |
 | Alerts | Every alert saved by day. |
+| Scorecard | Which alert types actually work, graded automatically, plus the learning model's status. |
 | Paper trades | Automatic and manual paper trades, P&L after charges, win rate by alert type. |
 | Live setup | Upstox keys and login, alert levels, Telegram, AI, paper trading settings. |
 | Tomorrow | Will the next session be a big-move day? Expected range in points, direction lean, scheduled events, why the model thinks so, and how your recent calls turned out. |

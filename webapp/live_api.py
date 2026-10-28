@@ -204,6 +204,43 @@ def live_paper(source: str | None = None):
     return clean({**book.summary(e.state if e.paper is book else None), "source": src})
 
 
+@router.get("/api/live/context")
+def live_context():
+    return clean(engine().context.view())
+
+
+@router.post("/api/live/context/refresh")
+def live_context_refresh():
+    e = engine()
+    e.context.refresh_daily()
+    e.context.refresh_global()
+    e.context.poll_filings()
+    return clean(e.context.view())
+
+
+@router.get("/api/live/scorecard")
+def live_scorecard(source: str | None = None):
+    return clean(engine().scorecard_view(source))
+
+
+@router.get("/api/live/briefs")
+def live_briefs(day: str | None = None):
+    return clean(engine().briefs_view(day))
+
+
+@router.post("/api/live/briefs/{kind}")
+def live_make_brief(kind: str):
+    if kind not in ("pre", "post"):
+        raise HTTPException(400, "Unknown brief")
+    e = engine()
+    if kind == "post" and not e.metrics:
+        raise HTTPException(400, "Run the live scanner (or the simulator) first: the review needs a trading day.")
+    if kind == "pre":
+        e.context.refresh_daily()
+        e.context.refresh_global()
+    return clean(e.make_brief(kind, send=False))
+
+
 @router.get("/api/live/logs")
 def live_logs():
     return {"lines": list(engine().logs)[-200:]}
