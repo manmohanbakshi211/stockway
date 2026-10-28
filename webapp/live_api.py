@@ -66,9 +66,20 @@ def upstox_callback(code: str | None = None, error: str | None = None):
     try:
         body = exchange_code(code, c["upstox_api_key"], c["upstox_api_secret"], c["redirect_uri"])
     except Exception as ex:
-        return _page("Upstox login failed", html.escape(str(ex)) +
-                     "<br><br>Check that the redirect URL in your Upstox app is exactly "
-                     f"<code>{html.escape(c['redirect_uri'])}</code>", ok=False)
+        msg = str(ex)
+        low = msg.lower()
+        if "segment" in low or "reactivat" in low or "dormant" in low:
+            hint = ("Your Upstox account itself is not active for trading yet. Open the Upstox app → Account → "
+                    "Segments, activate <b>Equity</b> and <b>F&amp;O</b> (re-activation can take up to a day), then "
+                    "click Log in with Upstox again. The app connection is fine.")
+        elif "redirect" in low:
+            hint = ("Check that the redirect URL in your Upstox app is exactly "
+                    f"<code>{html.escape(c['redirect_uri'])}</code>")
+        elif "client" in low or "credential" in low or "secret" in low:
+            hint = "Check the API key and secret in Live setup. Copy them again from your Upstox app."
+        else:
+            hint = "Try Log in with Upstox once more. If it repeats, send this message to support."
+        return _page("Upstox login failed", html.escape(msg) + "<br><br>" + hint, ok=False)
     e.tokens.save(body)
     e.log(f"Logged in to Upstox as {body.get('user_name') or body.get('user_id')}")
     now = dt.datetime.now(IST)
