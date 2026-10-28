@@ -213,8 +213,9 @@ def rule_pulse(indices: list, alerts: list, movers: dict, vix: dict | None) -> l
 
 # ---------------------------------------------------------------- news
 class News:
-    def __init__(self, log=print):
+    def __init__(self, log=print, feeds=None):
         self.log = log
+        self.feeds = feeds or RSS
         self.items = []          # newest first
         self.seen = set()
         self.last_fetch = 0.0
@@ -223,9 +224,9 @@ class News:
     def fetch(self, symbols: dict):
         """symbols: SYMBOL -> list of name words to match in headlines."""
         new = []
-        for src, url in RSS.items():
+        for src, url in self.feeds.items():
             try:
-                r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0 Stockway"})
+                r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0 (Macintosh) Stockway"})
                 r.raise_for_status()
                 root = ET.fromstring(r.content)
                 for it in root.iter("item"):
@@ -239,7 +240,10 @@ class News:
                         from email.utils import parsedate_to_datetime
                         ts = parsedate_to_datetime(pub).timestamp()
                     except Exception:
-                        ts = time.time()
+                        try:      # e.g. "2026-10-28 22:54:37" (UTC)
+                            ts = dt.datetime.strptime(pub.strip()[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=dt.timezone.utc).timestamp()
+                        except Exception:
+                            ts = time.time()
                     new.append({"title": title, "link": link, "source": src, "ts": ts,
                                 "syms": match_symbols(title, symbols), "tone": tone(title)})
                 self.errors.pop(src, None)

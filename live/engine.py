@@ -63,6 +63,11 @@ class LiveEngine:
         self.news = News(self.log)
         self.context = Context(self.data_dir, self.log)
         self.context.on_filing = self._filing_alert
+        from .brain import Brain
+        from .world import World
+        self.world = World(self.data_dir, self.log, self.ai)
+        self.world.on_macro = self._macro_alert
+        self.brain = Brain(self)
         self.thread = None
         self.stop_evt = threading.Event()
         self.manual_stop_day = None
@@ -77,6 +82,7 @@ class LiveEngine:
         threading.Thread(target=self._news_loop, daemon=True, name="live-news").start()
         threading.Thread(target=self.context.run_forever, args=(self._filings_wanted,), daemon=True,
                          name="live-context").start()
+        threading.Thread(target=self._world_loop, daemon=True, name="live-world").start()
 
     # ------------------------------------------------------------ helpers
     def cfg(self) -> dict:
@@ -127,6 +133,8 @@ class LiveEngine:
         self.stats = {}
         self.prints_seen = 0
         self.watch = {"stalled": False, "since": None}
+        from .chartdata import ChartData
+        self.charts = ChartData(self)
 
     @property
     def running(self):
@@ -493,6 +501,11 @@ class LiveEngine:
                         self.log(f"Next-expiry chain {sym} failed: {e}")
             self._compute_all(now, mins, emit=True, lc=lc)
             try:
+                self.charts.scan(now, lambda a, now=now, lc=lc: self._emit(a, now, lc))
+            except Exception as e:
+                if self._every("setup_err", 300, clock_time=False):
+                    self.log(f"Setup scan error: {e}")
+            try:
                 self.desk.tick(now)
             except Exception as e:
                 if self._every("desk_err", 300, clock_time=False):
@@ -506,6 +519,10 @@ class LiveEngine:
                 self._watchdog(now)
             if self._every("stats", 300, clock_time=False):
                 self._refresh_stats()
+            aic = self.cfg().get("ai") or {}
+            every = int(aic.get("brain_every_min") or 10) * 60 if self.ai.enabled() else 300
+            if mins >= 3 and self._every("brain", every, clock_time=False):
+                threading.Thread(target=self._brain_safe, daemon=True).start()
             if self._every("ai_pulse", int((self.cfg().get("ai") or {}).get("pulse_every_min") or 15) * 60, clock_time=False) \
                     and self.ai.enabled() and mins >= 5:
                 threading.Thread(target=self._ai_pulse, daemon=True).start()
@@ -679,7 +696,9 @@ class LiveEngine:
                 and a["direction"] in ("up", "down"):
             muted = f"Demoted: this alert type has worked only {st['hit_rate']}% of {st['n']} times."
             a["severity"] = max(1, a["severity"] - 1)
-        a["data"] = {**(a.get("data") or {}), "evidence": ev, "levels": levels(m, a["direction"], self.state) if m else {},
+        lv_setup = (a.get("data") or {}).get("setup_levels")
+        a["data"] = {**(a.get("data") or {}), "evidence": ev,
+                     "levels": lv_setup or (levels(m, a["direction"], self.state) if m else {}),
                      "structure": structure(a["direction"], m, ctx) if m else None,
                      "track": st, "score": sc, "model_p": round(p * 100) if p is not None else None, "muted": muted,
                      "regime": (reg or {}).get("label")}
@@ -715,6 +734,63 @@ class LiveEngine:
             self.stats = scorecard(self.store, self.source)
         except Exception as e:
             self.log(f"Scorecard failed: {e}")
+
+    def _brain_safe(self):
+        try:
+            note = self.brain.run()
+            if note and note.get("by") == "AI" and int((self.cfg().get("ai") or {}).get("brain_telegram") or 0):
+                self.telegram.send(f"🧠 <b>{note.get('headline')}</b>\n" + "\n".join("• " + x for x in note.get("summary", [])[:4]))
+        except Exception as e:
+            self.log(f"Market brain failed: {e}")
+
+    def _macro_alert(self, a):
+        if self.running and self.source != "sim":
+            self._emit(a, self.clock.now(), self.cfg()["live"])
+        elif self.running:
+            a["title"] = "[real market] " + a["title"]
+            self._emit(a, self.clock.now(), self.cfg()["live"])
+
+    def _world_loop(self):
+        time.sleep(8)
+        t = collections.defaultdict(float)
+        while True:
+            now = time.time()
+            hour = dt.datetime.now(IST).hour
+            awake = 6 <= hour <= 23
+            def due(k, sec):
+                if now - t[k] >= sec:
+                    t[k] = now
+                    return True
+                return False
+            for k, sec, fn in (("prices", 300, self.world.refresh_prices), ("corr", 6 * 3600, self.world.refresh_correlations),
+                               ("calendar", 2 * 3600, self._world_calendar), ("results", 6 * 3600, self._world_results),
+                               ("news", 300, self.world.refresh_news)):
+                if (awake or not self.world.updated.get(k)) and due(k, sec):
+                    try:
+                        fn()
+                        self.world.errors.pop(k, None)
+                    except Exception as e:
+                        self.world.errors[k] = str(e)[:160]
+            try:
+                self.world.check_events()
+            except Exception:
+                pass
+            time.sleep(15)
+
+    def _world_calendar(self):
+        from lab.strategies import EVENTS
+        today = dt.datetime.now(IST).date()
+        extra = [(dt.date.fromisoformat(d), "India: scheduled policy / budget event") for d in EVENTS
+                 if today <= dt.date.fromisoformat(d) <= today + dt.timedelta(days=7)]
+        if self.uni:
+            exps = sorted({u.near_expiry(today) for u in self.uni.indices if u.near_expiry(today)})
+            extra += [(d, "Index option expiry") for d in exps if d <= today + dt.timedelta(days=7)]
+        self.world.refresh_calendar(extra_events=extra)
+
+    def _world_results(self):
+        fo = set(self.uni.underlyings) if self.uni and self.source != "sim" else \
+            set(((self.context.mwpl or {}).get("symbols") or {}).keys())
+        self.world.refresh_results(self.context.nse, fo)
 
     def _filing_alert(self, f):
         if not self.running or self.source == "sim" or not self.uni or f["sym"] not in self.uni.underlyings:
@@ -949,7 +1025,7 @@ class LiveEngine:
                 "indices": [self.index_view(m) for m in self._indices()], "vix": self._vix(),
                 "alerts": new, "pulse": self.pulse, "movers": self._movers() if self.metrics else None,
                 "market": self.market,
-                "context": {"fii_dii": cv["fii_dii"], "global": cv["global"][:8], "ban": cv["ban"],
+                "context": {"fii_dii": cv["fii_dii"], "global": cv["global"], "ban": cv["ban"],
                             "fii": next((r for r in ((cv["participants"] or {}).get("rows") or []) if r["who"] == "FII"), None)},
                 "paper": {"open": len(ps["open"]), "net": ps["net"], "unreal": ps["unreal"], "n": ps["n"],
                           "win_rate": ps["win_rate"], "guard": ps.get("guard")} if ps else None,

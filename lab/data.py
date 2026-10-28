@@ -222,6 +222,8 @@ def day_table(data_dir, sym: str, days: list[Day] | None = None) -> pd.DataFrame
         dte.append(n)
     t["dte"] = list(reversed(dte))
     t["prev_close"] = t["close"].shift(1)
+    t["prev_high"] = t["high"].shift(1)
+    t["prev_low"] = t["low"].shift(1)
     t["gap_pct"] = (t["open"] / t["prev_close"] - 1) * 100
     r = np.log(t["close"] / t["close"].shift(1))
     t["rv20"] = r.rolling(20).std() * math.sqrt(252) * 100

@@ -145,6 +145,8 @@ ai:
   pulse_every_min: 15
   explain_min_severity: 3
   daily_limit: 200
+  brain_every_min: 10          # AI market brain note interval (rules-only notes every 5 min without a key)
+  brain_telegram: 0            # 1 = also send AI brain notes to Telegram
 
 # Strategy lab: backtests on Dhan historical option data, and the live strategy desk (paper)
 lab:

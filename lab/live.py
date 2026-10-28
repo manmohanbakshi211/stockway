@@ -181,8 +181,11 @@ class StrategyDesk:
                 continue
             f = self._features(u, m)
             fn = FAMILIES[fam][0]
+            call = dict(params)
+            if fam == "chart_setup":
+                call["after"] = m - 6           # only act on a signal from the bar that just closed
             try:
-                pos = fn(ld, f, dict(params))
+                pos = fn(ld, f, call)
             except Exception as e:
                 self.status[key] = f"Error: {e}"
                 self.done_today.add(key)
@@ -276,12 +279,18 @@ class StrategyDesk:
                 reason = "stop"
             elif pos.target_x and mtm_pts >= pos.target_x * prem:
                 reason = "target"
-            elif pos.spot_stop:
+            elif pos.spot_stop or pos.spot_target:
                 u = self.e.uni.underlyings[pos.sym]
                 i = self.e.state.get(u.key)
-                lvl, d = pos.spot_stop
-                if i and i.ltp and ((d == "below" and i.ltp < lvl) or (d == "above" and i.ltp > lvl)):
-                    reason = "spot stop"
+                px = i.ltp if i and i.ltp else None
+                if px and pos.spot_stop:
+                    lvl, d = pos.spot_stop
+                    if (d == "below" and px < lvl) or (d == "above" and px > lvl):
+                        reason = "spot stop"
+                if px and not reason and pos.spot_target:
+                    lvl, d = pos.spot_target
+                    if (d == "above" and px >= lvl) or (d == "below" and px <= lvl):
+                        reason = "spot target"
             if not reason and m >= pos.exit_m:
                 reason = "time exit"
             if self.halted and not reason:

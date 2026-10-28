@@ -58,7 +58,10 @@ def daily_stats(candles: list) -> dict:
     vols = [c[5] for c in cs[-20:] if c[5]]
     hv20 = hv(closes, 20)
     hv_hist = [hv(closes[max(0, i - 21):i], 20) for i in range(22, len(closes) + 1, 5)]
-    return {"avg_vol": sum(vols) / len(vols) if vols else None, "hv20": hv20, "hv60": hv(closes, 60),
+    today = dt.datetime.now(IST).date().isoformat()
+    done = [x for x in cs if str(x[0])[:10] < today]
+    prev = {"h": done[-1][2], "l": done[-1][3], "c": done[-1][4], "o": done[-1][1], "date": str(done[-1][0])[:10]} if done else None
+    return {"prev": prev, "avg_vol": sum(vols) / len(vols) if vols else None, "hv20": hv20, "hv60": hv(closes, 60),
             "hv_pct": percentile(hv20, hv_hist), "close_1y_hi": max(closes) if closes else None,
             "close_1y_lo": min(closes) if closes else None, "days": len(closes)}
 

@@ -55,6 +55,7 @@ class Position:
     stop_x: float | None = None          # combined: exit when loss >= stop_x x |net premium|
     target_x: float | None = None        # combined: exit when profit >= target_x x |net premium|
     spot_stop: tuple | None = None       # (level, "below"/"above"): exit all if spot crosses
+    spot_target: tuple | None = None     # (level, "above"/"below"): take profit when spot reaches it
     entry_m: int = 0
     reason: str = ""
     meta: dict = field(default_factory=dict)
@@ -162,10 +163,12 @@ def simulate(day, pos: Position) -> dict | None:
             hit = "stop"
         elif pos.target_x and mtm >= pos.target_x * prem:
             hit = "target"
-        elif pos.spot_stop:
-            lvl, d = pos.spot_stop
-            if (d == "below" and spot[j] < lvl) or (d == "above" and spot[j] > lvl):
-                hit = "spot stop"
+        elif pos.spot_stop and ((pos.spot_stop[1] == "below" and spot[j] < pos.spot_stop[0]) or
+                                (pos.spot_stop[1] == "above" and spot[j] > pos.spot_stop[0])):
+            hit = "spot stop"
+        elif pos.spot_target and ((pos.spot_target[1] == "above" and spot[j] >= pos.spot_target[0]) or
+                                  (pos.spot_target[1] == "below" and spot[j] <= pos.spot_target[0])):
+            hit = "spot target"
         if hit:
             for i in range(len(pos.legs)):
                 if alive[i]:

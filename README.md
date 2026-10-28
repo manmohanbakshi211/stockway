@@ -113,6 +113,7 @@ Institution-style intraday strategies on Nifty and Bank Nifty, every one with a 
 | Expiry-day iron condor | Expiry days, when time decay is fastest |
 | Opening-range breakout debit spread | Days that break out after 9:30 |
 | Trend-day debit spread | Clean one-way days |
+| Chart setup debit spread | Four of the chart setups below (not OI-wall rejection: no OI in history), same code as the live scanner |
 
 How it decides, the way a desk does:
 
@@ -129,10 +130,32 @@ How it decides, the way a desk does:
 Setup: Strategy desk page → paste your Dhan client ID and access token → Download history (~40 min for 3
 years) → Run backtest. Re-run monthly.
 
+## Chart, world monitor and AI brain
+
+**Chart** (TradingView Lightweight Charts): 1/3/5/15-minute candles for any index or F&O stock with
+VWAP + bands, EMA 9/21/50, Supertrend, RSI, MACD, volume, and every level the desk uses drawn on the chart:
+yesterday's high/low/close, CPR and pivots, opening range, call/put OI walls, max pain, gamma flip and walls,
+and the option-implied expected move. Alerts, setups and paper/desk trades appear as markers (hover for details).
+The side panel gives a plain-English chart read, today's setups with live state, and the levels by distance.
+
+**Chart setups** (checked on every closed 5-minute bar, each with a stop and a target from real levels):
+EMA pullback in a trend, VWAP reclaim/loss, narrow-CPR breakout, previous-day high/low break, OI-wall rejection.
+They fire as alerts, are graded on the Scorecard, and are backtested in the Strategy desk.
+
+**World**: global index futures, currencies, commodities, US yields, VIX, crypto and Indian ADRs (vs NSE price),
+each with its past correlation to Nifty and an indicative "global pressure" on Nifty; this week's economic
+calendar, F&O results for 10 days, and global news tagged by likely impact on India. Big moves (crude, dollar,
+US futures, Asia) and high-impact events 15 minutes ahead come as alerts.
+
+**AI market brain**: every few minutes a desk note — bias with confidence, key levels, risks, watchlist and
+what changed. Works on rules with no key; written by AI when a Gemini key is set.
+
 ## Pages
 
 | Page | What it answers |
 |---|---|
+| Chart | TradingView-style chart with indicators, levels, setups and markers, plus a chart read. |
+| World | Global markets, forex, commodities, rates, ADRs, economic and results calendars, global news. |
 | Strategy desk | Today's strategy plan and positions, paper P&L by day, out-of-sample backtest results, Dhan data setup. |
 | Live | Index cards (PCR, max pain, support/resistance from option OI, IV, expected move, bias), live alerts with option ideas, market pulse, movers, news. |
 | Scanner | Every F&O stock ranked by activity, with buildup, volume pace, IV, PCR, unusual options, bias. Filters and sorting. |

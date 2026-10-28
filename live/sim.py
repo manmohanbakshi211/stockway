@@ -422,7 +422,10 @@ class SimREST:
         for i, c in enumerate(reversed(closes)):
             d = self.m.today - dt.timedelta(days=i + 1)
             v = int(adv * rng.uniform(0.7, 1.3))
-            out.append([f"{d.isoformat()}T00:00:00+05:30", c, c * 1.01, c * 0.99, round(c, 2), v, 0])
+            hi = c * (1 + abs(rng.gauss(0, sig / math.sqrt(252))) * 0.9)
+            lo = c * (1 - abs(rng.gauss(0, sig / math.sqrt(252))) * 0.9)
+            op = rng.uniform(lo, hi)
+            out.append([f"{d.isoformat()}T00:00:00+05:30", round(op, 2), round(max(hi, op, c), 2), round(min(lo, op, c), 2), round(c, 2), v, 0])
         return out
 
 

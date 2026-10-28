@@ -38,11 +38,13 @@ const KIND = {
   vwap_cross: "VWAP cross", volume_surge: "Volume surge", oi_buildup: "Futures OI buildup", unusual_options: "Unusual options",
   oi_wall: "OI wall shift", pcr_shift: "PCR shift", iv_spike: "IV spike", beyond_priced: "Bigger than priced",
   vix_jump: "VIX jump", vix_drop: "VIX drop", news: "News", order_flow: "Order flow", absorption: "Absorption",
-  gamma_flip: "Gamma flip", big_print: "Big trade", filing: "Company filing",
+  gamma_flip: "Gamma flip", big_print: "Big trade", filing: "Company filing", macro: "Global / macro",
+  setup_ema_pullback: "Setup: EMA pullback", setup_vwap_reclaim: "Setup: VWAP reclaim", setup_cpr_breakout: "Setup: CPR breakout",
+  setup_pdh_break: "Setup: prev-day break", setup_wall_fade: "Setup: OI wall rejection",
 };
 
 /* ---------------- polling + notifications */
-function livePage() { return ["live", "desk", "scanner", "sym", "alerts", "paper", "connect", "context", "scorecard", "briefs"].includes(state.page); }
+function livePage() { return ["live", "chart", "world", "desk", "scanner", "sym", "alerts", "paper", "connect", "context", "scorecard", "briefs"].includes(state.page); }
 
 async function pollSnapshot() {
   try {
@@ -55,6 +57,7 @@ async function pollSnapshot() {
       if (L.primed) fresh.slice().reverse().forEach(notify);
     }
     L.primed = true;
+    if (!L.brainAt || Date.now() - L.brainAt > 30000) { L.brainAt = Date.now(); api("/api/brain").then((b) => { L.brain = b.latest; }).catch(() => {}); }
     railLive();
     if (state.page === "live") renderLive();
   } catch (_) { /* server restarting */ }
@@ -191,7 +194,7 @@ function alertItem(a, full = false, extra = "") {
   } else trade = `<div class="idea"><span class="muted small">${esc(d.regime ? "Market: " + d.regime : "")}</span><span class="btn-row"><button class="link-btn" data-explain="${a.id}">Why?</button></span></div>`;
   return `<li class="alert sev${a.severity}" data-aid="${a.id}">
     <div class="al-time">${hms(a.ts)}<span class="sevtag s${a.severity}">${SEV[a.severity]}</span>${score}</div>
-    <div class="al-body"><div class="al-title">${arrow(a.direction)} <a href="#/sym?s=${encodeURIComponent(a.sym)}">${esc(a.title)}</a></div>
+    <div class="al-body"><div class="al-title">${arrow(a.direction)} <a href="${a.sym === "GLOBAL" ? "#/world" : `#/chart?s=${encodeURIComponent(a.sym)}`}">${esc(a.title)}</a></div>
       <p>${esc(a.detail)}${link} <span class="muted small">${esc(KIND[a.kind] || a.kind)}</span> ${track}</p>
       ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}
       ${ev ? `<div class="evs">${ev}</div>` : ""}${plan}${trade}
@@ -304,6 +307,7 @@ function renderLive(force = false) {
         <ul class="alerts">${storyList(alerts) || `<li class="muted" style="padding:18px">No alerts yet. They appear here the moment something happens.</li>`}</ul>
       </section>
       <aside>
+        ${brainCard(L.brain, { button: true })}
         <div class="panel pulse"><h3>Market pulse</h3>${pulseHTML}</div>
         ${contribHTML}${secHTML}
         <div class="panel tight"><div class="toolbar" style="margin:0 0 6px"><h3>Movers</h3>
@@ -318,6 +322,7 @@ function renderLive(force = false) {
   body.querySelectorAll("[data-sev]").forEach((b) => b.onclick = () => { L.sevFilter = Number(b.dataset.sev); LS.set("sevFilter", L.sevFilter); renderLive(true); });
   body.querySelectorAll("[data-mtab]").forEach((b) => b.onclick = () => { LS.set("moversTab", b.dataset.mtab); renderLive(true); });
   body.querySelectorAll("[data-ctab]").forEach((b) => b.onclick = () => { LS.set("contribTab", b.dataset.ctab); renderLive(true); });
+  body.querySelectorAll("[data-brain-run]").forEach((b) => b.onclick = async () => { b.disabled = true; b.textContent = "Thinking…"; try { L.brain = await post("/api/brain/run", {}); renderLive(true); } catch (e) { toast(e.message); b.disabled = false; } });
   body.querySelectorAll("tr[data-sym]").forEach((tr) => tr.onclick = () => { location.hash = `#/sym?s=${encodeURIComponent(tr.dataset.sym)}`; });
 }
 
@@ -434,7 +439,7 @@ function drawSym(d, first) {
   }).join("");
   const unusual = (o.unusual || []).map((u) => `<li>${arrow(u.direction)} <b>${fk(u.strike)} ${u.side}</b> — heavy ${u.kind}: ${u.lots_5m} lots in 5 min (${u.x_pace}× pace), premium ${fp(u.prem_chg_5m, 1)}</li>`).join("");
   body.innerHTML = `
-    <div class="sym-head"><div><a class="small" href="#/scanner">← Scanner</a>
+    <div class="sym-head"><div><a class="small" href="#/scanner">← Scanner</a> · <a class="small" href="#/chart?s=${encodeURIComponent(m.sym)}">Open chart</a>
       <h1 class="page-title">${esc(m.name)} <span class="muted" style="font-weight:500">${esc(m.sym)}</span></h1>
       <div class="sym-price">${fx(m.spot)} ${fpc(m.chg_pct)} ${f.buildup_label ? `<span class="pill ${f.buildup_sign > 0 ? "p-up" : "p-down"}">${esc(f.buildup_label)}</span>` : ""}</div></div>
       <div class="sym-bias">${biasMeter(m.score)}${m.reasons && m.reasons.length ? `<p class="ic-why">${esc(m.reasons.join(" · "))}</p>` : ""}</div></div>
@@ -916,8 +921,188 @@ function drawDeskCharts(r) {
     plotLayout({ margin: { l: 40, r: 10, t: 26, b: 30 }, title: { text: "Daily P&L on days with trades (number of days)", font: { size: 12 }, x: 0 }, xaxis: { tickprefix: "₹", gridcolor: "#EEF1F4" }, bargap: 0.05 }), plotCfg);
 }
 
+
+/* ---------------- page: Pro chart (TradingView Lightweight Charts) */
+const CH = { chart: null, sym: null, tf: 5, days: 3, series: {}, lines: [], markers: null, sig: "", data: null };
+const CH_TOGGLES = [["vwap", "VWAP + bands"], ["ema", "EMA 9/21/50"], ["st", "Supertrend"], ["prev", "Yesterday H/L/C"], ["cpr", "CPR + pivots"],
+  ["or", "Opening range"], ["oi", "OI walls + max pain"], ["gamma", "Gamma levels"], ["em", "Expected move"], ["marks", "Alerts + trades"],
+  ["vol", "Volume"], ["rsi", "RSI"], ["macd", "MACD"]];
+function chOn(k) { return LS.get("ch_" + k, !["macd", "em"].includes(k)); }
+
+async function pageChart() {
+  stopPageTimer();
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  CH.sym = (params.get("s") || LS.get("lastSym", "NIFTY")).toUpperCase();
+  CH.tf = Number(params.get("tf") || LS.get("ch_tf", 5));
+  CH.days = Number(LS.get("ch_days", 3));
+  LS.set("lastSym", CH.sym);
+  const syms = (L.scanner && L.scanner.length ? L.scanner : await api("/api/live/scanner").catch(() => [])).map((m) => m.sym).sort();
+  main.classList.add("wide");
+  main.innerHTML = `<div class="ch-top">
+      <div class="ch-sym"><input list="ch-syms" id="ch-sym" value="${esc(CH.sym)}" aria-label="Symbol" spellcheck="false"><datalist id="ch-syms">${syms.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
+        <span id="ch-price" class="ch-price"></span></div>
+      <div class="seg" role="group" aria-label="Timeframe">${[1, 3, 5, 15].map((t) => `<button data-tf="${t}" aria-pressed="${CH.tf === t}">${t}m</button>`).join("")}</div>
+      <div class="seg" role="group" aria-label="Days">${[1, 3, 5].map((d) => `<button data-days="${d}" aria-pressed="${CH.days === d}">${d}D</button>`).join("")}</div>
+      <details class="ch-ind"><summary class="btn">Indicators &amp; levels</summary><div class="ch-menu">${CH_TOGGLES.map(([k, l]) => `<label class="check"><input type="checkbox" data-tog="${k}" ${chOn(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></details>
+      <a class="btn" href="#/sym?s=${encodeURIComponent(CH.sym)}">Option chain</a>
+    </div>
+    <div class="ch-wrap"><div id="ch-chart" class="ch-chart"></div>
+      <aside class="ch-side"><div class="panel tight"><h3>Chart read</h3><div id="ch-read"><p class="muted">Loading…</p></div>
+        <button class="link-btn" id="ch-ai">AI read this chart</button><div id="ch-ai-out"></div></div>
+        <div class="panel tight"><h3>Setups today</h3><div id="ch-setups"></div></div>
+        <div class="panel tight"><h3>Key levels</h3><div id="ch-levels"></div></div></aside></div>
+    <p class="note">Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts. ${""}Index VWAP counts each bar equally (indices have no volume).</p>`;
+  $("#ch-sym").onchange = (e) => { location.hash = `#/chart?s=${encodeURIComponent(e.target.value.trim().toUpperCase())}&tf=${CH.tf}`; };
+  main.querySelectorAll("[data-tf]").forEach((b) => b.onclick = () => { LS.set("ch_tf", Number(b.dataset.tf)); location.hash = `#/chart?s=${encodeURIComponent(CH.sym)}&tf=${b.dataset.tf}`; });
+  main.querySelectorAll("[data-days]").forEach((b) => b.onclick = () => { LS.set("ch_days", Number(b.dataset.days)); pageChart(); });
+  main.querySelectorAll("[data-tog]").forEach((c) => c.onchange = () => { LS.set("ch_" + c.dataset.tog, c.checked); buildChart(CH.hasVol); drawChart(CH.data, true); });
+  $("#ch-ai").onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = "Reading…";
+    try { const r = await post(`/api/live/chart/${encodeURIComponent(CH.sym)}/ai`, {}); $("#ch-ai-out").innerHTML = `<div class="ai-text">${fmtAI(r.text)}</div>`; } catch (err) { toast(err.message); }
+    e.target.disabled = false; e.target.textContent = "AI read this chart";
+  };
+  const tick = async (first) => {
+    if (state.page !== "chart") return;
+    try {
+      CH.data = await api(`/api/live/chart/${encodeURIComponent(CH.sym)}?tf=${CH.tf}&days=${CH.days}`);
+      if (first || !CH.chart || CH.hasVol !== CH.data.has_volume) { CH.hasVol = CH.data.has_volume; buildChart(CH.hasVol); first = true; }
+      drawChart(CH.data, first);
+    }
+    catch (err) { if (first) $("#ch-chart").innerHTML = `<div class="empty" style="margin:20px">${esc(err.message)}<br><br><a class="btn primary" href="#/live">Go to Live</a></div>`; }
+    L.pageTimer = setTimeout(() => tick(false), 2000);
+  };
+  tick(true);
+}
+
+function buildChart(hasVolume = true) {
+  const el = $("#ch-chart"); if (!el || !window.LightweightCharts) return;
+  if (CH.chart) { CH.chart.remove(); CH.chart = null; }
+  const LW = window.LightweightCharts;
+  const chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 12, panes: { separatorColor: "#D5DCE3" } },
+    grid: { vertLines: { color: "#F1F4F7" }, horzLines: { color: "#F1F4F7" } }, rightPriceScale: { borderColor: "#D5DCE3" },
+    timeScale: { borderColor: "#D5DCE3", timeVisible: true, secondsVisible: false, rightOffset: 8 }, crosshair: { mode: 0 } });
+  const S = {};
+  S.candle = chart.addSeries(LW.CandlestickSeries, { upColor: "#1E8A5A", downColor: "#C23B32", borderVisible: false, wickUpColor: "#1E8A5A", wickDownColor: "#C23B32" });
+  const ln = (color, width = 1, style = 0, pane = 0, extra = {}) => chart.addSeries(LW.LineSeries, { color, lineWidth: width, lineStyle: style, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...extra }, pane);
+  if (chOn("vwap")) { S.vwap = ln("#3D2FA8", 2); S.u1 = ln("rgba(61,47,168,.45)", 1, 2); S.d1 = ln("rgba(61,47,168,.45)", 1, 2); S.u2 = ln("rgba(61,47,168,.3)", 1, 1); S.d2 = ln("rgba(61,47,168,.3)", 1, 1); }
+  if (chOn("ema")) { S.ema9 = ln("#E07B00", 1); S.ema21 = ln("#0A84C1", 1); S.ema50 = ln("#5E6B78", 1, 2); }
+  if (chOn("st")) { S.st_up = ln("#1E8A5A", 2, 0, 0, { lineType: 1 }); S.st_dn = ln("#C23B32", 2, 0, 0, { lineType: 1 }); }
+  let pane = 1;
+  if (chOn("vol") && hasVolume) { S.vol = chart.addSeries(LW.HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false }, pane); S.volPane = pane++; }
+  if (chOn("rsi")) { S.rsi = ln("#3D2FA8", 1, 0, pane, { lastValueVisible: true }); S.rsi.createPriceLine({ price: 70, color: "#C23B32", lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsi.createPriceLine({ price: 30, color: "#1E8A5A", lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsiPane = pane++; }
+  if (chOn("macd")) { S.macd_hist = chart.addSeries(LW.HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, pane); S.macd = ln("#0A84C1", 1, 0, pane); S.macd_sig = ln("#E07B00", 1, 0, pane); S.macdPane = pane++; }
+  const panes = chart.panes();
+  panes.forEach((p, i) => p.setStretchFactor(i === 0 ? 4 : 1));
+  S.markers = LW.createSeriesMarkers(S.candle, []);
+  const lg = document.createElement("div"); lg.className = "ch-legend"; el.appendChild(lg);
+  chart.subscribeCrosshairMove((p) => {
+    const c = p && p.time ? p.seriesData.get(S.candle) : null;
+    if (!c) { lg.innerHTML = ""; return; }
+    const v = (k) => { const x = S[k] && p.seriesData.get(S[k]); return x && x.value != null ? x.value : null; };
+    const bits = [["VWAP", v("vwap")], ["EMA9", v("ema9")], ["EMA21", v("ema21")], ["RSI", v("rsi")]].filter((x) => x[1] != null)
+      .map(([n, x]) => `<span>${n} <b>${fx(x)}</b></span>`).join("");
+    const t = new Date((p.time - 19800) * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+    const ev = ((CH.data && CH.data.markers) || []).filter((m) => m.time === p.time && m.title).map((m) => `<div class="lg-ev" style="color:${m.color}">${esc(m.title)}</div>`).join("");
+    lg.innerHTML = `<div><span>${t}</span><span>O <b>${fx(c.open)}</b></span><span>H <b>${fx(c.high)}</b></span><span>L <b>${fx(c.low)}</b></span><span>C <b class="${c.close >= c.open ? "up" : "down"}">${fx(c.close)}</b></span>${bits}</div>${ev}`;
+  });
+  CH.chart = chart; CH.series = S; CH.lines = []; CH.sig = "";
+}
+
+function drawChart(d, first) {
+  if (!d || !CH.chart) return;
+  const S = CH.series;
+  S.candle.setData(d.candles);
+  for (const k of ["vwap", "u1", "d1", "u2", "d2", "ema9", "ema21", "ema50", "st_up", "st_dn", "rsi", "macd", "macd_sig", "macd_hist"]) if (S[k]) S[k].setData(d.series[k] || []);
+  if (S.vol) S.vol.setData(d.has_volume ? d.volume : []);
+  // price lines for levels (rebuild only when they change)
+  const groups = { prev: "prev", cpr: "cpr", or: "or", oi: "oi", gamma: "gamma", em: "em" };
+  const want = d.levels.filter((l) => chOn(groups[l.group] || l.group));
+  const sig = JSON.stringify(want.map((l) => [l.name, l.price]));
+  if (sig !== CH.sig) {
+    CH.lines.forEach((pl) => S.candle.removePriceLine(pl));
+    CH.lines = want.map((l) => S.candle.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: l.style, axisLabelVisible: true, title: l.name }));
+    CH.sig = sig;
+  }
+  S.markers.setMarkers(chOn("marks") ? d.markers.map(({ time, position, color, shape, text }) => ({ time, position, color, shape, text })) : []);
+  if (first) {                       // show the last ~120 bars (at least 40 slots so a young session isn't stretched)
+    const n = d.candles.length;
+    if (n) CH.chart.timeScale().setVisibleLogicalRange({ from: n - Math.max(40, Math.min(n, 120)), to: n + 6 });
+  }
+  $("#ch-price").innerHTML = `<b>${fx(d.spot)}</b> ${fpc(d.chg_pct)} ${d.regime && d.regime.code !== "opening" ? `<span class="pill p-sig">${esc(d.regime.label)}</span>` : ""}`;
+  $("#ch-read").innerHTML = d.read.length ? `<ul class="plain">${d.read.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="muted">Builds after the first 15 minutes.</p>`;
+  $("#ch-setups").innerHTML = d.setups.length ? `<ul class="plain">${d.setups.slice().reverse().map((x) => `<li>${hm(x.ts)} ${arrow(x.direction)} <b>${esc(x.name)}</b> @ ${fx(x.entry)}<br><small>stop ${fx(x.stop)} · target ${fx(x.target)} · R:R ${x.rr}</small>
+      <span class="pill ${x.state === "target hit" ? "p-up" : x.state === "stopped" ? "p-down" : "p-sig"}">${esc(x.state)}${x.state === "active" ? ` ${x.r_now > 0 ? "+" : ""}${x.r_now}R` : ""}</span></li>`).join("")}</ul>` : `<p class="muted small">No setup yet today. The scanner checks every closed 5-minute bar.</p>`;
+  const spot = d.spot;
+  $("#ch-levels").innerHTML = `<ul class="plain lv">${d.levels.slice().sort((a, b) => b.price - a.price).map((l) => `<li class="${l.price > spot ? "abv" : "blw"}"><span><i style="background:${l.color}"></i>${esc(l.name)}</span><b>${fx(l.price)}</b><small>${((l.price / spot - 1) * 100).toFixed(2)}%</small></li>`).join("")}</ul>`;
+}
+
+
+/* ---------------- page: World */
+async function pageWorld() {
+  stopPageTimer();
+  const tick = async (first) => {
+    if (state.page !== "world") return;
+    try { drawWorld(await api("/api/world"), first); } catch (e) { if (first) main.innerHTML = `<div class="empty"><h2>World</h2><p>${esc(e.message)}</p></div>`; }
+    L.pageTimer = setTimeout(() => tick(false), 60000);
+  };
+  tick(true);
+}
+
+function brainCard(note, opts = {}) {
+  if (!note) return `<div class="panel brain"><h3>AI market brain</h3><p class="muted small">The first note appears a few minutes after the market opens (or click Run now).</p>${opts.button ? `<button class="link-btn" data-brain-run>Run now</button>` : ""}</div>`;
+  const bias = note.bias || "neutral";
+  return `<div class="panel brain b-${esc(bias)}"><div class="toolbar" style="margin:0 0 6px"><h3 style="margin:0">AI market brain <span class="muted small">${esc(note.time || "")} · ${note.by === "AI" ? "AI" : "rules"}</span></h3>
+      ${opts.button ? `<button class="link-btn" data-brain-run>Run now</button>` : ""}</div>
+    <p class="brain-head"><span class="pill ${bias === "bullish" ? "p-up" : bias === "bearish" ? "p-down" : ""}">${esc(bias)} ${note.confidence != null ? note.confidence + "%" : ""}</span> <b>${esc(note.headline || "")}</b></p>
+    <ul class="plain">${(note.summary || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+    ${note.plan ? `<p class="small"><b>Plan:</b> ${esc(note.plan)}</p>` : ""}
+    ${(note.changed || []).length ? `<p class="small muted"><b>Changed:</b> ${note.changed.map(esc).join(" · ")}</p>` : ""}
+    ${(note.risks || []).length ? `<p class="small"><b class="down">Risks:</b> ${note.risks.map(esc).join(" · ")}</p>` : ""}
+    ${(note.watchlist || []).length ? `<div class="chips">${note.watchlist.map((w) => `<a class="chip static" href="#/chart?s=${encodeURIComponent(w.sym)}" title="${esc(w.why || "")}">${esc(w.sym)}${w.level ? " " + fx(Number(w.level)) : ""}</a>`).join("")}</div>` : ""}
+  </div>`;
+}
+
+function drawWorld(w, first) {
+  const p = w.pressure || {};
+  const imp = (v) => (v == null ? "–" : `<span class="${v > 0.02 ? "up" : v < -0.02 ? "down" : "muted"}">${v > 0 ? "+" : ""}${v.toFixed(2)}%</span>`);
+  const spark = (xs) => {
+    if (!xs || xs.length < 2) return "";
+    const lo = Math.min(...xs), hi = Math.max(...xs), W = 60, H = 18;
+    const pts = xs.map((x, i) => `${(i / (xs.length - 1)) * W},${H - ((x - lo) / ((hi - lo) || 1)) * H}`).join(" ");
+    return `<svg width="${W}" height="${H}" class="spark"><polyline points="${pts}" fill="none" stroke="${xs[xs.length - 1] >= xs[0] ? "#1E8A5A" : "#C23B32"}" stroke-width="1.5"/></svg>`;
+  };
+  const groups = w.groups.map((g) => `<div class="panel tight"><h3>${esc(g.group)}</h3><table class="mini"><thead><tr><th>Market</th><th class="r">Last</th><th class="r">Day</th><th></th><th class="r" title="Past correlation with Nifty (next day for US/Europe, same day for Asia)">Corr</th><th class="r" title="What this move has meant for Nifty in the past">Nifty impact</th></tr></thead>
+    <tbody>${g.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="r">${fx(r.last)}</td><td class="r">${fpc(r.chg_pct)}</td><td>${spark(r.spark)}</td><td class="r muted">${r.corr != null ? r.corr.toFixed(2) : "–"}</td><td class="r">${imp(r.nifty_impact)}</td></tr>`).join("")}</tbody></table></div>`).join("");
+  const now = Date.now();
+  const cal = w.calendar.map((e) => { const t = new Date(e.time); const past = t.getTime() < now - 30 * 60000;
+    return `<tr class="${past ? "past" : ""}"><td>${t.toLocaleString("en-IN", { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })}</td><td><b>${esc(e.country)}</b></td><td>${esc(e.title)}</td>
+      <td><span class="pill ${e.impact === "High" ? "p-down" : "p-amber"}">${esc(e.impact)}</span></td><td class="r muted">${esc(e.forecast || "")}</td><td class="r muted">${esc(e.previous || "")}</td></tr>`; }).join("");
+  const res = {};
+  w.results.forEach((r) => { (res[r.date] = res[r.date] || []).push(r.sym); });
+  const news = w.news.filter((n) => LS.get("w_imp", "all") === "all" || n.impact === "high" || (LS.get("w_imp", "all") === "medium" && n.impact === "medium")).slice(0, 50);
+  main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">World</h1><p class="lede" style="margin-bottom:0">Global markets, currencies, commodities, rates, crypto, Indian ADRs, economic events, results and global news: what it means for Nifty.</p></div>
+      <button class="btn" id="w-refresh">Refresh now</button></div>
+    <div class="kpis" style="margin-top:16px"><div class="kpi"><b class="${(p.implied_pct || 0) >= 0 ? "up" : "down"}">${p.implied_pct != null ? (p.implied_pct > 0 ? "+" : "") + p.implied_pct.toFixed(2) + "%" : "–"}</b><span>Global pressure on Nifty: ${esc(p.label || "not ready")}</span></div>
+      <div class="kpi"><b>${w.nifty ? fx(w.nifty.last) : "–"}</b><span>Nifty last close ${w.nifty ? fpc(w.nifty.chg_pct) : ""}</span></div>
+      <div class="kpi"><b>${w.upcoming.filter((e) => e.impact === "High" && e.mins >= 0).length}</b><span>High-impact events in the next 2 hours</span></div>
+      <div class="kpi"><b>${(res[new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })] || []).length}</b><span>F&amp;O results today</span></div></div>
+    ${p.drivers ? `<p class="note">Biggest drivers: ${p.drivers.map((d) => `${esc(d.name)} ${d.move > 0 ? "+" : ""}${d.move.toFixed(2)}% → ${d.impact > 0 ? "+" : ""}${d.impact.toFixed(2)}%`).join(" · ")}. Indicative: based on the last 9 months' relation, not a forecast.</p>` : ""}
+    <div class="world-grid">${groups}</div>
+    ${w.adr.length ? `<h2>Indian ADRs vs NSE price</h2><div class="table-wrap"><table><thead><tr><th>ADR</th><th class="r">ADR ($)</th><th class="r">ADR day</th><th class="r">Implied ₹</th><th class="r">NSE ₹</th><th class="r">Premium</th></tr></thead><tbody>
+      ${w.adr.map((a) => `<tr><td><b>${esc(a.nse)}</b> <span class="muted small">${esc(a.adr)}</span></td><td class="r">${fx(a.adr_usd)}</td><td class="r">${fpc(a.adr_chg)}</td><td class="r">${fx(a.implied_inr)}</td><td class="r">${fx(a.nse_inr)}</td><td class="r">${fpc(a.premium_pct)}</td></tr>`).join("")}</tbody></table></div>
+      <p class="note">A big change in the ADR overnight often shows up in the stock at the next open.</p>` : ""}
+    <div class="split" style="margin-top:22px">
+      <div><h2 style="margin-top:0">Economic calendar <span class="muted small">this week, IST</span></h2><div class="table-wrap cal"><table><thead><tr><th>When</th><th></th><th>Event</th><th>Impact</th><th class="r">Forecast</th><th class="r">Previous</th></tr></thead><tbody>${cal || `<tr><td colspan="6" class="muted">Loading…</td></tr>`}</tbody></table></div></div>
+      <div><h2 style="margin-top:0">Results calendar <span class="muted small">F&amp;O stocks, next 10 days</span></h2><div class="panel tight">${Object.entries(res).map(([d, xs]) => `<p class="small" style="margin:0 0 8px"><b>${new Date(d + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}</b>: ${xs.slice(0, 40).map((x) => `<a href="#/chart?s=${encodeURIComponent(x)}">${esc(x)}</a>`).join(", ")}${xs.length > 40 ? ` +${xs.length - 40}` : ""}</p>`).join("") || `<p class="muted">Loading…</p>`}</div></div></div>
+    <div class="toolbar" style="margin-top:22px"><h2 style="margin:0">Global news</h2><div class="seg">${[["all", "All"], ["medium", "Matters for India"], ["high", "High impact"]].map(([k, l]) => `<button data-wimp="${k}" aria-pressed="${LS.get("w_imp", "all") === k}">${l}</button>`).join("")}</div></div>
+    <ul class="alerts filings">${news.map((n) => `<li>${n.impact ? `<span class="pill ${n.impact === "high" ? "p-down" : n.impact === "medium" ? "p-amber" : ""}">${esc(n.impact)}</span>` : ""} ${n.direction > 0 ? '<span class="up">▲</span>' : n.direction < 0 ? '<span class="down">▼</span>' : ""}
+      <a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a><br><small class="muted">${esc(n.source)} · ${hm(n.ts)}${n.why ? " · " + esc(n.why) : ""}${n.by === "AI" ? " · AI" : ""}</small></li>`).join("") || `<li class="muted" style="padding:14px">Loading…</li>`}</ul>`;
+  $("#w-refresh").onclick = async (e) => { e.target.disabled = true; e.target.textContent = "Refreshing…"; try { drawWorld(await post("/api/world/refresh", {})); } catch (err) { toast(err.message); } };
+  main.querySelectorAll("[data-wimp]").forEach((b) => b.onclick = () => { LS.set("w_imp", b.dataset.wimp); drawWorld(w); });
+}
+
 /* ---------------- register */
 Object.assign(PAGES, { live: pageLive, scanner: pageScanner, sym: pageSym, alerts: pageAlerts, paper: pagePaper, connect: pageConnect,
-  context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk });
-window.addEventListener("hashchange", () => { stopPageTimer(); });
+  context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk, chart: pageChart, world: pageWorld });
+window.addEventListener("hashchange", () => { stopPageTimer(); if (!location.hash.startsWith("#/chart") && CH.chart) { CH.chart.remove(); CH.chart = null; } main.classList.toggle("wide", location.hash.startsWith("#/chart")); });
 pollSnapshot();

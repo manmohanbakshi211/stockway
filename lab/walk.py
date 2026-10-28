@@ -26,7 +26,8 @@ DEFAULTS = {
     "alloc_pct": 25.0,       # max margin one strategy may use, % of capital
     "max_lots": 20,
     "train_months": 6,
-    "min_trades": {"iron_fly": 40, "iron_condor": 40, "expiry_condor": 10, "orb_spread": 12, "trend_spread": 10},
+    "min_trades": {"iron_fly": 40, "iron_condor": 40, "expiry_condor": 10, "orb_spread": 12, "trend_spread": 10,
+                   "chart_setup": 12},
     "min_pf": 1.15,
     "min_t": 2.0,            # statistical bar: profit must be ~2 standard errors above zero (filters lucky variants)
 }

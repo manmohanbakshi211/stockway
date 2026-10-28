@@ -51,6 +51,8 @@ EDITABLE = {
     "ai.model": str,
     "ai.pulse_every_min": int,
     "ai.explain_min_severity": int,
+    "ai.brain_every_min": int,
+    "ai.brain_telegram": int,
 }
 SECRET_KEYS = {"telegram.bot_token", "live.upstox_api_secret", "ai.api_key", "lab.dhan_token"}
 

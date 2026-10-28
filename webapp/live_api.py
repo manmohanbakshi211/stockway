@@ -147,6 +147,49 @@ def live_symbol(sym: str, expiry: str | None = None):
     return clean(d)
 
 
+@router.get("/api/live/chart/{sym}")
+def live_chart(sym: str, tf: int = 5, days: int = 3):
+    e = engine()
+    if tf not in (1, 3, 5, 15, 30, 60):
+        raise HTTPException(400, "Timeframe must be 1, 3, 5, 15, 30 or 60 minutes")
+    try:
+        d = e.charts.payload(sym.upper(), tf, max(1, min(5, days)))
+    except PermissionError as ex:
+        raise HTTPException(401, str(ex))
+    if not d:
+        raise HTTPException(404, "No live data for this symbol yet. Start the live scanner (or the simulator) first.")
+    return clean(d)
+
+
+@router.post("/api/live/chart/{sym}/ai")
+def live_chart_ai(sym: str):
+    from live.notify import SYSTEM_STYLE, _compact_json, _slim_metrics
+    e = engine()
+    if not e.ai.enabled():
+        raise HTTPException(400, "Add an AI key in Live setup to get an AI chart reading.")
+    sym = sym.upper()
+    d = e.charts.payload(sym, 5, 1)
+    if not d:
+        raise HTTPException(404, "No chart data yet.")
+    c = d["candles"][-24:]
+    s = d["series"]
+    last = lambda k: (s[k][-1]["value"] if s.get(k) else None)
+    facts = {"symbol": sym, "candles_5m_last_2h": [[x["open"], x["high"], x["low"], x["close"]] for x in c],
+             "indicators": {k: last(k) for k in ("vwap", "u1", "d1", "u2", "d2", "ema9", "ema21", "ema50", "rsi", "macd", "macd_sig")},
+             "supertrend": "up" if s.get("st_up") and s["st_up"][-1]["time"] == c[-1]["time"] else "down",
+             "levels": {l["name"]: l["price"] for l in d["levels"]}, "rule_reading": d["read"], "setups": d["setups"],
+             "regime": d.get("regime"), "metrics": _slim_metrics(e.metrics.get(sym)),
+             "news": [n["title"] for n in e.news.items if sym in n["syms"]][:5]}
+    prompt = (SYSTEM_STYLE + "You are reading a live 5-minute chart like a senior prop trader. In 5 short bullets: "
+              "1) structure and trend, 2) where price sits vs the key levels, 3) the best trade setup now with entry, stop and "
+              "target levels (or 'no trade' and why), 4) what would change your mind, 5) one risk. Use only the numbers given.\n\n"
+              + _compact_json(facts))
+    text = e.ai.ask(prompt, 450)
+    if not text:
+        raise HTTPException(502, e.ai.last_error or "AI did not answer.")
+    return {"text": text}
+
+
 @router.get("/api/live/alerts")
 def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1, source: str | None = None):
     e = engine()
@@ -239,6 +282,38 @@ def live_make_brief(kind: str):
         e.context.refresh_daily()
         e.context.refresh_global()
     return clean(e.make_brief(kind, send=False))
+
+
+@router.get("/api/world")
+def world_view():
+    return clean(engine().world.view())
+
+
+@router.post("/api/world/refresh")
+def world_refresh():
+    e = engine()
+    for fn in (e.world.refresh_prices, e.world.refresh_news, e._world_calendar, e._world_results):
+        try:
+            fn()
+        except Exception as ex:
+            e.world.errors[fn.__name__] = str(ex)[:160]
+    return clean(e.world.view())
+
+
+@router.get("/api/brain")
+def brain_view():
+    e = engine()
+    h = e.brain.history()
+    return clean({"latest": h[-1] if h else None, "history": list(reversed(h[-30:])), "ai": e.ai.enabled()})
+
+
+@router.post("/api/brain/run")
+def brain_run():
+    e = engine()
+    try:
+        return clean(e.brain.run())
+    except Exception as ex:
+        raise HTTPException(500, f"Market brain failed: {ex}")
 
 
 @router.get("/api/live/logs")

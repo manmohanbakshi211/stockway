@@ -134,6 +134,52 @@ def trend_spread(day, f, p):
                     stop_x=0.4, target_x=p["target"], meta={"dir": d, "eff": round(eff, 2)})
 
 
+# ---------------------------------------------------------------- chart setups (same code as the live scanner)
+def _setup_signals(day, f):
+    """All setup signals of the day, computed once per day: [(minute, signal), ...] in time order."""
+    cache = getattr(day, "_setup_cache", None)
+    if cache is not None and cache[0] == len(day.spot):
+        return cache[1]
+    import numpy as np
+    from live import setups as S, ta
+    sp = np.asarray(day.spot, dtype=float)
+    n_bars = int(np.sum(~np.isnan(sp)) // 5)
+    t, o, h, l, c = [], [], [], [], []
+    for k in range(n_bars):
+        seg = sp[5 * k:5 * k + 5]
+        if np.isnan(seg).any():
+            break
+        t.append(k * 300.0); o.append(seg[0]); h.append(seg.max()); l.append(seg.min()); c.append(seg[-1])
+    out = []
+    if len(c) >= 4:
+        b = {"t": np.array(t), "o": np.array(o), "h": np.array(h), "l": np.array(l), "c": np.array(c), "v": np.zeros(len(c))}
+        ind = S.indicators(b)
+        ctx = {"is_index": True, "pdh": f.get("prev_high"), "pdl": f.get("prev_low"), "pdc": f.get("prev_close"),
+               "cpr": ta.cpr(f.get("prev_high"), f.get("prev_low"), f.get("prev_close")),
+               "or_high": max(h[:3]), "or_low": min(l[:3])}
+        for i in range(3, min(len(c), 72)):          # signals until 15:15
+            bi = {k: v[:i + 1] for k, v in b.items()}
+            ii = {k: v[:i + 1] for k, v in ind.items()}
+            for s in S.evaluate(bi, ii, ctx):
+                out.append((5 * i + 4, s))
+    day._setup_cache = (len(day.spot), out)
+    return out
+
+
+def chart_setup(day, f, p):
+    if blocked(f, p["flt"], False):
+        return None
+    for m, s in _setup_signals(day, f):
+        if s["setup"] != p["setup"] or m < p.get("after", 0) or m > p["until"]:
+            continue
+        d = 1 if s["direction"] == "up" else -1
+        legs = _debit_spread(day, m, d, p["width"])
+        return Position(day.sym, "chart_setup", legs, exit_m=M(15, 15), entry_m=m, stop_x=0.6,
+                        spot_stop=(s["stop"], "below" if d > 0 else "above"),
+                        spot_target=(s["target"], "above" if d > 0 else "below"), meta={"setup": s["setup"], "dir": d})
+    return None
+
+
 FAMILIES = {
     "iron_fly": (iron_fly, {"entry": [M(9, 20), M(9, 30), M(10, 0)], "wing": [1.0, 1.5], "sl": [0.25, 0.4],
                             "trail": [False, True], "flt": ["loose", "strict"]}),
@@ -145,12 +191,14 @@ FAMILIES = {
                                 "flt": ["loose"]}),
     "trend_spread": (trend_spread, {"entry": [M(11, 0), M(12, 0)], "min_move": [0.5, 0.8], "target": [0.8],
                                     "flt": ["loose"]}),
+    "chart_setup": (chart_setup, {"setup": ["ema_pullback", "vwap_reclaim", "cpr_breakout", "pdh_break"], "width": [2, 4],
+                                  "until": [M(14, 30)], "flt": ["loose"]}),
 }
 SELLING = {"iron_fly", "iron_condor", "expiry_condor"}
 
 NICE = {"iron_fly": "Iron fly (sell ATM straddle, hedged)", "iron_condor": "Iron condor (sell OTM, hedged)",
         "expiry_condor": "Expiry-day iron condor", "orb_spread": "Opening-range breakout debit spread",
-        "trend_spread": "Trend-day debit spread"}
+        "trend_spread": "Trend-day debit spread", "chart_setup": "Chart setup (debit spread)"}
 
 
 def grid(family: str):
@@ -177,6 +225,10 @@ def describe(family, p) -> str:
     if family == "orb_spread":
         return (f"Break of the 9:15–9:30 range by {p['buf']}% before {t(p['until'])}: buy ATM, sell 2 strikes out; "
                 f"target +{int(p['target'] * 100)}%, stop −45% or back inside the range, exit 15:00")
+    if family == "chart_setup":
+        from live.setups import NAMES
+        return (f"{NAMES[p['setup']]} signal on the 5-minute chart: debit spread {p['width']} strikes wide in its direction; "
+                f"exit at the setup's target or stop on the index, or 15:15")
     if family == "trend_spread":
         return (f"At {t(p['entry'])}, if the day is trending (≥{p['min_move']}× a normal day's move, clean): debit spread "
                 f"with the trend; target +{int(p['target'] * 100)}%, stop −40%, exit 15:00")

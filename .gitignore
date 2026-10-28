@@ -24,3 +24,4 @@ data/context_cache.json
 data/index_weights.json
 data/history/
 data/lab/
+data/world_cache.json
