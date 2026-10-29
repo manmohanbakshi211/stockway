@@ -165,6 +165,26 @@ shoulders, triangles, flags, breakout + retest, RSI divergence and reversal cand
 entry, stop and target, drawn on the chart. Every pattern is replayed on the 1-minute index history and alerts quote
 its record ("491 times, 41% won, avg −0.00R"). The status bar shows Upstox's data delay and analysis time.
 
+**Risk gate**: every alert's trade idea gets PASS or BLOCK with the reason before it can become a paper trade:
+entry window (09:20 to 14:45), F&O ban, an open position on the same stock, daily loss and trades-per-day limits,
+historically losing signal types, reward:risk under 1.2, bid-ask spread over 3%, options under ₹3, and lots sized so
+the stop loses at most your max loss per trade (if one lot is already too much, it is blocked, never rounded up).
+A reminder five minutes before the 15:15 square-off lists what is still open.
+
+**Time Machine** (any index or F&O stock): replays the rest of the day 10,000 times from the symbol's own last
+60 sessions of 5-minute bars (same time of day), plus the same plan on each real past session, and gives the odds
+of target first / stop first / neither and an honest verdict that weighs the reward:risk. Idea from the MIT
+day-trader-skill, rebuilt for NSE hours and Upstox data.
+
+**Insider trades**: promoter, director and key-manager trades disclosed under SEBI's insider-trading rules, for
+every F&O stock (₹50 lakh+ in the market), net by stock, with alerts for new ones over ₹1 crore. The chart page
+shows each company's last quarterly results (from NSE's integrated filings) and its insider trades.
+
+**10 years of end-of-day data (NSE bhavcopy, free)**: every index option contract's daily prices since 2015.
+Tests hedged premium selling held to expiry (iron condor / iron fly) and buying straddles, walk-forward by year,
+plus the volatility risk premium year by year. The **Expiry desk** paper-trades the variant that passed for this
+year, entered near the close and settled at expiry.
+
 **World**: global index futures, currencies, commodities, US yields, VIX, crypto and Indian ADRs (vs NSE price),
 each with its past correlation to Nifty and an indicative "global pressure" on Nifty; this week's economic
 calendar, F&O results for 10 days, and global news tagged by likely impact on India. Big moves (crude, dollar,
@@ -179,6 +199,7 @@ what changed. Works on rules with no key; written by AI when a Gemini key is set
 |---|---|
 | Chart | TradingView-style chart with indicators, levels, setups and markers, plus a chart read. |
 | World | Global markets, forex, commodities, rates, ADRs, economic and results calendars, global news. |
+| Insider trades | Promoter / director buying and selling in F&O stocks, net by stock, every disclosure. |
 | Strategy desk | Today's strategy plan and positions, paper P&L by day, out-of-sample backtest results, history download (Upstox Plus or Dhan). |
 | Live | Index cards (PCR, max pain, support/resistance from option OI, IV, expected move, bias), live alerts with option ideas, market pulse, movers, news. |
 | Scanner | Every F&O stock ranked by activity, with buildup, volume pace, IV, PCR, unusual options, bias. Filters and sorting. |
