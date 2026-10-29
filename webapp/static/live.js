@@ -801,23 +801,29 @@ async function pageDesk() {
   const S = res && res.summary;
   main.innerHTML = `<h1 class="page-title">Strategy desk</h1>
     <p class="lede">Institution-style intraday strategies on Nifty and Bank Nifty: hedged option selling on calm days, debit spreads on trending days. Every strategy is tested on years of real 1-minute option prices, and only out-of-sample results count.</p>
-    ${st.synthetic ? `<div class="banner">⚠️ You are looking at a <b>demo on synthetic (fake) data</b>. It shows how the desk works, not whether it makes money. Download real history from Dhan below.</div>` : ""}
+    ${st.synthetic ? `<div class="banner">⚠️ You are looking at a <b>demo on synthetic (fake) data</b>. It shows how the desk works, not whether it makes money. Download real history below (Upstox Plus).</div>` : ""}
     <div id="desk-live"></div>
-    ${S ? deskResults(res) : `<div class="empty" style="max-width:none"><h2>No backtest yet</h2><p>Connect Dhan (₹499/month data plan), download history, then run the backtest. Or see a quick demo on synthetic data first.</p>
+    ${S ? deskResults(res) : `<div class="empty" style="max-width:none"><h2>No backtest yet</h2><p>Log in to Upstox (Plus plan), download history, then run the backtest. Or see a quick demo on synthetic data first.</p>
       <div class="btn-row"><button class="btn" id="lab-demo">See a demo (synthetic data)</button></div></div>`}
     <h2>Data and settings</h2>
     <div class="split">
-      <div class="panel"><h3>1. Dhan historical data</h3>
-        <ol class="steps"><li>Open a free Dhan account if you don't have one.</li>
-          <li>On <a href="https://web.dhan.co" target="_blank" rel="noopener">web.dhan.co</a> → Profile → <b>Access DhanHQ APIs</b>: subscribe to <b>Data APIs</b> (₹499 / 30 days).</li>
-          <li>On the same page, <b>generate an access token</b>. Copy it and your <b>Client ID</b> here.</li></ol>
+      <div class="panel"><h3>1. Historical option data</h3>
+        <p><b>Upstox Plus</b> ${st.upstox ? `<span class="pill p-up">logged in</span>` : `<span class="pill p-down">not logged in</span>`}: 1-minute prices and OI of expired Nifty and Bank Nifty options (from 2022).</p>
+        <ol class="steps"><li>Upstox Plus plan active on your account.</li>
+          <li>Log in on <a href="#/connect">Live setup</a> (after upgrading, log out and log in once so the new plan is picked up).</li>
+          <li><b>Check access</b>, then <b>Download history</b>. It resumes where it stopped; leave the app open.</li></ol>
         <div class="form-grid" style="margin-top:12px">
-          <label class="field">Dhan client ID<input type="text" id="l-cid" value="${q(settings["lab.dhan_client_id"])}" autocomplete="off"></label>
-          <label class="field">Access token<input type="password" id="l-tok" value="${q(settings["lab.dhan_token"])}" autocomplete="off"><small>Tokens expire; paste a new one when Dhan asks.</small></label>
-          <label class="field">History to download<select id="l-years">${[1, 2, 3, 4, 5].map((v) => `<option value="${v}" ${Number(settings["lab.years"] || 3) === v ? "selected" : ""}>${v} year${v > 1 ? "s" : ""}</option>`).join("")}</select><small>3 years ≈ 6,000 requests, about 40 minutes.</small></label>
+          <label class="field">History to download<select id="l-years">${[1, 2, 3, 4].map((v) => `<option value="${v}" ${Number(settings["lab.years"] || 3) === v ? "selected" : ""}>${v} year${v > 1 ? "s" : ""}</option>`).join("")}</select><small>About 4,500 requests per year (roughly 1 to 1.5 hours per year, within Upstox's limits).</small></label>
         </div>
-        <div class="btn-row" style="margin-top:14px"><button class="btn" id="l-save">Save</button><button class="btn" id="l-test">Test connection</button>
-          <button class="btn primary" id="l-dl" ${st.dhan ? "" : "disabled"}>Download history</button></div>
+        <div class="btn-row" style="margin-top:14px"><button class="btn" id="l-uptest" ${st.upstox ? "" : "disabled"}>Check access</button>
+          <button class="btn primary" id="l-dl" ${st.upstox ? "" : "disabled"}>Download history</button></div>
+        <details style="margin-top:12px"><summary class="muted small">Or use Dhan instead (needs a Dhan account)</summary>
+        <div class="form-grid" style="margin-top:10px">
+          <label class="field">Dhan client ID<input type="text" id="l-cid" value="${q(settings["lab.dhan_client_id"])}" autocomplete="off"></label>
+          <label class="field">Access token<input type="password" id="l-tok" value="${q(settings["lab.dhan_token"])}" autocomplete="off"><small>web.dhan.co → Profile → Access DhanHQ APIs (Data APIs ₹499 / 30 days).</small></label>
+        </div>
+        <div class="btn-row" style="margin-top:10px"><button class="btn" id="l-save">Save</button><button class="btn" id="l-test">Test Dhan</button>
+          <button class="btn" id="l-dl-dhan" ${st.dhan ? "" : "disabled"}>Download from Dhan</button></div></details>
         <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Index</th><th class="r">Months</th><th>Range</th><th class="r">Size</th></tr></thead><tbody>${dataRows}</tbody></table></div>
         <div class="btn-row" style="margin-top:12px"><button class="btn primary" id="l-bt" ${Object.values(st.data).some((v) => v.months) ? "" : "disabled"}>Run backtest</button>
           ${!st.synthetic && !Object.values(st.data).some((v) => v.months) ? `<button class="btn" id="lab-demo2">Demo on synthetic data</button>` : ""}</div>
@@ -838,11 +844,16 @@ async function pageDesk() {
       toast("Saved"); return true;
     } catch (e) { toast(e.message); return false; }
   };
-  const job = async (path) => { try { await post(path, {}); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
+  const job = async (path, body = {}) => { try { await post(path, body); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
   $("#l-save").onclick = async () => { if (await save()) pageDesk(); };
   $("#l-save2").onclick = save;
   $("#l-test").onclick = async () => { if (!(await save())) return; try { const r = await post("/api/lab/dhan/test", {}); toast(`Dhan connected (${r.profile.dhanClientId || "ok"}${r.profile.dataPlan ? ", data plan: " + r.profile.dataPlan : ""})`); pageDesk(); } catch (e) { toast(e.message); } };
-  $("#l-dl").onclick = async () => { if (await save()) job("/api/lab/download"); };
+  $("#l-dl").onclick = async () => { if (await save()) job("/api/lab/download", { source: "upstox" }); };
+  $("#l-dl-dhan").onclick = async () => { if (await save()) job("/api/lab/download", { source: "dhan" }); };
+  $("#l-uptest").onclick = async () => {
+    try { const r = await post("/api/lab/upstox/test", {}); const e = r.expiries;
+      toast(`Upstox Plus OK: Nifty ${e.NIFTY.n} expiries (from ${e.NIFTY.first}), Bank Nifty ${e.BANKNIFTY.n} (from ${e.BANKNIFTY.first})`);
+    } catch (err) { toast(err.message); } };
   $("#l-bt").onclick = async () => { if (await save()) job("/api/lab/backtest"); };
   ["#lab-demo", "#lab-demo2"].forEach((id) => { if ($(id)) $(id).onclick = () => job("/api/lab/demo"); });
   if (res) drawDeskCharts(res);

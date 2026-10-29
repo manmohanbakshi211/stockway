@@ -117,8 +117,9 @@ Institution-style intraday strategies on Nifty and Bank Nifty, every one with a 
 
 How it decides, the way a desk does:
 
-1. **Test on real history.** Dhan's historical option data (₹499 / 30 days): 1-minute prices for
-   at-the-money ±10 strikes. Fixed-strike prices are rebuilt so positions are held exactly as they would be.
+1. **Test on real history.** Upstox Plus expired-options data (or Dhan's Data API): 1-minute prices and OI
+   for at-the-money ±10 strikes of the nearest expiry, held at fixed strikes exactly as a position would be.
+   Implied volatility is computed from the prices (Black-Scholes).
    All charges (brokerage, STT 0.15%, exchange, SEBI, GST, stamp) and slippage are included.
 2. **Walk forward.** About 100 variants (entry time, strike distance, stops, filters). Each month, only the
    previous 6 months are used to choose; only the following month counts. A variant must have enough trades,
@@ -127,8 +128,9 @@ How it decides, the way a desk does:
    cap on the theoretical worst case and on margin. Everything closes for the day after a 2% loss.
 4. **Paper trade the plan** live every day (same rules as the backtest) and compare with the backtest.
 
-Setup: Strategy desk page → paste your Dhan client ID and access token → Download history (~40 min for 3
-years) → Run backtest. Re-run monthly.
+Setup: log in to Upstox (Plus plan) on Live setup → Strategy desk → Check access → Download history (about
+1–1.5 hours per year of history, resumable; data starts 2022) → Run backtest. Re-run monthly.
+Dhan works too (Client ID + token under "Or use Dhan instead").
 
 ## Chart, world monitor and AI brain
 
@@ -156,7 +158,7 @@ what changed. Works on rules with no key; written by AI when a Gemini key is set
 |---|---|
 | Chart | TradingView-style chart with indicators, levels, setups and markers, plus a chart read. |
 | World | Global markets, forex, commodities, rates, ADRs, economic and results calendars, global news. |
-| Strategy desk | Today's strategy plan and positions, paper P&L by day, out-of-sample backtest results, Dhan data setup. |
+| Strategy desk | Today's strategy plan and positions, paper P&L by day, out-of-sample backtest results, history download (Upstox Plus or Dhan). |
 | Live | Index cards (PCR, max pain, support/resistance from option OI, IV, expected move, bias), live alerts with option ideas, market pulse, movers, news. |
 | Scanner | Every F&O stock ranked by activity, with buildup, volume pace, IV, PCR, unusual options, bias. Filters and sorting. |
 | Option chain | Full chain for any index or stock with OI bars, OI change, IV, greeks, walls, max pain, intraday chart. |

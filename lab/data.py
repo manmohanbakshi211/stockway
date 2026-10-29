@@ -126,7 +126,9 @@ def have_data(data_dir) -> dict:
     out = {}
     for sym in UNDERLYINGS:
         fs = sorted((hd / sym).glob("raw_*.parquet"))
-        out[sym] = {"months": len(fs), "first": fs[0].stem[4:] if fs else None, "last": fs[-1].stem[4:] if fs else None,
+        ms = sorted({f.stem[4:11] for f in fs})            # raw_YYYY-MM (Dhan) or raw_YYYY-MM-DD (Upstox, per expiry)
+        out[sym] = {"months": len(ms), "first": ms[0] if ms else None, "last": ms[-1] if ms else None, "files": len(fs),
+                    "source": "upstox" if any(len(f.stem) > 11 for f in fs) else "dhan" if fs else None,
                     "mb": round(sum(f.stat().st_size for f in fs) / 1e6, 1)}
     return out
 
@@ -185,14 +187,22 @@ def build_days(raw: pd.DataFrame, sym: str) -> list[Day]:
 
 def iter_days(data_dir, sym: str, start=None, end=None):
     hd = hist_dir(data_dir) / sym
+    seen = set()
     for f in sorted(hd.glob("raw_*.parquet")):
-        ym = f.stem[4:]
-        if start and ym < f"{start:%Y-%m}":
-            continue
-        if end and ym > f"{end:%Y-%m}":
+        tag = f.stem[4:]
+        if len(tag) == 7:                                  # one calendar month (Dhan)
+            first = dt.date.fromisoformat(tag + "-01")
+            last = (first + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(days=1)
+        else:                                              # one expiry (Upstox): its days come before it
+            last = dt.date.fromisoformat(tag)
+            first = last - dt.timedelta(days=40)
+        if (start and last < start) or (end and first > end):
             continue
         for d in build_days(pd.read_parquet(f), sym):
+            if d.date in seen:
+                continue
             if (not start or d.date >= start) and (not end or d.date <= end):
+                seen.add(d.date)
                 yield d
 
 
