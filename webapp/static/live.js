@@ -803,6 +803,7 @@ async function pageDesk() {
     <p class="lede">Institution-style intraday strategies on Nifty and Bank Nifty: hedged option selling on calm days, debit spreads on trending days. Every strategy is tested on years of real 1-minute option prices, and only out-of-sample results count.</p>
     ${st.synthetic ? `<div class="banner">⚠️ You are looking at a <b>demo on synthetic (fake) data</b>. It shows how the desk works, not whether it makes money. Download real history below (Upstox Plus).</div>` : ""}
     <div id="desk-live"></div>
+    <div id="desk-edge"></div>
     ${S ? deskResults(res) : `<div class="empty" style="max-width:none"><h2>No backtest yet</h2><p>Log in to Upstox (Plus plan), download history, then run the backtest. Or see a quick demo on synthetic data first.</p>
       <div class="btn-row"><button class="btn" id="lab-demo">See a demo (synthetic data)</button></div></div>`}
     <h2>Data and settings</h2>
@@ -857,6 +858,7 @@ async function pageDesk() {
   $("#l-bt").onclick = async () => { if (await save()) job("/api/lab/backtest"); };
   ["#lab-demo", "#lab-demo2"].forEach((id) => { if ($(id)) $(id).onclick = () => job("/api/lab/demo"); });
   if (res) drawDeskCharts(res);
+  api("/api/lab/edge").then((e) => { const el = $("#desk-edge"); if (el) el.innerHTML = edgeCard(e); }).catch(() => {});
   const tick = async () => {
     if (state.page !== "desk") return;
     try { drawDeskLive(await api("/api/lab/desk")); } catch (_) {}
@@ -894,6 +896,22 @@ function drawDeskLive(d) {
     Plotly.react($("#desk-days"), [{ type: "bar", x: d.days.map((x) => x.day), y: d.days.map((x) => x.pnl), marker: { color: d.days.map((x) => (x.pnl >= 0 ? C.up : C.down)) } }],
       plotLayout({ margin: { l: 60, r: 10, t: 8, b: 30 }, yaxis: { gridcolor: "#EEF1F4", tickprefix: "₹" } }), plotCfg);
   }
+}
+
+function edgeCard(e) {
+  const wf = e.walk_forward || {};
+  const name = { ema_pullback: "EMA pullback", vwap_reclaim: "VWAP reclaim", cpr_breakout: "CPR breakout", pdh_break: "Prev-day high/low break", wall_fade: "OI wall rejection" };
+  const rs = (x) => `<span class="${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : "−"}₹${Math.abs(Math.round(x)).toLocaleString("en-IN")}</span>`;
+  const rows = (e.setups || []).map((r) => {
+    const g = r.avg_rs > 0 && r.t >= 2 ? `<span class="pill p-up">edge</span>` : r.avg_rs < 0 && r.t <= -1 ? `<span class="pill p-down">losing</span>` : `<span class="pill">not proven</span>`;
+    return `<tr><td>${r.sym === "BANKNIFTY" ? "Bank Nifty" : "Nifty"}</td><td>${esc(name[r.setup] || r.setup)} ${r.dir > 0 ? "long" : "short"}</td><td class="r">${r.n}</td><td class="r">${r.win_pct.toFixed(0)}%</td><td class="r">${rs(r.avg_rs)}</td><td class="r">${r.pf == null || r.pf > 99 ? "–" : r.pf.toFixed(2)}</td><td class="r">${r.t.toFixed(1)}</td><td>${g}</td></tr>`;
+  }).join("");
+  const t = wf.taken || {}, a = wf.all || {};
+  return `<div class="panel"><h3>Chart setups on real history <span class="muted small">${esc((e.period || {}).from || "")} → ${esc((e.period || {}).to || "")} · ${(e.signals || 0).toLocaleString("en-IN")} signals</span></h3>
+    <p class="muted small">Every live setup signal, replayed on 1-minute option prices: buy the at-the-money option one minute after the signal, exit at the setup's target/stop or after 90 minutes. Per lot, after all charges and slippage. "t" above 2 means clearly better than luck.</p>
+    <div class="table-wrap"><table><thead><tr><th>Index</th><th>Setup</th><th class="r">Signals</th><th class="r">Won</th><th class="r">Avg / lot</th><th class="r">PF</th><th class="r">t</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <h4 style="margin-top:14px">AI signal filter ${wf.ok ? `<span class="pill p-up">on</span>` : `<span class="pill">off (not proven)</span>`}</h4>
+    <p class="small">Tested month by month on months it never saw: picked ${t.n || 0} signals, avg ${t.avg_rs != null ? rs(t.avg_rs) : "–"} vs all ${a.n || 0} signals avg ${a.avg_rs != null ? rs(a.avg_rs) : "–"}${wf.auc ? ` (AUC ${wf.auc})` : ""}. ${esc(wf.why || "")}</p></div>`;
 }
 
 function deskResults(r) {

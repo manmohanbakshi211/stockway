@@ -135,6 +135,8 @@ class LiveEngine:
         self.watch = {"stalled": False, "since": None}
         from .chartdata import ChartData
         self.charts = ChartData(self)
+        from .edgebook import EdgeBook
+        self.edge = EdgeBook(self.data_dir)
 
     @property
     def running(self):

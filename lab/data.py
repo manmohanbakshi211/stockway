@@ -176,7 +176,7 @@ def build_days(raw: pd.DataFrame, sym: str) -> list[Day]:
         for (k, side), h in g.groupby(["strike", "side"]):
             h = h.drop_duplicates("m")
             arrs = {}
-            for f, col in (("c", "close"), ("h", "high"), ("l", "low"), ("iv", "iv")):
+            for f, col in (("c", "close"), ("h", "high"), ("l", "low"), ("iv", "iv"), ("oi", "oi")):
                 a = np.full(N_MIN, np.nan)
                 a[h["m"].to_numpy()] = h[col].to_numpy()
                 arrs[f] = pd.Series(a).ffill().to_numpy()

@@ -580,6 +580,15 @@ def lab_results():
     return clean(r)
 
 
+@app.get("/api/lab/edge")
+def lab_edge():
+    from lab.walk import lab_dir
+    f = lab_dir(ROOT / "data") / "meta.json"
+    if not f.exists():
+        raise HTTPException(404, "No setup study yet. It runs with the backtest.")
+    return clean(json.loads(f.read_text()))
+
+
 @app.post("/api/lab/dhan/test")
 def lab_dhan_test():
     from lab.dhan import Dhan

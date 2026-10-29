@@ -273,6 +273,16 @@ def run_all(data_dir, user_cfg: dict | None = None, log=print, should_stop=lambd
     (d / "results.json").write_text(json.dumps(res, default=str))
     (d / "plan.json").write_text(json.dumps({"generated": res["generated"], "plan": res["plan"], "config": cfg}, default=str))
     wf["trades"].drop(columns=["month"]).to_parquet(d / "trades.parquet", index=False)
+    try:
+        from .edge import study
+        from .meta import run as meta_run
+        log("Extra: testing every chart-setup signal on the same history (option buy, costs included)")
+        sig = study(data_dir, syms, log=log, should_stop=should_stop)
+        if len(sig):
+            sig.to_parquet(d / "signals.parquet", index=False)
+            meta_run(data_dir, sig, log=log)
+    except Exception as e:
+        log(f"Setup study skipped: {e}")
     s = res["summary"]
     if s:
         log(f"Out-of-sample: avg ₹{s['avg_day']:,.0f}/day, {s['green_pct']:.0f}% green trading days, "

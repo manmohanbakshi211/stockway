@@ -121,13 +121,45 @@ class ChartData:
                 s["ts"] = now.timestamp()
                 self.active.setdefault(sym, []).append(s)
                 e = s["entry"]
-                emit({"sym": sym, "kind": "setup_" + s["setup"], "direction": s["direction"], "severity": 2,
+                hist = {"line": None, "grade": "unknown", "p": None}
+                edge = getattr(self.e, "edge", None)
+                if edge is not None and sym in ("NIFTY", "BANKNIFTY"):
+                    try:
+                        edge.load()
+                        hist = edge.verdict(sym, s["setup"], s["direction"], self._edge_row(sym, m, closed, ind, ctx, s, slot))
+                    except Exception:
+                        pass
+                detail = f"Stop {s['stop']:,.1f}, target {s['target']:,.1f} (reward:risk {s['rr']}). " + "; ".join(s["why"]) + "."
+                if hist["line"]:
+                    detail += " " + hist["line"]
+                emit({"sym": sym, "kind": "setup_" + s["setup"], "direction": s["direction"],
+                      "severity": 1 if hist["grade"] == "losing" else 2,
                       "title": f"{sym} {setups.NAMES[s['setup']]} {'long' if d > 0 else 'short'} at {e:,.1f}",
-                      "detail": f"Stop {s['stop']:,.1f}, target {s['target']:,.1f} (reward:risk {s['rr']}). " + "; ".join(s["why"]) + ".",
+                      "detail": detail,
                       "price": m.get("spot"),
-                      "data": {"setup": s["setup"], "setup_levels": {
+                      "data": {"setup": s["setup"], "history": hist, "setup_levels": {
                           "stop": round(s["stop"], 2), "target": round(s["target"], 2), "rr": float(s["rr"]),
                           "stop_pct": round(abs(e - s["stop"]) / e * 100, 2), "target_pct": round(abs(s["target"] - e) / e * 100, 2)}}})
+
+    def _edge_row(self, sym, m, b, ind, ctx, s, slot) -> dict:
+        """The facts the signal filter was trained on, as far as they are known live (missing ones stay empty)."""
+        d = 1 if s["direction"] == "up" else -1
+        c = float(b["c"][-1])
+        o = m.get("opt") or {}
+        vix = self.e._vix() if self.e.state else None
+        o0 = float(b["o"][0])
+        cp = ctx.get("cpr") or {}
+        atr = float(ind["atr"][-1]) if len(ind["atr"]) else math.nan
+        wall = ctx.get("resistance") if d > 0 else ctx.get("support")
+        r = float(ind["rsi"][-1])
+        return {"dir": d, "minute": 5 * slot - 1, "rr": s["rr"], "dte": o.get("days_to_expiry"), "iv": o.get("atm_iv"),
+                "vix": vix and vix.get("ltp"), "vix_chg": vix and vix.get("chg_pct"),
+                "gap_pct": (o0 / ctx["pdc"] - 1) * 100 if ctx.get("pdc") else math.nan,
+                "move_pct": d * (c / o0 - 1) * 100, "dist_vwap_pct": d * (c / float(ind["vw"][-1]) - 1) * 100,
+                "rsi": r if d > 0 else 100 - r, "ema_spread_pct": d * (float(ind["e9"][-1]) / float(ind["e21"][-1]) - 1) * 100,
+                "st_with": int(ind["sd"][-1] == d), "cpr_width": cp.get("width_pct"),
+                "risk_atr": abs(c - s["stop"]) / atr if atr and atr == atr else math.nan,
+                "wall_room": ((wall - c) if d > 0 else (c - wall)) / c * 100 if wall else math.nan}
 
     # ------------------------------------------------------------ chart payload
     def payload(self, sym, tf=5, days=3) -> dict | None:
