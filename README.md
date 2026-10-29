@@ -13,6 +13,9 @@ Not financial advice. Paper trade the signals before using real money.
 
 ---
 
+> **Alerts and paper trading only.** Stockway never places real orders or touches money in a trading account;
+> Upstox is used for market data only.
+
 ## Install (once)
 
 Needs git (type `git --version` in Terminal; if it isn't installed, macOS offers to install it) and Python 3.10+.
