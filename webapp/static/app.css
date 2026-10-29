@@ -517,3 +517,9 @@ main.wide { max-width: none; }
 .ch-legend:empty { display: none; }
 .ch-legend span { margin-right: 10px; white-space: nowrap; }
 .ch-legend .lg-ev { font-weight: 600; margin-top: 2px; }
+
+.flash-up { animation: flashUp 1.6s ease-out; }
+.flash-down { animation: flashDown 1.6s ease-out; }
+@keyframes flashUp { from { background: rgba(30,138,90,.25); } to { background: transparent; } }
+@keyframes flashDown { from { background: rgba(194,59,50,.25); } to { background: transparent; } }
+.dot-live { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #1E8A5A; margin-right: 4px; vertical-align: 1px; }

@@ -1072,7 +1072,7 @@ async function pageWorld() {
   const tick = async (first) => {
     if (state.page !== "world") return;
     try { drawWorld(await api("/api/world"), first); } catch (e) { if (first) main.innerHTML = `<div class="empty"><h2>World</h2><p>${esc(e.message)}</p></div>`; }
-    L.pageTimer = setTimeout(() => tick(false), 60000);
+    L.pageTimer = setTimeout(() => tick(false), 15000);
   };
   tick(true);
 }
@@ -1100,8 +1100,14 @@ function drawWorld(w, first) {
     const pts = xs.map((x, i) => `${(i / (xs.length - 1)) * W},${H - ((x - lo) / ((hi - lo) || 1)) * H}`).join(" ");
     return `<svg width="${W}" height="${H}" class="spark"><polyline points="${pts}" fill="none" stroke="${xs[xs.length - 1] >= xs[0] ? "#1E8A5A" : "#C23B32"}" stroke-width="1.5"/></svg>`;
   };
+  const prevLast = L.worldLast || {};
+  const nowS = w.server_ts || Date.now() / 1000;
+  const age = (ts) => { if (!ts) return ""; const m = Math.round((nowS - ts) / 60); return m < 1 ? "now" : m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60) + "h" : "closed"; };
+  const flash = (r) => { const o = prevLast[r.ticker]; return o == null || o === r.last ? "" : r.last > o ? "flash-up" : "flash-down"; };
+  L.worldLast = Object.fromEntries(w.groups.flatMap((g) => g.rows.map((r) => [r.ticker, r.last])));
+  const liveAge = w.updated && w.updated.live ? Math.round(nowS - w.updated.live) : null;
   const groups = w.groups.map((g) => `<div class="panel tight"><h3>${esc(g.group)}</h3><table class="mini"><thead><tr><th>Market</th><th class="r">Last</th><th class="r">Day</th><th></th><th class="r" title="Past correlation with Nifty (next day for US/Europe, same day for Asia)">Corr</th><th class="r" title="What this move has meant for Nifty in the past">Nifty impact</th></tr></thead>
-    <tbody>${g.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="r">${fx(r.last)}</td><td class="r">${fpc(r.chg_pct)}</td><td>${spark(r.spark)}</td><td class="r muted">${r.corr != null ? r.corr.toFixed(2) : "–"}</td><td class="r">${imp(r.nifty_impact)}</td></tr>`).join("")}</tbody></table></div>`).join("");
+    <tbody>${g.rows.map((r) => `<tr><td>${esc(r.name)}${r.live_ts ? ` <small class="muted" title="Time since the last price">${age(r.live_ts)}</small>` : ""}</td><td class="r ${flash(r)}">${fx(r.last)}</td><td class="r">${fpc(r.chg_pct)}</td><td>${spark(r.spark_day && r.spark_day.length > 2 ? r.spark_day : r.spark)}</td><td class="r muted">${r.corr != null ? r.corr.toFixed(2) : "–"}</td><td class="r">${imp(r.nifty_impact)}</td></tr>`).join("")}</tbody></table></div>`).join("");
   const now = Date.now();
   const cal = w.calendar.map((e) => { const t = new Date(e.time); const past = t.getTime() < now - 30 * 60000;
     return `<tr class="${past ? "past" : ""}"><td>${t.toLocaleString("en-IN", { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })}</td><td><b>${esc(e.country)}</b></td><td>${esc(e.title)}</td>
@@ -1110,9 +1116,10 @@ function drawWorld(w, first) {
   w.results.forEach((r) => { (res[r.date] = res[r.date] || []).push(r.sym); });
   const news = w.news.filter((n) => LS.get("w_imp", "all") === "all" || n.impact === "high" || (LS.get("w_imp", "all") === "medium" && n.impact === "medium")).slice(0, 50);
   main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">World</h1><p class="lede" style="margin-bottom:0">Global markets, currencies, commodities, rates, crypto, Indian ADRs, economic events, results and global news: what it means for Nifty.</p></div>
-      <button class="btn" id="w-refresh">Refresh now</button></div>
+      <div style="text-align:right"><button class="btn" id="w-refresh">Refresh now</button>
+        <p class="small muted" style="margin:6px 0 0">${liveAge != null ? `<span class="dot-live"></span> Prices ${liveAge < 90 ? "updated " + liveAge + "s ago" : "updated " + Math.round(liveAge / 60) + " min ago"} · auto every minute` : "Loading prices…"}</p></div></div>
     <div class="kpis" style="margin-top:16px"><div class="kpi"><b class="${(p.implied_pct || 0) >= 0 ? "up" : "down"}">${p.implied_pct != null ? (p.implied_pct > 0 ? "+" : "") + p.implied_pct.toFixed(2) + "%" : "–"}</b><span>Global pressure on Nifty: ${esc(p.label || "not ready")}</span></div>
-      <div class="kpi"><b>${w.nifty ? fx(w.nifty.last) : "–"}</b><span>Nifty last close ${w.nifty ? fpc(w.nifty.chg_pct) : ""}</span></div>
+      <div class="kpi"><b>${w.nifty ? fx(w.nifty.last) : "–"}</b><span>${w.nifty && w.nifty.live ? "Nifty live" : "Nifty"} ${w.nifty ? fpc(w.nifty.chg_pct) : ""}</span></div>
       <div class="kpi"><b>${w.upcoming.filter((e) => e.impact === "High" && e.mins >= 0).length}</b><span>High-impact events in the next 2 hours</span></div>
       <div class="kpi"><b>${(res[new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })] || []).length}</b><span>F&amp;O results today</span></div></div>
     ${p.drivers ? `<p class="note">Biggest drivers: ${p.drivers.map((d) => `${esc(d.name)} ${d.move > 0 ? "+" : ""}${d.move.toFixed(2)}% → ${d.impact > 0 ? "+" : ""}${d.impact.toFixed(2)}%`).join(" · ")}. Indicative: based on the last 9 months' relation, not a forecast.</p>` : ""}

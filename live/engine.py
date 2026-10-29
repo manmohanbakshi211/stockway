@@ -764,10 +764,14 @@ class LiveEngine:
                     t[k] = now
                     return True
                 return False
-            for k, sec, fn in (("prices", 300, self.world.refresh_prices), ("corr", 6 * 3600, self.world.refresh_correlations),
+            live_every = max(30, int(((self.cfg().get("world") or {}).get("live_every_sec")) or 60))
+            if self.world.errors.get("live"):
+                live_every = min(600, live_every * 4)          # Yahoo pushing back: slow down
+            for k, sec, fn in (("live", live_every, self.world.refresh_live), ("prices", 900, self.world.refresh_prices),
+                               ("corr", 6 * 3600, self.world.refresh_correlations),
                                ("calendar", 2 * 3600, self._world_calendar), ("results", 6 * 3600, self._world_results),
                                ("news", 300, self.world.refresh_news)):
-                if (awake or not self.world.updated.get(k)) and due(k, sec):
+                if (awake or not self.world.updated.get(k) or k == "live") and due(k, sec):
                     try:
                         fn()
                         self.world.errors.pop(k, None)
@@ -777,7 +781,7 @@ class LiveEngine:
                 self.world.check_events()
             except Exception:
                 pass
-            time.sleep(15)
+            time.sleep(5)
 
     def _world_calendar(self):
         from lab.strategies import EVENTS

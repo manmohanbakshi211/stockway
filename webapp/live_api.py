@@ -5,6 +5,7 @@ import datetime as dt
 import html
 import math
 import threading
+import time
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -284,20 +285,37 @@ def live_make_brief(kind: str):
     return clean(e.make_brief(kind, send=False))
 
 
+def _world_with_india(e) -> dict:
+    """World view with Indian prices replaced by the live feed when it is running."""
+    w = e.world.view()
+    if e.running and e.metrics:
+        n = e.metrics.get("NIFTY")
+        if n and n.get("spot"):
+            w["nifty"] = {"last": n["spot"], "chg_pct": n.get("chg_pct"), "live": True, "source": e.source}
+        for a in w.get("adr") or []:
+            m = e.metrics.get(a["nse"])
+            if m and m.get("spot") and a.get("implied_inr"):
+                a["nse_inr"] = m["spot"]
+                a["premium_pct"] = (a["implied_inr"] / m["spot"] - 1) * 100
+                a["nse_live"] = True
+    w["server_ts"] = time.time()
+    return w
+
+
 @router.get("/api/world")
 def world_view():
-    return clean(engine().world.view())
+    return clean(_world_with_india(engine()))
 
 
 @router.post("/api/world/refresh")
 def world_refresh():
     e = engine()
-    for fn in (e.world.refresh_prices, e.world.refresh_news, e._world_calendar, e._world_results):
+    for fn in (e.world.refresh_prices, e.world.refresh_live, e.world.refresh_news, e._world_calendar, e._world_results):
         try:
             fn()
         except Exception as ex:
             e.world.errors[fn.__name__] = str(ex)[:160]
-    return clean(e.world.view())
+    return clean(_world_with_india(e))
 
 
 @router.get("/api/brain")

@@ -115,8 +115,16 @@ class World:
                     continue
                 last, prev = float(s.iloc[-1]), float(s.iloc[-2])
                 n, g, reg = names.get(t, (t, None, None))
-                self.rows[t] = {"ticker": t, "name": n, "group": g, "region": reg, "last": last, "prev": prev,
-                                "chg_pct": _pct(last, prev), "asof": str(s.index[-1].date()), "spark": [float(x) for x in s.tail(5)]}
+                old = self.rows.get(t) or {}
+                row = {"ticker": t, "name": n, "group": g, "region": reg, "last": last, "prev": prev,
+                       "chg_pct": _pct(last, prev), "asof": str(s.index[-1].date()), "spark": [float(x) for x in s.tail(5)],
+                       "d_last": last, "d_prev": prev}
+                if old.get("live_date") and old["live_date"] >= row["asof"] and old.get("live_ts", 0) > time.time() - 900:
+                    # a fresher intraday price is already known: keep it, against the right previous close
+                    pv = last if old["live_date"] > row["asof"] else prev
+                    row.update(last=old["last"], prev=pv, chg_pct=_pct(old["last"], pv), live_ts=old["live_ts"],
+                               live_date=old["live_date"], spark_day=old.get("spark_day"))
+                self.rows[t] = row
             except Exception:
                 continue
         # ADR premium vs the NSE price
@@ -132,6 +140,48 @@ class World:
         self.updated["prices"] = time.time()
         self._check_moves()
         self._save()
+
+    def refresh_live(self):
+        """Intraday prices (1-minute bars) for every market, between the slower daily refreshes."""
+        import yfinance as yf
+        if not self.rows:
+            self.refresh_prices()
+        ticks = [t for t in self.rows]
+        df = yf.download(ticks, period="2d", interval="1m", progress=False, group_by="ticker", auto_adjust=False,
+                         threads=True, prepost=False)
+        n_up = 0
+        for t in ticks:
+            try:
+                s = df[t]["Close"].dropna()
+            except Exception:
+                continue
+            if s.empty:
+                continue
+            r = self.rows[t]
+            last = float(s.iloc[-1])
+            ts = s.index[-1]
+            bar_date = str(ts.date())
+            # previous close: yesterday's if the daily table already has today's bar, else the daily table's last
+            pv = r.get("d_last") if bar_date > r.get("asof", "") else r.get("d_prev")
+            if not pv:
+                continue
+            today = s[s.index.date == ts.date()]
+            day = today.iloc[:: max(1, len(today) // 40)].tolist() + [last] if len(today) > 1 else None
+            r.update(last=last, prev=pv, chg_pct=_pct(last, pv), live_ts=float(ts.timestamp()), live_date=bar_date,
+                     spark_day=[float(x) for x in day] if day else r.get("spark_day"))
+            n_up += 1
+        usd = (self.rows.get("INR=X") or {}).get("last")
+        for a in self.adr:
+            r = self.rows.get(a["adr"])
+            n = self.rows.get(a["nse"] + ".NS")
+            if r and usd:
+                a.update(adr_usd=r["last"], adr_chg=r["chg_pct"], implied_inr=r["last"] * usd / ADR[a["adr"]][1])
+                if n:
+                    a["nse_inr"] = n["last"]
+                a["premium_pct"] = _pct(a["implied_inr"], a["nse_inr"])
+        self.updated["live"] = time.time()
+        self._check_moves()
+        return n_up
 
     def refresh_correlations(self):
         """How each market's daily move relates to Nifty's: the same day, and Nifty's next day (overnight lead)."""
