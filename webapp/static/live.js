@@ -43,11 +43,12 @@ const KIND = {
   setup_pdh_break: "Setup: prev-day break", setup_wall_fade: "Setup: OI wall rejection",
   pattern_double_top: "Pattern: double top", pattern_double_bottom: "Pattern: double bottom", pattern_head_shoulders: "Pattern: head & shoulders",
   pattern_inv_hs: "Pattern: inverse H&S", pattern_triangle: "Pattern: triangle", pattern_flag: "Pattern: flag",
+  insider: "Insider trade", flat_by: "Square-off reminder",
   pattern_breakout_retest: "Pattern: breakout + retest", pattern_rsi_divergence: "Pattern: RSI divergence", pattern_candle_at_level: "Pattern: candle at level",
 };
 
 /* ---------------- polling + notifications */
-function livePage() { return ["live", "chart", "world", "desk", "scanner", "sym", "alerts", "paper", "connect", "context", "scorecard", "briefs"].includes(state.page); }
+function livePage() { return ["live", "chart", "world", "desk", "scanner", "sym", "alerts", "paper", "connect", "context", "scorecard", "briefs", "insiders"].includes(state.page); }
 
 async function pollSnapshot() {
   try {
@@ -1040,6 +1041,7 @@ async function pageChart() {
       <aside class="ch-side"><div class="panel tight"><h3>Chart read</h3><div id="ch-read"><p class="muted">Loading…</p></div>
         <button class="link-btn" id="ch-ai">AI read this chart</button><div id="ch-ai-out"></div></div>
         <div class="panel tight"><h3>Patterns <span class="muted small">on this chart</span></h3><div id="ch-pats"></div></div>
+        ${["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"].includes(CH.sym) ? "" : `<div class="panel tight"><h3>Company <span class="muted small">results and insiders</span></h3><div id="ch-company"><p class="muted small">Loading…</p></div></div>`}
         <div class="panel tight" id="ch-scen-wrap"><h3>Scenarios <span class="muted small">next 5 / 15 / 60 min</span></h3><div id="ch-scen"><p class="muted small">Nifty and Bank Nifty.</p></div></div>
         <div class="panel tight"><h3>Setups today</h3><div id="ch-setups"></div></div>
         <div class="panel tight"><h3>Key levels</h3><div id="ch-levels"></div></div></aside></div>
@@ -1053,6 +1055,7 @@ async function pageChart() {
     try { const r = await post(`/api/live/chart/${encodeURIComponent(CH.sym)}/ai`, {}); $("#ch-ai-out").innerHTML = `<div class="ai-text">${fmtAI(r.text)}</div>`; } catch (err) { toast(err.message); }
     e.target.disabled = false; e.target.textContent = "AI read this chart";
   };
+  if ($("#ch-company")) api(`/api/company/${encodeURIComponent(CH.sym)}`).then((c) => { const el = $("#ch-company"); if (el) el.innerHTML = companyCard(c); }).catch((e) => { const el = $("#ch-company"); if (el) el.innerHTML = `<p class="muted small">${esc(e.message)}</p>`; });
   const tick = async (first) => {
     if (state.page !== "chart") return;
     try {
@@ -1260,8 +1263,43 @@ function drawWorld(w, first) {
   main.querySelectorAll("[data-wimp]").forEach((b) => b.onclick = () => { LS.set("w_imp", b.dataset.wimp); drawWorld(w); });
 }
 
+/* ---------------- page: Insider trades */
+const cr = (v) => (v == null ? "–" : `₹${(v / 1e7).toLocaleString("en-IN", { maximumFractionDigits: 1 })} cr`);
+async function pageInsiders() {
+  stopPageTimer();
+  const days = Number(LS.get("ins_days", 60));
+  const all = LS.get("ins_all", false);
+  const v = await api(`/api/insiders?days=${days}&all=${all ? 1 : 0}`);
+  const net = v.net.map((b) => `<tr class="click" data-sym="${esc(b.sym)}"><td><b>${esc(b.sym)}</b> <span class="muted small">${esc(b.company || "")}</span></td><td class="r up">${b.buy ? cr(b.buy) : "–"}</td><td class="r down">${b.sell ? cr(b.sell) : "–"}</td><td class="r"><b class="${b.net >= 0 ? "up" : "down"}">${b.net >= 0 ? "+" : "−"}${cr(Math.abs(b.net))}</b></td><td class="r">${b.n}</td><td class="r">${b.people}</td></tr>`).join("");
+  const rows = v.rows.map((x) => `<tr><td>${esc((x.filed || "").slice(0, 10))}</td><td><a href="#/chart?s=${encodeURIComponent(x.sym)}"><b>${esc(x.sym)}</b></a></td><td>${esc(x.person)}<br><small class="muted">${esc(x.category)}</small></td>
+    <td class="${x.side === "Buy" ? "up" : "down"}"><b>${esc(x.side)}</b><br><small class="muted">${esc(x.mode)}</small></td><td class="r">${cr(x.value)}</td><td class="r small">${x.before_pct?.toFixed(2)}% → ${x.after_pct?.toFixed(2)}%</td><td class="r small">${esc(x.traded || "")}${x.days_to_file != null ? `<br><span class="muted">+${x.days_to_file}d to file</span>` : ""}</td></tr>`).join("");
+  main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Insider trades</h1><p class="lede" style="margin-bottom:0">Promoters, directors and key managers buying or selling their own company's shares in the market (F&amp;O stocks, ₹50 lakh+). ${esc(v.note)}</p></div>
+      <div style="text-align:right"><button class="btn" id="ins-refresh">Refresh now</button><p class="small muted" style="margin:6px 0 0">${v.updated ? "Updated " + hm(v.updated) + " · every 3 hours" : "First read takes about 2 minutes"}</p></div></div>
+    <div class="toolbar" style="margin-top:12px"><div class="seg">${[30, 60, 180, 365].map((d) => `<button data-days="${d}" aria-pressed="${d === days}">${d} days</button>`).join("")}</div>
+      <label class="check"><input type="checkbox" id="ins-all" ${all ? "checked" : ""}><span>Show all disclosures (off-market, ESOPs, small)</span></label></div>
+    <h2>Net by stock</h2><div class="table-wrap"><table><thead><tr><th>Stock</th><th class="r">Bought</th><th class="r">Sold</th><th class="r">Net</th><th class="r">Trades</th><th class="r">People</th></tr></thead><tbody>${net || `<tr><td colspan="6" class="muted">Nothing yet.</td></tr>`}</tbody></table></div>
+    <h2>Every disclosure</h2><div class="table-wrap"><table><thead><tr><th>Filed</th><th>Stock</th><th>Who</th><th>Side</th><th class="r">Value</th><th class="r">Holding</th><th class="r">Traded</th></tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">Nothing yet.</td></tr>`}</tbody></table></div>
+    <p class="note">Insiders sell for many reasons (taxes, diversification, pledges); buying with their own money in the market is the stronger signal. Disclosures arrive days after the trade.</p>`;
+  main.querySelectorAll("[data-days]").forEach((b) => b.onclick = () => { LS.set("ins_days", Number(b.dataset.days)); pageInsiders(); });
+  $("#ins-all").onchange = (e) => { LS.set("ins_all", e.target.checked); pageInsiders(); };
+  main.querySelectorAll("tr[data-sym]").forEach((r) => r.onclick = () => { location.hash = `#/chart?s=${encodeURIComponent(r.dataset.sym)}`; });
+  $("#ins-refresh").onclick = async (e) => { e.target.disabled = true; try { await post("/api/insiders/refresh", {}); toast("Reading NSE disclosures: about 2 minutes"); } catch (err) { toast(err.message); } };
+  L.pageTimer = setTimeout(() => state.page === "insiders" && pageInsiders(), 120000);
+}
+
+function companyCard(c) {
+  const r = c.results || {};
+  if (r.error) return `<p class="muted small">${esc(r.error)}</p>`;
+  const q = (r.quarters || []).slice(0, 5);
+  const qt = q.length ? `<table class="mini"><thead><tr><th>Quarter</th><th class="r">Revenue</th><th class="r">Profit</th><th class="r">Margin</th><th class="r">EPS</th></tr></thead><tbody>${q.map((x) => `<tr><td>${new Date(x.quarter_end + "T00:00:00").toLocaleDateString("en-IN", { month: "short", year: "2-digit" })}</td><td class="r">${x.revenue_cr != null ? fk(Math.round(x.revenue_cr)) : "–"}</td><td class="r">${x.profit_cr != null ? fk(Math.round(x.profit_cr)) : "–"}</td><td class="r">${x.margin_pct ?? "–"}%</td><td class="r">${x.eps ?? "–"}</td></tr>`).join("")}</tbody></table>
+    <p class="small muted" style="margin:4px 0">₹ crore, ${esc(q[0].basis)}${r.yoy ? ` · latest vs a year ago: revenue ${fpc(r.yoy.revenue_pct)}, profit ${r.yoy.profit_pct != null ? fpc(r.yoy.profit_pct) : "–"}` : ""}</p>` : `<p class="muted small">No results found.</p>`;
+  const ins = (c.insiders || []).filter((x) => x.market).slice(0, 4);
+  const it = ins.length ? `<h4 style="margin:10px 0 4px">Insider trades</h4><ul class="plain small">${ins.map((x) => `<li>${esc((x.filed || "").slice(0, 10))} <b class="${x.side === "Buy" ? "up" : "down"}">${esc(x.side)}</b> ${cr(x.value)} · ${esc(x.person)} <span class="muted">(${esc(x.category)})</span></li>`).join("")}</ul>` : "";
+  return qt + it;
+}
+
 /* ---------------- register */
 Object.assign(PAGES, { live: pageLive, scanner: pageScanner, sym: pageSym, alerts: pageAlerts, paper: pagePaper, connect: pageConnect,
-  context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk, chart: pageChart, world: pageWorld });
+  context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk, chart: pageChart, world: pageWorld, insiders: pageInsiders });
 window.addEventListener("hashchange", () => { stopPageTimer(); if (!location.hash.startsWith("#/chart") && CH.chart) { CH.chart.remove(); CH.chart = null; } main.classList.toggle("wide", location.hash.startsWith("#/chart")); });
 pollSnapshot();

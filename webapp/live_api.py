@@ -384,6 +384,32 @@ def scenarios_refresh():
     return {"started": True}
 
 
+@router.get("/api/insiders")
+def insiders_view(days: int = 60, all: int = 0):
+    return clean(engine().insiders.view(days=max(1, min(400, days)), all_rows=bool(all)))
+
+
+@router.post("/api/insiders/refresh")
+def insiders_refresh():
+    e = engine()
+    if e.insiders.running:
+        return {"started": False}
+    threading.Thread(target=e._insiders_refresh, daemon=True).start()
+    return {"started": True}
+
+
+@router.get("/api/company/{sym}")
+def company(sym: str):
+    e = engine()
+    sym = sym.upper()
+    out = {"sym": sym, "insiders": e.insiders.for_symbol(sym)}
+    try:
+        out["results"] = e.insiders.results(sym)
+    except Exception as ex:
+        out["results"] = {"error": f"NSE did not answer: {str(ex)[:80]}"}
+    return clean(out)
+
+
 @router.get("/api/brain")
 def brain_view():
     e = engine()

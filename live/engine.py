@@ -144,6 +144,8 @@ class LiveEngine:
         self.patterns = PatternBook(self.data_dir)
         from .timemachine import TimeMachine
         self.tm = TimeMachine(self)
+        from .insiders import Insiders
+        self.insiders = Insiders(self)
 
     @property
     def running(self):
@@ -803,6 +805,8 @@ class LiveEngine:
                 pass
             if due("scenario_hist", 3 * 3600):
                 threading.Thread(target=self._scenario_refresh, daemon=True).start()
+            if 7 <= hour <= 22 and due("insiders", 3 * 3600):
+                threading.Thread(target=self._insiders_refresh, daemon=True).start()
             time.sleep(5)
 
     def _flat_by_reminder(self, now, lc):
@@ -856,6 +860,28 @@ class LiveEngine:
         fo = set(self.uni.underlyings) if self.uni and self.source != "sim" else \
             set(((self.context.mwpl or {}).get("symbols") or {}).keys())
         self.world.refresh_results(self.context.nse, fo)
+
+    def _insiders_refresh(self):
+        fo = set(self.uni.underlyings) if self.uni and self.source != "sim" else \
+            set(((self.context.mwpl or {}).get("symbols") or {}).keys())
+        fo = {x for x in fo if x not in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")}
+        if not fo:
+            return
+        try:
+            new = self.insiders.refresh(fo, log=self.log) or []
+        except Exception as e:
+            self.log(f"Insider trades refresh failed: {e}")
+            return
+        for x in new:
+            buy = x["side"] == "Buy"
+            cr = x["value"] / 1e7
+            a = {"sym": x["sym"], "kind": "insider", "direction": "up" if buy else "down",
+                 "severity": 3 if ("promoter" in x["category"].lower() and buy and cr >= 10) else 2,
+                 "title": f"{x['sym']}: {x['category'].lower()} {'bought' if buy else 'sold'} ₹{cr:,.1f} cr of shares",
+                 "detail": f"{x['person']} ({x['category']}), {x['mode'].lower()}, traded {x['traded']}, disclosed {x['days_to_file']} day(s) later. "
+                           f"Holding {x['before_pct']:.2f}% → {x['after_pct']:.2f}%. Public disclosure under SEBI's insider-trading rules.",
+                 "price": (self.metrics.get(x["sym"]) or {}).get("spot"), "data": {"link": x.get("xbrl")}}
+            self._macro_alert(a)
 
     def _filing_alert(self, f):
         if not self.running or self.source == "sim" or not self.uni or f["sym"] not in self.uni.underlyings:
