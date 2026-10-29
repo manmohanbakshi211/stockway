@@ -601,7 +601,18 @@ def lab_eod_run():
 
     def job(log, stop):
         run(ROOT / "data", log=log)
+        try:
+            from webapp.live_api import engine as _eng
+            _eng().expiry.load_plan()
+        except Exception:
+            pass
     return {"id": JOBS.start("lab_eod", "Testing strategies on 10+ years of end-of-day data", job)["id"]}
+
+
+@app.get("/api/lab/expiry")
+def lab_expiry():
+    from webapp.live_api import engine as _eng
+    return clean(_eng().expiry.view())
 
 
 @app.get("/api/lab/eod")

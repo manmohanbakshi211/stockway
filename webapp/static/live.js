@@ -837,6 +837,7 @@ async function pageDesk() {
     <div id="desk-live"></div>
     <div id="desk-edge"></div>
     <div id="desk-eod"></div>
+    <div id="desk-expiry"></div>
     ${S ? deskResults(res) : `<div class="empty" style="max-width:none"><h2>No backtest yet</h2><p>Log in to Upstox (Plus plan), download history, then run the backtest. Or see a quick demo on synthetic data first.</p>
       <div class="btn-row"><button class="btn" id="lab-demo">See a demo (synthetic data)</button></div></div>`}
     <h2>Data and settings</h2>
@@ -892,6 +893,7 @@ async function pageDesk() {
   ["#lab-demo", "#lab-demo2"].forEach((id) => { if ($(id)) $(id).onclick = () => job("/api/lab/demo"); });
   if (res) drawDeskCharts(res);
   api("/api/lab/edge").then((e) => { const el = $("#desk-edge"); if (el) el.innerHTML = edgeCard(e); }).catch(() => {});
+  api("/api/lab/expiry").then((x) => { const el = $("#desk-expiry"); if (el) el.innerHTML = expiryCard(x); }).catch(() => {});
   Promise.all([api("/api/lab/eod/status"), api("/api/lab/eod").catch(() => null)]).then(([st2, r]) => {
     const el = $("#desk-eod"); if (!el) return;
     el.innerHTML = eodCard(st2, r);
@@ -935,6 +937,19 @@ function drawDeskLive(d) {
     Plotly.react($("#desk-days"), [{ type: "bar", x: d.days.map((x) => x.day), y: d.days.map((x) => x.pnl), marker: { color: d.days.map((x) => (x.pnl >= 0 ? C.up : C.down)) } }],
       plotLayout({ margin: { l: 60, r: 10, t: 8, b: 30 }, yaxis: { gridcolor: "#EEF1F4", tickprefix: "₹" } }), plotCfg);
   }
+}
+
+function expiryCard(x) {
+  const rs = (v) => v == null ? "–" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
+  const plan = x.plan.map((p) => `<li><b>${esc(p.sym)}</b>: ${esc(p.name)} <span class="muted small">${esc(p.pid)}</span></li>`).join("") || `<li class="muted">No strategy passed for this year: in cash.</li>`;
+  const legs = (t) => t.legs.map((l) => `${l.q > 0 ? "Buy" : "Sell"} ${fx(l.strike)} ${l.side} @ ${l.entry}`).join(" · ");
+  const open = x.open.map((t) => `<tr><td><b>${esc(t.sym)}</b><br><small class="muted">expiry ${esc(t.expiry)}</small></td><td class="small">${esc(legs(t))}</td><td class="r">${t.lots}</td><td class="r">${t.credit}</td><td class="r">${rupees(t.max_loss)}</td><td class="r">${rs(t.mtm)}</td></tr>`).join("");
+  const closed = x.closed.slice(0, 12).map((t) => `<tr><td>${esc(t.sym)} <small class="muted">${esc(t.expiry)}</small></td><td class="r">${t.lots}</td><td class="r">${fx(t.settle)}</td><td class="r">${rs(t.net)}</td><td class="small muted">${esc(t.reason || "")}</td></tr>`).join("");
+  return `<div class="panel"><h3>Expiry desk <span class="muted small">paper, held to expiry · the strategy that passed the 10-year test</span></h3>
+    <ul class="plain small">${plan}${(x.cash || []).map((c) => `<li class="muted">${esc(c)}</li>`).join("")}</ul>
+    <p class="small">Paper result so far: ${x.n ? `${rs(x.total)} over ${x.n} expiries, ${x.won} won` : "no expiry settled yet"}. Entry about 15:20 on the entry day at live bid/ask; settled at the expiry close.</p>
+    ${open ? `<div class="table-wrap"><table><thead><tr><th>Open</th><th>Legs</th><th class="r">Lots</th><th class="r">Credit (pts)</th><th class="r">Max loss</th><th class="r">Now</th></tr></thead><tbody>${open}</tbody></table></div>` : ""}
+    ${closed ? `<div class="table-wrap"><table><thead><tr><th>Settled</th><th class="r">Lots</th><th class="r">Index at expiry</th><th class="r">Net</th><th></th></tr></thead><tbody>${closed}</tbody></table></div>` : ""}</div>`;
 }
 
 function eodCard(st, r) {

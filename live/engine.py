@@ -79,6 +79,8 @@ class LiveEngine:
         self._reset()
         from lab.live import StrategyDesk
         self.desk = StrategyDesk(self)
+        from lab.expiry_desk import ExpiryDesk
+        self.expiry = ExpiryDesk(self)
         threading.Thread(target=self._watch, daemon=True, name="live-watch").start()
         threading.Thread(target=self._news_loop, daemon=True, name="live-news").start()
         threading.Thread(target=self.context.run_forever, args=(self._filings_wanted,), daemon=True,
@@ -369,6 +371,8 @@ class LiveEngine:
             used += 2 * (len(ks) - len(plan[u.symbol][1]))
             plan[u.symbol] = (exp, ks)
         want, windows = set(getattr(self, "desk", None).needed_keys() if getattr(self, "desk", None) else ()), {}
+        if getattr(self, "expiry", None):
+            want |= self.expiry.needed_keys()
         for sym, (exp, ks) in plan.items():
             u = self.uni.underlyings[sym]
             windows[sym] = ks
@@ -521,6 +525,12 @@ class LiveEngine:
             except Exception as e:
                 if self._every("desk_err", 300, clock_time=False):
                     self.log(f"Strategy desk error: {e}")
+            try:
+                if self._every("expiry_desk", 10, clock_time=False):
+                    self.expiry.tick(now)
+            except Exception as e:
+                if self._every("expiry_err", 300, clock_time=False):
+                    self.log(f"Expiry desk error: {e}")
             self._big_prints(now, lc)
             self.tracker.update(self.state, self.clock.ts())
             self.paper.update(self.state, now)
