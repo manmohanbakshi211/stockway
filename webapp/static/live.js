@@ -1289,7 +1289,7 @@ async function pageInsiders() {
   const rows = v.rows.map((x) => `<tr><td>${esc((x.filed || "").slice(0, 10))}</td><td><a href="#/chart?s=${encodeURIComponent(x.sym)}"><b>${esc(x.sym)}</b></a></td><td>${esc(x.person)}<br><small class="muted">${esc(x.category)}</small></td>
     <td class="${x.side === "Buy" ? "up" : "down"}"><b>${esc(x.side)}</b><br><small class="muted">${esc(x.mode)}</small></td><td class="r">${cr(x.value)}</td><td class="r small">${x.before_pct?.toFixed(2)}% → ${x.after_pct?.toFixed(2)}%</td><td class="r small">${esc(x.traded || "")}${x.days_to_file != null ? `<br><span class="muted">+${x.days_to_file}d to file</span>` : ""}</td></tr>`).join("");
   main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Insider trades</h1><p class="lede" style="margin-bottom:0">Promoters, directors and key managers buying or selling their own company's shares in the market (F&amp;O stocks, ₹50 lakh+). ${esc(v.note)}</p></div>
-      <div style="text-align:right"><button class="btn" id="ins-refresh">Refresh now</button><p class="small muted" style="margin:6px 0 0">${v.updated ? "Updated " + hm(v.updated) + " · every 3 hours" : "First read takes about 2 minutes"}</p></div></div>
+      <div style="text-align:right"><button class="btn" id="ins-refresh">Refresh now</button><p class="small muted" style="margin:6px 0 0">${v.running ? esc(v.progress || "Reading NSE disclosures") + "…" : v.updated ? "Updated " + hm(v.updated) + " · every 3 hours" : "First read: about 10 minutes (one year of filings)"}</p></div></div>
     <div class="toolbar" style="margin-top:12px"><div class="seg">${[30, 60, 180, 365].map((d) => `<button data-days="${d}" aria-pressed="${d === days}">${d} days</button>`).join("")}</div>
       <label class="check"><input type="checkbox" id="ins-all" ${all ? "checked" : ""}><span>Show all disclosures (off-market, ESOPs, small)</span></label></div>
     <h2>Net by stock</h2><div class="table-wrap"><table><thead><tr><th>Stock</th><th class="r">Bought</th><th class="r">Sold</th><th class="r">Net</th><th class="r">Trades</th><th class="r">People</th></tr></thead><tbody>${net || `<tr><td colspan="6" class="muted">Nothing yet.</td></tr>`}</tbody></table></div>
@@ -1298,8 +1298,8 @@ async function pageInsiders() {
   main.querySelectorAll("[data-days]").forEach((b) => b.onclick = () => { LS.set("ins_days", Number(b.dataset.days)); pageInsiders(); });
   $("#ins-all").onchange = (e) => { LS.set("ins_all", e.target.checked); pageInsiders(); };
   main.querySelectorAll("tr[data-sym]").forEach((r) => r.onclick = () => { location.hash = `#/chart?s=${encodeURIComponent(r.dataset.sym)}`; });
-  $("#ins-refresh").onclick = async (e) => { e.target.disabled = true; try { await post("/api/insiders/refresh", {}); toast("Reading NSE disclosures: about 2 minutes"); } catch (err) { toast(err.message); } };
-  L.pageTimer = setTimeout(() => state.page === "insiders" && pageInsiders(), 120000);
+  $("#ins-refresh").onclick = async (e) => { e.target.disabled = true; try { await post("/api/insiders/refresh", {}); toast("Reading NSE disclosures in the background"); setTimeout(pageInsiders, 3000); } catch (err) { toast(err.message); } };
+  L.pageTimer = setTimeout(() => state.page === "insiders" && pageInsiders(), v.running ? 10000 : 120000);
 }
 
 function companyCard(c) {

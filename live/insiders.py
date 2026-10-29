@@ -27,7 +27,7 @@ def _num(x):
 
 
 def _date(s):
-    for fmt in ("%d-%b-%Y %H:%M", "%d-%b-%Y", "%d-%m-%Y"):
+    for fmt in ("%d-%b-%Y %H:%M:%S", "%d-%b-%Y %H:%M", "%d-%b-%Y", "%d-%m-%Y"):
         try:
             return dt.datetime.strptime(str(s), fmt)
         except (TypeError, ValueError):
@@ -58,44 +58,148 @@ def meaningful(x: dict) -> bool:
     return x["key"] and x["market"] and x["value"] >= SHOW_MIN_RS and x["side"] in ("Buy", "Sell")
 
 
+def _pct(v):
+    """New-format XBRL gives holdings as a fraction (0.0123 = 1.23%)."""
+    x = _num(v)
+    return round(x * 100, 4) if x <= 1 else x
+
+
+def parse_pit_xml(text: str, meta: dict) -> list:
+    """Rows from one NSE PIT XBRL filing (the format NSE uses from May 2026). One filing can hold several trades."""
+    import re
+    main, per = {}, {}
+    for tag, ctx, val in re.findall(r'<in-bse-co:([A-Za-z]+)\s+contextRef="([^"]+)"[^>]*>([^<]*)<', text):
+        (main if ctx == "MainI" else per.setdefault(ctx, {}))[tag] = val.strip()
+    filed = _date(meta.get("broadcastDateTime")) or _date(meta.get("exchdisstime"))
+    rows = []
+    for ctx, f in per.items():
+        typ = f.get("SecuritiesAcquiredOrDisposedTransactionType", "")
+        side = "Buy" if typ.lower() == "buy" else "Sell" if typ.lower() == "sell" else typ
+        cat = f.get("CategoryOfPerson", "")
+        mode = f.get("ModeOfAcquisitionOrDisposal", "")
+        t1 = f.get("DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyToDate") or \
+            f.get("DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyFromDate")
+        try:
+            traded = dt.date.fromisoformat(t1) if t1 else None
+        except ValueError:
+            traded = None
+        rows.append({"pid": f"g{meta.get('appId')}:{ctx}", "app": str(meta.get("appId")),
+                     "sym": meta.get("symbol") or main.get("Symbol"),
+                     "company": meta.get("companyName") or main.get("NameOfTheCompany"),
+                     "person": f.get("NameOfThePerson", ""), "category": cat, "side": side, "mode": mode,
+                     "qty": _num(f.get("SecuritiesAcquiredOrDisposedNumberOfSecurity")),
+                     "value": _num(f.get("SecuritiesAcquiredOrDisposedValueOfSecurity")),
+                     "sec_type": f.get("TypeOfInstrument"),
+                     "before_pct": _pct(f.get("SecuritiesHeldPriorToAcquisitionOrDisposalPercentageOfShareholding")),
+                     "after_pct": _pct(f.get("SecuritiesHeldPostAcquistionOrDisposalPercentageOfShareholding")),
+                     "traded": traded.isoformat() if traded else None,
+                     "filed": filed.isoformat(timespec="minutes") if filed else None,
+                     "days_to_file": (filed.date() - traded).days if filed and traded else None,
+                     "xbrl": meta.get("ixbrl") or meta.get("xmlFileName"),
+                     "key": any(k.lower() in cat.lower() for k in KEY_PEOPLE),
+                     "market": mode.lower().startswith("market")})
+    return rows
+
+
+NEW_FEED_FROM = dt.date(2026, 5, 1)      # NSE moved PIT disclosures to XBRL filings ('corporates-pit-gg') here
+
+
 class Insiders:
+    """Reads NSE's market-wide insider-disclosure list by date, keeps F&O stocks, and reads each new filing once.
+
+    From May 2026 NSE lists filings in 'corporates-pit-gg' (details in one small XBRL file per filing); older
+    disclosures are in the archive feed ('corporates-pit'). Parsed rows are kept on disk, so after the first read
+    each refresh only fetches the last ten days.
+    """
+
     def __init__(self, engine):
         self.e = engine
-        self.rows = {}                 # pid -> row
-        self.seen = set(engine.store.get("insiders:seen", []) or [])
-        self.updated = None
+        st = engine.store
+        self.rows = {x["pid"]: x for x in (st.get("insiders:rows", []) or []) if x.get("pid")}
+        self.done = set(st.get("insiders:done", []) or [])        # filings already read
+        self.seen = set(st.get("insiders:seen", []) or [])
+        self.updated = st.get("insiders:updated")
+        self.seeded = bool(self.updated)                          # alerts only once a first read exists
         self.running = False
+        self.progress = None
         self.results_cache = {}
 
-    def refresh(self, symbols, log=print, pause=0.6):
-        """One request per stock: its latest 20 disclosures."""
-        if self.running:
-            return
-        self.running = True
+    def _list(self, path, a: dt.date, b: dt.date, chunk=30):
+        out, d = [], a
         nse = self.e.context.nse
-        new_alerts = []
+        while d <= b:
+            e = min(b, d + dt.timedelta(days=chunk - 1))
+            try:
+                r = nse.api(f"{path}&from_date={d:%d-%m-%Y}&to_date={e:%d-%m-%Y}") or {}
+                out += (r.get("data") if isinstance(r, dict) else r) or []
+            except Exception:
+                pass
+            d = e + dt.timedelta(days=1)
+            time.sleep(0.5)
+        return out
+
+    def _save(self):
+        st = self.e.store
+        keep = sorted(self.rows.values(), key=lambda x: x.get("filed") or "", reverse=True)[:8000]
+        st.put("insiders:rows", keep)
+        st.put("insiders:done", sorted(self.done)[-30000:])
+        st.put("insiders:seen", sorted(self.seen)[-30000:])
+
+    def refresh(self, symbols, log=print, pause=0.35, history_days=365):
+        if self.running:
+            return []
+        self.running = True
+        fo = set(symbols)
+        nse = self.e.context.nse
+        today = dt.datetime.now(IST).date()
+        first = not self.updated
+        start = today - dt.timedelta(days=history_days if first else 10)
+        new_alerts, fresh = [], []
         try:
-            for i, sym in enumerate(sorted(symbols)):
+            # 1. archive feed (before May 2026): the rows come complete
+            if start < NEW_FEED_FROM:
+                self.progress = "Reading the archive (before May 2026)"
+                for r in self._list("/api/corporates-pit?index=equities", start, NEW_FEED_FROM - dt.timedelta(days=1)):
+                    if r.get("symbol") in fo:
+                        x = normalise(r)
+                        if x["pid"]:
+                            self.rows[x["pid"]] = x
+                            self.seen.add(x["pid"])
+            # 2. current feed: list, then one XBRL file per new filing (newest first)
+            lst = self._list("/api/corporates-pit-gg?index=equities", max(start, NEW_FEED_FROM), today)
+            lst = [m for m in lst if m.get("symbol") in fo and m.get("xmlFileName") and str(m.get("appId")) not in self.done]
+            lst.sort(key=lambda m: _date(m.get("broadcastDateTime")) or dt.datetime.min, reverse=True)
+            for i, m in enumerate(lst):
+                self.progress = f"Reading filings {i + 1}/{len(lst)}"
                 try:
-                    d = nse.api(f"/api/corporates-pit?index=equities&symbol={sym}") or {}
+                    rows = parse_pit_xml(nse.s.get(m["xmlFileName"], timeout=30).text, m)
                 except Exception:
                     time.sleep(pause * 3)
                     continue
-                for r in (d.get("data") if isinstance(d, dict) else d) or []:
-                    x = normalise(r)
-                    if not x["pid"]:
-                        continue
+                if m.get("prevAppId"):                       # a revision replaces the earlier filing
+                    old = f"g{m['prevAppId']}:"
+                    for k in [k for k in self.rows if k.startswith(old)]:
+                        self.rows.pop(k, None)
+                for x in rows:
                     self.rows[x["pid"]] = x
                     if x["pid"] not in self.seen:
                         self.seen.add(x["pid"])
-                        if self.updated is not None and meaningful(x) and x["value"] >= ALERT_MIN_RS:
-                            new_alerts.append(x)
+                        fresh.append(x)
+                self.done.add(str(m["appId"]))
+                if i % 50 == 49:
+                    self._save()
                 time.sleep(pause)
+            recent = (today - dt.timedelta(days=4)).isoformat()
+            if self.seeded:
+                new_alerts = [x for x in fresh if meaningful(x) and x["value"] >= ALERT_MIN_RS and (x["filed"] or "") >= recent]
+            self.seeded = True
             self.updated = time.time()
-            self.e.store.put("insiders:seen", sorted(self.seen)[-20000:])
-            log(f"Insider trades: {len(self.rows):,} disclosures read, {len(new_alerts)} new big ones")
+            self.e.store.put("insiders:updated", self.updated)
+            self._save()
+            log(f"Insider trades: {len(lst)} new filings read ({len(self.rows):,} disclosures kept), {len(new_alerts)} new big ones")
         finally:
             self.running = False
+            self.progress = None
         return new_alerts
 
     def view(self, days=60, all_rows=False) -> dict:
@@ -112,7 +216,8 @@ class Insiders:
             b["people"].add(x["person"])
         net = sorted(({**b, "net": b["buy"] - b["sell"], "people": len(b["people"])} for b in by.values()),
                      key=lambda b: -abs(b["net"]))
-        return {"rows": rows[:400], "net": net[:60], "updated": self.updated, "days": days,
+        return {"rows": rows[:400], "net": net[:60], "updated": self.updated, "days": days, "progress": self.progress,
+                "running": self.running,
                 "note": "Disclosures under SEBI's insider-trading rules: filed after the trade (usually within 2 trading days). Public information, not a tip."}
 
     def for_symbol(self, sym, days=365) -> list:

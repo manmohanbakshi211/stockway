@@ -178,7 +178,9 @@ day-trader-skill, rebuilt for NSE hours and Upstox data.
 
 **Insider trades**: promoter, director and key-manager trades disclosed under SEBI's insider-trading rules, for
 every F&O stock (₹50 lakh+ in the market), net by stock, with alerts for new ones over ₹1 crore. The chart page
-shows each company's last quarterly results (from NSE's integrated filings) and its insider trades.
+shows each company's last quarterly results (from NSE's integrated filings) and its insider trades. Since May 2026 NSE
+publishes these as XBRL filings; the app reads each filing once (first read about 10 minutes, then only the
+last ten days every 3 hours).
 
 **10 years of end-of-day data (NSE bhavcopy, free)**: every index option contract's daily prices since 2015.
 Tests hedged premium selling held to expiry (iron condor / iron fly) and buying straddles, walk-forward by year,
