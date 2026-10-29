@@ -86,3 +86,51 @@ class EdgeBook:
         elif grade == "weak":
             line += ". No proven edge yet."
         return {"line": line, "grade": grade, "p": p}
+
+
+class PatternBook:
+    """Track record of each chart pattern on years of 1-minute index history (lab/pattern_study.py)."""
+
+    def __init__(self, data_dir):
+        self.f = Path(data_dir) / "lab" / "patterns.json"
+        self.mtime = None
+        self.rep = None
+
+    def load(self):
+        if not self.f.exists():
+            self.rep = None
+            return
+        mt = self.f.stat().st_mtime
+        if mt != self.mtime:
+            self.mtime = mt
+            try:
+                self.rep = json.loads(self.f.read_text())
+            except Exception:
+                self.rep = None
+
+    def record(self, sym, pattern, direction) -> dict | None:
+        self.load()
+        if not self.rep:
+            return None
+        d = 1 if direction == "up" else -1
+        rows = [r for r in self.rep.get("table") or [] if r["pattern"] == pattern and int(r["dir"]) == d]
+        mine = [r for r in rows if r["sym"] == sym]
+        if mine:
+            return {**mine[0], "scope": sym}
+        if not rows:
+            return None
+        n = sum(r["n"] for r in rows)                     # stocks: pooled index record, labelled as such
+        avg = sum(r["avg_r"] * r["n"] for r in rows) / n
+        win = sum(r["win_pct"] * r["n"] for r in rows) / n
+        t = max((r["t"] for r in rows), key=abs)
+        return {"n": n, "avg_r": round(avg, 3), "win_pct": round(win, 1), "t": t, "scope": "indices"}
+
+    def line(self, sym, pattern, direction) -> tuple[str | None, str]:
+        r = self.record(sym, pattern, direction)
+        if not r:
+            return None, "unknown"
+        grade = "edge" if r["avg_r"] > 0 and r["t"] >= 2 else "losing" if r["avg_r"] < 0 and r["t"] <= -1 else "weak"
+        txt = (f"History ({'on ' + r['scope'] if r['scope'] == 'indices' else r['scope']}, since "
+               f"{((self.rep.get('period') or {}).get(sym) or [''])[0][:7] or '2022'}): {r['n']} times, {r['win_pct']:.0f}% won, "
+               f"avg {r['avg_r']:+.2f}R" + (". Proven edge." if grade == "edge" else ". Historically losing." if grade == "losing" else ". No proven edge."))
+        return txt, grade

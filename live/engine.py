@@ -139,6 +139,8 @@ class LiveEngine:
         self.edge = EdgeBook(self.data_dir)
         from .analog import Scenarios
         self.scenarios = Scenarios(self)
+        from .edgebook import PatternBook
+        self.patterns = PatternBook(self.data_dir)
 
     @property
     def running(self):
@@ -1039,7 +1041,7 @@ class LiveEngine:
         if self.feed:
             feed = {"connected": self.feed.connected, "msgs": self.feed.msgs,
                     "last_msg_age": round(time.time() - self.feed.last_msg, 1) if self.feed.last_msg else None,
-                    "subs": self.feed.counts()}
+                    "subs": self.feed.counts(), "lag_ms": round(getattr(self.feed, "lag_ms", None) or 0) if getattr(self.feed, "lag_ms", None) is not None else None}
         new = [a for a in self.alerts_mem if a["id"] > since_id][:100]
         ps = self.paper.summary(self.state) if self.paper else None
         cv = self.context.view()

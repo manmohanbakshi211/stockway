@@ -41,6 +41,9 @@ const KIND = {
   gamma_flip: "Gamma flip", big_print: "Big trade", filing: "Company filing", macro: "Global / macro",
   setup_ema_pullback: "Setup: EMA pullback", setup_vwap_reclaim: "Setup: VWAP reclaim", setup_cpr_breakout: "Setup: CPR breakout",
   setup_pdh_break: "Setup: prev-day break", setup_wall_fade: "Setup: OI wall rejection",
+  pattern_double_top: "Pattern: double top", pattern_double_bottom: "Pattern: double bottom", pattern_head_shoulders: "Pattern: head & shoulders",
+  pattern_inv_hs: "Pattern: inverse H&S", pattern_triangle: "Pattern: triangle", pattern_flag: "Pattern: flag",
+  pattern_breakout_retest: "Pattern: breakout + retest", pattern_rsi_divergence: "Pattern: RSI divergence", pattern_candle_at_level: "Pattern: candle at level",
 };
 
 /* ---------------- polling + notifications */
@@ -108,7 +111,9 @@ function statusBar() {
   const lag = feed && feed.last_msg_age != null ? (feed.last_msg_age < 5 ? "streaming" : `no data for ${Math.round(feed.last_msg_age)}s`) : "";
   const subs = feed ? `${(feed.subs.full || 0) + (feed.subs.option_greeks || 0)} instruments` : "";
   const vix = s.vix && st.running ? `<span class="vixchip" title="India VIX: the market's fear gauge">VIX <b>${s.vix.ltp.toFixed(2)}</b> ${fpc(s.vix.chg_pct, 1)}</span>` : "";
-  const msg = st.state === "running" ? `${st.source === "sim" ? "Simulator" : "Upstox"} · ${subs} · ${lag}` : esc(st.message || "");
+  const dl = feed && feed.lag_ms != null ? feed.lag_ms : null;
+  const speed = st.running ? ` · <span class="${dl != null && dl > 3000 ? "down" : "muted"}" title="Delay from Upstox's server to this app, and how long one full analysis of every instrument takes">${dl != null ? `data delay ${(dl / 1000).toFixed(1)}s · ` : ""}analysis ${st.loop_ms != null ? st.loop_ms + " ms" : "–"}</span>` : "";
+  const msg = st.state === "running" ? `${st.source === "sim" ? "Simulator" : "Upstox"} · ${subs} · ${lag}${speed}` : esc(st.message || "");
   let btns = "";
   if (st.running) btns = `<button class="btn" data-live-stop>Stop</button>`;
   else {
@@ -958,7 +963,8 @@ function drawDeskCharts(r) {
 const CH = { chart: null, sym: null, tf: 5, days: 3, series: {}, lines: [], markers: null, sig: "", data: null };
 const CH_TOGGLES = [["vwap", "VWAP + bands"], ["ema", "EMA 9/21/50"], ["st", "Supertrend"], ["prev", "Yesterday H/L/C"], ["cpr", "CPR + pivots"],
   ["or", "Opening range"], ["oi", "OI walls + max pain"], ["gamma", "Gamma levels"], ["em", "Expected move"], ["marks", "Alerts + trades"],
-  ["vol", "Volume"], ["rsi", "RSI"], ["macd", "MACD"], ["scen", "Scenarios: up / sideways / down"]];
+  ["vol", "Volume"], ["rsi", "RSI"], ["macd", "MACD"], ["scen", "Scenarios: up / sideways / down"], ["pat", "Chart patterns"],
+  ["swing", "Swing labels (HH / HL / LH / LL)"]];
 function chOn(k) { return LS.get("ch_" + k, !["macd", "em"].includes(k)); }
 
 async function pageChart() {
@@ -984,6 +990,7 @@ async function pageChart() {
     <div class="ch-wrap"><div id="ch-chart" class="ch-chart"></div>
       <aside class="ch-side"><div class="panel tight"><h3>Chart read</h3><div id="ch-read"><p class="muted">Loading…</p></div>
         <button class="link-btn" id="ch-ai">AI read this chart</button><div id="ch-ai-out"></div></div>
+        <div class="panel tight"><h3>Patterns <span class="muted small">on this chart</span></h3><div id="ch-pats"></div></div>
         <div class="panel tight" id="ch-scen-wrap"><h3>Scenarios <span class="muted small">next 5 / 15 / 60 min</span></h3><div id="ch-scen"><p class="muted small">Nifty and Bank Nifty.</p></div></div>
         <div class="panel tight"><h3>Setups today</h3><div id="ch-setups"></div></div>
         <div class="panel tight"><h3>Key levels</h3><div id="ch-levels"></div></div></aside></div>
@@ -1047,7 +1054,7 @@ function buildChart(hasVolume = true) {
     const ev = ((CH.data && CH.data.markers) || []).filter((m) => m.time === p.time && m.title).map((m) => `<div class="lg-ev" style="color:${m.color}">${esc(m.title)}</div>`).join("");
     lg.innerHTML = `<div><span>${t}</span><span>O <b>${fx(c.open)}</b></span><span>H <b>${fx(c.high)}</b></span><span>L <b>${fx(c.low)}</b></span><span>C <b class="${c.close >= c.open ? "up" : "down"}">${fx(c.close)}</b></span>${bits}</div>${ev}`;
   });
-  CH.chart = chart; CH.series = S; CH.lines = []; CH.sig = "";
+  CH.chart = chart; CH.series = S; CH.lines = []; CH.sig = ""; CH.patSeries = []; CH.psig = null;
 }
 
 function scenarioCard(sc, sym) {
@@ -1094,13 +1101,36 @@ function drawChart(d, first) {
     CH.lines = want.map((l) => S.candle.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: l.style, axisLabelVisible: true, title: l.name }));
     CH.sig = sig;
   }
-  S.markers.setMarkers(chOn("marks") ? d.markers.map(({ time, position, color, shape, text }) => ({ time, position, color, shape, text })) : []);
+  const mk = chOn("marks") ? d.markers.map(({ time, position, color, shape, text }) => ({ time, position, color, shape, text })) : [];
+  if (chOn("pat")) (d.patterns || []).forEach((p) => mk.push({ time: p.time, position: p.direction === "up" ? "belowBar" : "aboveBar",
+    color: p.grade === "edge" ? "#1E8A5A" : p.grade === "losing" ? "#9AA5B1" : "#3D2FA8", shape: p.direction === "up" ? "arrowUp" : "arrowDown", text: p.name.split(" (")[0] }));
+  if (chOn("swing")) (d.swings || []).forEach((w) => mk.push({ time: w.time, position: w.type === "H" ? "aboveBar" : "belowBar", color: "#8A94A0", shape: "circle", size: 0.3, text: w.label }));
+  mk.sort((a, b) => a.time - b.time);
+  S.markers.setMarkers(mk);
+  // pattern lines (rebuilt only when the patterns change)
+  const psig = chOn("pat") ? JSON.stringify((d.patterns || []).map((p) => [p.pattern, p.time])) : "";
+  if (psig !== CH.psig) {
+    (CH.patSeries || []).forEach((x) => { try { CH.chart.removeSeries(x); } catch (_) {} });
+    CH.patSeries = [];
+    if (chOn("pat")) (d.patterns || []).forEach((p) => p.lines.forEach((ln) => {
+      const pts = []; ln.forEach((q) => { if (!pts.length || q.time > pts[pts.length - 1].time) pts.push(q); });
+      if (pts.length < 2) return;
+      const ser = CH.chart.addSeries(window.LightweightCharts.LineSeries, { color: p.direction === "up" ? "rgba(30,138,90,.85)" : "rgba(194,59,50,.85)", lineWidth: 2, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 0);
+      ser.setData(pts); CH.patSeries.push(ser);
+    }));
+    CH.psig = psig;
+  }
   if (first) {                       // show the last ~120 bars (at least 40 slots so a young session isn't stretched)
     const n = d.candles.length;
     const ahead = d.scenario && d.scenario.ready && chOn("scen") ? Math.ceil((d.scenario.horizon_max || 60) / d.tf) + 3 : 6;
     if (n) CH.chart.timeScale().setVisibleLogicalRange({ from: n - Math.max(40, Math.min(n, 120)), to: n + ahead });
   }
   $("#ch-price").innerHTML = `<b>${fx(d.spot)}</b> ${fpc(d.chg_pct)} ${d.regime && d.regime.code !== "opening" ? `<span class="pill p-sig">${esc(d.regime.label)}</span>` : ""}`;
+  const pats = (d.patterns || []).slice().reverse();
+  $("#ch-pats").innerHTML = (d.structure ? `<p class="small" style="margin:0 0 6px">Structure: <b class="${d.structure === "uptrend" ? "up" : d.structure === "downtrend" ? "down" : ""}">${esc(d.structure)}</b> <span class="muted">(${(d.swings || []).slice(-4).map((w) => w.label).join(" → ")})</span></p>` : "")
+    + (pats.length ? `<ul class="plain">${pats.slice(0, 6).map((p) => `<li>${hm(p.time - 19800)} ${arrow(p.direction)} <b>${esc(p.name)}</b> @ ${fx(p.entry)}<br><small>${esc(p.why)}. Stop ${fx(p.stop)} · target ${fx(p.target)} · R:R ${p.rr}</small>
+      ${p.history ? `<br><small class="${p.grade === "edge" ? "up" : p.grade === "losing" ? "down" : "muted"}">${esc(p.history)}</small>` : ""}</li>`).join("")}</ul>` : `<p class="muted small">No completed pattern on these bars yet.</p>`);
+  CH.psig = CH.psig || "";
   $("#ch-read").innerHTML = d.read.length ? `<ul class="plain">${d.read.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="muted">Builds after the first 15 minutes.</p>`;
   $("#ch-setups").innerHTML = d.setups.length ? `<ul class="plain">${d.setups.slice().reverse().map((x) => `<li>${hm(x.ts)} ${arrow(x.direction)} <b>${esc(x.name)}</b> @ ${fx(x.entry)}<br><small>stop ${fx(x.stop)} · target ${fx(x.target)} · R:R ${x.rr}</small>
       <span class="pill ${x.state === "target hit" ? "p-up" : x.state === "stopped" ? "p-down" : "p-sig"}">${esc(x.state)}${x.state === "active" ? ` ${x.r_now > 0 ? "+" : ""}${x.r_now}R` : ""}</span></li>`).join("")}</ul>` : `<p class="muted small">No setup yet today. The scanner checks every closed 5-minute bar.</p>`;

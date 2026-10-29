@@ -342,6 +342,11 @@ class Scenarios:
             self.busy = False
 
     def run_eval(self, log=print):
+        try:
+            from lab.pattern_study import run as pattern_run
+            pattern_run({s: self.lib(s) for s in SYMS}, self.e.data_dir, log=log)
+        except Exception as ex:
+            log(f"Pattern study failed: {ex}")
         out = {}
         for sym in SYMS:
             lib = self.lib(sym)

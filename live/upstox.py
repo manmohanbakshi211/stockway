@@ -158,9 +158,11 @@ def _f(x):
     return float(x) if x is not None else None
 
 
-def decode(msg_bytes: bytes, pb) -> tuple[str, list]:
-    """Protobuf FeedResponse -> (type, [normalized tick dicts])."""
+def decode(msg_bytes: bytes, pb, meta: dict | None = None) -> tuple[str, list]:
+    """Protobuf FeedResponse -> (type, [normalized tick dicts]). meta (optional) receives the server timestamp."""
     fr = pb.FeedResponse.FromString(msg_bytes)
+    if meta is not None:
+        meta["ts"] = getattr(fr, "currentTs", 0) or 0
     typ = pb.Type.Name(fr.type) if hasattr(pb, "Type") else str(fr.type)
     ticks = []
     for key, feed in fr.feeds.items():
@@ -218,6 +220,7 @@ class UpstoxFeed:
         self.connected = False
         self.msgs = 0
         self.last_msg = 0.0
+        self.lag_ms = None
         self.lock = threading.Lock()
 
     # public
@@ -311,12 +314,17 @@ class UpstoxFeed:
     def _on_message(self, ws, message):
         if isinstance(message, str):
             return
+        meta = {}
         try:
-            typ, ticks = decode(message, self.pb)
+            typ, ticks = decode(message, self.pb, meta)
         except Exception as e:
             self.on_status(f"Bad feed message: {e}")
             return
         self.msgs += 1
         self.last_msg = time.time()
+        if meta.get("ts"):
+            lag = self.last_msg * 1000 - meta["ts"]          # Upstox server time -> our receive time
+            if -5000 < lag < 120000:
+                self.lag_ms = lag if self.lag_ms is None else 0.8 * self.lag_ms + 0.2 * lag
         if ticks:
             self.on_ticks(ticks)
