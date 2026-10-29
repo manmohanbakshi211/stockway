@@ -214,6 +214,44 @@ def live_explain(alert_id: int):
     return {"text": text}
 
 
+@router.post("/api/live/alerts/{alert_id}/timemachine")
+def live_timemachine_alert(alert_id: int):
+    """Replay an alert's plan (entry now, its stop and target) 10,000 times and on the real past."""
+    e = engine()
+    a = next((x for x in e.alerts_mem if x["id"] == alert_id), None) or e.store.alert(alert_id)
+    if not a:
+        raise HTTPException(404, "Alert not found")
+    d = a.get("data") or {}
+    lv = d.get("setup_levels") or d.get("levels") or {}
+    if a.get("direction") not in ("up", "down") or not lv.get("stop") or not lv.get("target"):
+        raise HTTPException(400, "This alert has no stop and target to test.")
+    m = e.metrics.get(a["sym"]) or {}
+    entry = m.get("spot") or a.get("price")
+    if not entry:
+        raise HTTPException(400, "No current price for this symbol.")
+    return clean(_tm(e, a["sym"], float(entry), float(lv["stop"]), float(lv["target"]), a["direction"]))
+
+
+@router.post("/api/timemachine")
+async def timemachine_plan(req: Request):
+    b = await req.json()
+    e = engine()
+    try:
+        return clean(_tm(e, str(b["sym"]).upper(), float(b["entry"]), float(b["stop"]), float(b["target"]), b.get("direction") or
+                         ("up" if float(b["target"]) > float(b["entry"]) else "down")))
+    except KeyError as ex:
+        raise HTTPException(400, f"Missing {ex}")
+
+
+def _tm(e, sym, entry, stop, target, direction):
+    try:
+        return e.tm.check(sym, entry=entry, stop=stop, target=target, direction=direction)
+    except PermissionError as ex:
+        raise HTTPException(401, str(ex))
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+
+
 @router.post("/api/live/alerts/{alert_id}/paper")
 def live_paper_from_alert(alert_id: int):
     e = engine()

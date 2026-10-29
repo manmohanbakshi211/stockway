@@ -63,11 +63,14 @@ class PaperBook:
         g = self.guard(now)
         if not manual and g["blocked"]:
             return None
+        risk = (alert.get("data") or {}).get("risk")
+        if not manual and risk and risk.get("verdict") != "PASS":
+            return None                                   # the risk gate said no: no paper trade
         inst = state.get(opt["key"])
         if not inst or not inst.ltp:
             return None
         entry = inst.ask or inst.ltp
-        lots = self.size(entry, opt["lot"])
+        lots = int(risk["lots"]) if risk and risk.get("lots") else self.size(entry, opt["lot"])
         t = {"alert_id": alert.get("id"), "source": self.source, "day": now.date().isoformat(), "sym": alert["sym"],
              "kind": alert["kind"], "opt_key": opt["key"], "label": opt["label"], "side": opt["side"],
              "lot": opt["lot"], "lots": lots, "entry_ts": now.timestamp(), "entry": entry,

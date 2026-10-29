@@ -19,6 +19,7 @@ from .record import Recorder, Tracker, evidence, levels, outcomes, scorecard, si
 from .state import MarketState
 from .store import Store
 from .universe import VIX_KEY, atm_window
+from . import riskgate
 from .upstox import TokenStore
 from .vol import atm_iv_from_chain, daily_stats, gex, percentile, structure
 
@@ -141,6 +142,8 @@ class LiveEngine:
         self.scenarios = Scenarios(self)
         from .edgebook import PatternBook
         self.patterns = PatternBook(self.data_dir)
+        from .timemachine import TimeMachine
+        self.tm = TimeMachine(self)
 
     @property
     def running(self):
@@ -519,6 +522,7 @@ class LiveEngine:
             self._big_prints(now, lc)
             self.tracker.update(self.state, self.clock.ts())
             self.paper.update(self.state, now)
+            self._flat_by_reminder(now, lc)
             if self._every("pulse", 5, clock_time=False):
                 self._market_view()
                 self._rule_pulse()
@@ -708,6 +712,18 @@ class LiveEngine:
                      "structure": structure(a["direction"], m, ctx) if m else None,
                      "track": st, "score": sc, "model_p": round(p * 100) if p is not None else None, "muted": muted,
                      "regime": (reg or {}).get("label")}
+        # risk gate: PASS / BLOCK with reasons and lots, before anything can become a paper trade
+        try:
+            if a.get("option") and self.paper:
+                inst = self.state.get(a["option"]["key"])
+                if inst:
+                    a["option"]["bid"], a["option"]["ask"] = inst.bid, inst.ask or a["option"].get("ask")
+                ban = (self.context.view().get("ban") or []) if self.context else []
+                a["data"]["risk"] = riskgate.check(a, a["option"], now=now, paper_cfg=self.paper.cfg, guard=self.paper.guard(now),
+                                                   open_syms={t["sym"] for t in self.paper.open_trades()}, ban=ban,
+                                                   cfg=(lc.get("risk") or {}))
+        except Exception as e:
+            self.log(f"Risk gate failed: {e}")
         # stories: alerts on the same symbol within 30 minutes are one developing story
         s = self.stories.get(a["sym"])
         new_story = not s or ts - s["last"] > STORY_GAP_MIN * 60
@@ -788,6 +804,29 @@ class LiveEngine:
             if due("scenario_hist", 3 * 3600):
                 threading.Thread(target=self._scenario_refresh, daemon=True).start()
             time.sleep(5)
+
+    def _flat_by_reminder(self, now, lc):
+        """Five minutes before the square-off time: say what is still open (once a day)."""
+        ex = (self.paper.cfg.get("exit_time") if self.paper else None) or "15:15"
+        h, m = map(int, ex.split(":"))
+        warn_at = (dt.datetime.combine(now.date(), dt.time(h, m)) - dt.timedelta(minutes=5)).strftime("%H:%M")
+        day = now.date().isoformat()
+        if now.strftime("%H:%M") < warn_at or getattr(self, "_flat_warned", None) == day:
+            return
+        self._flat_warned = day
+        opens = self.paper.open_trades() if self.paper else []
+        desk_open = []
+        try:
+            desk_open = [t for t in self.desk.view()["today"] if t["status"] == "open"]
+        except Exception:
+            pass
+        if not opens and not desk_open:
+            return
+        names = ", ".join([t["label"] for t in opens][:6] + [f"{t['family']} {t['sym']}" for t in desk_open][:3])
+        self._emit({"sym": "PORTFOLIO", "kind": "flat_by", "direction": "neutral", "severity": 2,
+                    "title": f"Square-off at {ex}: {len(opens) + len(desk_open)} paper position(s) still open",
+                    "detail": f"Open: {names}. Intraday positions close at {ex}; nothing is carried overnight.",
+                    "price": None, "data": {}}, now, lc)
 
     def _scenario_refresh(self, force=False):
         """Keep the scenario engine's 1-minute index history current (needs an Upstox login) and re-test it daily."""

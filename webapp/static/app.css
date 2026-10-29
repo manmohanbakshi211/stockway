@@ -525,3 +525,9 @@ main.wide { max-width: none; }
 .dot-live { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #1E8A5A; margin-right: 4px; vertical-align: 1px; }
 
 .nw { white-space: nowrap; }
+
+.risk { margin: 6px 0 0; padding: 4px 8px; border-radius: 4px; }
+.risk.pass { background: rgba(30,138,90,.08); }
+.risk.block { background: rgba(194,59,50,.08); }
+.tm { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); }
+.tm-bars { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; }

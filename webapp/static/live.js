@@ -195,15 +195,32 @@ function alertItem(a, full = false, extra = "") {
     const s2 = st && st.type === "spread" && st.spread ? ` · or spread ${fk(st.spread.buy)}/${fk(st.spread.sell)} for ${rupees(st.spread.cost)}, max ${rupees(st.spread.max_profit)}` : "";
     const tag = st ? `<span class="pill ${st.type === "buy" ? "p-up" : st.type === "spread" ? "p-amber" : "p-down"}">${st.type === "buy" ? "Buy option" : st.type === "spread" ? "Use a spread" : "Skip"}</span>` : "";
     trade = `<div class="idea"><span>${tag} <b>${esc(o.label)}</b> @ ₹${fx(o.ltp)} · ${rupees(o.cost_per_lot)}/lot${s2}${st ? `<br><small class="muted">${esc(st.why)}</small>` : ""}</span>
-      <span class="btn-row"><button class="link-btn" data-paper="${a.id}">Paper trade</button><button class="link-btn" data-explain="${a.id}">Why?</button></span></div>`;
+      <span class="btn-row">${lv.stop ? `<button class="link-btn" data-tm="${a.id}">Time Machine</button>` : ""}<button class="link-btn" data-paper="${a.id}">Paper trade</button><button class="link-btn" data-explain="${a.id}">Why?</button></span></div>`;
   } else trade = `<div class="idea"><span class="muted small">${esc(d.regime ? "Market: " + d.regime : "")}</span><span class="btn-row"><button class="link-btn" data-explain="${a.id}">Why?</button></span></div>`;
   return `<li class="alert sev${a.severity}" data-aid="${a.id}">
     <div class="al-time">${hms(a.ts)}<span class="sevtag s${a.severity}">${SEV[a.severity]}</span>${score}</div>
     <div class="al-body"><div class="al-title">${arrow(a.direction)} <a href="${a.sym === "GLOBAL" ? "#/world" : `#/chart?s=${encodeURIComponent(a.sym)}`}">${esc(a.title)}</a></div>
       <p>${esc(a.detail)}${link} <span class="muted small">${esc(KIND[a.kind] || a.kind)}</span> ${track}</p>
       ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}
-      ${ev ? `<div class="evs">${ev}</div>` : ""}${plan}${trade}
+      ${ev ? `<div class="evs">${ev}</div>` : ""}${plan}${trade}${riskLine(d.risk)}<div class="tm-out" id="tm-${a.id}"></div>
       ${a.ai ? `<div class="ai-text">${fmtAI(a.ai)}</div>` : ""}${extra}</div></li>`;
+}
+
+function riskLine(r) {
+  if (!r) return "";
+  if (r.verdict === "PASS") return `<p class="risk pass small"><b>Risk check: PASS</b> · ${r.lots} lot${r.lots > 1 ? "s" : ""} · max loss ${rupees(r.max_loss)} at the stop · uses ${rupees(r.capital_used)}${(r.warnings || []).length ? ` · <span class="amber">${r.warnings.map(esc).join(" ")}</span>` : ""}</p>`;
+  return `<p class="risk block small"><b>Risk check: BLOCK</b> · ${(r.reasons || []).map(esc).join(" ")} <span class="muted">No paper trade.</span></p>`;
+}
+
+function tmCard(r) {
+  const m = r.mc, h = r.history, v = r.verdict;
+  const cls = v.grade === "edge" ? "up" : v.grade === "against" ? "down" : "amber";
+  return `<div class="tm"><p class="small" style="margin:0 0 4px"><b>Time Machine</b> <span class="muted">· ${m.replays.toLocaleString("en-IN")} replays of the rest of the day from ${esc(r.sym)}'s last ${h.sessions} sessions (seed ${m.seed})</span></p>
+    <div class="tm-bars"><span class="up">Target first <b>${m.target_first}%</b></span><span class="down">Stop first <b>${m.stop_first}%</b></span><span>Neither by 15:15 <b>${m.neither}%</b></span><span>Avg <b>${m.avg_r > 0 ? "+" : ""}${m.avg_r}R</b></span></div>
+    <p class="small" style="margin:4px 0">15:15 price: median ${fx(m.close_pct[2])}, 90% between ${fx(m.close_pct[0])} and ${fx(m.close_pct[4])}.</p>
+    <p class="small" style="margin:4px 0">Real past (same time of day, same stop/target distances, ${h.sessions} sessions): ${h.target} target, ${h.stop} stop, ${h.neither} neither, avg ${h.avg_r > 0 ? "+" : ""}${h.avg_r}R.</p>
+    <p class="small ${cls}" style="margin:4px 0"><b>${esc(v.line)}</b>${(v.notes || []).map((n) => `<br>${esc(n)}`).join("")}</p>
+    <p class="muted small" style="margin:0">A simulation from recent behaviour, not a prediction. Results, news and events can do things the last 60 days never did.</p></div>`;
 }
 
 function storyList(alerts) {
@@ -225,6 +242,12 @@ function bindAlertButtons(root) {
     e.preventDefault(); b.disabled = true;
     try { await post(`/api/live/alerts/${b.dataset.paper}/paper`, {}); toast("Paper trade opened"); } catch (err) { toast(err.message); }
     b.disabled = false;
+  });
+  root.querySelectorAll("[data-tm]").forEach((b) => b.onclick = async (e) => {
+    e.preventDefault(); b.disabled = true; const t = b.textContent; b.textContent = "Replaying…";
+    try { const r = await post(`/api/live/alerts/${b.dataset.tm}/timemachine`, {}); const el = document.getElementById("tm-" + b.dataset.tm); if (el) el.innerHTML = tmCard(r); }
+    catch (err) { toast(err.message); }
+    b.disabled = false; b.textContent = t;
   });
   root.querySelectorAll("[data-explain]").forEach((b) => b.onclick = async (e) => {
     e.preventDefault(); b.disabled = true; b.textContent = "Thinking…";
