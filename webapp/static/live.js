@@ -1059,14 +1059,14 @@ function scenarioCard(sc, sym) {
   const rows = ["5", "15", "60"].map((h) => { const x = sc.horizons[h]; if (!x) return "";
     const top = Math.max(x.up, x.side, x.down);
     const c = (v, cls) => `<td class="r ${v === top ? "b " + cls : ""}">${pc(v)}</td>`;
-    return `<tr><td>${h === "60" ? "1 hour" : h + " min"}</td>${c(x.up, "up")}${c(x.side, "")}${c(x.down, "down")}<td class="r small">${pts(x.lo_pts)} to ${pts(x.hi_pts)} pts</td></tr>`; }).join("");
+    return `<tr><td class="nw">${h === "60" ? "1 hr" : h + "m"}</td>${c(x.up, "up")}${c(x.side, "")}${c(x.down, "down")}<td class="r small nw">${pts(x.lo_pts)} … ${pts(x.hi_pts)}</td></tr>`; }).join("");
   const ev = sc.eval && sc.eval.horizons ? sc.eval.horizons["15"] : null;
   const evh = sc.eval && sc.eval.horizons ? sc.eval.horizons["60"] : null;
   const skill = ev && ev.skill_pct != null ? ev.skill_pct : null;
   const honest = ev ? `<p class="small" style="margin:8px 0 0"><b>Track record</b> (last ${sc.eval.days} sessions, replayed without peeking): the most likely call came true ${ev.hit_pct}% of the time at 15 min (base rate ${ev.hit_base_pct}%)${evh ? `, ${evh.hit_pct}% at 1 hour (base ${evh.hit_base_pct}%)` : ""}. The range held ${ev.range_inside_pct}% of the time (aim 80%).
       ${skill != null && skill <= 1 ? `<br><b class="amber">Direction has no proven edge yet: trust the range (how far it can go), not the arrow.</b>` : ""}</p>` : `<p class="small muted" style="margin:8px 0 0">Track record appears after the first test run (needs the 1-minute history).</p>`;
   const sims = (sc.similar || []).slice(0, 5).map((x) => `<li><b>${new Date(x.date + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" })}</b> <span class="muted small">${x.similarity}% alike</span> · next hour ${fpc(x.next60_pct)} · to close ${fpc(x.close_pct)}</li>`).join("");
-  return `<table class="mini"><thead><tr><th></th><th class="r up">▲ Up</th><th class="r">↔ Side</th><th class="r down">▼ Down</th><th class="r">Likely range</th></tr></thead><tbody>${rows}</tbody></table>
+  return `<table class="mini"><thead><tr><th></th><th class="r up">▲ Up</th><th class="r">↔ Side</th><th class="r down">▼ Down</th><th class="r">80% range (pts)</th></tr></thead><tbody>${rows}</tbody></table>
     <p class="small muted" style="margin:6px 0 0">From the ${sc.k} past sessions most like today so far, rescaled to today's volatility (${sc.sigma_day_pct}% a day). Sideways = move under ±${Math.round(sc.horizons["15"] ? sc.horizons["15"].side_band_pts : 0)} pts in 15 min.</p>
     ${sims ? `<h4 style="margin:10px 0 4px">Most similar past days</h4><ul class="plain small">${sims}</ul>` : ""}${honest}`;
 }
@@ -1097,7 +1097,8 @@ function drawChart(d, first) {
   S.markers.setMarkers(chOn("marks") ? d.markers.map(({ time, position, color, shape, text }) => ({ time, position, color, shape, text })) : []);
   if (first) {                       // show the last ~120 bars (at least 40 slots so a young session isn't stretched)
     const n = d.candles.length;
-    if (n) CH.chart.timeScale().setVisibleLogicalRange({ from: n - Math.max(40, Math.min(n, 120)), to: n + 6 });
+    const ahead = d.scenario && d.scenario.ready && chOn("scen") ? Math.ceil((d.scenario.horizon_max || 60) / d.tf) + 3 : 6;
+    if (n) CH.chart.timeScale().setVisibleLogicalRange({ from: n - Math.max(40, Math.min(n, 120)), to: n + ahead });
   }
   $("#ch-price").innerHTML = `<b>${fx(d.spot)}</b> ${fpc(d.chg_pct)} ${d.regime && d.regime.code !== "opening" ? `<span class="pill p-sig">${esc(d.regime.label)}</span>` : ""}`;
   $("#ch-read").innerHTML = d.read.length ? `<ul class="plain">${d.read.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="muted">Builds after the first 15 minutes.</p>`;

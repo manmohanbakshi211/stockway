@@ -523,3 +523,5 @@ main.wide { max-width: none; }
 @keyframes flashUp { from { background: rgba(30,138,90,.25); } to { background: transparent; } }
 @keyframes flashDown { from { background: rgba(194,59,50,.25); } to { background: transparent; } }
 .dot-live { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #1E8A5A; margin-right: 4px; vertical-align: 1px; }
+
+.nw { white-space: nowrap; }

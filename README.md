@@ -153,6 +153,13 @@ The side panel gives a plain-English chart read, today's setups with live state,
 EMA pullback in a trend, VWAP reclaim/loss, narrow-CPR breakout, previous-day high/low break, OI-wall rejection.
 They fire as alerts, are graded on the Scorecard, and are backtested in the Strategy desk.
 
+**Scenarios** (Nifty, Bank Nifty): today's session so far is matched against every past session since 2022
+(1-minute, scaled to each day's normal volatility, plus gap, VIX and range). The 40 most similar days show what
+happened next: probabilities of up / sideways / down for 5, 15 and 60 minutes, an 80% range in points, and three
+projected paths drawn on the chart. The same method is replayed on the last 250 sessions without peeking, and the
+panel shows its real track record: so far the size of the move is useful, the direction is close to a coin toss.
+The 1-minute history downloads by itself after an Upstox login.
+
 **World**: global index futures, currencies, commodities, US yields, VIX, crypto and Indian ADRs (vs NSE price),
 each with its past correlation to Nifty and an indicative "global pressure" on Nifty; this week's economic
 calendar, F&O results for 10 days, and global news tagged by likely impact on India. Big moves (crude, dollar,
