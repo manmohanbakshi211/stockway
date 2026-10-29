@@ -160,6 +160,11 @@ projected paths drawn on the chart. The same method is replayed on the last 250 
 panel shows its real track record: so far the size of the move is useful, the direction is close to a coin toss.
 The 1-minute history downloads by itself after an Upstox login.
 
+**Chart patterns**: swing points (HH / HL / LH / LL) and market structure, plus double tops/bottoms, head &
+shoulders, triangles, flags, breakout + retest, RSI divergence and reversal candles at key levels, each with
+entry, stop and target, drawn on the chart. Every pattern is replayed on the 1-minute index history and alerts quote
+its record ("491 times, 41% won, avg −0.00R"). The status bar shows Upstox's data delay and analysis time.
+
 **World**: global index futures, currencies, commodities, US yields, VIX, crypto and Indian ADRs (vs NSE price),
 each with its past correlation to Nifty and an indicative "global pressure" on Nifty; this week's economic
 calendar, F&O results for 10 days, and global news tagged by likely impact on India. Big moves (crude, dollar,

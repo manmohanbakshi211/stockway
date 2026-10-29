@@ -12,6 +12,7 @@ from . import patterns as PT, setups, ta
 from .clock import IST
 
 IST_SHIFT = 19800          # the chart library shows UTC; shift so the axis reads IST
+NOISY_FOR_STOCKS = {"flag", "breakout_retest", "candle_at_level"}
 SHORT = {"ema_pullback": "EMA", "vwap_reclaim": "VWAP", "cpr_breakout": "CPR", "pdh_break": "PDH/L", "wall_fade": "Wall"}
 
 
@@ -158,6 +159,8 @@ class ChartData:
     def _pattern_alerts(self, sym, m, closed, ctx, emit):
         book = getattr(self.e, "patterns", None)
         for p in PT.detect(closed, self._levels(ctx), recent=1):
+            if not m.get("is_index") and p["pattern"] in NOISY_FOR_STOCKS:
+                continue                      # common, small patterns: drawn on the chart, not alerted for 200 stocks
             d = 1 if p["direction"] == "up" else -1
             line, grade = book.line(sym, p["pattern"], p["direction"]) if book else (None, "unknown")
             e = p["entry"]
