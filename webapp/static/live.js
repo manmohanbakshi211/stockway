@@ -813,7 +813,7 @@ async function pageDesk() {
           <li>Log in on <a href="#/connect">Live setup</a> (after upgrading, log out and log in once so the new plan is picked up).</li>
           <li><b>Check access</b>, then <b>Download history</b>. It resumes where it stopped; leave the app open.</li></ol>
         <div class="form-grid" style="margin-top:12px">
-          <label class="field">History to download<select id="l-years">${[1, 2, 3, 4].map((v) => `<option value="${v}" ${Number(settings["lab.years"] || 3) === v ? "selected" : ""}>${v} year${v > 1 ? "s" : ""}</option>`).join("")}</select><small>About 4,500 requests per year (roughly 1 to 1.5 hours per year, within Upstox's limits).</small></label>
+          <label class="field">History to download<select id="l-years">${[1, 2, 3, 4].map((v) => `<option value="${v}" ${Number(settings["lab.years"] || 3) === v ? "selected" : ""}>${v} year${v > 1 ? "s" : ""}</option>`).join("")}</select><small>About 5,000 requests per year (roughly 1 hour per year of history, within Upstox limits).</small></label>
         </div>
         <div class="btn-row" style="margin-top:14px"><button class="btn" id="l-uptest" ${st.upstox ? "" : "disabled"}>Check access</button>
           <button class="btn primary" id="l-dl" ${st.upstox ? "" : "disabled"}>Download history</button></div>

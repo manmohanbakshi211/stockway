@@ -27,7 +27,7 @@ class PlusRequired(PermissionError):
 
 class Limiter:
     """Upstox standard API limits are 50/s, 500/min, 2000/30 min; stay well under them (the live app shares them)."""
-    WINDOWS = ((1.0, 8), (60.0, 250), (1800.0, 1300))
+    WINDOWS = ((1.0, 10), (60.0, 400), (1800.0, 1800))
 
     def __init__(self):
         self.calls = []
@@ -278,7 +278,7 @@ def download(token: str, data_dir, syms=("NIFTY", "BANKNIFTY"), start: dt.date |
     def tick():
         done[0] += 1
         progress(min(done[0], total - 1), total)
-    log(f"{len(jobs)} expiries to fetch (about {total:,} requests; roughly {max(1, total // 1300 * 30)} minutes or more)")
+    log(f"{len(jobs)} expiries to fetch (about {total:,} requests; roughly {max(1, total // 1800 * 30)} minutes or more)")
     for sym, e, a, b, f in jobs:
         if should_stop():
             log("Stopped. Finished expiries are kept; run again to continue.")
