@@ -874,8 +874,11 @@ class LiveEngine:
     def _insiders_refresh(self):
         fo = set(self.uni.underlyings) if self.uni and self.source != "sim" else \
             set(((self.context.mwpl or {}).get("symbols") or {}).keys())
+        if not fo and self.uni:
+            fo = set(self.uni.underlyings)
         fo = {x for x in fo if x not in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")}
         if not fo:
+            self.log("Insider trades: the F&O stock list is not loaded yet; will try again.")
             return
         try:
             new = self.insiders.refresh(fo, log=self.log) or []
