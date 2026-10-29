@@ -812,6 +812,7 @@ async function pageDesk() {
     ${st.synthetic ? `<div class="banner">⚠️ You are looking at a <b>demo on synthetic (fake) data</b>. It shows how the desk works, not whether it makes money. Download real history below (Upstox Plus).</div>` : ""}
     <div id="desk-live"></div>
     <div id="desk-edge"></div>
+    <div id="desk-eod"></div>
     ${S ? deskResults(res) : `<div class="empty" style="max-width:none"><h2>No backtest yet</h2><p>Log in to Upstox (Plus plan), download history, then run the backtest. Or see a quick demo on synthetic data first.</p>
       <div class="btn-row"><button class="btn" id="lab-demo">See a demo (synthetic data)</button></div></div>`}
     <h2>Data and settings</h2>
@@ -867,6 +868,12 @@ async function pageDesk() {
   ["#lab-demo", "#lab-demo2"].forEach((id) => { if ($(id)) $(id).onclick = () => job("/api/lab/demo"); });
   if (res) drawDeskCharts(res);
   api("/api/lab/edge").then((e) => { const el = $("#desk-edge"); if (el) el.innerHTML = edgeCard(e); }).catch(() => {});
+  Promise.all([api("/api/lab/eod/status"), api("/api/lab/eod").catch(() => null)]).then(([st2, r]) => {
+    const el = $("#desk-eod"); if (!el) return;
+    el.innerHTML = eodCard(st2, r);
+    $("#eod-dl").onclick = () => job("/api/lab/eod/download");
+    if ($("#eod-run")) $("#eod-run").onclick = () => job("/api/lab/eod/run");
+  }).catch(() => {});
   const tick = async () => {
     if (state.page !== "desk") return;
     try { drawDeskLive(await api("/api/lab/desk")); } catch (_) {}
@@ -904,6 +911,23 @@ function drawDeskLive(d) {
     Plotly.react($("#desk-days"), [{ type: "bar", x: d.days.map((x) => x.day), y: d.days.map((x) => x.pnl), marker: { color: d.days.map((x) => (x.pnl >= 0 ? C.up : C.down)) } }],
       plotLayout({ margin: { l: 60, r: 10, t: 8, b: 30 }, yaxis: { gridcolor: "#EEF1F4", tickprefix: "₹" } }), plotCfg);
   }
+}
+
+function eodCard(st, r) {
+  const rs = (x) => x == null ? "–" : `<span class="${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : "−"}₹${Math.abs(Math.round(x)).toLocaleString("en-IN")}</span>`;
+  const head = `<div class="toolbar" style="margin:0 0 8px"><h3 style="margin:0">10+ years, end of day <span class="muted small">NSE bhavcopy · ${st.days ? `${st.days.toLocaleString("en-IN")} days, ${esc(st.first)} → ${esc(st.last)}` : "not downloaded"}</span></h3>
+    <div class="btn-row" style="margin:0"><button class="btn" id="eod-dl">${st.days ? "Update data" : "Download (free, ~45 min)"}</button>${st.days ? `<button class="btn primary" id="eod-run">Run 10-year test</button>` : ""}</div></div>`;
+  if (!r) return `<div class="panel">${head}<p class="muted small">Every Nifty and Bank Nifty option contract's daily close since 2015, free from NSE. Tests hedged premium selling (iron condor / iron fly held to expiry) and buying straddles over 10+ years, walk-forward by year.</p></div>`;
+  const fams = Object.values(r.results || {});
+  const rows = fams.map((f) => { const o = f.oos || {}; const yrs = f.years.map((y) => `<span class="chip static small" title="${esc(y.pid || y.note || "")}">${y.year}: ${y.pid ? rs(y.pnl) : "cash"}</span>`).join(" ");
+    return `<tr><td>${f.sym === "BANKNIFTY" ? "Bank Nifty" : "Nifty"}</td><td>${esc(f.name)}</td><td class="r">${o.n || 0}</td><td class="r">${o.n ? rs(o.avg) : "–"}</td><td class="r">${o.n ? rs(o.total) : "–"}</td><td class="r">${o.win_pct ?? "–"}${o.n ? "%" : ""}</td><td class="r">${o.n ? rs(o.worst) : "–"}</td></tr>
+      <tr><td></td><td colspan="6" class="small">${yrs}</td></tr>`; }).join("");
+  const vrp = (r.vrp || []).map((v) => `<tr><td>${v.sym === "BANKNIFTY" ? "Bank Nifty" : "Nifty"}</td><td>${v.year}</td><td class="r">${v.implied_pct}%</td><td class="r">${v.realised_pct}%</td><td class="r">${v.implied_over_pct}%</td></tr>`).join("");
+  return `<div class="panel">${head}
+    <p class="muted small">${(r.notes || []).map(esc).join(" ")}</p>
+    <div class="table-wrap"><table><thead><tr><th>Index</th><th>Strategy</th><th class="r">Trades (out of sample)</th><th class="r">Avg / lot</th><th class="r">Total / lot</th><th class="r">Won</th><th class="r">Worst</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <details style="margin-top:10px"><summary class="small">Volatility risk premium by year (option-implied move vs the move that happened)</summary>
+      <div class="table-wrap"><table class="mini"><thead><tr><th>Index</th><th>Year</th><th class="r">Implied move</th><th class="r">Actual move</th><th class="r">Implied was bigger</th></tr></thead><tbody>${vrp}</tbody></table></div></details></div>`;
 }
 
 function edgeCard(e) {

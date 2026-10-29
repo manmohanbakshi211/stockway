@@ -580,6 +580,39 @@ def lab_results():
     return clean(r)
 
 
+@app.get("/api/lab/eod/status")
+def lab_eod_status():
+    from lab.bhav import Bhavcopy
+    return Bhavcopy(ROOT / "data").status()
+
+
+@app.post("/api/lab/eod/download")
+def lab_eod_download():
+    from lab.bhav import Bhavcopy
+
+    def job(log, stop):
+        Bhavcopy(ROOT / "data", log).download(dt.date(2015, 1, 1), should_stop=stop, progress=_lab_progress(log, "Downloading end-of-day files"))
+    return {"id": JOBS.start("lab_eod", "Downloading 10+ years of NSE end-of-day F&O data", job)["id"]}
+
+
+@app.post("/api/lab/eod/run")
+def lab_eod_run():
+    from lab.eod_study import run
+
+    def job(log, stop):
+        run(ROOT / "data", log=log)
+    return {"id": JOBS.start("lab_eod", "Testing strategies on 10+ years of end-of-day data", job)["id"]}
+
+
+@app.get("/api/lab/eod")
+def lab_eod_results():
+    from lab.walk import lab_dir
+    f = lab_dir(ROOT / "data") / "eod_results.json"
+    if not f.exists():
+        raise HTTPException(404, "No end-of-day test yet.")
+    return clean(json.loads(f.read_text()))
+
+
 @app.get("/api/lab/edge")
 def lab_edge():
     from lab.walk import lab_dir
