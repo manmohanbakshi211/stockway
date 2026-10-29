@@ -137,6 +137,8 @@ class LiveEngine:
         self.charts = ChartData(self)
         from .edgebook import EdgeBook
         self.edge = EdgeBook(self.data_dir)
+        from .analog import Scenarios
+        self.scenarios = Scenarios(self)
 
     @property
     def running(self):
@@ -781,7 +783,23 @@ class LiveEngine:
                 self.world.check_events()
             except Exception:
                 pass
+            if due("scenario_hist", 3 * 3600):
+                threading.Thread(target=self._scenario_refresh, daemon=True).start()
             time.sleep(5)
+
+    def _scenario_refresh(self, force=False):
+        """Keep the scenario engine's 1-minute index history current (needs an Upstox login) and re-test it daily."""
+        tok = self.tokens.load()
+        sc = self.scenarios
+        try:
+            if tok:
+                before = {s: sc._file(s).exists() for s in ("NIFTY", "BANKNIFTY")}
+                sc.ensure_history(tok["access_token"], log=self.log, force=force)
+                ev_age = time.time() - ((sc.eval or {}).get("_ts") or 0)
+                if force or not sc.eval or ev_age > 20 * 3600 or not all(before.values()):
+                    sc.run_eval(log=self.log)
+        except Exception as ex:
+            self.log(f"Scenario engine refresh failed: {ex}")
 
     def _world_calendar(self):
         from lab.strategies import EVENTS

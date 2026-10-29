@@ -250,7 +250,19 @@ def live_paper(source: str | None = None):
 
 @router.get("/api/live/context")
 def live_context():
-    return clean(engine().context.view())
+    e = engine()
+    c = e.context.view()
+    rows = getattr(e.world, "rows", {}) or {}
+    g = []
+    for x in c.get("global") or []:          # fresher prices from the World monitor when it has them
+        r = rows.get(x.get("symbol"))
+        if r and r.get("live_ts"):
+            x = {**x, "last": r["last"], "chg_pct": r["chg_pct"],
+                 "asof": dt.datetime.fromtimestamp(r["live_ts"], IST).strftime("%d %b %H:%M")}
+        g.append(x)
+    c["global"] = g
+    c["server_ts"] = time.time()
+    return clean(c)
 
 
 @router.post("/api/live/context/refresh")
@@ -316,6 +328,22 @@ def world_refresh():
         except Exception as ex:
             e.world.errors[fn.__name__] = str(ex)[:160]
     return clean(_world_with_india(e))
+
+
+@router.get("/api/scenarios/status")
+def scenarios_status():
+    return clean(engine().scenarios.status())
+
+
+@router.post("/api/scenarios/refresh")
+def scenarios_refresh():
+    e = engine()
+    if not e.tokens.load():
+        raise HTTPException(401, "Log in to Upstox first: the history comes from Upstox.")
+    if e.scenarios.busy:
+        return {"started": False, "note": "Already running."}
+    threading.Thread(target=e._scenario_refresh, kwargs={"force": True}, daemon=True).start()
+    return {"started": True}
 
 
 @router.get("/api/brain")

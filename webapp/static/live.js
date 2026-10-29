@@ -704,9 +704,11 @@ async function pageConnect() {
 
 
 /* ---------------- page: Market context */
-async function pageContext() {
+async function pageContext(auto = false) {
   stopPageTimer();
-  const c = await api("/api/live/context");
+  let c;
+  try { c = await api("/api/live/context"); } catch (e) { if (!auto) throw e; L.pageTimer = setTimeout(() => state.page === "context" && pageContext(true), 30000); return; }
+  if (state.page !== "context") return;
   const P = (c.participants || {}).rows || [];
   const nm = (v) => (v == null ? "–" : `${v > 0 ? "+" : ""}${fk(Math.round(v))}`);
   const cls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
@@ -716,7 +718,7 @@ async function pageContext() {
   const deals = (c.deals_fo.length ? c.deals_fo : c.deals_all).slice(0, 25).map((d) => `<tr><td><b>${esc(d.sym)}</b> <small class="muted">${esc(d.type)}</small></td><td>${esc(d.client)}</td><td class="${d.side === "BUY" ? "up" : "down"}">${esc(d.side)}</td><td class="r">${fx(d.price)}</td><td class="r"><b>₹${fx(d.value_cr)} cr</b></td></tr>`).join("");
   const errs = Object.entries(c.errors || {});
   main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Market context</h1><p class="lede" style="margin-bottom:0">Who is positioned where, what money moved, and what companies just announced. From NSE and global markets.</p></div>
-      <button class="btn" id="ctx-refresh">Refresh now</button></div>
+      <div style="text-align:right"><button class="btn" id="ctx-refresh">Refresh now</button><p class="small muted" style="margin:6px 0 0"><span class="dot-live"></span> Auto-refresh every 30s · ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}</p></div></div>
     ${errs.length ? `<div class="banner">Some sources didn't answer: ${errs.map(([k, v]) => `${esc(k)} (${esc(v)})`).join("; ")}. They retry every 30 minutes.</div>` : ""}
     <h2>Positioning in index derivatives <span class="muted small">${c.participants ? "NSE, " + esc(c.participants.date) : ""}</span></h2>
     <div class="table-wrap"><table><thead><tr><th>Who</th><th class="r">Index futures long %</th><th class="r">Futures net</th><th class="r">Change</th><th class="r">Calls net</th><th class="r">Change</th><th class="r">Puts net</th><th class="r">Change</th><th class="r">Stock futures net</th></tr></thead>
@@ -737,6 +739,7 @@ async function pageContext() {
     <h2>Company filings, live <span class="muted small">F&amp;O stocks, from NSE</span></h2>
     <ul class="alerts filings">${fil || `<li class="muted" style="padding:16px">Filings appear here as companies announce them (checked every minute, 7:30 AM to 8 PM).</li>`}</ul>`;
   $("#ctx-refresh").onclick = async (e) => { e.target.disabled = true; e.target.textContent = "Refreshing…"; try { await post("/api/live/context/refresh", {}); } catch (err) { toast(err.message); } pageContext(); };
+  L.pageTimer = setTimeout(() => state.page === "context" && pageContext(true), 30000);
 }
 
 /* ---------------- page: Scorecard */
@@ -955,7 +958,7 @@ function drawDeskCharts(r) {
 const CH = { chart: null, sym: null, tf: 5, days: 3, series: {}, lines: [], markers: null, sig: "", data: null };
 const CH_TOGGLES = [["vwap", "VWAP + bands"], ["ema", "EMA 9/21/50"], ["st", "Supertrend"], ["prev", "Yesterday H/L/C"], ["cpr", "CPR + pivots"],
   ["or", "Opening range"], ["oi", "OI walls + max pain"], ["gamma", "Gamma levels"], ["em", "Expected move"], ["marks", "Alerts + trades"],
-  ["vol", "Volume"], ["rsi", "RSI"], ["macd", "MACD"]];
+  ["vol", "Volume"], ["rsi", "RSI"], ["macd", "MACD"], ["scen", "Scenarios: up / sideways / down"]];
 function chOn(k) { return LS.get("ch_" + k, !["macd", "em"].includes(k)); }
 
 async function pageChart() {
@@ -965,10 +968,13 @@ async function pageChart() {
   CH.tf = Number(params.get("tf") || LS.get("ch_tf", 5));
   CH.days = Number(LS.get("ch_days", 3));
   LS.set("lastSym", CH.sym);
-  const syms = (L.scanner && L.scanner.length ? L.scanner : await api("/api/live/scanner").catch(() => [])).map((m) => m.sym).sort();
+  const IDX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"];
+  const stocks = (L.scanner && L.scanner.length ? L.scanner : await api("/api/live/scanner").catch(() => [])).map((m) => m.sym).filter((x) => !IDX.includes(x)).sort();
+  if (!IDX.includes(CH.sym) && !stocks.includes(CH.sym)) stocks.unshift(CH.sym);
   main.classList.add("wide");
   main.innerHTML = `<div class="ch-top">
-      <div class="ch-sym"><input list="ch-syms" id="ch-sym" value="${esc(CH.sym)}" aria-label="Symbol" spellcheck="false"><datalist id="ch-syms">${syms.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
+      <div class="ch-sym"><select id="ch-sym" aria-label="Symbol"><optgroup label="Indices">${IDX.map((x) => `<option value="${x}" ${x === CH.sym ? "selected" : ""}>${x}</option>`).join("")}</optgroup>
+        <optgroup label="F&amp;O stocks">${stocks.map((x) => `<option value="${esc(x)}" ${x === CH.sym ? "selected" : ""}>${esc(x)}</option>`).join("")}</optgroup></select>
         <span id="ch-price" class="ch-price"></span></div>
       <div class="seg" role="group" aria-label="Timeframe">${[1, 3, 5, 15].map((t) => `<button data-tf="${t}" aria-pressed="${CH.tf === t}">${t}m</button>`).join("")}</div>
       <div class="seg" role="group" aria-label="Days">${[1, 3, 5].map((d) => `<button data-days="${d}" aria-pressed="${CH.days === d}">${d}D</button>`).join("")}</div>
@@ -978,10 +984,11 @@ async function pageChart() {
     <div class="ch-wrap"><div id="ch-chart" class="ch-chart"></div>
       <aside class="ch-side"><div class="panel tight"><h3>Chart read</h3><div id="ch-read"><p class="muted">Loading…</p></div>
         <button class="link-btn" id="ch-ai">AI read this chart</button><div id="ch-ai-out"></div></div>
+        <div class="panel tight" id="ch-scen-wrap"><h3>Scenarios <span class="muted small">next 5 / 15 / 60 min</span></h3><div id="ch-scen"><p class="muted small">Nifty and Bank Nifty.</p></div></div>
         <div class="panel tight"><h3>Setups today</h3><div id="ch-setups"></div></div>
         <div class="panel tight"><h3>Key levels</h3><div id="ch-levels"></div></div></aside></div>
     <p class="note">Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts. ${""}Index VWAP counts each bar equally (indices have no volume).</p>`;
-  $("#ch-sym").onchange = (e) => { location.hash = `#/chart?s=${encodeURIComponent(e.target.value.trim().toUpperCase())}&tf=${CH.tf}`; };
+  $("#ch-sym").onchange = (e) => { location.hash = `#/chart?s=${encodeURIComponent(e.target.value)}&tf=${CH.tf}`; };
   main.querySelectorAll("[data-tf]").forEach((b) => b.onclick = () => { LS.set("ch_tf", Number(b.dataset.tf)); location.hash = `#/chart?s=${encodeURIComponent(CH.sym)}&tf=${b.dataset.tf}`; });
   main.querySelectorAll("[data-days]").forEach((b) => b.onclick = () => { LS.set("ch_days", Number(b.dataset.days)); pageChart(); });
   main.querySelectorAll("[data-tog]").forEach((c) => c.onchange = () => { LS.set("ch_" + c.dataset.tog, c.checked); buildChart(CH.hasVol); drawChart(CH.data, true); });
@@ -1016,6 +1023,12 @@ function buildChart(hasVolume = true) {
   if (chOn("vwap")) { S.vwap = ln("#3D2FA8", 2); S.u1 = ln("rgba(61,47,168,.45)", 1, 2); S.d1 = ln("rgba(61,47,168,.45)", 1, 2); S.u2 = ln("rgba(61,47,168,.3)", 1, 1); S.d2 = ln("rgba(61,47,168,.3)", 1, 1); }
   if (chOn("ema")) { S.ema9 = ln("#E07B00", 1); S.ema21 = ln("#0A84C1", 1); S.ema50 = ln("#5E6B78", 1, 2); }
   if (chOn("st")) { S.st_up = ln("#1E8A5A", 2, 0, 0, { lineType: 1 }); S.st_dn = ln("#C23B32", 2, 0, 0, { lineType: 1 }); }
+  if (chOn("scen")) {
+    const sl = (color, style, w = 2) => chart.addSeries(LW.LineSeries, { color, lineWidth: w, lineStyle: style, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false }, 0);
+    S.sc_up = sl("rgba(30,138,90,.9)", 2); S.sc_side = sl("rgba(94,107,120,.9)", 2); S.sc_down = sl("rgba(194,59,50,.9)", 2);
+    S.sc_lo = sl("rgba(94,107,120,.45)", 1, 1); S.sc_hi = sl("rgba(94,107,120,.45)", 1, 1);
+    S.sc_lo.applyOptions({ lastValueVisible: false }); S.sc_hi.applyOptions({ lastValueVisible: false });
+  }
   let pane = 1;
   if (chOn("vol") && hasVolume) { S.vol = chart.addSeries(LW.HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false }, pane); S.volPane = pane++; }
   if (chOn("rsi")) { S.rsi = ln("#3D2FA8", 1, 0, pane, { lastValueVisible: true }); S.rsi.createPriceLine({ price: 70, color: "#C23B32", lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsi.createPriceLine({ price: 30, color: "#1E8A5A", lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsiPane = pane++; }
@@ -1037,12 +1050,41 @@ function buildChart(hasVolume = true) {
   CH.chart = chart; CH.series = S; CH.lines = []; CH.sig = "";
 }
 
+function scenarioCard(sc, sym) {
+  if (!["NIFTY", "BANKNIFTY"].includes(sym)) return `<p class="muted small">Available for Nifty and Bank Nifty (they have years of 1-minute history).</p>`;
+  if (!sc) return `<p class="muted small">Loading…</p>`;
+  if (!sc.ready) return `<p class="muted small">${esc(sc.why || "Not ready yet.")}</p>`;
+  const pc = (x) => `${Math.round(x * 100)}%`;
+  const pts = (x) => `${x > 0 ? "+" : ""}${Math.round(x)}`;
+  const rows = ["5", "15", "60"].map((h) => { const x = sc.horizons[h]; if (!x) return "";
+    const top = Math.max(x.up, x.side, x.down);
+    const c = (v, cls) => `<td class="r ${v === top ? "b " + cls : ""}">${pc(v)}</td>`;
+    return `<tr><td>${h === "60" ? "1 hour" : h + " min"}</td>${c(x.up, "up")}${c(x.side, "")}${c(x.down, "down")}<td class="r small">${pts(x.lo_pts)} to ${pts(x.hi_pts)} pts</td></tr>`; }).join("");
+  const ev = sc.eval && sc.eval.horizons ? sc.eval.horizons["15"] : null;
+  const evh = sc.eval && sc.eval.horizons ? sc.eval.horizons["60"] : null;
+  const skill = ev && ev.skill_pct != null ? ev.skill_pct : null;
+  const honest = ev ? `<p class="small" style="margin:8px 0 0"><b>Track record</b> (last ${sc.eval.days} sessions, replayed without peeking): the most likely call came true ${ev.hit_pct}% of the time at 15 min (base rate ${ev.hit_base_pct}%)${evh ? `, ${evh.hit_pct}% at 1 hour (base ${evh.hit_base_pct}%)` : ""}. The range held ${ev.range_inside_pct}% of the time (aim 80%).
+      ${skill != null && skill <= 1 ? `<br><b class="amber">Direction has no proven edge yet: trust the range (how far it can go), not the arrow.</b>` : ""}</p>` : `<p class="small muted" style="margin:8px 0 0">Track record appears after the first test run (needs the 1-minute history).</p>`;
+  const sims = (sc.similar || []).slice(0, 5).map((x) => `<li><b>${new Date(x.date + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" })}</b> <span class="muted small">${x.similarity}% alike</span> · next hour ${fpc(x.next60_pct)} · to close ${fpc(x.close_pct)}</li>`).join("");
+  return `<table class="mini"><thead><tr><th></th><th class="r up">▲ Up</th><th class="r">↔ Side</th><th class="r down">▼ Down</th><th class="r">Likely range</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="small muted" style="margin:6px 0 0">From the ${sc.k} past sessions most like today so far, rescaled to today's volatility (${sc.sigma_day_pct}% a day). Sideways = move under ±${Math.round(sc.horizons["15"] ? sc.horizons["15"].side_band_pts : 0)} pts in 15 min.</p>
+    ${sims ? `<h4 style="margin:10px 0 4px">Most similar past days</h4><ul class="plain small">${sims}</ul>` : ""}${honest}`;
+}
+
 function drawChart(d, first) {
   if (!d || !CH.chart) return;
   const S = CH.series;
   S.candle.setData(d.candles);
   for (const k of ["vwap", "u1", "d1", "u2", "d2", "ema9", "ema21", "ema50", "st_up", "st_dn", "rsi", "macd", "macd_sig", "macd_hist"]) if (S[k]) S[k].setData(d.series[k] || []);
   if (S.vol) S.vol.setData(d.has_volume ? d.volume : []);
+  const sc = d.scenario;
+  if (S.sc_up) {
+    const P = (sc && sc.ready && sc.paths) || {};
+    [["up", S.sc_up, "▲ Up"], ["side", S.sc_side, "↔ Side"], ["down", S.sc_down, "▼ Down"]].forEach(([k, ser, lab]) => {
+      const x = P[k]; ser.setData(x ? x.line : []); ser.applyOptions({ title: x ? `${lab} ${Math.round(x.p * 100)}%` : "", lineWidth: x ? Math.max(1, Math.round(1 + x.p * 4)) : 1 });
+    });
+    S.sc_lo.setData(sc && sc.ready ? sc.band.lo : []); S.sc_hi.setData(sc && sc.ready ? sc.band.hi : []);
+  }
   // price lines for levels (rebuild only when they change)
   const groups = { prev: "prev", cpr: "cpr", or: "or", oi: "oi", gamma: "gamma", em: "em" };
   const want = d.levels.filter((l) => chOn(groups[l.group] || l.group));
@@ -1061,6 +1103,7 @@ function drawChart(d, first) {
   $("#ch-read").innerHTML = d.read.length ? `<ul class="plain">${d.read.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="muted">Builds after the first 15 minutes.</p>`;
   $("#ch-setups").innerHTML = d.setups.length ? `<ul class="plain">${d.setups.slice().reverse().map((x) => `<li>${hm(x.ts)} ${arrow(x.direction)} <b>${esc(x.name)}</b> @ ${fx(x.entry)}<br><small>stop ${fx(x.stop)} · target ${fx(x.target)} · R:R ${x.rr}</small>
       <span class="pill ${x.state === "target hit" ? "p-up" : x.state === "stopped" ? "p-down" : "p-sig"}">${esc(x.state)}${x.state === "active" ? ` ${x.r_now > 0 ? "+" : ""}${x.r_now}R` : ""}</span></li>`).join("")}</ul>` : `<p class="muted small">No setup yet today. The scanner checks every closed 5-minute bar.</p>`;
+  $("#ch-scen").innerHTML = scenarioCard(d.scenario, d.sym);
   const spot = d.spot;
   $("#ch-levels").innerHTML = `<ul class="plain lv">${d.levels.slice().sort((a, b) => b.price - a.price).map((l) => `<li class="${l.price > spot ? "abv" : "blw"}"><span><i style="background:${l.color}"></i>${esc(l.name)}</span><b>${fx(l.price)}</b><small>${((l.price / spot - 1) * 100).toFixed(2)}%</small></li>`).join("")}</ul>`;
 }

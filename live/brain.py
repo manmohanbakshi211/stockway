@@ -12,6 +12,21 @@ from .clock import IST
 from .notify import SYSTEM_STYLE, _compact_json
 
 
+def _scen(e, sym):
+    """The scenario engine's 1-hour view, if it has one (probabilities and likely range)."""
+    try:
+        sc = getattr(e, "scenarios", None)
+        if not sc or sym not in ("NIFTY", "BANKNIFTY"):
+            return None
+        rows = e.charts.today_bars(sym)
+        day = e.clock.now().date()
+        f = sc.live(sym, rows, day, None, None) if rows else None
+        h = f and f["horizons"].get("60")
+        return h and {k: h[k] for k in ("up", "side", "down", "lo_pts", "hi_pts")}
+    except Exception:
+        return None
+
+
 def snapshot(e) -> dict:
     """Everything worth knowing right now, compact."""
     idx = {}
@@ -23,7 +38,8 @@ def snapshot(e) -> dict:
                          "support": o.get("support"), "resistance": o.get("resistance"), "max_pain": o.get("max_pain"),
                          "atm_iv": o.get("atm_iv"), "iv_chg_15m": o.get("iv_chg_15m"), "expected_move_pct": o.get("daily_move_pct"),
                          "gamma": g.get("regime"), "gamma_flip": g.get("flip"), "pdh": ctx.get("pdh"), "pdl": ctx.get("pdl"),
-                         "flow_5m": (m.get("flow") or {}).get("delta_pct_5m")}
+                         "flow_5m": (m.get("flow") or {}).get("delta_pct_5m"),
+                         "scenario_60m": _scen(e, m["sym"])}
     mk = e.market or {}
     cv = e.context.view()
     fii = next((r for r in ((cv.get("participants") or {}).get("rows") or []) if r["who"] == "FII"), None)

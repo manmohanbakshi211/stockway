@@ -141,6 +141,40 @@ class ChartData:
                           "stop": round(s["stop"], 2), "target": round(s["target"], 2), "rr": float(s["rr"]),
                           "stop_pct": round(abs(e - s["stop"]) / e * 100, 2), "target_pct": round(abs(s["target"] - e) / e * 100, 2)}}})
 
+    def _scenario(self, sym, day, ctx, tf, last_bar_time):
+        """Three projected paths (up / sideways / down) and the 80% range, as chart series in the future."""
+        sc = getattr(self.e, "scenarios", None)
+        if sc is None or sym not in ("NIFTY", "BANKNIFTY"):
+            return None
+        today = self.today_bars(sym)
+        if not today:
+            return {"ready": False, "why": "Starts 15 minutes after the open."}
+        try:
+            vix = self.e._vix() if self.e.state else None
+            f = sc.live(sym, today, day, ctx.get("pdc"), vix and vix.get("ltp"))
+        except Exception as ex:
+            return {"ready": False, "why": f"Scenario engine error: {ex}"}
+        if not f:
+            st = sc.status()["symbols"].get(sym) or {}
+            why = ("Needs 1-minute history: log in to Upstox; it downloads by itself (a few minutes)." if not st.get("have")
+                   else "Starts 15 minutes after the open.")
+            return {"ready": False, "why": why}
+        t0, t = f["t0"], f["t"]
+        def series(vals):
+            pts = [{"time": int(t0 + t * 60 + IST_SHIFT) // (60 * tf) * (60 * tf), "value": f["spot"]}]
+            for j, v in enumerate(vals):
+                minute = t + 1 + j
+                if minute % tf == 0 or j == len(vals) - 1:
+                    tm = int(t0 + minute * 60 + IST_SHIFT)
+                    if tm > pts[-1]["time"]:
+                        pts.append({"time": tm, "value": v})
+            return pts
+        out = {k: v for k, v in f.items() if k not in ("paths", "band")}
+        out["ready"] = True
+        out["paths"] = {k: {**{x: y for x, y in v.items() if x != "path"}, "line": series(v["path"])} for k, v in f["paths"].items()}
+        out["band"] = {"lo": series(f["band"]["lo"]), "hi": series(f["band"]["hi"])}
+        return out
+
     def _edge_row(self, sym, m, b, ind, ctx, s, slot) -> dict:
         """The facts the signal filter was trained on, as far as they are known live (missing ones stay empty)."""
         d = 1 if s["direction"] == "up" else -1
@@ -168,9 +202,13 @@ class ChartData:
         if not m:
             return None
         day = e.clock.now().date()
-        rows = (self.history(sym) if days > 1 else []) + self.today_bars(sym)
+        today = self.today_bars(sym)
+        rows = (self.history(sym) if days > 1 or not today else []) + today
         if not rows:
             return None
+        if not today and days == 1:              # market closed / before the open: show the last session
+            last = max(dt.datetime.fromtimestamp(r[0], IST).date() for r in rows)
+            rows = [r for r in rows if dt.datetime.fromtimestamp(r[0], IST).date() == last]
         a = np.asarray(sorted(rows, key=lambda r: r[0]), dtype=float)
         # keep the last `days` sessions
         dates = sorted({dt.datetime.fromtimestamp(x, IST).date() for x in a[:, 0]})[-days:]
@@ -274,7 +312,8 @@ class ChartData:
                 hit_s = (px - s["stop"]) * d <= 0
                 live_setups.append({**s, "name": setups.NAMES[s["setup"]], "state": "target hit" if hit_t else "stopped" if hit_s else "active",
                                     "r_now": round((px - s["entry"]) * d / abs(s["entry"] - s["stop"]), 2)})
-        return {"sym": sym, "name": m.get("name"), "tf": tf, "spot": m.get("spot"), "chg_pct": m.get("chg_pct"),
+        scen = self._scenario(sym, day, ctx, tf, int(T[-1]) if len(T) else None)
+        return {"sym": sym, "name": m.get("name"), "tf": tf, "spot": m.get("spot"), "chg_pct": m.get("chg_pct"), "scenario": scen,
                 "candles": [{"time": int(a_), "open": round(float(b_), 2), "high": round(float(c_), 2), "low": round(float(d_), 2), "close": round(float(e_), 2)}
                             for a_, b_, c_, d_, e_ in zip(T, o, h, l, c)],
                 "volume": [{"time": int(a_), "value": float(x), "color": "rgba(30,138,90,.45)" if cc >= oo else "rgba(194,59,50,.45)"}
