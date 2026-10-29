@@ -131,6 +131,12 @@ How it decides, the way a desk does:
    cap on the theoretical worst case and on margin. Everything closes for the day after a 2% loss.
 4. **Paper trade the plan** live every day (same rules as the backtest) and compare with the backtest.
 
+**Setup report card.** The backtest also replays every live chart-setup signal on the same 1-minute option
+history (buy the ATM option, exit at the setup's target/stop or after 90 minutes, all costs) and shows, per setup,
+signals, win rate, average ₹ per lot and whether it beats luck. Live Nifty/Bank Nifty setup alerts quote this record;
+setups that historically lose become info-only (no paper trade). An AI filter (gradient boosting on ~25 facts known
+at the signal) is tested month by month on unseen months and is used live only if it passes.
+
 Setup: log in to Upstox (Plus plan) on Live setup → Strategy desk → Check access → Download history (about
 1–1.5 hours per year of history, resumable; data starts 2022) → Run backtest. Re-run monthly.
 Dhan works too (Client ID + token under "Or use Dhan instead").
