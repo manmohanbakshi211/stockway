@@ -291,12 +291,35 @@ async function pageTomorrow() {
 }
 
 /* ---------------- page: history */
+function historySummary(h) {
+  // Plain-language scorecard of the daily radar on days it never trained on, plus the last 15 days.
+  const D = h.dates, n = D.length;
+  const last = new Date(D[n - 1]); const cut = new Date(last); cut.setFullYear(cut.getFullYear() - 3);
+  const idx = D.map((d, i) => i).filter((i) => h.prob[i] != null && h.big[i] != null && new Date(D[i]) >= cut);
+  if (!idx.length) return "";
+  const big = idx.filter((i) => h.big[i] === 1), flagged = idx.filter((i) => h.flag[i] === 1);
+  const caught = big.filter((i) => h.flag[i] === 1).length;
+  const hitWhenFlagged = flagged.length ? flagged.filter((i) => h.big[i] === 1).length / flagged.length : null;
+  const base = big.length / idx.length;
+  const lift = hitWhenFlagged != null && base ? hitWhenFlagged / base : null;
+  const res = (i) => h.big[i] == null ? ["Waiting", "muted"] : h.big[i] === 1 && h.flag[i] === 1 ? ["Caught", "up"] : h.big[i] === 1 ? ["Missed", "down"] : h.flag[i] === 1 ? ["False alarm", "amber"] : ["Quiet, as expected", "muted"];
+  const recent = D.map((d, i) => i).filter((i) => h.prob[i] != null).slice(-15).reverse();
+  return `<div class="panel" style="margin-bottom:16px"><h3>In plain words (last 3 years, days the model never saw)</h3>
+    <p style="margin:6px 0">${big.length} big-move days. The radar flagged <b>${caught}</b> of them (${Math.round(caught / Math.max(1, big.length) * 100)}%).
+      When it flagged a day, a big move followed <b>${hitWhenFlagged != null ? Math.round(hitWhenFlagged * 100) : "–"}%</b> of the time, against ${Math.round(base * 100)}% on an ordinary day${lift ? ` (<b>${lift.toFixed(1)}×</b> better than guessing)` : ""}.</p>
+    <p class="small muted" style="margin:0 0 10px">Use it to size and to choose the strategy: on flagged days expect a wider range (avoid selling tight premium); on quiet days, range strategies suit better. It does not tell the direction.</p>
+    <div class="table-wrap"><table><thead><tr><th>Day</th><th class="r">Chance of a big move</th><th>Radar said</th><th class="r">Actual range</th><th>Result</th></tr></thead><tbody>
+      ${recent.map((i) => { const [t, c] = res(i); return `<tr class="click" data-day="${D[i]}"><td>${new Date(D[i]).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}</td><td class="r">${Math.round(h.prob[i] * 100)}%</td><td>${h.flag[i] === 1 ? "<b>Big day likely</b>" : "Normal"}</td><td class="r">${h.range[i] != null ? (h.range[i] * 100).toFixed(2) + "%" : "–"}</td><td class="${c}">${t}</td></tr>`; }).join("")}
+    </tbody></table></div></div>`;
+}
+
 async function pageHistory() {
   if (!state.status || !state.status.model) { main.innerHTML = `<h1 class="page-title">History</h1>${noModel()}`; bindTrainButtons(); return; }
   const h = await api("/api/history");
   main.innerHTML = `<h1 class="page-title">History</h1>
     <p class="lede">Every big-move day in the data. From the first test year on, each day was predicted by a model that had never seen it. Click any point to see what came before it.</p>
     ${demoBanner()}
+    ${historySummary(h)}
     <div class="toolbar">
       <div class="seg" role="group" aria-label="Time range">
         <button data-range="365">1 year</button><button data-range="1095" aria-pressed="true">3 years</button><button data-range="all">All</button>
@@ -347,6 +370,7 @@ async function pageHistory() {
   };
   main.querySelectorAll("[data-range]").forEach((b) => b.addEventListener("click", () => setRange(b.dataset.range)));
   $("#hist-price").on("plotly_click", (ev) => { if (ev.points && ev.points[0]) openDay(String(ev.points[0].x).slice(0, 10)); });
+  main.querySelectorAll("tr[data-day]").forEach((r) => r.onclick = () => openDay(r.dataset.day));
   $("#hist-price").on("plotly_relayout", (ev) => {
     if (ev["xaxis.range[0]"]) Plotly.relayout("hist-prob", { "xaxis.range": [ev["xaxis.range[0]"], ev["xaxis.range[1]"]] });
   });

@@ -280,6 +280,14 @@ function setupCard() {
     <p class="note">The simulator plays a made-up trading day with real-looking moves, so you can learn the screens before connecting. ${s.state === "error" ? `<br><b class="down">${esc(s.message)}</b>` : ""}</p></div>`;
 }
 
+function watchStrip(w) {
+  if (!w || !w.length) return "";
+  const sp = (a) => { if (!a || a.length < 2) return ""; const lo = Math.min(...a), hi = Math.max(...a), r = hi - lo || 1;
+    return `<svg viewBox="0 0 60 18" class="spark" aria-hidden="true"><polyline fill="none" stroke="${a[a.length - 1] >= a[0] ? "#1E8A5A" : "#C23B32"}" stroke-width="1.4" points="${a.map((v, i) => `${(i / (a.length - 1)) * 60},${16 - ((v - lo) / r) * 14}`).join(" ")}"/></svg>`; };
+  return `<div class="watch-strip" aria-label="Sensex and US markets">${w.map((x) => `<a class="watch" href="#/world"><span>${esc(x.name)}</span><b>${fx(x.last)}</b> ${fpc(x.chg_pct)}${sp(x.spark)}<small>${x.ts ? hm(x.ts) : ""}</small></a>`).join("")}
+    <span class="muted small watch-note">Yahoo, about 1 min behind</span></div>`;
+}
+
 function renderLive(force = false) {
   const bar = $("#lv-bar"), body = $("#lv-body");
   if (!bar || !body || !L.snap) return;
@@ -289,7 +297,7 @@ function renderLive(force = false) {
   bar.innerHTML = statusBar(); bindLiveButtons(bar);
   const s = L.snap;
   if (!s.status.running && !s.indices.length) {
-    body.innerHTML = s.status.logged_in ? `<div class="empty" style="max-width:none"><h2>${esc(s.status.message || "Scanner is off")}</h2><p>It starts by itself at 9:00 AM on market days. Start now to scan immediately.</p><div class="btn-row"><button class="btn primary" data-live-start="upstox">Start live</button><button class="btn" data-live-start="sim">Run simulator</button></div></div>` : setupCard();
+    body.innerHTML = watchStrip(s.watch) + (s.status.logged_in ? `<div class="empty" style="max-width:none"><h2>${esc(s.status.message || "Scanner is off")}</h2><p>It starts by itself at 9:00 AM on market days. Start now to scan immediately.</p><div class="btn-row"><button class="btn primary" data-live-start="upstox">Start live</button><button class="btn" data-live-start="sim">Run simulator</button></div></div>` : setupCard());
     bindLiveButtons(body); return;
   }
   const pulse = s.pulse || {};
@@ -325,6 +333,7 @@ function renderLive(force = false) {
       <p class="muted small" style="margin:6px 0 0">Points from index moves × approximate weights. These explain ${cb.explained > 0 ? "+" : ""}${cb.explained.toFixed(0)} of the ${cb.actual > 0 ? "+" : ""}${cb.actual.toFixed(0)}-point move.</p>` : ""}</div>` : "";
   body.innerHTML = `${strip}
     <div class="icards">${s.indices.slice(0, 4).map(indexCard).join("")}</div>
+    ${watchStrip(s.watch)}
     <div class="live-grid">
       <section>
         <div class="toolbar"><h2 style="margin:0">Alerts <span class="muted small">${L.alerts.length} today</span></h2>
@@ -421,22 +430,38 @@ function drawScanner() {
 }
 
 /* ---------------- page: Symbol / option chain */
+/* ---------------- symbol picker (indices + F&O stocks), works before the scanner starts */
+async function symbolList() {
+  if (L.symList && Date.now() - L.symList._at < 300000) return L.symList;
+  try { L.symList = { ...(await api("/api/symbols")), _at: Date.now() }; } catch (_) { L.symList = { indices: ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"], stocks: [], _at: Date.now() }; }
+  return L.symList;
+}
+function symbolOptions(list, sel) {
+  return `<optgroup label="Indices">${list.indices.map((x) => `<option value="${esc(x)}" ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join("")}</optgroup>
+    <optgroup label="F&amp;O stocks">${list.stocks.map((x) => `<option value="${esc(x)}" ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join("")}</optgroup>`;
+}
+
 async function pageSym() {
   stopPageTimer();
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   const sym = (params.get("s") || LS.get("lastSym", "NIFTY")).toUpperCase();
   if (L.sym !== sym) { L.sym = sym; L.expiry = null; }
   LS.set("lastSym", sym);
-  main.innerHTML = `<div id="sym-body"><p class="muted">Loading ${esc(sym)}…</p></div>`;
+  const list = await symbolList();
+  if (![...list.indices, ...list.stocks].includes(sym)) list.stocks = [sym, ...list.stocks];
+  main.innerHTML = `<div class="sym-pick"><label class="sr-only" for="sym-pick">Symbol</label><select id="sym-pick" aria-label="Symbol">${symbolOptions(list, sym)}</select>
+      <a class="btn" href="#/chart?s=${encodeURIComponent(sym)}">Chart</a><a class="btn" href="#/timemachine?s=${encodeURIComponent(sym)}">Time Machine</a></div>
+    <div id="sym-body"><p class="muted">Loading ${esc(sym)}…</p></div>`;
+  $("#sym-pick").onchange = (e) => { location.hash = `#/sym?s=${encodeURIComponent(e.target.value)}`; };
   const tick = async (first) => {
     if (state.page !== "sym" || L.sym !== sym) return;
     try {
       const d = await api(`/api/live/symbol/${encodeURIComponent(sym)}${L.expiry ? `?expiry=${L.expiry}` : ""}`);
       drawSym(d, first);
     } catch (e) {
-      if (first) $("#sym-body").innerHTML = `<div class="empty"><h2>${esc(sym)}</h2><p>${esc(e.message)}</p><a class="btn primary" href="#/live">Go to Live</a></div>`;
+      if (first) $("#sym-body").innerHTML = `<div class="empty"><h2>${esc(sym)}: option chain needs the live feed</h2><p>${esc(e.message)} The live scanner starts by itself at 9:00 AM on market days (or start it on the Live page). Meanwhile the chart shows the last session.</p><div class="btn-row"><a class="btn primary" href="#/chart?s=${encodeURIComponent(sym)}">Open last chart</a><a class="btn" href="#/live">Go to Live</a></div></div>`;
     }
-    L.pageTimer = setTimeout(() => tick(false), 3000);
+    L.pageTimer = setTimeout(() => tick(false), $("#sym-body .empty") ? 20000 : 3000);
   };
   tick(true);
 }
@@ -803,6 +828,23 @@ async function pageContext(auto = false) {
 }
 
 /* ---------------- page: Scorecard */
+function scoreBuckets(sc) {
+  // Hit = the option gained 20% before losing 20% within an hour, so ~50% is break-even before costs.
+  const nm = (r) => `${esc(KIND[r.kind] || r.kind)} <span class="muted">${r.is_index ? "indices" : "stocks"}</span>`;
+  const chip = (r) => `<li>${nm(r)} <b>${r.hit_rate}%</b> <span class="muted small">of ${r.n}</span></li>`;
+  const rows = (sc.rows || []).filter((r) => r.hit_rate != null);
+  const trust = rows.filter((r) => r.n >= 30 && r.hit_rate >= 55);
+  const prom = rows.filter((r) => r.n >= 10 && r.n < 30 && r.hit_rate >= 55);
+  const mute = rows.filter((r) => r.n >= 30 && r.hit_rate < 40);
+  const early = rows.filter((r) => r.n < 10).length;
+  const box = (cls, title, why, list) => `<div class="sb ${cls}"><h4>${title}</h4><p class="small muted">${why}</p>${list.length ? `<ul class="plain small">${list.map(chip).join("")}</ul>` : `<p class="small muted">None yet.</p>`}</div>`;
+  return `<div class="panel" style="margin-top:14px"><h3>In plain words</h3>
+    <div class="sbuckets">${box("ok", "Trust these", "Worked 55%+ of the time over 30+ alerts.", trust)}
+      ${box("mid", "Promising, keep watching", "55%+ but under 30 alerts: could still be luck.", prom)}
+      ${box("bad", "Ignore these", "Under 40% over 30+ alerts. Already demoted (no Telegram, no auto paper trade).", mute)}</div>
+    <p class="small muted" style="margin:8px 0 0">${early ? `${early} alert type${early > 1 ? "s have" : " has"} fewer than 10 graded alerts: too early to judge. ` : ""}About 50% is break-even before costs, because a hit is +20% on the option before −20%. Real-market results count; simulator results don't.</p></div>`;
+}
+
 async function pageScorecard() {
   stopPageTimer();
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
@@ -819,6 +861,7 @@ async function pageScorecard() {
   main.innerHTML = `<h1 class="page-title">Signal scorecard</h1>
     <p class="lede">Every alert is followed for 60 minutes and graded. This is how you know which signals deserve real money. ${sc.source === "sim" ? "<b>Showing simulator results (random market, not evidence).</b>" : ""}
       <a href="#/scorecard?src=${sc.source === "sim" ? "upstox" : "sim"}">Show ${sc.source === "sim" ? "real market" : "simulator"} results</a></p>
+    ${scoreBuckets(sc)}
     ${aiReviewBox("scorecard", "Claude's read on your alerts")}
     <div class="kpis"><div class="kpi"><b>${sc.graded}</b><span>Alerts graded (recent)</span></div>
       <div class="kpi"><b>${sc.overall != null ? sc.overall + "%" : "–"}</b><span>Worked overall</span></div>
@@ -865,16 +908,17 @@ async function pageDesk() {
   const dataRows = Object.entries(st.data).map(([k, v]) => `<tr><td>${k === "BANKNIFTY" ? "Bank Nifty" : "Nifty"}</td><td class="r">${v.months}</td><td>${v.first || "–"} → ${v.last || "–"}</td><td class="r">${v.mb} MB</td></tr>`).join("");
   const S = res && res.summary;
   main.innerHTML = `<h1 class="page-title">Strategy desk</h1>
-    <p class="lede">Institution-style intraday strategies on Nifty and Bank Nifty: hedged option selling on calm days, debit spreads on trending days. Every strategy is tested on years of real 1-minute option prices, and only out-of-sample results count.</p>
+    <p class="lede">Test strategies on years of real prices; only what passes on data it never saw gets paper-traded. Follow the steps below in order. Everything here is paper: no real orders, ever.</p>
     ${st.synthetic ? `<div class="banner">⚠️ You are looking at a <b>demo on synthetic (fake) data</b>. It shows how the desk works, not whether it makes money. Download real history below (Upstox Plus).</div>` : ""}
-    <div id="desk-live"></div>
+    <div id="desk-guide"><div class="panel"><p class="muted">Loading your research status…</p></div></div>
     ${aiReviewBox("desk", "Claude research review of the desk")}
+    <div id="desk-live"></div>
     <div id="desk-edge"></div>
     <div id="desk-eod"></div>
     <div id="desk-expiry"></div>
     ${S ? deskResults(res) : `<div class="empty" style="max-width:none"><h2>No backtest yet</h2><p>Log in to Upstox (Plus plan), download history, then run the backtest. Or see a quick demo on synthetic data first.</p>
       <div class="btn-row"><button class="btn" id="lab-demo">See a demo (synthetic data)</button></div></div>`}
-    <h2>Data and settings</h2>
+    <h2 id="desk-data">Data and settings</h2>
     <div class="split">
       <div class="panel"><h3>1. Historical option data</h3>
         <p><b>Upstox Plus</b> ${st.upstox ? `<span class="pill p-up">logged in</span>` : `<span class="pill p-down">not logged in</span>`}: 1-minute prices and OI of expired Nifty and Bank Nifty options (from 2022).</p>
@@ -927,6 +971,10 @@ async function pageDesk() {
   ["#lab-demo", "#lab-demo2"].forEach((id) => { if ($(id)) $(id).onclick = () => job("/api/lab/demo"); });
   if (res) drawDeskCharts(res);
   bindAIReview(main);
+  Promise.all([api("/api/lab/eod/status").catch(() => ({})), api("/api/lab/eod").catch(() => null), api("/api/lab/expiry").catch(() => null)])
+    .then(([es, er, ex]) => { const el = $("#desk-guide"); if (!el) return; el.innerHTML = deskGuide(st, res, es, er, ex);
+      el.querySelectorAll("[data-gjob]").forEach((b) => b.onclick = () => job(b.dataset.gjob));
+      el.querySelectorAll("[data-gscroll]").forEach((b) => b.onclick = () => document.getElementById(b.dataset.gscroll)?.scrollIntoView({ behavior: "smooth" })); });
   api("/api/lab/edge").then((e) => { const el = $("#desk-edge"); if (el) el.innerHTML = edgeCard(e); }).catch(() => {});
   api("/api/lab/expiry").then((x) => { const el = $("#desk-expiry"); if (el) el.innerHTML = expiryCard(x); }).catch(() => {});
   Promise.all([api("/api/lab/eod/status"), api("/api/lab/eod").catch(() => null)]).then(([st2, r]) => {
@@ -972,6 +1020,45 @@ function drawDeskLive(d) {
     Plotly.react($("#desk-days"), [{ type: "bar", x: d.days.map((x) => x.day), y: d.days.map((x) => x.pnl), marker: { color: d.days.map((x) => (x.pnl >= 0 ? C.up : C.down)) } }],
       plotLayout({ margin: { l: 60, r: 10, t: 8, b: 30 }, yaxis: { gridcolor: "#EEF1F4", tickprefix: "₹" } }), plotCfg);
   }
+}
+
+function deskGuide(st, res, es, er, ex) {
+  const rs = (v) => v == null ? "–" : `${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}`;
+  const months = Object.entries(st.data || {}).map(([k, v]) => `${k === "BANKNIFTY" ? "Bank Nifty" : "Nifty"} ${v.months || 0} months`).join(", ");
+  const haveMin = Object.values(st.data || {}).some((v) => v.months);
+  const day = (t) => t ? new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
+  const step = (state, title, detail, btn) => `<li class="gstep ${state}"><span class="gmark" aria-hidden="true">${state === "done" ? "✓" : state === "part" ? "◐" : "○"}</span>
+    <div><b>${title}</b><br><span class="small muted">${detail}</span></div><div>${btn || ""}</div></li>`;
+  const steps = [
+    step(es.days ? "done" : "todo", "10 years of end-of-day option prices (NSE, free)", es.days ? `${es.days.toLocaleString("en-IN")} days, ${esc(es.first)} → ${esc(es.last)}` : "Every Nifty and Bank Nifty option's daily close since 2015. About 45 minutes.",
+      `<button class="btn ${es.days ? "" : "primary"}" data-gjob="/api/lab/eod/download">${es.days ? "Update" : "Download"}</button>`),
+    step(er ? "done" : "todo", "10-year test (premium selling held to expiry, straddles)", er ? `Run ${day(er.generated)} · walk-forward by year, 2015 → today` : "Needs step 1. Takes a few minutes.",
+      es.days ? `<button class="btn ${er ? "" : "primary"}" data-gjob="/api/lab/eod/run">${er ? "Run again" : "Run"}</button>` : ""),
+    step(haveMin ? (st.synthetic ? "todo" : "part") : "todo", "1-minute option history (Upstox Plus)", haveMin && !st.synthetic ? `${months}. Keeps adding where it stopped.` : "Needs your Upstox Plus login. About an hour per year.",
+      `<button class="btn" data-gscroll="desk-data">${haveMin ? "Continue" : "Set up"}</button>`),
+    step(res && !st.synthetic ? "done" : "todo", "Intraday backtest (Nifty / Bank Nifty strategies)", res ? `Run ${day(res.generated)} · ${esc(res.period.test_from || "")} → ${esc(res.period.to)}` : "Needs step 3. Re-run once a month.",
+      haveMin ? `<button class="btn ${res ? "" : "primary"}" data-gjob="/api/lab/backtest">${res ? "Run again" : "Run"}</button>` : ""),
+  ];
+  // what passed, in plain words
+  const out = [];
+  const yr = new Date().getFullYear();
+  Object.values((er && er.results) || {}).forEach((f) => {
+    const o = f.oos || {}, nowPid = (f.years.find((y) => y.year === yr) || {}).pid;
+    const nm = `${f.sym === "BANKNIFTY" ? "Bank Nifty" : "Nifty"} ${f.name.split(" (")[0].toLowerCase()}`;
+    if (f.family === "long_straddle") { out.push(`<li class="bad">✗ <b>${esc(nm)}</b>: buying straddles lost money over 10 years. Not traded.</li>`); return; }
+    if (!o.n) { out.push(`<li class="wait">… <b>${esc(nm)}</b>: no year passed the bar. Cash.</li>`); return; }
+    if (o.avg > 0 && nowPid) out.push(`<li class="ok">✓ <b>${esc(nm)}</b>: made money on years it never saw: ${o.n} trades, ${rs(o.avg)} a lot per trade, ${o.win_pct}% wins, worst ${rs(o.worst)}. ${o.t >= 2 ? "Strong evidence." : o.t >= 1 ? `Evidence is moderate (t ${o.t}), so it is paper-traded first.` : `Evidence is weak (only ${o.n} trades, t ${o.t}): could be luck, paper only.`} <span class="muted">Now on the Expiry desk (paper).</span></li>`);
+    else if (o.avg > 0) out.push(`<li class="wait">… <b>${esc(nm)}</b>: positive overall (${rs(o.total)}) but not chosen for ${yr}. Cash this year.</li>`);
+    else out.push(`<li class="bad">✗ <b>${esc(nm)}</b>: lost on unseen years (${rs(o.total)} over ${o.n} trades). Not traded.</li>`);
+  });
+  ((res && res.plan) || []).forEach((p) => { if (p.active) out.push(`<li class="ok">✓ <b>${esc(p.sym)} ${esc(p.name)}</b>: passed the last 6 months; paper-traded intraday.</li>`); });
+  if (res && res.plan && !res.plan.some((p) => p.active)) out.push(`<li class="wait">… <b>Intraday strategies</b>: nothing passed the last 6 months, so the intraday desk stays in cash. No trade beats a bad trade.</li>`);
+  const live = ex && ex.plan && ex.plan.length ? `Expiry desk is paper-trading: ${ex.plan.map((p) => `<b>${esc(p.sym === "BANKNIFTY" ? "Bank Nifty" : p.sym)}</b> ${esc(p.name.split(" (")[0].toLowerCase())}`).join(", ")}${ex.n ? ` · ${ex.n} expiries settled, ${rs(ex.total)}` : " · first trade on the next entry day (about 15:20)"}.` : "";
+  return `<div class="panel desk-guide"><h3>Your research, step by step</h3><ol class="gsteps">${steps.join("")}</ol>
+    <h3 style="margin-top:16px">What passed, in plain words</h3>
+    ${out.length ? `<ul class="gpass">${out.join("")}</ul>` : `<p class="muted small">Nothing tested yet. Start with step 1.</p>`}
+    ${live ? `<p class="small" style="margin:8px 0 0">${live}</p>` : ""}
+    <p class="small muted" style="margin:8px 0 0">"Passed" means profitable on years the test never trained on, after costs. Even then it is paper-traded for 4–8 weeks before trusting it.</p></div>`;
 }
 
 function expiryCard(x) {
@@ -1076,7 +1163,7 @@ async function pageChart() {
   CH.days = Number(LS.get("ch_days", 3));
   LS.set("lastSym", CH.sym);
   const IDX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"];
-  const stocks = (L.scanner && L.scanner.length ? L.scanner : await api("/api/live/scanner").catch(() => [])).map((m) => m.sym).filter((x) => !IDX.includes(x)).sort();
+  const stocks = (await symbolList()).stocks.filter((x) => !IDX.includes(x));
   if (!IDX.includes(CH.sym) && !stocks.includes(CH.sym)) stocks.unshift(CH.sym);
   main.classList.add("wide");
   main.innerHTML = `<div class="ch-top">
@@ -1229,7 +1316,7 @@ function drawChart(d, first) {
     const ahead = d.scenario && d.scenario.ready && chOn("scen") ? Math.ceil((d.scenario.horizon_max || 60) / d.tf) + 3 : 6;
     if (n) CH.chart.timeScale().setVisibleLogicalRange({ from: n - Math.max(40, Math.min(n, 120)), to: n + ahead });
   }
-  $("#ch-price").innerHTML = `<b>${fx(d.spot)}</b> ${fpc(d.chg_pct)} ${d.regime && d.regime.code !== "opening" ? `<span class="pill p-sig">${esc(d.regime.label)}</span>` : ""}`;
+  $("#ch-price").innerHTML = `<b>${fx(d.spot)}</b> ${fpc(d.chg_pct)} ${d.regime && d.regime.code !== "opening" ? `<span class="pill p-sig">${esc(d.regime.label)}</span>` : ""}${d.offline ? ` <span class="pill p-amber" title="${esc(d.offline.source)}">Last session · ${esc(d.offline.as_of)}</span>` : ""}`;
   const pats = (d.patterns || []).slice().reverse();
   $("#ch-pats").innerHTML = (d.structure ? `<p class="small" style="margin:0 0 6px">Structure: <b class="${d.structure === "uptrend" ? "up" : d.structure === "downtrend" ? "down" : ""}">${esc(d.structure)}</b> <span class="muted">(${(d.swings || []).slice(-4).map((w) => w.label).join(" → ")})</span></p>` : "")
     + (pats.length ? `<ul class="plain">${pats.slice(0, 6).map((p) => `<li>${hm(p.time - 19800)} ${arrow(p.direction)} <b>${esc(p.name)}</b> @ ${fx(p.entry)}<br><small>${esc(p.why)}. Stop ${fx(p.stop)} · target ${fx(p.target)} · R:R ${p.rr}</small>
@@ -1421,6 +1508,7 @@ async function pageTimeMachine() {
         <p class="small muted tm-quick">Quick fill: stop <select id="tm-qs" aria-label="Stop distance">${[0.3, 0.5, 0.75, 1, 1.5].map((v) => `<option value="${v}" ${v === 0.5 ? "selected" : ""}>${v}%</option>`).join("")}</select> away, target <select id="tm-qr" aria-label="Target in R">${[1, 1.5, 2, 3].map((v) => `<option value="${v}" ${v === 2 ? "selected" : ""}>${v}R</option>`).join("")}</select> <button type="button" class="link-btn" id="tm-fill">Fill</button></p>
         <label class="field">Entry time<input type="time" id="tm-start" min="09:20" max="15:10" step="300" value="${esc(qp.get("t") || nowHM || keep.start || "09:30")}"><small>Bars after this time are replayed up to the 15:15 square-off.</small></label>
         <button class="btn primary" type="submit" id="tm-run">Run 10,000 replays</button>
+        <button class="btn" type="button" id="tm-scan">Find a better stop &amp; target</button>
         <p class="small muted" id="tm-plan-note" style="margin:0"></p>
       </form>
       <section id="tm-result" class="tm-result" aria-live="polite">${tmEmpty()}</section>
@@ -1436,6 +1524,10 @@ async function pageTimeMachine() {
   const setDir = (d) => { dir = d; segBtns.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.dir === d))); planNote(); };
   segBtns.forEach((b) => b.onclick = () => setDir(b.dataset.dir));
   const ltpOf = (s2) => (TM.setup.symbols.find((x) => x.sym === s2) || {}).ltp;
+  const priceOf = async (s2) => {          // live price, else the last close (scanner off / market closed)
+    const l = ltpOf(s2); if (l) return l;
+    try { const r = await api(`/api/price/${encodeURIComponent(s2)}`); const x = TM.setup.symbols.find((y) => y.sym === s2); if (x) x.ltp = r.price; return r.price; } catch (_) { return null; }
+  };
   const num = (id) => Number(String($(id).value).replace(/[^0-9.]/g, ""));
   const fill = () => {
     const e = num("#tm-entry") || ltpOf($("#tm-sym").value);
@@ -1456,7 +1548,8 @@ async function pageTimeMachine() {
   }
   ["#tm-entry", "#tm-stop", "#tm-target"].forEach((id) => $(id).addEventListener("input", planNote));
   $("#tm-fill").onclick = fill;
-  $("#tm-sym").onchange = () => { const l = ltpOf($("#tm-sym").value); $("#tm-entry").value = l ? l : ""; $("#tm-stop").value = ""; $("#tm-target").value = ""; if (l) fill(); };
+  $("#tm-sym").onchange = async () => { $("#tm-entry").value = ""; $("#tm-stop").value = ""; $("#tm-target").value = "";
+    const l = await priceOf($("#tm-sym").value); if (l) { $("#tm-entry").value = l; fill(); } };
   const run = async () => {
     const body = { sym: $("#tm-sym").value, direction: dir, entry: num("#tm-entry"), stop: num("#tm-stop"), target: num("#tm-target"), start: $("#tm-start").value };
     if (!body.entry || !body.stop || !body.target) { toast("Fill entry, stop and target (or use Fill)"); return; }
@@ -1476,6 +1569,19 @@ async function pageTimeMachine() {
     btn.disabled = false; btn.textContent = "Run 10,000 replays";
   };
   $("#tm-form").onsubmit = (e) => { e.preventDefault(); run(); };
+  $("#tm-scan").onclick = async () => {
+    const body = { sym: $("#tm-sym").value, direction: dir, entry: num("#tm-entry") || (await priceOf($("#tm-sym").value)), start: $("#tm-start").value };
+    if (!body.entry) { toast("Type an entry price first"); return; }
+    const btn = $("#tm-scan"); btn.disabled = true; btn.textContent = "Testing 24 plans…";
+    $("#tm-result").innerHTML = `<div class="panel"><p class="muted">Testing 24 stop/target combinations for ${esc(body.sym)} (${dir === "up" ? "long" : "short"} at ${esc(body.start)}), each 4,000 replays plus the real past…</p></div>`;
+    try {
+      const r = await post("/api/timemachine/scan", body);
+      $("#tm-result").innerHTML = tmScan(r);
+      $("#tm-result").querySelectorAll("[data-use]").forEach((b) => b.onclick = () => { const x = r.rows[Number(b.dataset.use)];
+        load({ sym: r.sym, direction: r.direction, entry: r.entry, stop: x.stop, target: x.target, start: r.start }, true); });
+    } catch (e) { $("#tm-result").innerHTML = `<div class="panel"><p class="down"><b>Couldn't test.</b> ${esc(e.message)}</p></div>`; }
+    btn.disabled = false; btn.innerHTML = "Find a better stop &amp; target";
+  };
   const load = (p, go) => {
     if ([...$("#tm-sym").options].some((o) => o.value === p.sym)) $("#tm-sym").value = p.sym;
     else { $("#tm-sym").insertAdjacentHTML("afterbegin", `<option value="${esc(p.sym)}">${esc(p.sym)}</option>`); $("#tm-sym").value = p.sym; }
@@ -1500,8 +1606,7 @@ async function pageTimeMachine() {
   if (ap) load(ap, true);
   else {
     if (keep.dir) setDir(keep.dir);
-    const l = ltpOf($("#tm-sym").value);
-    if (l) { $("#tm-entry").value = l; fill(); }
+    priceOf($("#tm-sym").value).then((l) => { if (l && !$("#tm-entry").value) { $("#tm-entry").value = l; fill(); } });
     if (aid) toast("That alert is no longer in today's list: type its plan here.");
   }
 }
@@ -1527,12 +1632,37 @@ function tmResult(r) {
       <i class="t" style="width:${m.target_first}%"></i><i class="n" style="width:${m.neither}%"></i><i class="s" style="width:${m.stop_first}%"></i></div>
     <div class="kpis tm-kpis"><div class="kpi"><b class="up">${m.target_first}%</b><span>Target first</span></div><div class="kpi"><b class="down">${m.stop_first}%</b><span>Stop first</span></div>
       <div class="kpi"><b>${m.neither}%</b><span>Neither by 15:15</span></div><div class="kpi"><b class="${m.avg_r > 0 ? "up" : m.avg_r < 0 ? "down" : ""}">${m.avg_r > 0 ? "+" : ""}${m.avg_r}R</b><span>Average result</span></div></div>
-    <p class="${cls}" style="margin:12px 0 4px"><b>${esc(v.line)}</b></p>
+    <p class="tm-do ${cls}"><b>What to do:</b> ${v.grade === "edge" ? (h.avg_r > 0 ? "worth a paper trade: the replays and the real past agree." : "mixed: the replays like it but the real past doesn't. Paper-trade small, or skip.")
+      : v.grade === "against" ? "skip it as planned, or tap <b>Find a better stop &amp; target</b>." : "no clear edge. Skip unless you have another reason."}</p>
+    <p class="${cls}" style="margin:8px 0 4px">${esc(v.line)}</p>
     ${(v.notes || []).map((n) => `<p class="small" style="margin:2px 0">${esc(n)}</p>`).join("")}
     <p class="small" style="margin:6px 0">Break-even for ${pl.r}R: the target must come first in <b>${v.needed_pct}%</b> of decided replays; it did in <b>${v.got_pct}%</b>.</p>
+    ${tmTypical(r.typical, pl.entry)}
     <div id="tm-fan" class="tm-fan"></div>
     <p class="small" style="margin:6px 0">15:15 price: median ${fx(m.close_pct[2])}, 90% of replays between ${fx(m.close_pct[0])} and ${fx(m.close_pct[4])}.</p>
     <p class="small" style="margin:6px 0"><b>Real past</b> (same time of day, same distances, ${h.sessions} sessions): ${h.target} target, ${h.stop} stop, ${h.neither} neither · average ${h.avg_r > 0 ? "+" : ""}${h.avg_r}R.</p></div>`;
+}
+
+function tmTypical(t, entry) {
+  if (!t) return "";
+  const pts = (p) => entry ? ` (${fx(entry * p / 100, 0)} pts)` : "";
+  return `<div class="tm-typ"><b>How far it usually moves after this time</b> <span class="muted small">(median of the last 60 sessions)</span>
+    <div class="tm-typ-row">${Object.entries(t).map(([k, x]) => `<span><small>${esc(k)}</small> <span class="up">+${x.up_med}%</span>${pts(x.up_med)} / <span class="down">−${x.down_med}%</span></span>`).join("")}</div>
+    <p class="small muted" style="margin:4px 0 0">A target much further than the "to 15:15" figure rarely gets hit; a stop inside the 30-minute figure gets hit by noise.</p></div>`;
+}
+
+function tmScan(r) {
+  const b = r.best, dir = r.direction === "up" ? "long" : "short";
+  const head = r.edge
+    ? `<p class="tm-do up"><b>Best plan found:</b> stop ${b.stop_pct}% away (${fx(b.stop)}), target ${b.r}R (${fx(b.target)}). Replays ${b.avg_r > 0 ? "+" : ""}${b.avg_r}R, real past ${b.past_avg_r > 0 ? "+" : ""}${b.past_avg_r}R per trade.</p>`
+    : `<p class="tm-do down"><b>No stop/target combination had an edge</b> for a ${dir} on ${esc(r.sym)} at ${esc(r.start)} in the last ${r.sessions} sessions. Skip it, or try the other direction or a different time.</p>`;
+  const rows = r.rows.slice(0, 10).map((x, i) => `<tr class="${i === 0 && r.edge ? "best" : ""}"><td>${x.stop_pct}% <span class="muted small">${fx(x.stop)}</span></td><td>${x.r}R <span class="muted small">${fx(x.target)}</span></td>
+    <td class="r up">${x.target_first}%</td><td class="r down">${x.stop_first}%</td><td class="r"><b class="${x.avg_r > 0 ? "up" : "down"}">${x.avg_r > 0 ? "+" : ""}${x.avg_r}R</b></td>
+    <td class="r ${x.past_avg_r > 0 ? "up" : "down"}">${x.past_avg_r > 0 ? "+" : ""}${x.past_avg_r}R</td><td class="r"><button class="link-btn" data-use="${r.rows.indexOf(x)}">Use</button></td></tr>`).join("");
+  return `<div class="panel tm-panel"><div class="tm-head"><div><b>${esc(r.sym)}</b> ${arrow(r.direction)} ${dir} from ${fx(r.entry)} at ${esc(r.start)} · 24 plans tested</div></div>
+    ${head}${tmTypical(r.typical, r.entry)}
+    <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>Stop</th><th>Target</th><th class="r">Target first</th><th class="r">Stop first</th><th class="r">Replays avg</th><th class="r">Real past avg</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="small muted" style="margin:8px 0 0">${esc(r.note)} Ranked by the weaker of the two averages. "Use" runs the full 10,000-replay test on that plan.</p></div>`;
 }
 
 function tmFan(r) {

@@ -26,6 +26,7 @@ ASSETS = {
     "Rates & fear": [("US 10Y yield", "^TNX", "us"), ("US 5Y yield", "^FVX", "us"), ("US 3M bill", "^IRX", "us"),
                      ("US VIX", "^VIX", "us")],
     "Crypto (risk mood)": [("Bitcoin", "BTC-USD", "us"), ("Ethereum", "ETH-USD", "us")],
+    "Indian indices (other)": [("Sensex", "^BSESN", "local")],
     "Indian ADRs (New York)": [("Infosys ADR", "INFY", "us"), ("HDFC Bank ADR", "HDB", "us"), ("ICICI Bank ADR", "IBN", "us"),
                                ("Wipro ADR", "WIT", "us")],
 }

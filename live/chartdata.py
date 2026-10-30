@@ -5,6 +5,7 @@ import datetime as dt
 import math
 import time
 import urllib.parse
+from pathlib import Path as Path_
 
 import numpy as np
 
@@ -260,16 +261,73 @@ class ChartData:
                 "wall_room": ((wall - c) if d > 0 else (c - wall)) / c * 100 if wall else math.nan}
 
     # ------------------------------------------------------------ chart payload
+    def offline_rows(self, sym) -> list:
+        """Past sessions without the live feed (before the open, after hours, scanner off, simulator).
+
+        Indices: the scenario engine's saved 1-minute history. Anything else: Yahoo Finance 5-minute bars (last
+        60 days), cached for the day with the Time Machine's copy.
+        """
+        import pandas as pd
+        from pathlib import Path
+        day = self.e.clock.now().date()
+        k = (sym, day, "offline")
+        if k in self.hist:
+            return self.hist[k]
+        rows = []
+        base = Path(self.e.data_dir) / "history"
+        try:
+            f = base / sym / "minutes.parquet"
+            df = None
+            if f.exists():
+                df = pd.read_parquet(f)
+                df = df[df["ts"] >= df["ts"].max() - 12 * 86400]
+            else:
+                tf_ = base / "tm" / f"{sym}.parquet"
+                if tf_.exists() and dt.datetime.fromtimestamp(tf_.stat().st_mtime, IST).date() == day:
+                    df = pd.read_parquet(tf_)
+                else:
+                    from .timemachine import TimeMachine
+                    df = TimeMachine._yahoo(sym)
+                    if df is not None and len(df):
+                        tf_.parent.mkdir(parents=True, exist_ok=True)
+                        df.to_parquet(tf_, index=False)
+            if df is not None and len(df):
+                df = df[df["ts"] >= df["ts"].max() - 12 * 86400]
+                vol = df["volume"] if "volume" in df else 0
+                rows = [[float(a), float(b), float(c), float(d), float(e_), float(v or 0)] for a, b, c, d, e_, v in
+                        zip(df["ts"], df["open"], df["high"], df["low"], df["close"], (vol if hasattr(vol, "__iter__") else [0] * len(df)))]
+        except Exception as ex:
+            self.e.log(f"Chart history (offline) for {sym} failed: {ex}")
+        self.hist[k] = rows
+        return rows
+
     def payload(self, sym, tf=5, days=3) -> dict | None:
         e = self.e
-        m = e.metrics.get(sym)
-        if not m:
-            return None
         day = e.clock.now().date()
-        today = self.today_bars(sym)
-        rows = (self.history(sym) if days > 1 or not today else []) + today
+        live_m = e.metrics.get(sym)
+        today = self.today_bars(sym) if live_m else []
+        hist = self.history(sym) if (days > 1 or not today) and live_m else []
+        offline = False
+        if not today and not hist:
+            hist = self.offline_rows(sym)
+            offline = bool(hist)
+        rows = hist + today
         if not rows:
             return None
+        m = live_m
+        if not m:                                  # no live feed for this symbol: describe it from the bars
+            last = max(dt.datetime.fromtimestamp(r[0], IST).date() for r in rows)
+            prev_rows = [r for r in rows if dt.datetime.fromtimestamp(r[0], IST).date() < last]
+            last_rows = [r for r in rows if dt.datetime.fromtimestamp(r[0], IST).date() == last]
+            spot = last_rows[-1][4]
+            pc = prev_rows[-1][4] if prev_rows else None
+            m = {"sym": sym, "is_index": sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"), "spot": spot,
+                 "chg_pct": round((spot / pc - 1) * 100, 2) if pc else None, "cp": pc}
+        prev_bars = []
+        if offline:
+            ds = sorted({dt.datetime.fromtimestamp(r[0], IST).date() for r in rows})
+            if len(ds) >= 2:
+                prev_bars = sorted((r for r in rows if dt.datetime.fromtimestamp(r[0], IST).date() == ds[-2]), key=lambda r: r[0])
         if not today and days == 1:              # market closed / before the open: show the last session
             last = max(dt.datetime.fromtimestamp(r[0], IST).date() for r in rows)
             rows = [r for r in rows if dt.datetime.fromtimestamp(r[0], IST).date() == last]
@@ -297,6 +355,9 @@ class ChartData:
         def line(arr):
             return [{"time": int(tt), "value": round(float(x), 2)} for tt, x in zip(T, arr) if not math.isnan(x)]
         ctx = self.context(sym, m)
+        if offline and not ctx.get("pdh") and prev_bars:          # previous-day levels from the bars themselves
+            ph, pl, pc_ = max(r[2] for r in prev_bars), min(r[3] for r in prev_bars), prev_bars[-1][4]
+            ctx.update(pdh=ph, pdl=pl, pdc=pc_, cpr=ta.cpr(ph, pl, pc_))
         g = e.gex.get(sym) or {}
         o_ = m.get("opt") or {}
         # expected move for today from the ATM straddle (from the day's open)
@@ -364,12 +425,21 @@ class ChartData:
                 m_["text"] = ""
             seen.add(k_)
         # chart read and active setups (today, still unresolved)
-        b5 = self.five_min(sym, day)
+        b5 = self.five_min(sym, day) if live_m else None
+        if b5 is None and offline and len(segs):
+            sg = segs[-1] if tf == 5 else None
+            if sg is None:
+                d_last = dates[-1]
+                t0_ = self._session_start(d_last)
+                s_ = a[(a[:, 0] >= t0_) & (a[:, 0] < t0_ + 6.5 * 3600)]
+                sg = ta.resample(s_[:, 0], s_[:, 1], s_[:, 2], s_[:, 3], s_[:, 4], s_[:, 5], 5, t0_) if len(s_) else None
+            if sg is not None:
+                b5 = {"t": sg[0], "o": sg[1], "h": sg[2], "l": sg[3], "c": sg[4], "v": sg[5]}
         read, live_setups = [], []
         if b5 is not None and len(b5["c"]) >= 3:
             ind = setups.indicators(b5)
             read = setups.chart_read(b5, ind, {**ctx, "flip": g.get("flip")})
-            px = m["spot"]
+            px = m.get("spot") or float(b5["c"][-1])
             for s in self.active.get(sym, [])[-8:]:
                 d = 1 if s["direction"] == "up" else -1
                 hit_t = (px - s["target"]) * d >= 0
@@ -382,6 +452,8 @@ class ChartData:
         except Exception as ex:
             pats = {"patterns": [], "swings": [], "structure": None, "error": str(ex)[:120]}
         return {"sym": sym, "name": m.get("name"), "tf": tf, "spot": m.get("spot"), "chg_pct": m.get("chg_pct"), "scenario": scen, **pats,
+                "offline": ({"as_of": str(dates[-1]), "source": "saved 1-minute history" if (Path_(e.data_dir) / "history" / sym / "minutes.parquet").exists()
+                             else "Yahoo Finance 5-minute bars"} if offline else None),
                 "candles": [{"time": int(a_), "open": round(float(b_), 2), "high": round(float(c_), 2), "low": round(float(d_), 2), "close": round(float(e_), 2)}
                             for a_, b_, c_, d_, e_ in zip(T, o, h, l, c)],
                 "volume": [{"time": int(a_), "value": float(x), "color": "rgba(30,138,90,.45)" if cc >= oo else "rgba(194,59,50,.45)"}

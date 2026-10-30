@@ -197,22 +197,22 @@ The menu is grouped: **Trade today** (Live, Ask Stockway, Alerts, Chart, Option 
 | Page | What it answers |
 |---|---|
 | Ask Stockway | Ask about the market right now (English or Hinglish); answered by Claude from the app's live data. |
-| Time Machine | Test any trade plan before taking it: 10,000 replays of the rest of the day plus the real past. |
-| Chart | TradingView-style chart with indicators, levels, setups and markers, plus a chart read. |
+| Time Machine | Test any trade plan before taking it: 10,000 replays plus the real past, a plain "what to do", how far price usually moves after that time, and "Find a better stop & target" (24 plans ranked). |
+| Chart | TradingView-style chart with indicators, levels, setups and markers, plus a chart read. Before the open or with the scanner off it shows the last session (saved history or Yahoo 5-minute bars). |
 | World | Global markets, forex, commodities, rates, ADRs, economic and results calendars, global news. |
 | Insider trades | Promoter / director buying and selling in F&O stocks, net by stock, every disclosure. |
-| Strategy desk | Today's strategy plan and positions, paper P&L by day, out-of-sample backtest results, history download (Upstox Plus or Dhan). |
-| Live | Index cards (PCR, max pain, support/resistance from option OI, IV, expected move, bias), live alerts with option ideas, market pulse, movers, news. |
+| Strategy desk | Step-by-step research checklist and "what passed, in plain words", then today's plan and positions, paper P&L by day, out-of-sample backtest results, history download (Upstox Plus or Dhan). |
+| Live | Sensex, Nasdaq, Dow and S&P strip, index cards (PCR, max pain, support/resistance from option OI, IV, expected move, bias), live alerts with option ideas, market pulse, movers, news. |
 | Scanner | Every F&O stock ranked by activity, with buildup, volume pace, IV, PCR, unusual options, bias. Filters and sorting. |
-| Option chain | Full chain for any index or stock with OI bars, OI change, IV, greeks, walls, max pain, intraday chart. |
+| Option chain | Pick any index or F&O stock from the dropdown: full chain with OI bars, OI change, IV, greeks, walls, max pain, intraday chart. |
 | Market context | FII/DII/Pro/Client positioning, cash flows, ban list, big deals, company filings, global markets. |
 | Briefs | Pre-market plan and post-market review. |
 | Alerts | Every alert saved by day. |
-| Scorecard | Which alert types actually work, graded automatically, plus the learning model's status. |
+| Scorecard | Which alert types actually work, sorted into Trust / Keep watching / Ignore, graded automatically. |
 | Paper trades | Automatic and manual paper trades, P&L after charges, win rate by alert type. |
 | Live setup | Upstox keys and login, alert levels, Telegram, AI, paper trading settings (one capital for the whole app). |
 | Tomorrow | Will the next session be a big-move day? Expected range in points, direction lean, scheduled events, why the model thinks so, and how your recent calls turned out. |
-| History | Every big day on the chart: flagged, missed, or false alarm. Click any point for that day's story. |
+| History | In plain words: how many big days the radar caught and how much better than guessing, the last 15 days' calls, and every big day on the chart. |
 | Biggest days | The 60 widest-range days in 10 years, and whether the model saw them coming. |
 | What drives moves | How often a big day followed when each factor was high vs low. |
 | Model check | Honest scores on years the model never saw, plus an option-buying proxy test. |

@@ -130,6 +130,23 @@ def run(sess: np.ndarray, days: list, *, entry: float, stop: float, target: floa
             "mc": mc, "history": hist_out, "verdict": verdict(mc, r_mult, hist_out)}
 
 
+def typical_moves(sess: np.ndarray, start_bar: int, entry_bar_close=None) -> dict:
+    """How far price usually travels after the entry time, from the past sessions: median and 75th percentile of the
+    best move up and the worst move down within 30 minutes, 1 hour and until 15:15 (in % of the price at entry)."""
+    out = {}
+    s0 = max(1, min(start_bar, BARS - 1))
+    base = sess[:, s0 - 1, 3]
+    for name, nb in (("30 min", 6), ("1 hour", 12), ("to 15:15", FLAT_BAR - s0 + 1)):
+        e = min(FLAT_BAR, s0 + nb - 1)
+        if e < s0:
+            continue
+        hi = sess[:, s0:e + 1, 1].max(axis=1) / base - 1
+        lo = 1 - sess[:, s0:e + 1, 2].min(axis=1) / base
+        out[name] = {"up_med": round(float(np.median(hi)) * 100, 2), "down_med": round(float(np.median(lo)) * 100, 2),
+                     "up_p75": round(float(np.percentile(hi, 75)) * 100, 2), "down_p75": round(float(np.percentile(lo, 75)) * 100, 2)}
+    return out
+
+
 def verdict(mc, r_mult, hist) -> dict:
     sided = mc["target_first"] + mc["stop_first"]
     need = 100 / (1 + r_mult)                       # % of decided replays the target must win to break even
@@ -219,6 +236,44 @@ class TimeMachine:
         f = _frame(rows, ("ts", "open", "high", "low", "close", "volume"))
         return f if len(f) else None
 
+    def scan(self, sym, *, entry, direction, start: str | None = None, when: dt.datetime | None = None) -> dict:
+        """Try a grid of stop distances and reward:risk targets for the same entry and time; rank them.
+
+        Picked on the same 60 sessions it is measured on, so the best row is optimistic: prefer rows where the
+        replays and the real past agree, and paper-trade before trusting.
+        """
+        now = when or self.e.clock.now()
+        days, sess = self.history(sym, now.date())
+        if start:
+            h, m = map(int, str(start).split(":"))
+            bar = _bar_of(now.replace(hour=h, minute=m))
+        else:
+            bar = _bar_of(now) + 1
+        if bar >= FLAT_BAR:
+            raise ValueError("Nothing left to replay: entries must be before 15:15 (the square-off).")
+        bar = max(1, bar)
+        d = 1 if direction == "up" else -1
+        tm = typical_moves(sess, bar)
+        rows = []
+        for sp in (0.25, 0.4, 0.6, 0.8, 1.0, 1.25):
+            for r in (1.0, 1.5, 2.0, 3.0):
+                stop, target = entry * (1 - d * sp / 100), entry * (1 + d * sp * r / 100)
+                o = run(sess, days, entry=entry, stop=stop, target=target, direction=direction, start_bar=bar, replays=4000)
+                v = o["verdict"]
+                rows.append({"stop_pct": sp, "r": r, "stop": round(stop, 2), "target": round(target, 2),
+                             "target_first": o["mc"]["target_first"], "stop_first": o["mc"]["stop_first"],
+                             "neither": o["mc"]["neither"], "avg_r": o["mc"]["avg_r"], "past_avg_r": o["history"]["avg_r"],
+                             "needed": v["needed_pct"], "got": v["got_pct"], "grade": v["grade"]})
+        for x in rows:          # both views must agree: rank by the weaker of the two averages
+            x["score"] = round(min(x["avg_r"], x["past_avg_r"]), 3)
+        rows.sort(key=lambda x: -x["score"])
+        best = rows[0]
+        return {"sym": sym, "direction": direction, "entry": entry, "start": f"{(555 + 5 * bar) // 60:02d}:{(555 + 5 * bar) % 60:02d}",
+                "sessions": len(sess), "typical": tm, "rows": rows, "best": best,
+                "edge": best["score"] > 0.05,
+                "note": "Chosen on the same 60 sessions it is scored on, so the top row flatters itself. Trust it only if "
+                        "both columns are positive, then paper-trade it."}
+
     @staticmethod
     def _yahoo(sym):
         """Last ~60 sessions of 5-minute bars from Yahoo Finance (free, no login). Indices and NSE stocks."""
@@ -254,6 +309,7 @@ class TimeMachine:
         if bar < 1:
             bar = 1
         out = run(sess, days, entry=entry, stop=stop, target=target, direction=direction, start_bar=bar)
+        out["typical"] = typical_moves(sess, bar)
         out["sym"] = sym
         out["as_of"] = now.isoformat(timespec="minutes")
         out["start"] = f"{(555 + 5 * bar) // 60:02d}:{(555 + 5 * bar) % 60:02d}"

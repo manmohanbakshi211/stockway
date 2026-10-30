@@ -1179,7 +1179,22 @@ class LiveEngine:
                 "paper": {"open": len(ps["open"]), "net": ps["net"], "unreal": ps["unreal"], "n": ps["n"],
                           "win_rate": ps["win_rate"], "guard": ps.get("guard")} if ps else None,
                 "news": self.news.items[:12], "ai": {"enabled": self.ai.enabled(), "used": self.ai.used,
-                                                     "error": self.ai.last_error}}
+                                                     "error": self.ai.last_error},
+                "watch": self._watch()}
+
+    WATCH = (("Sensex", "^BSESN"), ("Nasdaq 100 fut", "NQ=F"), ("Dow fut", "YM=F"), ("S&P 500 fut", "ES=F"))
+
+    def _watch(self) -> list:
+        """Sensex, Nasdaq, Dow and S&P on the Live page (Yahoo 1-minute prices, about a minute behind)."""
+        out = []
+        rows = getattr(self.world, "rows", {}) or {}
+        for name, t in self.WATCH:
+            r = rows.get(t) or {}
+            if r.get("last") is None:
+                continue
+            out.append({"name": name, "ticker": t, "last": r.get("last"), "chg_pct": r.get("chg_pct"),
+                        "ts": r.get("live_ts"), "spark": r.get("spark_day")})
+        return out
 
     def scanner(self) -> list:
         return [self.slim(m) for m in self.metrics.values()]

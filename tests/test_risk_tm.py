@@ -85,3 +85,19 @@ def test_sessions_accept_missing_last_bars():
             rows.append({"ts": ts, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0 + b * 0.01})
     days, s = sessions_from_minutes(pd.DataFrame(rows))
     assert len(days) == 2 and s.shape == (2, BARS, 4) and s[0, -1, 3] == s[0, -2, 3]
+
+
+def test_typical_moves_and_scan_rank():
+    import numpy as np
+    from live.timemachine import BARS, run, typical_moves
+    rng = np.random.default_rng(1)
+    sess = []
+    for _ in range(40):
+        c = 100 * np.cumprod(1 + rng.normal(0, 0.0008, BARS))
+        o = np.r_[100, c[:-1]]
+        sess.append(np.stack([o, np.maximum(o, c) * 1.0005, np.minimum(o, c) * 0.9995, c], 1))
+    sess = np.array(sess)
+    t = typical_moves(sess, 4)
+    assert set(t) == {"30 min", "1 hour", "to 15:15"} and t["to 15:15"]["up_med"] >= t["30 min"]["up_med"] > 0
+    r = run(sess, list(range(40)), entry=100, stop=99.5, target=101, direction="up", start_bar=4, replays=500)
+    assert 0 <= r["mc"]["target_first"] <= 100

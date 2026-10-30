@@ -249,6 +249,68 @@ async def timemachine_plan(req: Request):
         raise HTTPException(400, "Entry, stop and target must be numbers.")
 
 
+INDEX_SYMS = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")
+FALLBACK_STOCKS = ("RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "SBIN", "AXISBANK", "KOTAKBANK", "LT", "ITC",
+                   "BHARTIARTL", "BAJFINANCE", "HINDUNILVR", "MARUTI", "M&M", "TATAMOTORS", "TATASTEEL", "SUNPHARMA",
+                   "TITAN", "ULTRACEMCO", "ASIANPAINT", "WIPRO", "HCLTECH", "ADANIENT", "ADANIPORTS", "NTPC", "POWERGRID",
+                   "ONGC", "COALINDIA", "JSWSTEEL", "HINDALCO", "BAJAJFINSV", "TECHM", "DRREDDY", "CIPLA", "EICHERMOT",
+                   "HEROMOTOCO", "BPCL", "INDUSINDBK", "GRASIM", "DLF", "BEL", "HAL", "VEDL", "PNB", "BANKBARODA", "ZOMATO")
+
+
+def _symbol_names(e) -> list:
+    """Every symbol the app knows: the live universe, else NSE's F&O list, else a built-in list of big names."""
+    names = set(e.metrics or {})
+    if e.uni:
+        names |= set(e.uni.underlyings)
+    try:
+        if e.context and (e.context.mwpl or {}).get("symbols"):
+            names |= set(e.context.mwpl["symbols"])
+    except Exception:
+        pass
+    if len(names - set(INDEX_SYMS)) < 10:
+        names |= set(FALLBACK_STOCKS)
+    return sorted(names | set(INDEX_SYMS))
+
+
+@router.get("/api/symbols")
+def symbols():
+    """Indices and F&O stocks for the symbol pickers (works before the scanner starts)."""
+    e = engine()
+    names = _symbol_names(e)
+    return {"indices": [x for x in INDEX_SYMS], "stocks": [x for x in names if x not in INDEX_SYMS]}
+
+
+@router.post("/api/timemachine/scan")
+async def timemachine_scan(req: Request):
+    """Find a better stop and target for an entry: a grid of 24 plans, each replayed 4,000 times and on the real past."""
+    b = await req.json()
+    e = engine()
+    try:
+        return clean(await _run_blocking(lambda: e.tm.scan(str(b["sym"]).upper().strip(), entry=float(b["entry"]),
+                                                           direction=b.get("direction") or "up", start=(b.get("start") or None))))
+    except KeyError as ex:
+        raise HTTPException(400, f"Missing {ex}")
+    except PermissionError as ex:
+        raise HTTPException(401, str(ex))
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+
+
+@router.get("/api/price/{sym}")
+def last_price(sym: str):
+    """Live price, or the last close when the live feed is off (from saved history or Yahoo)."""
+    e = engine()
+    sym = sym.upper()
+    m = (e.metrics or {}).get(sym)
+    if m and m.get("spot"):
+        return {"sym": sym, "price": round(float(m["spot"]), 2), "live": True}
+    rows = e.charts.offline_rows(sym) if e.charts else []
+    if not rows:
+        raise HTTPException(404, f"No price for {sym} yet.")
+    return {"sym": sym, "price": round(float(rows[-1][4]), 2), "live": False,
+            "as_of": dt.datetime.fromtimestamp(rows[-1][0], IST).strftime("%d %b %H:%M")}
+
+
 @router.get("/api/timemachine/setup")
 def timemachine_setup():
     """What the Time Machine page needs: symbols with a live price, and today's alerts that carry a plan."""
@@ -257,13 +319,8 @@ def timemachine_setup():
     for sym, m in (e.metrics or {}).items():
         if m.get("spot"):
             syms[sym] = round(float(m["spot"]), 2)
-    names = set(syms)
-    if e.uni:
-        names |= set(e.uni.underlyings)
-    if e.context and (e.context.mwpl or {}).get("symbols"):
-        names |= set(e.context.mwpl["symbols"])
-    names |= {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"}
-    idx = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
+    names = set(syms) | set(_symbol_names(e))
+    idx = list(INDEX_SYMS)
     order = idx + sorted(n for n in names if n not in idx)
     plans = []
     for a in list(e.alerts_mem)[:300]:
