@@ -652,3 +652,27 @@ tr.best td { background: var(--up-soft); }
 .scen-best p{margin:6px 0 0}
 .scen .sc-m{display:none}
 @media (max-width: 600px){.scen .sc-x{display:none}.scen td:first-child{max-width:150px}.scen .sc-m{display:inline-block;margin-top:4px}.scen td,.scen th{padding-left:6px;padding-right:6px}}
+
+/* 2.14: paper account, side-bar P&L, aggressive switch */
+.nav-pnl { float: right; font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 8px; font-variant-numeric: tabular-nums; }
+.nav-pnl.pos { color: var(--up); background: var(--up-soft); }
+.nav-pnl.neg { color: var(--down); background: var(--down-soft); }
+.btn.danger { color: var(--down); border-color: var(--down); }
+.btn.danger:hover { background: var(--down-soft); }
+.row-links { font-size: 12px; }
+.agg.on { border-color: var(--amber); background: var(--amber-soft); }
+.kpis.acct .kpi small { font-weight: 650; }
+.btn.buy { color: #fff; background: var(--up); border-color: var(--up); }
+.btn.sell { color: #fff; background: var(--down); border-color: var(--down); }
+.bs { display: inline-flex; gap: 2px; margin-left: 4px; }
+.bs button { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; border: 1px solid; background: none; cursor: pointer; line-height: 1.4; }
+.bs .b { color: var(--up); border-color: var(--up); } .bs .b:hover { background: var(--up-soft); }
+.bs .s { color: var(--down); border-color: var(--down); } .bs .s:hover { background: var(--down-soft); }
+.xcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 10px 0; }
+.xcard { background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius); padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.xcard span { font-weight: 650; width: 100%; font-size: 13px; color: var(--muted); }
+.xcard b { font-size: 22px; font-stretch: 110%; font-variant-numeric: tabular-nums; }
+.xcard em { font-style: normal; font-weight: 650; }
+.xcard small { width: 100%; font-size: 12px; }
+.live-px { font-variant-numeric: tabular-nums; }
+.wl td { font-size: 13px; } .wl .r { white-space: nowrap; }

@@ -410,13 +410,15 @@ class ChartData:
             mk.append({"time": tt(al["ts"]), "position": "belowBar" if al["direction"] == "up" else "aboveBar" if al["direction"] == "down" else "inBar",
                        "color": "#1E8A5A" if al["direction"] == "up" else "#C23B32" if al["direction"] == "down" else "#9A6A12",
                        "shape": "arrowUp" if al["direction"] == "up" else "arrowDown" if al["direction"] == "down" else "circle",
-                       "text": (SHORT.get(al["kind"][6:], "") if setup else "") if al["severity"] >= 2 else "",
+                       "text": ("BUY" if al["direction"] == "up" else "SELL") if (al.get("data") or {}).get("focus") and al["direction"] in ("up", "down")
+                               else (SHORT.get(al["kind"][6:], "") if setup else "") if al["severity"] >= 2 else "",
                        "id": al["id"], "title": al["title"], "kind": al["kind"]})
         trades = []
         if e.paper:
             for tr in e.store.trades(source=e.source, limit=300):
                 if tr["sym"] == sym and tr["entry_ts"] >= t_first:
-                    trades.append({"time": tt(tr["entry_ts"]), "label": "Buy", "title": f"Paper buy {tr['label']}", "kind": "paper"})
+                    side = "Sell" if (tr.get("dir") or 1) < 0 else "Buy"
+                    trades.append({"time": tt(tr["entry_ts"]), "label": side, "title": f"Paper {side.lower()} {tr['label']}", "kind": "paper"})
                     if tr.get("exit_ts"):
                         trades.append({"time": tt(tr["exit_ts"]), "label": f"₹{tr['net']:,.0f}", "title": f"Paper exit ({tr['reason']}) ₹{tr['net']:,.0f}", "kind": "paper"})
         try:

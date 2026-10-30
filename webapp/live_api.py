@@ -348,6 +348,9 @@ def _tm(e, sym, entry, stop, target, direction, start=None):
         raise HTTPException(400, str(ex))
 
 
+STALE_MIN = 5          # an alert older than this can no longer be paper-traded (its price is gone)
+
+
 @router.post("/api/live/alerts/{alert_id}/paper")
 async def live_paper_from_alert(alert_id: int, request: Request):
     """Paper trade from an alert. The risk gate is re-checked now: hard rules (time window, day loss limit, ban,
@@ -364,6 +367,9 @@ async def live_paper_from_alert(alert_id: int, request: Request):
     if not a or not a.get("option"):
         raise HTTPException(400, "This alert has no option idea to paper trade.")
     now = e.clock.now()
+    age = (now.timestamp() - float(a.get("ts") or 0)) / 60
+    if age > STALE_MIN:
+        raise HTTPException(400, f"This signal is {age:.0f} minutes old: the price has moved on. Take a fresh signal.")
     a = {**a, "data": {**(a.get("data") or {})}}
     risk = e.risk_for(a, now)
     a["data"]["risk"] = risk
@@ -390,13 +396,84 @@ def live_paper_close(trade_id: int):
     return clean(r)
 
 
+@router.post("/api/live/paper/close_all")
+def live_paper_close_all():
+    e = engine()
+    if not e.paper:
+        raise HTTPException(400, "Start the live scanner first.")
+    done = e.paper.close_all(e.state, e.clock.now())
+    return {"ok": True, "closed": len(done), "net": round(sum(t["net"] for t in done), 2)}
+
+
+@router.post("/api/live/paper/open")
+async def live_paper_open(request: Request):
+    """Paper Buy (direction 1) / Sell (-1) one option by instrument key; or {sym, side: buy|sell} for the chart's
+    at-the-money buttons. Paper only."""
+    b = await request.json()
+    e = engine()
+    try:
+        if b.get("key"):
+            return clean(e.paper_open(b["key"], int(b.get("direction") or 1), int(b.get("lots") or 1)))
+        return clean(e.paper_quick(str(b.get("sym", "")).upper(), b.get("side", "buy")))
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+
+
+@router.post("/api/live/paper/settings")
+async def live_paper_settings(request: Request):
+    """Paper switches from the Paper page (aggressive mode). Saved to your settings."""
+    from radar.config import save_user_settings
+    b = await request.json()
+    upd = {}
+    if "aggressive" in b:
+        upd["live.paper.aggressive"] = bool(b["aggressive"])
+    if upd:
+        save_user_settings(upd)
+        e = engine()
+        if e.paper:
+            e.paper.cfg.update({k.split(".")[-1]: v for k, v in upd.items()})
+    return {"ok": True, **upd}
+
+
+@router.get("/api/watchlist")
+def watchlist_view():
+    from live import watchlist
+    return clean(watchlist.view(engine()))
+
+
+@router.post("/api/watchlist")
+async def watchlist_change(request: Request):
+    from live import watchlist
+    b = await request.json()
+    sym = str(b.get("add") or "").strip().upper()
+    e = engine()
+    if sym and e.uni and sym not in e.uni.underlyings:
+        raise HTTPException(400, f"{sym} is not an F&O symbol the app follows.")
+    return {"manual": watchlist.change(e.store, add=sym or None, remove=b.get("remove"))}
+
+
+@router.get("/api/live/paper/mini")
+def live_paper_mini():
+    """For the side bar: today's net (booked + open) and the demo account."""
+    e = engine()
+    if not e.paper:
+        return {"running": False}
+    p = e.paper.summary(e.state)
+    a = p["account"]
+    return clean({"running": True, "today": a["today"], "equity": a["equity"], "free": a["free"], "open": len(p["open"])})
+
+
 @router.get("/api/live/paper")
 def live_paper(source: str | None = None):
     from live.paper import PaperBook
     e = engine()
     src = source or (e.source if e.paper else e.cfg()["live"]["source"])
     book = e.paper if e.paper and e.source == src else PaperBook(e.store, src, e.cfg()["live"].get("paper"))
-    return clean({**book.summary(e.state if e.paper is book else None), "source": src})
+    out = book.summary(e.state if e.paper is book else None)
+    for t in out["open"] + out["closed"]:              # the underlying's price and day move, for the tables
+        t["und_now"] = e.underlying_view(t["sym"])
+    out["aggressive"] = bool(book.cfg.get("aggressive"))
+    return clean({**out, "source": src})
 
 
 @router.get("/api/live/context")

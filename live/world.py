@@ -123,7 +123,7 @@ class World:
                     # a fresher intraday price is already known: keep it, against the right previous close
                     pv = last if old["live_date"] > row["asof"] else prev
                     row.update(last=old["last"], prev=pv, chg_pct=_pct(old["last"], pv), live_ts=old["live_ts"],
-                               live_date=old["live_date"], spark_day=old.get("spark_day"))
+                               live_date=old["live_date"], spark_day=old.get("spark_day"), spark_pc=old.get("spark_pc"))
                 self.rows[t] = row
             except Exception:
                 continue
@@ -141,11 +141,77 @@ class World:
         self._check_moves()
         self._save()
 
+    @staticmethod
+    def _chart(t: str) -> dict | None:
+        """One market from Yahoo's chart endpoint: last price, the exchange's own previous close, today's 2-minute line.
+        Lighter and more exact than a bulk download (the % change matches Yahoo's own page)."""
+        import requests
+        from urllib.parse import quote
+        r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(t)}", params={"range": "1d", "interval": "2m"},
+                         headers={"User-Agent": "Mozilla/5.0 (Macintosh) Stockway"}, timeout=8)
+        r.raise_for_status()
+        res = (r.json().get("chart") or {}).get("result") or []
+        if not res:
+            return None
+        m = res[0].get("meta") or {}
+        ts = res[0].get("timestamp") or []
+        q = ((res[0].get("indicators") or {}).get("quote") or [{}])[0]
+        pts = [(a, c) for a, c in zip(ts, q.get("close") or []) if c is not None]
+        last = m.get("regularMarketPrice") or (pts[-1][1] if pts else None)
+        pc = m.get("chartPreviousClose") or m.get("previousClose")
+        if last is None or not pc:
+            return None
+        line = [c for _, c in pts]
+        step = max(1, len(line) // 120)
+        return {"last": float(last), "prev": float(pc), "ts": float(m.get("regularMarketTime") or (pts[-1][0] if pts else time.time())),
+                "line": [float(x) for x in line[::step]] + ([float(last)] if line else [])}
+
     def refresh_live(self):
-        """Intraday prices (1-minute bars) for every market, between the slower daily refreshes."""
-        import yfinance as yf
+        """Intraday prices for every market, between the slower daily refreshes: Yahoo's chart endpoint in parallel
+        (about 2 seconds for all of them); falls back to the bulk 1-minute download if that fails."""
         if not self.rows:
             self.refresh_prices()
+        from concurrent.futures import ThreadPoolExecutor
+        ticks = list(self.rows)
+        got = {}
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for t, res in zip(ticks, ex.map(lambda x: self._safe_chart(x), ticks)):
+                if res:
+                    got[t] = res
+        if len(got) >= max(3, len(ticks) // 2):
+            for t, c in got.items():
+                r = self.rows[t]
+                bar_date = dt.datetime.fromtimestamp(c["ts"], dt.timezone.utc).date().isoformat()
+                # previous close from the daily table (Yahoo's chart 'previousClose' is sometimes a day stale for
+                # Indian indices); the chart's own value only if the daily table is missing
+                pv = (r.get("d_last") if bar_date > r.get("asof", "") else r.get("d_prev")) or c["prev"]
+                r.update(last=c["last"], prev=pv, chg_pct=_pct(c["last"], pv), live_ts=c["ts"], live_date=bar_date,
+                         spark_day=c["line"] if len(c["line"]) > 2 else r.get("spark_day"), spark_pc=pv)
+            self._after_live()
+            return len(got)
+        return self._refresh_live_bulk()
+
+    def _safe_chart(self, t):
+        try:
+            return self._chart(t)
+        except Exception:
+            return None
+
+    def _after_live(self):
+        usd = (self.rows.get("INR=X") or {}).get("last")
+        for a in self.adr:
+            r = self.rows.get(a["adr"])
+            n = self.rows.get(a["nse"] + ".NS")
+            if r and usd:
+                a.update(adr_usd=r["last"], adr_chg=r["chg_pct"], implied_inr=r["last"] * usd / ADR[a["adr"]][1])
+                if n:
+                    a["nse_inr"] = n["last"]
+                a["premium_pct"] = _pct(a["implied_inr"], a["nse_inr"])
+        self.updated["live"] = time.time()
+        self._check_moves()
+
+    def _refresh_live_bulk(self):
+        import yfinance as yf
         ticks = [t for t in self.rows]
         df = yf.download(ticks, period="2d", interval="1m", progress=False, group_by="ticker", auto_adjust=False,
                          threads=4, prepost=False)

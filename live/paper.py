@@ -22,7 +22,14 @@ DEFAULTS = {
     "max_daily_loss_pct": 3.0,  # stop new auto trades after this loss in a day
     "max_trades_day": 12,
     "cooloff_min": 30,          # after two stop-losses in a row, no new trade for this long
+    # aggressive mode: auto paper-trade every directional idea, even when the risk check says BLOCK (paper only)
+    "aggressive": False,
+    "aggressive_min_severity": 2,
+    "aggressive_max_open": 15,
+    "short_margin_pct": 15.0,   # rough margin for a short option: % of the underlying value of the position
 }
+
+MODES = {0: "auto", 1: "you", 2: "override", 3: "aggressive", 4: "you (chain/chart)"}
 
 
 def costs(entry: float, exit: float, qty: int) -> float:
@@ -48,26 +55,35 @@ class PaperBook:
         return self.store.trades(status="open", source=self.source)
 
     def try_open(self, alert: dict, state, now: dt.datetime, manual=False, override=False) -> int | None:
-        """manual: you clicked Paper trade (needs PASS); override: you confirmed taking a soft BLOCK (1 lot, tagged)."""
+        """manual: you clicked Paper trade (needs PASS); override: you confirmed taking a soft BLOCK (1 lot, tagged).
+        Automatic trades need PASS, unless aggressive mode is on: then every directional idea is taken (tagged)."""
         c = self.cfg
         opt = alert.get("option")
         if not opt:
             return None
+        aggressive = False
         if not manual:
-            if not c["auto"] or alert["severity"] < c["min_severity"] or alert["kind"] not in c["kinds"]:
+            if not c["auto"]:
                 return None
-            if now.strftime("%H:%M") >= c["no_entry_after"]:
+            if c.get("aggressive") and alert.get("direction") in ("up", "down") \
+                    and alert["severity"] >= int(c.get("aggressive_min_severity") or 2):
+                aggressive = True
+            elif alert["severity"] < c["min_severity"] or alert["kind"] not in c["kinds"]:
                 return None
+            hm = now.strftime("%H:%M")
+            if hm < "09:16" or hm >= (c["exit_time"] if aggressive else c["no_entry_after"]):
+                return None                               # never on pre-open or after-close prices
         opens = self.open_trades()
-        if any(t["sym"] == alert["sym"] for t in opens) or (not manual and len(opens) >= c["max_open"]):
-            return None
-        g = self.guard(now)
-        if g["blocked"]:
+        cap = int(c.get("aggressive_max_open") or 15) if aggressive else int(c["max_open"])
+        if any(t["sym"] == alert["sym"] for t in opens) or (not manual and len(opens) >= cap):
             return None
         risk = (alert.get("data") or {}).get("risk")
-        if risk and risk.get("verdict") != "PASS":
-            if not (manual and override and risk.get("can_override")):
-                return None                               # the risk gate said no: no paper trade
+        if not aggressive:
+            if self.guard(now)["blocked"]:
+                return None
+            if risk and risk.get("verdict") != "PASS":
+                if not (manual and override and risk.get("can_override")):
+                    return None                           # the risk gate said no: no paper trade
         inst = state.get(opt["key"])
         if not inst or not inst.ltp:
             return None
@@ -76,13 +92,45 @@ class PaperBook:
             lots = 1
         else:
             lots = int(risk["lots"]) if risk and risk.get("lots") else self.size(entry, opt["lot"])
-        t = {"alert_id": alert.get("id"), "source": self.source, "day": now.date().isoformat(), "sym": alert["sym"],
-             "kind": alert["kind"], "opt_key": opt["key"], "label": opt["label"], "side": opt["side"],
+        manual_code = 3 if aggressive else 2 if override else int(manual)
+        return self._open(state, now, sym=alert["sym"], kind=alert["kind"], opt=opt, entry=entry, ltp=inst.ltp, lots=lots,
+                          direction=1, manual=manual_code, alert_id=alert.get("id"), und_key=alert.get("und_key"),
+                          why=alert.get("title", ""))
+
+    def open_manual(self, state, now: dt.datetime, *, sym: str, opt: dict, direction: int, lots: int = 1,
+                    und_key: str | None = None, kind="manual") -> dict:
+        """Buy (direction 1) or sell (direction -1) an option by hand from the option chain or the chart. Selling an
+        option you hold closes it; otherwise it opens a short. Market hours only, live price only. Paper only."""
+        hm = now.strftime("%H:%M")
+        if now.weekday() >= 5 or hm < "09:15" or hm >= "15:30":
+            raise ValueError("Market closed: paper fills only on live prices (09:15–15:30).")
+        inst = state.get(opt["key"])
+        if not inst or not inst.ltp:
+            raise ValueError("No live price for this option right now.")
+        for t in self.open_trades():
+            if t["opt_key"] == opt["key"] and (t.get("dir") or 1) == -direction:
+                return {"closed": self.close_manual(t["id"], state, now)}
+        if self.guard(now)["blocked"] and not self.cfg.get("aggressive"):
+            raise ValueError(self.guard(now)["why"])
+        entry = (inst.ask or inst.ltp) if direction > 0 else (inst.bid or inst.ltp)
+        tid = self._open(state, now, sym=sym, kind=kind, opt=opt, entry=entry, ltp=inst.ltp, lots=max(1, int(lots)),
+                         direction=direction, manual=4, und_key=und_key, why="by hand")
+        return {"opened": tid}
+
+    def _open(self, state, now, *, sym, kind, opt, entry, ltp, lots, direction, manual, alert_id=None, und_key=None, why=""):
+        c = self.cfg
+        und = state.get(und_key) if und_key else None
+        tp, sp = float(c["target_pct"]) / 100, float(c["stop_pct"]) / 100
+        t = {"alert_id": alert_id, "source": self.source, "day": now.date().isoformat(), "sym": sym,
+             "kind": kind, "opt_key": opt["key"], "label": opt["label"], "side": opt["side"],
              "lot": opt["lot"], "lots": lots, "entry_ts": now.timestamp(), "entry": entry,
-             "target": round(entry * (1 + c["target_pct"] / 100), 2), "stop": round(entry * (1 - c["stop_pct"] / 100), 2),
-             "peak": entry, "last": inst.ltp, "status": "open", "manual": 2 if override else int(manual)}
+             "target": round(entry * (1 + tp) if direction > 0 else entry * (1 - tp), 2),
+             "stop": round(entry * (1 - sp) if direction > 0 else entry * (1 + sp), 2),
+             "peak": entry, "last": ltp, "status": "open", "manual": manual, "dir": direction,
+             "und_key": und_key, "und_entry": und.ltp if und and und.ltp else None, "und_last": und.ltp if und and und.ltp else None,
+             "mode": MODES.get(manual, "auto")}
         tid = self.store.add_trade(t)
-        self.log(f"Paper BUY {opt['label']} @ {entry:.2f} ({alert['title']})")
+        self.log(f"Paper {'BUY' if direction > 0 else 'SELL'} {opt['label']} @ {entry:.2f} ({why})")
         return tid
 
     def size(self, entry, lot) -> int:
@@ -120,45 +168,81 @@ class PaperBook:
         c = self.cfg
         closed = []
         for t in self.open_trades():
+            d = t.get("dir") or 1
+            und = state.get(t["und_key"]) if t.get("und_key") else None
             inst = state.get(t["opt_key"])
             if not inst or not inst.ltp:
                 if force_close:
-                    self._close(t, t["last"] or t["entry"], now, "market closed")
+                    self._close(t, t["last"] or t["entry"], now, "market closed", und)
                 continue
-            bid = inst.bid or inst.ltp
-            peak = max(t["peak"] or 0, inst.ltp)
+            px = (inst.bid or inst.ltp) if d > 0 else (inst.ask or inst.ltp)       # what you would get closing now
+            peak = max(t["peak"] or 0, inst.ltp) if d > 0 else min(t["peak"] or inst.ltp, inst.ltp)
             held = (now.timestamp() - t["entry_ts"]) / 60
             reason = None
-            if bid >= t["target"]:
+            if (d > 0 and px >= t["target"]) or (d < 0 and px <= t["target"]):
                 reason = "target"
-            elif bid <= t["stop"]:
+            elif (d > 0 and px <= t["stop"]) or (d < 0 and px >= t["stop"]):
                 reason = "stop loss"
             elif force_close or now.strftime("%H:%M") >= c["exit_time"]:
                 reason = "end of day"
-            elif held >= c["max_hold_min"]:
-                reason = "time limit"
+            elif held >= c["max_hold_min"] and t.get("manual") != 4:
+                reason = "time limit"                       # your own chain/chart trades are held until you exit
             if reason:
-                closed.append(self._close(t, bid, now, reason))
+                closed.append(self._close(t, px, now, reason, und))
             else:
-                self.store.update_trade(t["id"], peak=peak, last=inst.ltp)
+                upd = {"peak": peak, "last": inst.ltp}
+                if und and und.ltp:
+                    upd["und_last"] = und.ltp
+                self.store.update_trade(t["id"], **upd)
         return closed
 
     def close_manual(self, tid, state, now):
         for t in self.open_trades():
             if t["id"] == tid:
                 inst = state.get(t["opt_key"])
-                px = (inst.bid or inst.ltp) if inst and inst.ltp else (t["last"] or t["entry"])
-                return self._close(t, px, now, "closed by you")
+                d = t.get("dir") or 1
+                px = ((inst.bid if d > 0 else inst.ask) or inst.ltp) if inst and inst.ltp else (t["last"] or t["entry"])
+                und = state.get(t["und_key"]) if t.get("und_key") else None
+                return self._close(t, px, now, "closed by you", und)
         return None
 
-    def _close(self, t, px, now, reason):
+    def close_all(self, state, now) -> list:
+        return [x for x in (self.close_manual(t["id"], state, now) for t in self.open_trades()) if x]
+
+    def _close(self, t, px, now, reason, und=None):
+        d = t.get("dir") or 1
         qty = t["lot"] * t["lots"]
-        gross = round((px - t["entry"]) * qty, 2)
-        cst = costs(t["entry"], px, qty)
-        self.store.update_trade(t["id"], exit_ts=now.timestamp(), exit=px, reason=reason, status="closed",
-                                gross=gross, costs=cst, net=round(gross - cst, 2), last=px)
-        self.log(f"Paper SELL {t['label']} @ {px:.2f} ({reason}) net ₹{gross - cst:,.0f}")
+        gross = round(d * (px - t["entry"]) * qty, 2)
+        cst = costs(t["entry"], px, qty) if d > 0 else costs(px, t["entry"], qty)
+        upd = dict(exit_ts=now.timestamp(), exit=px, reason=reason, status="closed", gross=gross, costs=cst,
+                   net=round(gross - cst, 2), last=px)
+        if und is not None and getattr(und, "ltp", None):
+            upd.update(und_exit=und.ltp, und_last=und.ltp)
+        self.store.update_trade(t["id"], **upd)
+        self.log(f"Paper {'SELL' if d > 0 else 'BUY back'} {t['label']} @ {px:.2f} ({reason}) net ₹{gross - cst:,.0f}")
         return {**t, "exit": px, "reason": reason, "net": gross - cst}
+
+    def margin(self, t) -> float:
+        """Money a position blocks: premium paid for a buy; a rough exchange margin for a short."""
+        qty = t["lot"] * t["lots"]
+        if (t.get("dir") or 1) > 0:
+            return t["entry"] * qty
+        und = t.get("und_last") or t.get("und_entry")
+        return (und * qty * float(self.cfg.get("short_margin_pct", 15)) / 100) if und else t["entry"] * qty * 8
+
+    def account(self, trades: list, opened: list, now=None) -> dict:
+        """The demo account: starting capital plus everything booked, what is blocked in open positions, what is free."""
+        cap = float(self.cfg["capital"])
+        realised = sum(t["net"] or 0 for t in trades if t["status"] == "closed")
+        unreal = sum(t.get("unreal") or 0 for t in opened)
+        used = sum(self.margin(t) for t in opened)
+        day = (now or dt.datetime.now(IST)).date().isoformat()
+        today_real = sum(t["net"] or 0 for t in trades if t["status"] == "closed" and t["day"] == day)
+        bal = cap + realised
+        return {"capital": round(cap, 0), "balance": round(bal, 2), "equity": round(bal + unreal, 2), "used": round(used, 0),
+                "free": round(bal + unreal - used, 0), "realised": round(realised, 2), "unrealised": round(unreal, 2),
+                "today": round(today_real + unreal, 2), "today_booked": round(today_real, 2),
+                "return_pct": round((bal + unreal - cap) / cap * 100, 2) if cap else None}
 
     def summary(self, state=None) -> dict:
         trades = self.store.trades(source=self.source, limit=2000)
@@ -167,8 +251,11 @@ class PaperBook:
         for t in opened:
             inst = state.get(t["opt_key"]) if state else None
             ltp = inst.ltp if inst and inst.ltp else t["last"] or t["entry"]
-            t["unreal"] = round((ltp - t["entry"]) * t["lot"] * t["lots"], 2)
+            t["unreal"] = round((t.get("dir") or 1) * (ltp - t["entry"]) * t["lot"] * t["lots"], 2)
             t["last"] = ltp
+            und = state.get(t["und_key"]) if state and t.get("und_key") else None
+            if und and und.ltp:
+                t["und_last"] = und.ltp
         by = {}
         for t in closed:
             b = by.setdefault(t["kind"], {"kind": t["kind"], "n": 0, "wins": 0, "net": 0.0})
@@ -189,4 +276,5 @@ class PaperBook:
                 "equity": eq, "n": n, "win_rate": round(wins / n * 100) if n else None,
                 "net": round(sum(t["net"] for t in closed), 2), "costs": round(sum(t["costs"] or 0 for t in closed), 2),
                 "unreal": round(sum(t["unreal"] for t in opened), 2), "settings": self.cfg,
+                "account": self.account(trades, opened),
                 "guard": self.guard(dt.datetime.now(IST) if state is None else (state.clock.now() if getattr(state, "clock", None) else dt.datetime.now(IST)))}

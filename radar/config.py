@@ -36,6 +36,7 @@ EDITABLE = {
     "live.paper.risk_pct": float,
     "live.paper.max_daily_loss_pct": float,
     "live.paper.max_trades_day": int,
+    "live.paper.aggressive": bool,
     "live.filings": bool,
     "live.briefs": bool,
     "live.mute_hit_rate": float,

@@ -114,6 +114,32 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Paper account, watchlist and trading from the chain and chart (2.14)
+
+All of this is paper: nothing reaches a broker, ever.
+
+- **Paper account**: starting capital, account value now, today's P&L (booked + open), free cash, money in open
+  positions, all booked P&L. The side bar shows today's P&L next to "Paper trades" (green / red), every 5 seconds.
+- **Close all** button; each position shows its stock's live price, today's % and the move since entry, with links to
+  its chart and option chain. Closed trades show the stock's entry → exit price.
+- **Option chain B / S**: paper Buy or Sell any strike at the live price (Lots box above the chain). Sell closes a
+  position you hold, otherwise opens a paper short (margin estimated at 15% of the underlying value).
+- **Chart**: Paper BUY (at-the-money call) / Paper SELL (at-the-money put) buttons; Focus alerts are marked BUY / SELL
+  on the chart and listed in "Trade signals", each with a paper-trade button.
+- **Aggressive auto trading** switch (Paper page): the system paper-trades every up/down idea (Important and
+  Act-now), even when the risk check blocks it, up to 15 open, 09:16–15:15. Tagged "aggressive" in reports.
+- **Alerts**: live price, today's % and the move since the alert on every card; the Paper trade button disappears
+  once an alert is 5 minutes old (the server refuses it too).
+- **Watchlist** page: your symbols plus up to 8 smart picks (Focus alerts in the last 90 minutes, then the most active
+  F&O stocks), with price, 5/15-min move, VWAP, volume pace, futures buildup, IV/PCR, range, support/resistance, bias,
+  last alert, and B / S paper buttons.
+- **Scanner Simple view** (default): Bullish / Bearish / Mixed plus one plain sentence per stock; "How to read this".
+- **Live page**: Sensex (live from Upstox, else Yahoo) and GIFT Nifty (near-month future from NSE IX's public site).
+- **Market brain** writes a fresh rule-based note every 5 minutes between Claude's hourly notes.
+- **World**: all markets refresh every 30 s in about 2 seconds (Yahoo chart endpoint in parallel); sparklines show
+  today against the previous close (dashed), coloured like the % change; previous closes from the daily table (Yahoo's
+  own is sometimes a day stale for Indian indices).
+
 ## Discipline, Focus and the day report (2.13)
 
 Built from the first live day (30 Oct 2026: 27 paper trades, 24 of them against the risk check, net −₹27,670; the 3 it

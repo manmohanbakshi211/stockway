@@ -9,6 +9,7 @@ import traceback
 from pathlib import Path
 
 from . import briefs, dayreport, detectors
+from .giftnifty import GiftNifty
 from .analytics import compute, norm_iv, pct
 from .clock import IST, Clock, SimClock, is_market_hours, minutes_since_open
 from .context import Context
@@ -18,7 +19,7 @@ from .paper import PaperBook
 from .record import Recorder, Tracker, evidence, levels, outcomes, scorecard, signal_score, size_mb
 from .state import MarketState
 from .store import Store
-from .universe import VIX_KEY, atm_window
+from .universe import SENSEX_KEY, VIX_KEY, atm_window
 from . import riskgate
 from .upstox import TokenStore
 from .vol import atm_iv_from_chain, daily_stats, gex, percentile, structure
@@ -130,6 +131,8 @@ class LiveEngine:
         self.vix_prev = None
         self.pulse = {"lines": [], "ai": None, "ts": None}
         self._explaining = threading.Lock()
+        self.pinned: set = set()                     # option keys you traded by hand: kept streaming
+        self.gift = GiftNifty(self.log)
         self.focus_last = {}
         self.market = {}
         self.words = {}
@@ -257,6 +260,12 @@ class LiveEngine:
         self.feed = make_feed()
         self.feed.start()
         self.feed.subscribe(base_keys, "full")
+        if self.source != "sim":                  # Sensex, live from Upstox (BSE index); optional, never blocks the start
+            try:
+                self._seed(self.rest.quotes([SENSEX_KEY]))
+                self.feed.subscribe([SENSEX_KEY], "ltpc")
+            except Exception as e:
+                self.log(f"Sensex live price not available ({e}); using Yahoo")
         self.daily = self.store.get(f"daily:{self.source}:{day}", {}) or {}
         self.avg_vol = {s: d.get("avg_vol") for s, d in self.daily.items() if d.get("avg_vol")}
         if len(self.daily) < len(self.uni.underlyings) * 0.8:
@@ -375,6 +384,9 @@ class LiveEngine:
         want, windows = set(getattr(self, "desk", None).needed_keys() if getattr(self, "desk", None) else ()), {}
         if getattr(self, "expiry", None):
             want |= self.expiry.needed_keys()
+        if self.paper:                                   # open paper positions always keep a live price
+            want |= {t["opt_key"] for t in self.paper.open_trades()}
+        want |= self.pinned
         for sym, (exp, ks) in plan.items():
             u = self.uni.underlyings[sym]
             windows[sym] = ks
@@ -551,6 +563,8 @@ class LiveEngine:
                 every, pulse_every = max(every, 3600), max(pulse_every, 3600)
             if mins >= 3 and self._every("brain", every, clock_time=False):
                 threading.Thread(target=self._brain_safe, daemon=True).start()
+            elif mins >= 3 and every > 300 and self._every("brain_rules", 300, clock_time=False):
+                threading.Thread(target=self._brain_safe, kwargs={"rules_only": True}, daemon=True).start()   # fresh note every 5 min, no AI call
             if self._every("ai_pulse", pulse_every, clock_time=False) \
                     and self.ai.enabled() and mins >= 5:
                 threading.Thread(target=self._ai_pulse, daemon=True).start()
@@ -690,6 +704,55 @@ class LiveEngine:
         return {"key": o.key, "label": f"{sym} {k:g} {side} {exp:%d %b}", "side": side, "strike": k,
                 "expiry": exp.isoformat(), "lot": o.lot, "ltp": i.ltp, "ask": i.ask, "iv": norm_iv(i.iv),
                 "delta": i.delta, "cost_per_lot": round((i.ask or i.ltp) * o.lot, 2)}
+
+    def find_option(self, key: str):
+        """(underlying, Option) for an option instrument key, from the loaded universe."""
+        for u in (self.uni.underlyings.values() if self.uni else []):
+            for exp, ch in u.chains.items():
+                for k, sides in ch.items():
+                    for side, o in sides.items():
+                        if o.key == key:
+                            return u, o
+        return None, None
+
+    def ensure_live(self, key: str):
+        """Start streaming an option that is outside the scanned strikes (seeded with a REST quote first)."""
+        if key in self.opt_subs or (self.state.get(key) and self.state.get(key).ltp and key in self.pinned):
+            return
+        self.pinned.add(key)
+        try:
+            self._seed(self.rest.quotes([key]))
+        except Exception as e:
+            self.log(f"Quote for {key} failed: {e}")
+        try:
+            self.feed.subscribe([key], "option_greeks")
+            self.opt_subs.add(key)
+        except Exception as e:
+            self.log(f"Subscribe {key} failed: {e}")
+
+    def paper_open(self, key: str, direction: int, lots: int = 1) -> dict:
+        """Paper Buy/Sell of one option from the option chain or the chart. Paper only: nothing reaches a broker."""
+        if not self.running or not self.paper:
+            raise ValueError("Start the live scanner first.")
+        u, o = self.find_option(key)
+        if not o:
+            raise ValueError("Option not found in today's contracts.")
+        self.ensure_live(key)
+        opt = {"key": o.key, "label": f"{u.symbol} {o.strike:g} {o.kind} {o.expiry:%d %b}", "side": o.kind, "lot": o.lot}
+        und_key = u.key if self.state.get(u.key) and self.state.get(u.key).ltp else u.fut_key
+        return self.paper.open_manual(self.state, self.clock.now(), sym=u.symbol, opt=opt, direction=1 if direction > 0 else -1,
+                                      lots=lots, und_key=und_key)
+
+    def paper_quick(self, sym: str, side: str) -> dict:
+        """Chart buttons: Buy = at-the-money call, Sell = at-the-money put (both bought), nearest expiry."""
+        o = self._suggest(sym, "up" if side == "buy" else "down")
+        if not o:
+            raise ValueError(f"No live at-the-money option for {sym} right now.")
+        return {**self.paper_open(o["key"], 1, 1), "label": o["label"]}
+
+    def underlying_view(self, sym: str) -> dict:
+        m = self.metrics.get(sym) if self.metrics else None
+        return {"spot": m.get("spot"), "chg_pct": m.get("chg_pct")} if m else {}
 
     def _ctx_for(self, sym, m):
         v = (m or {}).get("vol") or {}
@@ -856,9 +919,9 @@ class LiveEngine:
         except Exception as e:
             self.log(f"Scorecard failed: {e}")
 
-    def _brain_safe(self):
+    def _brain_safe(self, rules_only=False):
         try:
-            note = self.brain.run()
+            note = self.brain.run(force_rules=rules_only)
             if note and note.get("by") == "AI" and int((self.cfg().get("ai") or {}).get("brain_telegram") or 0):
                 self.telegram.send(f"🧠 <b>{note.get('headline')}</b>\n" + "\n".join("• " + x for x in note.get("summary", [])[:4]))
         except Exception as e:
@@ -883,7 +946,7 @@ class LiveEngine:
                     t[k] = now
                     return True
                 return False
-            live_every = max(30, int(((self.cfg().get("world") or {}).get("live_every_sec")) or 60))
+            live_every = max(20, int(((self.cfg().get("world") or {}).get("live_every_sec")) or 30))
             if self.world.errors.get("live"):
                 live_every = min(600, live_every * 4)          # Yahoo pushing back: slow down
             for k, sec, fn in (("live", live_every, self.world.refresh_live), ("prices", 900, self.world.refresh_prices),
@@ -1263,9 +1326,25 @@ class LiveEngine:
                           "win_rate": ps["win_rate"], "guard": ps.get("guard")} if ps else None,
                 "news": self.news.items[:12], "ai": {"enabled": self.ai.enabled(), "used": self.ai.used,
                                                      "error": self.ai.last_error},
-                "watch": self._watch()}
+                "watch": self._watch(), "extra": self.extra_indices(),
+                "px": {k: [round(m["spot"], 2), round(m.get("chg_pct") or 0, 2)] for k, m in (self.metrics or {}).items() if m.get("spot")}}
 
-    WATCH = (("Sensex", "^BSESN"), ("Nasdaq 100 fut", "NQ=F"), ("Dow fut", "YM=F"), ("S&P 500 fut", "ES=F"))
+    WATCH = (("Nasdaq 100 fut", "NQ=F"), ("Dow fut", "YM=F"), ("S&P 500 fut", "ES=F"))
+
+    def extra_indices(self) -> list:
+        """Sensex (Upstox live, else Yahoo) and GIFT Nifty (NSE IX) next to Nifty and Bank Nifty."""
+        out = []
+        i = self.state.get(SENSEX_KEY) if self.state else None
+        if i and i.ltp:
+            out.append({"name": "Sensex", "spot": i.ltp, "chg_pct": (i.ltp / i.cp - 1) * 100 if i.cp else None,
+                        "day_h": i.day_h, "day_l": i.day_l, "src": "BSE, live (Upstox)"})
+        else:
+            r = (getattr(self.world, "rows", {}) or {}).get("^BSESN") or {}
+            if r.get("last") is not None:
+                out.append({"name": "Sensex", "spot": r["last"], "chg_pct": r.get("chg_pct"), "src": "Yahoo, about 1 min behind"})
+        g = self.gift.get()
+        out.append(g if g else {"name": "GIFT Nifty", "spot": None, "src": "NSE IX: loading…" if not self.gift.err else "NSE IX not reachable now"})
+        return out
 
     def _watch(self) -> list:
         """Sensex, Nasdaq, Dow and S&P on the Live page (Yahoo 1-minute prices, about a minute behind)."""

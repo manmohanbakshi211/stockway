@@ -20,6 +20,7 @@ INDEX_NAMES = {
     "NIFTYNXT50": "Nifty Next 50",
 }
 VIX_KEY = "NSE_INDEX|India VIX"
+SENSEX_KEY = "BSE_INDEX|SENSEX"
 
 
 @dataclass
