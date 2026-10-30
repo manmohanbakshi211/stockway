@@ -700,6 +700,7 @@ async function pageConnect() {
         <label class="field" id="f-aim">Claude model<select id="s-aim">${[["sonnet", "Sonnet (recommended)"], ["opus", "Opus (deepest, uses your limit faster)"], ["haiku", "Haiku (fastest, lightest)"], ["", "Claude Code's default"]].map(([v, l]) => `<option value="${v}" ${(s["ai.pro_model"] ?? "sonnet") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="field">Explain automatically<select id="s-aisev">${[[2, "Important and act-now alerts"], [3, "Only act-now alerts"], [9, "Never (only when I click Why?)"]].map(([v, l]) => `<option value="${v}" ${Number(s["ai.explain_min_severity"] || 3) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="field">Market pulse every<select id="s-aipulse">${[5, 10, 15, 30, 60].map((v) => `<option value="${v}" ${Number(s["ai.pulse_every_min"] || 15) === v ? "selected" : ""}>${v} minutes</option>`).join("")}</select></label>
+        <label class="field">Answer language<select id="s-ailang">${[["hinglish", "Hinglish"], ["english", "English"]].map(([v, l]) => `<option value="${v}" ${(s["ai.language"] || "hinglish") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="field" id="f-aiauto">Automatic AI notes per day<select id="s-aiauto">${[0, 6, 12, 24].map((v) => `<option value="${v}" ${Number(s["ai.pro_auto_per_day"] ?? 12) === v ? "selected" : ""}>${v === 0 ? "None (only when I ask)" : v}</option>`).join("")}</select><small>Your Pro limit is shared with your Claude chats; questions you ask are not capped by this.</small></label>
       </div>
       <div id="ai-pro-box" class="ai-pro"></div>
@@ -721,7 +722,7 @@ async function pageConnect() {
     "live.auto_start": $("#s-auto").checked, "live.source": $("#s-src").value, "live.news": $("#s-news").checked,
     "live.sim_speed": Number($("#s-speed").value), "live.telegram_min_severity": Number($("#s-tsev").value),
     "ai.provider": $("#s-aip").value, "ai.api_key": $("#s-aik").value.trim(), "ai.explain_min_severity": Number($("#s-aisev").value),
-    "ai.pro_model": $("#s-aim").value, "ai.pro_auto_per_day": Number($("#s-aiauto").value),
+    "ai.pro_model": $("#s-aim").value, "ai.pro_auto_per_day": Number($("#s-aiauto").value), "ai.language": $("#s-ailang").value,
     "ai.pulse_every_min": Number($("#s-aipulse").value), "live.paper.auto": $("#s-pauto").checked, "live.paper.lots": Number($("#s-plots").value),
     "live.paper.target_pct": Number($("#s-ptgt").value), "live.paper.stop_pct": Number($("#s-pstop").value),
     "live.paper.capital": Number(String($("#s-pcap").value).replace(/[^0-9.]/g, "")) || 500000, "live.paper.risk_pct": Number($("#s-prisk").value),
@@ -755,7 +756,7 @@ async function pageConnect() {
   $("#ai-test").onclick = async (e) => {
     const out = $("#ai-test-out"); e.target.disabled = true; out.textContent = "Saving and asking…";
     if (!(await save())) { e.target.disabled = false; out.textContent = ""; return; }
-    try { const r = await post("/api/ai/test", {}); out.innerHTML = `<span class="up">✓ ${esc(r.by)} answered: “${esc(r.text)}”</span>`; }
+    try { const r = await post("/api/ai/test", {}); out.innerHTML = `<span class="up">✓ ${esc(r.by)} answered: “${esc(r.text)}”</span>`; aiStatus(true); }
     catch (err) { out.innerHTML = `<span class="down">${esc(err.message)}</span>`; }
     e.target.disabled = false;
   };
@@ -818,6 +819,7 @@ async function pageScorecard() {
   main.innerHTML = `<h1 class="page-title">Signal scorecard</h1>
     <p class="lede">Every alert is followed for 60 minutes and graded. This is how you know which signals deserve real money. ${sc.source === "sim" ? "<b>Showing simulator results (random market, not evidence).</b>" : ""}
       <a href="#/scorecard?src=${sc.source === "sim" ? "upstox" : "sim"}">Show ${sc.source === "sim" ? "real market" : "simulator"} results</a></p>
+    ${aiReviewBox("scorecard", "Claude's read on your alerts")}
     <div class="kpis"><div class="kpi"><b>${sc.graded}</b><span>Alerts graded (recent)</span></div>
       <div class="kpi"><b>${sc.overall != null ? sc.overall + "%" : "–"}</b><span>Worked overall</span></div>
       <div class="kpi"><b>${m.trained ? `${m.auc}` : `${m.n || 0}/${m.need || 120}`}</b><span>${m.trained ? `Learning model accuracy (AUC; 0.5 = coin toss), ${m.n} alerts` : "Graded alerts needed before the learning model switches on"}</span></div>
@@ -828,6 +830,7 @@ async function pageScorecard() {
       <tbody>${rows || `<tr><td colspan="8" class="muted">Nothing graded yet. Run the scanner for a session.</td></tr>`}</tbody></table></div>
     <h2>Latest graded alerts</h2>
     <div class="table-wrap"><table><thead><tr><th>When</th><th>Alert</th><th>Result</th><th class="r" title="Price move in the alert's favour">In favour 5m</th><th class="r">15m</th><th class="r">60m</th><th class="r">Option best / worst</th></tr></thead><tbody>${recent || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>`;
+  bindAIReview(main);
 }
 
 /* ---------------- page: Briefs */
@@ -865,6 +868,7 @@ async function pageDesk() {
     <p class="lede">Institution-style intraday strategies on Nifty and Bank Nifty: hedged option selling on calm days, debit spreads on trending days. Every strategy is tested on years of real 1-minute option prices, and only out-of-sample results count.</p>
     ${st.synthetic ? `<div class="banner">⚠️ You are looking at a <b>demo on synthetic (fake) data</b>. It shows how the desk works, not whether it makes money. Download real history below (Upstox Plus).</div>` : ""}
     <div id="desk-live"></div>
+    ${aiReviewBox("desk", "Claude research review of the desk")}
     <div id="desk-edge"></div>
     <div id="desk-eod"></div>
     <div id="desk-expiry"></div>
@@ -922,6 +926,7 @@ async function pageDesk() {
   $("#l-bt").onclick = async () => { if (await save()) job("/api/lab/backtest"); };
   ["#lab-demo", "#lab-demo2"].forEach((id) => { if ($(id)) $(id).onclick = () => job("/api/lab/demo"); });
   if (res) drawDeskCharts(res);
+  bindAIReview(main);
   api("/api/lab/edge").then((e) => { const el = $("#desk-edge"); if (el) el.innerHTML = edgeCard(e); }).catch(() => {});
   api("/api/lab/expiry").then((x) => { const el = $("#desk-expiry"); if (el) el.innerHTML = expiryCard(x); }).catch(() => {});
   Promise.all([api("/api/lab/eod/status"), api("/api/lab/eod").catch(() => null)]).then(([st2, r]) => {
@@ -1349,6 +1354,43 @@ function companyCard(c) {
   return qt + it;
 }
 
+/* ---------------- Claude reviews (Test & research) and the "Powered by Claude" line */
+L.ai = null;
+async function aiStatus(force = false) {
+  if (!force && L.ai && Date.now() - L.ai._at < 60000) return L.ai;
+  try { L.ai = { ...(await api("/api/ai/status")), _at: Date.now() }; } catch (_) { L.ai = L.ai || { enabled: false, _at: Date.now() }; }
+  railAI();
+  return L.ai;
+}
+const isClaude = (a) => a && String(a.provider || "").startsWith("claude");
+function railAI() {
+  const el = $("#rail-ai"); if (!el || !L.ai) return;
+  const a = L.ai, mdl = { opus: "Opus", sonnet: "Sonnet", haiku: "Haiku" }[a.model] || "";
+  el.innerHTML = !a.enabled ? `<a href="#/connect" class="muted">AI: not connected</a>`
+    : isClaude(a) ? `<span class="ai-by">✦ Powered by Claude${mdl ? " " + mdl : ""}</span><small>${a.provider === "claude_pro" ? "your Pro plan" : "Claude API"}</small>`
+    : `<span class="ai-by">AI: ${esc(a.label)}</span>`;
+}
+function aiReviewBox(topic, title) {
+  return `<div class="panel ai-review" data-topic="${topic}"><div class="toolbar" style="margin:0"><div><h3 style="margin:0">${esc(title)}</h3>
+      <p class="small muted" style="margin:2px 0 0">A sceptical research read of these numbers: what they say, how far to trust them, what to test next. Uses your connected AI.</p></div>
+      <button class="btn" type="button" data-ai-review="${topic}">✦ Ask Claude</button></div><div class="ai-review-out"></div></div>`;
+}
+function bindAIReview(root, getData) {
+  aiStatus().then((a) => root.querySelectorAll("[data-ai-review]").forEach((b) => { b.textContent = isClaude(a) ? "✦ Ask Claude" : a.enabled ? "AI review" : "Connect AI first"; }));
+  root.querySelectorAll("[data-ai-review]").forEach((b) => b.onclick = async () => {
+    const box = b.closest(".ai-review"), out = box.querySelector(".ai-review-out");
+    const a = await aiStatus();
+    if (!a.enabled) { location.hash = "#/connect"; return; }
+    b.disabled = true; const t = b.textContent; b.textContent = "Thinking…";
+    out.innerHTML = `<p class="muted small">Claude is reading the numbers… (Opus can take up to a minute)</p>`;
+    try {
+      const r = await post("/api/ai/review", { topic: b.dataset.aiReview, data: getData ? getData() : null });
+      out.innerHTML = `<div class="ai-text">${fmtAI(r.text)}</div><p class="small muted" style="margin:6px 0 0">${esc(r.by)} · ${r.secs}s · a review, not advice. Test before trusting.</p>`;
+    } catch (e) { out.innerHTML = `<p class="down small">${esc(e.message)}</p>`; }
+    b.disabled = false; b.textContent = t;
+  });
+}
+
 /* ---------------- Time Machine: test a trade plan before taking it */
 const TM = { setup: null, last: null };
 const tmTime = (bar) => { const m = 555 + 5 * bar; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
@@ -1424,8 +1466,9 @@ async function pageTimeMachine() {
     try {
       const r = await post("/api/timemachine", body);
       TM.last = r;
-      $("#tm-result").innerHTML = tmResult(r);
+      $("#tm-result").innerHTML = tmResult(r) + aiReviewBox("timemachine", "Claude's read on this test");
       tmFan(r);
+      bindAIReview($("#tm-result"), () => TM.last);
       const h = (LS.get("tm_hist", []) || []).filter((x) => !(x.sym === r.sym && x.entry === body.entry && x.stop === body.stop && x.target === body.target && x.start === r.start));
       h.unshift({ sym: r.sym, direction: dir, entry: body.entry, stop: body.stop, target: body.target, start: r.start, tf: r.mc.target_first, sf: r.mc.stop_first, avg: r.mc.avg_r, grade: r.verdict.grade, at: Date.now() });
       LS.set("tm_hist", h.slice(0, 10)); renderHist();
@@ -1558,3 +1601,4 @@ Object.assign(PAGES, { live: pageLive, scanner: pageScanner, sym: pageSym, alert
   timemachine: pageTimeMachine, ask: pageAsk });
 window.addEventListener("hashchange", () => { stopPageTimer(); if (!location.hash.startsWith("#/chart") && CH.chart) { CH.chart.remove(); CH.chart = null; } main.classList.toggle("wide", location.hash.startsWith("#/chart")); });
 pollSnapshot();
+aiStatus(true); setInterval(() => aiStatus(true), 5 * 60000);

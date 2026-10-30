@@ -253,7 +253,7 @@ def global_markets(log=print) -> list:
         return []
     try:
         df = yf.download(list(GLOBAL.values()), period="5d", interval="1d", progress=False, group_by="ticker",
-                         auto_adjust=False, threads=True)
+                         auto_adjust=False, threads=4)
     except Exception as e:
         log(f"Global markets failed: {e}")
         return []

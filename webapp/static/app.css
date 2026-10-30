@@ -594,3 +594,10 @@ main.wide { max-width: none; }
 .ai-pro code, .ai-steps code { background: var(--fog); padding: 1px 6px; border-radius: 4px; font-size: 12.5px; }
 @media (max-width: 900px) { .ask-q { max-width: 92%; } .ask-log { max-height: none; } }
 [hidden] { display: none !important; }
+
+/* ---------- Claude reviews + "Powered by Claude" */
+.ai-review { margin: 14px 0; border-left: 3px solid var(--signal); }
+.ai-review-out .ai-text { margin-top: 10px; }
+.rail-ai { margin-bottom: 8px; font-size: 13px; }
+.rail-ai .ai-by { display: block; color: var(--signal); font-weight: 650; }
+.rail-ai small { color: var(--muted); }

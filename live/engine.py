@@ -767,6 +767,29 @@ class LiveEngine:
             except Exception as e:
                 self.log(f"Paper trade failed: {e}")
 
+    @staticmethod
+    def open_files() -> dict:
+        """How many files and connections this process has open, and the system's limit (macOS default is 256)."""
+        import os
+        import resource
+        n = None
+        for d in ("/dev/fd", "/proc/self/fd"):
+            try:
+                n = len(os.listdir(d))
+                break
+            except OSError:
+                continue
+        soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+        return {"open": n, "limit": soft}
+
+    def _health_check(self):
+        try:
+            h = self.open_files()
+            if h["open"] and h["limit"] and h["open"] > 0.6 * h["limit"]:
+                self.log(f"Warning: {h['open']} open files (limit {h['limit']}). Restart the app if it slows down.")
+        except Exception:
+            pass
+
     def explain(self, alert_id, auto=True) -> str | None:
         """'Why?' on an alert: a short written explanation from the alert, its metrics and related news (cached)."""
         a = next((x for x in self.alerts_mem if x["id"] == alert_id), None) or self.store.alert(alert_id)
@@ -835,6 +858,8 @@ class LiveEngine:
                 pass
             if due("scenario_hist", 3 * 3600):
                 threading.Thread(target=self._scenario_refresh, daemon=True).start()
+            if due("health", 600):
+                self._health_check()
             if 7 <= hour <= 22 and due("insiders", 3 * 3600):
                 threading.Thread(target=self._insiders_refresh, daemon=True).start()
             time.sleep(5)

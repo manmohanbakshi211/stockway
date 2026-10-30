@@ -56,6 +56,7 @@ EDITABLE = {
     "ai.pro_model": str,
     "ai.pro_auto_per_day": int,
     "ai.daily_limit": int,
+    "ai.language": str,
 }
 SECRET_KEYS = {"telegram.bot_token", "live.upstox_api_secret", "ai.api_key", "lab.dhan_token"}
 

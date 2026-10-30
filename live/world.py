@@ -105,7 +105,7 @@ class World:
     def refresh_prices(self):
         import yfinance as yf
         ticks = self._tickers() + [NIFTY] + [v[0] for v in ADR.values()]
-        df = yf.download(ticks, period="5d", interval="1d", progress=False, group_by="ticker", auto_adjust=False, threads=True)
+        df = yf.download(ticks, period="5d", interval="1d", progress=False, group_by="ticker", auto_adjust=False, threads=4)
         names = {t: (n, g, reg) for g, items in ASSETS.items() for n, t, reg in items}
         for t in ticks:
             try:
@@ -147,7 +147,7 @@ class World:
             self.refresh_prices()
         ticks = [t for t in self.rows]
         df = yf.download(ticks, period="2d", interval="1m", progress=False, group_by="ticker", auto_adjust=False,
-                         threads=True, prepost=False)
+                         threads=4, prepost=False)
         n_up = 0
         for t in ticks:
             try:
@@ -187,7 +187,7 @@ class World:
         import numpy as np
         import yfinance as yf
         ticks = self._tickers() + [NIFTY]
-        df = yf.download(ticks, period="9mo", interval="1d", progress=False, group_by="ticker", auto_adjust=False, threads=True)
+        df = yf.download(ticks, period="9mo", interval="1d", progress=False, group_by="ticker", auto_adjust=False, threads=4)
         closes = {}
         for t in ticks:
             try:

@@ -71,3 +71,15 @@ def test_pro_explains_unavailable_model(tmp_path):
     ai = AI(lambda: {"ai": {"provider": "claude_pro", "pro_model": "opus"}})
     ai._cli = cli
     assert ai.ask("x", auto=False) is None and "choose Sonnet" in ai.last_error
+
+
+def test_yfinance_caches_are_off_and_file_limit_raised():
+    """yfinance opened a cache connection per thread and never closed it: the Mac ran out of open files."""
+    import resource
+    import pytest
+    import radar  # noqa: F401
+    import yfinance.cache as yc
+    with pytest.raises(Exception):
+        yc._TzDBManager.get_database()
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    assert soft >= min(hard, 10240) or soft >= 10240

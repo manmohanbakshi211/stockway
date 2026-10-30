@@ -432,6 +432,30 @@ def insiders_refresh():
     return {"started": True}
 
 
+@router.get("/api/health")
+def health():
+    """Open files and threads: if these keep climbing, something is leaking."""
+    import threading as _t
+    e = engine()
+    return {**e.open_files(), "threads": _t.active_count(), "running": bool(e.running)}
+
+
+@router.post("/api/ai/review")
+async def ai_review(req: Request):
+    """Claude's research review of a Time Machine test, the Strategy desk or the Scorecard."""
+    from live.review import review
+    b = await req.json()
+    e = engine()
+    try:
+        return clean(await _run_blocking(review, e, str(b.get("topic") or ""), b.get("data"), ROOT / "data"))
+    except PermissionError as ex:
+        raise HTTPException(400, str(ex))
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    except RuntimeError as ex:
+        raise HTTPException(502, str(ex))
+
+
 @router.post("/api/ask")
 async def ask_stockway(req: Request):
     """Ask Stockway: a question answered from the app's live data by the AI chosen in Live setup."""
@@ -455,6 +479,7 @@ def ai_status():
     e = engine()
     c = e.cfg().get("ai") or {}
     return {"provider": e.ai.provider(), "label": e.ai.label(), "enabled": e.ai.enabled(), "claude_cli": find_claude_cli(),
+            "model": c.get("pro_model") if e.ai.provider() == "claude_pro" else c.get("model"),
             "used": e.ai.used, "used_auto": e.ai.used_auto, "daily_limit": c.get("daily_limit"),
             "pro_auto_per_day": c.get("pro_auto_per_day") or 12, "last_error": e.ai.last_error}
 

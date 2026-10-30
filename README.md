@@ -106,8 +106,10 @@ it uses your plan's normal limits (shared with your Claude chats). One-time setu
 `curl -fsSL https://claude.ai/install.sh | bash`, then type `claude` and log in. Claude Code runs with every tool
 switched off (it cannot read files, run commands or browse), in an empty folder; it only answers. Automatic notes are
 capped per day (12 by default) and spread out; questions you ask are not capped by that.
-It powers **Ask Stockway** (chat in English or Hinglish, answered from the app's live data), the "Why?" answer on
-alerts, the AI chart read, briefs and the market brain. Other choices: a free Google Gemini key, or a Claude API key.
+It powers **Ask Stockway** (chat in English or Hinglish, answered from the app's live data), **Claude's research
+reviews** on the Time Machine, Strategy desk and Scorecard (a sceptical read: what the numbers say, how far to trust
+them, what to test next), the "Why?" answer on alerts, the AI chart read, briefs and the market brain. The menu shows
+which AI is connected ("Powered by Claude Opus · your Pro plan"). Other choices: a free Google Gemini key, or a Claude API key.
 Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
