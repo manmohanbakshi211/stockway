@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from radar import features, model, news, pipeline, report
@@ -468,6 +468,10 @@ async def post_settings(req: Request):
             hh, mm = str(body["schedule.time"]).split(":")
             assert 0 <= int(hh) < 24 and 0 <= int(mm) < 60
         body = {k: v for k, v in body.items() if not (isinstance(v, str) and v.startswith("••••"))}
+        # one capital for the whole app: paper trades, the risk check and the strategy desk size from the same money
+        for a, b in (("lab.capital", "live.paper.capital"), ("live.paper.capital", "lab.capital")):
+            if a in body and b not in body:
+                body[b] = body[a]
         save_user_settings(body)
     except (ValueError, AssertionError) as e:
         raise HTTPException(400, str(e) or "Time must look like 18:30")
@@ -620,7 +624,7 @@ def lab_eod_results():
     from lab.walk import lab_dir
     f = lab_dir(ROOT / "data") / "eod_results.json"
     if not f.exists():
-        raise HTTPException(404, "No end-of-day test yet.")
+        return None                      # not run yet: the page shows how to run it
     return clean(json.loads(f.read_text()))
 
 
@@ -629,7 +633,7 @@ def lab_edge():
     from lab.walk import lab_dir
     f = lab_dir(ROOT / "data") / "meta.json"
     if not f.exists():
-        raise HTTPException(404, "No setup study yet. It runs with the backtest.")
+        return None                      # runs with the backtest
     return clean(json.loads(f.read_text()))
 
 

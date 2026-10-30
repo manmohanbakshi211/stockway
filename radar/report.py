@@ -1,13 +1,12 @@
 """Builds output/report.html plus CSVs."""
 from __future__ import annotations
 
-import html
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+
 
 FEATURE_NAMES = {
     "vix": "India VIX level", "vix_chg1": "India VIX 1-day change", "vix_chg5": "India VIX 5-day change",

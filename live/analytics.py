@@ -5,7 +5,7 @@ import datetime as dt
 import math
 
 from .clock import OPEN, SESSION_MIN, minutes_since_open
-from .universe import atm_window, strike_step
+from .universe import strike_step
 
 BUILDUPS = {
     ("up", "up"): ("long_buildup", "Long buildup", 1),

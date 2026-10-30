@@ -132,7 +132,7 @@ live:
     lots: 1
     target_pct: 30
     stop_pct: 20
-    capital: 200000            # risk guard: lots sized so a stop loses ~risk_pct of capital
+    capital: 500000            # risk guard: lots sized so a stop loses ~risk_pct of capital
     risk_pct: 1.0
     max_daily_loss_pct: 3.0
     max_trades_day: 12

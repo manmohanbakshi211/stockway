@@ -15,7 +15,6 @@ had an edge. This is a proxy: it ignores intraday gamma path, skew, and Bank Nif
 """
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 

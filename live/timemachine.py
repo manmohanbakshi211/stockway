@@ -17,8 +17,6 @@ It is a simulation from recent behaviour, not a prediction: news, results and ev
 from __future__ import annotations
 
 import datetime as dt
-import math
-import time
 import urllib.parse
 from pathlib import Path
 
@@ -32,6 +30,7 @@ FLAT_BAR = 72                 # the 15:15 bar: square-off
 WINDOW = 2
 REPLAYS = 10_000
 SEED = 19
+YAHOO = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "FINNIFTY": "NIFTY_FIN_SERVICE.NS", "MIDCPNIFTY": "NIFTY_MID_SELECT.NS"}
 
 
 def _bar_of(ts_or_dt) -> int:
@@ -48,10 +47,15 @@ def sessions_from_minutes(df: pd.DataFrame) -> tuple[list, np.ndarray]:
     g = df.groupby(["date", "bar"]).agg(o=("open", "first"), h=("high", "max"), l=("low", "min"), c=("close", "last")).reset_index()
     days, arr = [], []
     for d, x in g.groupby("date"):
-        if len(x) != BARS:
+        x = x.set_index("bar").sort_index()
+        if not set(range(FLAT_BAR + 1)) <= set(x.index):
             continue                       # half days, gaps, halts: left out
+        if len(x) < BARS:                  # some feeds skip the last bars (15:20/15:25): hold the close flat
+            x = x.reindex(range(BARS))
+            c = x["c"].ffill()
+            x = x.assign(o=x["o"].fillna(c), h=x["h"].fillna(c), l=x["l"].fillna(c), c=c)
         days.append(d)
-        arr.append(x.sort_values("bar")[["o", "h", "l", "c"]].to_numpy(dtype=float))
+        arr.append(x[["o", "h", "l", "c"]].to_numpy(dtype=float))
     return days, (np.array(arr) if arr else np.zeros((0, BARS, 4)))
 
 
@@ -178,12 +182,16 @@ class TimeMachine:
             if df is not None and len(df):
                 df.to_parquet(f, index=False)
         if df is None:
+            df = self._yahoo(sym)                                                # no Upstox login: Yahoo's 5-minute bars
+            if df is not None and len(df):
+                df.to_parquet(f, index=False)
+        if df is None:
             mf = Path(self.e.data_dir) / "history" / sym / "minutes.parquet"     # indices: the scenario library
             if mf.exists():
                 df = pd.read_parquet(mf)
                 df = df[df["ts"] >= df["ts"].max() - 120 * 86400]
         if df is None or df.empty:
-            raise ValueError("No history for this symbol: log in to Upstox (the Time Machine reads its 5-minute bars).")
+            raise ValueError("No 5-minute history for this symbol (Upstox not logged in and Yahoo had nothing). Try again in a minute.")
         t = pd.to_datetime(df["ts"], unit="s", utc=True).dt.tz_convert("Asia/Kolkata").dt.date
         days, sess = sessions_from_minutes(df[t < day])
         days, sess = days[-60:], sess[-60:]
@@ -211,11 +219,42 @@ class TimeMachine:
         f = _frame(rows, ("ts", "open", "high", "low", "close", "volume"))
         return f if len(f) else None
 
-    def check(self, sym, *, entry, stop, target, direction, when: dt.datetime | None = None) -> dict:
+    @staticmethod
+    def _yahoo(sym):
+        """Last ~60 sessions of 5-minute bars from Yahoo Finance (free, no login). Indices and NSE stocks."""
+        tick = YAHOO.get(sym, f"{sym}.NS")
+        try:
+            import yfinance as yf
+            d = yf.download(tick, period="60d", interval="5m", progress=False, auto_adjust=False, threads=False)
+        except Exception:
+            return None
+        if d is None or d.empty:
+            return None
+        if isinstance(d.columns, pd.MultiIndex):
+            d.columns = d.columns.get_level_values(0)
+        d = d.rename(columns=str.lower).reset_index()
+        ts_col = d.columns[0]
+        epoch = pd.Timestamp("1970-01-01", tz="UTC")
+        out = pd.DataFrame({"ts": (pd.to_datetime(d[ts_col], utc=True) - epoch) // pd.Timedelta(seconds=1),
+                            "open": d["open"], "high": d["high"], "low": d["low"], "close": d["close"],
+                            "volume": d.get("volume", 0)}).dropna(subset=["open", "high", "low", "close"])
+        return out if len(out) else None
+
+    def check(self, sym, *, entry, stop, target, direction, when: dt.datetime | None = None, start: str | None = None) -> dict:
+        """start: 'HH:MM' to test an entry at that time of day (default: the next 5-minute bar from now)."""
         now = when or self.e.clock.now()
         days, sess = self.history(sym, now.date())
-        bar = _bar_of(now) + 1                      # the next bar after the signal
+        if start:
+            h, m = map(int, str(start).split(":"))
+            bar = _bar_of(now.replace(hour=h, minute=m))
+        else:
+            bar = _bar_of(now) + 1                  # the next bar after the signal
+        if bar >= FLAT_BAR:
+            raise ValueError("Nothing left to replay: entries must be before 15:15 (the square-off).")
+        if bar < 1:
+            bar = 1
         out = run(sess, days, entry=entry, stop=stop, target=target, direction=direction, start_bar=bar)
         out["sym"] = sym
         out["as_of"] = now.isoformat(timespec="minutes")
+        out["start"] = f"{(555 + 5 * bar) // 60:02d}:{(555 + 5 * bar) % 60:02d}"
         return out

@@ -21,7 +21,6 @@ Every pattern returns entry, stop and target (so reward:risk is known), the line
 """
 from __future__ import annotations
 
-import math
 
 import numpy as np
 

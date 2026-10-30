@@ -17,7 +17,6 @@ you set? Checks, in order:
 from __future__ import annotations
 
 import datetime as dt
-import math
 
 from .paper import costs
 
@@ -50,7 +49,7 @@ def check(alert: dict, opt: dict | None, *, now: dt.datetime, paper_cfg: dict, g
     grade = (data.get("history") or {}).get("grade") or data.get("history_grade")
     if c["block_losing_history"] and grade == "losing":
         reasons.append("This signal type has lost money on our own replay of past years.")
-    rr = (data.get("setup_levels") or {}).get("rr")
+    rr = (data.get("setup_levels") or data.get("levels") or {}).get("rr")
     if rr is not None and float(rr) < float(c["min_rr"]):
         reasons.append(f"Reward:risk {float(rr):.2f} is under your minimum {c['min_rr']}.")
     lots, max_loss, capital_used, per_lot = 0, None, None, None
@@ -71,17 +70,17 @@ def check(alert: dict, opt: dict | None, *, now: dt.datetime, paper_cfg: dict, g
         if ask and lot:
             stop_px = ask * (1 - stop_pct / 100)
             per_lot = ask * lot * stop_pct / 100 + costs(ask, stop_px, lot)
-            budget = float(paper_cfg.get("capital", 200000)) * float(paper_cfg.get("risk_pct", 1.0)) / 100
+            budget = float(paper_cfg.get("capital", 500000)) * float(paper_cfg.get("risk_pct", 1.0)) / 100
             lots = min(int(paper_cfg.get("max_lots", 5)), int(budget // per_lot)) if per_lot > 0 else 0
             if lots < 1:
                 reasons.append(f"One lot risks ₹{per_lot:,.0f} at the stop, more than your max loss per trade ₹{budget:,.0f}.")
             max_loss = round(per_lot * max(lots, 1), 0)
             capital_used = round(ask * lot * max(lots, 1), 0)
-            if capital_used > float(paper_cfg.get("capital", 200000)) * 0.25:
+            if capital_used > float(paper_cfg.get("capital", 500000)) * 0.25:
                 warns.append(f"Uses ₹{capital_used:,.0f}, over a quarter of the capital.")
     verdict = "BLOCK" if reasons else "PASS"
     return {"verdict": verdict, "reasons": reasons, "warnings": warns, "lots": lots if verdict == "PASS" else 0,
             "max_loss": max_loss, "capital_used": capital_used, "per_lot_loss": round(per_lot, 0) if per_lot else None,
-            "rules": {"max_loss_per_trade": round(float(paper_cfg.get("capital", 200000)) * float(paper_cfg.get("risk_pct", 1.0)) / 100, 0),
+            "rules": {"max_loss_per_trade": round(float(paper_cfg.get("capital", 500000)) * float(paper_cfg.get("risk_pct", 1.0)) / 100, 0),
                       "daily_loss_limit": guard.get("loss_limit"), "trades_today": guard.get("trades_today"),
                       "max_trades": paper_cfg.get("max_trades_day"), "min_rr": c["min_rr"]}}

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import math
 import re
 import time
 from pathlib import Path

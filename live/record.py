@@ -11,7 +11,6 @@ import json
 import math
 import sqlite3
 import threading
-import time
 from pathlib import Path
 
 HORIZONS = (5, 15, 60)
@@ -288,6 +287,17 @@ def levels(m: dict, direction: str, state) -> dict:
         stop = min(above) if above else spot * (1 + sig * math.sqrt(30))
         below = [x for x in (o.get("support"), m.get("day_l")) if x and x < spot * (1 - 0.002)]
         target = max(below) if below else spot * (1 - 1.5 * sig * math.sqrt(60))
+    # sanity: a stop inside the noise of the next 15 minutes is hit by chance, and a target beyond what the rest of
+    # the session can usually travel is a wish. Both made reward:risk numbers like 18 that meant nothing.
+    d = 1 if direction == "up" else -1
+    min_stop = max(0.003, sig * math.sqrt(15))
+    max_tgt = max(0.004, 1.5 * sig * math.sqrt(120))
+    if abs(spot - stop) / spot < min_stop:
+        stop = spot * (1 - d * min_stop)
+    elif abs(spot - stop) / spot > max_tgt:          # the nearest level is too far: use a volatility stop instead
+        stop = spot * (1 - d * max(min_stop, sig * math.sqrt(30)))
+    if abs(target - spot) / spot > max_tgt:
+        target = spot * (1 + d * max_tgt)
     risk, reward = abs(spot - stop), abs(target - spot)
     return {"stop": round(stop, 2), "target": round(target, 2), "rr": round(reward / risk, 2) if risk else None,
             "stop_pct": round(risk / spot * 100, 2), "target_pct": round(reward / spot * 100, 2)}

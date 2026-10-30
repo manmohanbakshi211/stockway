@@ -13,7 +13,7 @@ from .analytics import compute, norm_iv, pct
 from .clock import IST, Clock, SimClock, is_market_hours, minutes_since_open
 from .context import Context
 from .learn import Ranker, features, regime, regime_adjust
-from .notify import AI, News, Telegram, alert_prompt, match_symbols, pulse_prompt, rule_pulse, symbol_words, telegram_text
+from .notify import AI, News, Telegram, match_symbols, pulse_prompt, rule_pulse, symbol_words, telegram_text
 from .paper import PaperBook
 from .record import Recorder, Tracker, evidence, levels, outcomes, scorecard, signal_score, size_mb
 from .state import MarketState

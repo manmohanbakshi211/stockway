@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import html
 import math
+import re
 import threading
 import time
 
@@ -237,15 +238,48 @@ async def timemachine_plan(req: Request):
     b = await req.json()
     e = engine()
     try:
-        return clean(_tm(e, str(b["sym"]).upper(), float(b["entry"]), float(b["stop"]), float(b["target"]), b.get("direction") or
-                         ("up" if float(b["target"]) > float(b["entry"]) else "down")))
+        start = (str(b.get("start") or "").strip() or None)
+        if start and not re.fullmatch(r"\d{1,2}:\d{2}", start):
+            raise HTTPException(400, "Start time must look like 10:30")
+        return clean(_tm(e, str(b["sym"]).upper().strip(), float(b["entry"]), float(b["stop"]), float(b["target"]),
+                         b.get("direction") or ("up" if float(b["target"]) > float(b["entry"]) else "down"), start))
     except KeyError as ex:
         raise HTTPException(400, f"Missing {ex}")
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Entry, stop and target must be numbers.")
 
 
-def _tm(e, sym, entry, stop, target, direction):
+@router.get("/api/timemachine/setup")
+def timemachine_setup():
+    """What the Time Machine page needs: symbols with a live price, and today's alerts that carry a plan."""
+    e = engine()
+    syms = {}
+    for sym, m in (e.metrics or {}).items():
+        if m.get("spot"):
+            syms[sym] = round(float(m["spot"]), 2)
+    names = set(syms)
+    if e.uni:
+        names |= set(e.uni.underlyings)
+    if e.context and (e.context.mwpl or {}).get("symbols"):
+        names |= set(e.context.mwpl["symbols"])
+    names |= {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"}
+    idx = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
+    order = idx + sorted(n for n in names if n not in idx)
+    plans = []
+    for a in list(e.alerts_mem)[:300]:
+        d = a.get("data") or {}
+        lv = d.get("setup_levels") or d.get("levels") or {}
+        if a.get("direction") in ("up", "down") and lv.get("stop") and lv.get("target") and a.get("price"):
+            plans.append({"id": a["id"], "ts": a.get("ts"), "sym": a["sym"], "title": a.get("title"), "direction": a["direction"],
+                          "entry": a.get("price"), "stop": lv["stop"], "target": lv["target"], "rr": lv.get("rr")})
+    return clean({"symbols": [{"sym": n, "ltp": syms.get(n)} for n in order], "alerts": plans[:40],
+                  "now": e.clock.now().strftime("%H:%M") if getattr(e, "clock", None) else None,
+                  "running": bool(e.running), "source": e.source})
+
+
+def _tm(e, sym, entry, stop, target, direction, start=None):
     try:
-        return e.tm.check(sym, entry=entry, stop=stop, target=target, direction=direction)
+        return e.tm.check(sym, entry=entry, stop=stop, target=target, direction=direction, start=start)
     except PermissionError as ex:
         raise HTTPException(401, str(ex))
     except ValueError as ex:

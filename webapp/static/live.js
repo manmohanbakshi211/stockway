@@ -77,8 +77,20 @@ function notify(a) {
     const n = new Notification(`${a.direction === "up" ? "▲" : a.direction === "down" ? "▼" : "●"} ${a.title}`, { body: a.detail + (a.option ? `\nIdea: ${a.option.label} @ ₹${a.option.ltp}` : ""), tag: `sw-${a.id}` });
     n.onclick = () => { window.focus(); location.hash = `#/sym?s=${encodeURIComponent(a.sym)}`; };
   } else if (!livePage() || state.page !== "live") {
-    toast(a.title);
+    alertPop(a);
   }
+}
+
+function alertPop(a) {
+  // a small corner card (not over the page content); click opens the alert, closes by itself after 7 s
+  const box = $("#alert-pops"); if (!box) return;
+  const el = document.createElement("a");
+  el.className = `alert-pop sev${a.severity}`; el.href = "#/alerts";
+  el.innerHTML = `<span class="sevtag s${a.severity}">${SEV[a.severity]}</span> ${arrow(a.direction)} ${esc(a.title)}`;
+  el.onclick = () => el.remove();
+  box.prepend(el);
+  while (box.children.length > 3) box.lastChild.remove();
+  setTimeout(() => el.remove(), 7000);
 }
 
 let _ac = null;
@@ -203,7 +215,7 @@ function alertItem(a, full = false, extra = "") {
     <div class="al-body"><div class="al-title">${arrow(a.direction)} <a href="${a.sym === "GLOBAL" ? "#/world" : `#/chart?s=${encodeURIComponent(a.sym)}`}">${esc(a.title)}</a></div>
       <p>${esc(a.detail)}${link} <span class="muted small">${esc(KIND[a.kind] || a.kind)}</span> ${track}</p>
       ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}
-      ${ev ? `<div class="evs">${ev}</div>` : ""}${plan}${trade}${riskLine(d.risk)}<div class="tm-out" id="tm-${a.id}"></div>
+      ${ev ? `<div class="evs">${ev}</div>` : ""}${plan}${trade}${riskLine(d.risk)}
       ${a.ai ? `<div class="ai-text">${fmtAI(a.ai)}</div>` : ""}${extra}</div></li>`;
 }
 
@@ -211,17 +223,6 @@ function riskLine(r) {
   if (!r) return "";
   if (r.verdict === "PASS") return `<p class="risk pass small"><b>Risk check: PASS</b> · ${r.lots} lot${r.lots > 1 ? "s" : ""} · max loss ${rupees(r.max_loss)} at the stop · uses ${rupees(r.capital_used)}${(r.warnings || []).length ? ` · <span class="amber">${r.warnings.map(esc).join(" ")}</span>` : ""}</p>`;
   return `<p class="risk block small"><b>Risk check: BLOCK</b> · ${(r.reasons || []).map(esc).join(" ")} <span class="muted">No paper trade.</span></p>`;
-}
-
-function tmCard(r) {
-  const m = r.mc, h = r.history, v = r.verdict;
-  const cls = v.grade === "edge" ? "up" : v.grade === "against" ? "down" : "amber";
-  return `<div class="tm"><p class="small" style="margin:0 0 4px"><b>Time Machine</b> <span class="muted">· ${m.replays.toLocaleString("en-IN")} replays of the rest of the day from ${esc(r.sym)}'s last ${h.sessions} sessions (seed ${m.seed})</span></p>
-    <div class="tm-bars"><span class="up">Target first <b>${m.target_first}%</b></span><span class="down">Stop first <b>${m.stop_first}%</b></span><span>Neither by 15:15 <b>${m.neither}%</b></span><span>Avg <b>${m.avg_r > 0 ? "+" : ""}${m.avg_r}R</b></span></div>
-    <p class="small" style="margin:4px 0">15:15 price: median ${fx(m.close_pct[2])}, 90% between ${fx(m.close_pct[0])} and ${fx(m.close_pct[4])}.</p>
-    <p class="small" style="margin:4px 0">Real past (same time of day, same stop/target distances, ${h.sessions} sessions): ${h.target} target, ${h.stop} stop, ${h.neither} neither, avg ${h.avg_r > 0 ? "+" : ""}${h.avg_r}R.</p>
-    <p class="small ${cls}" style="margin:4px 0"><b>${esc(v.line)}</b>${(v.notes || []).map((n) => `<br>${esc(n)}`).join("")}</p>
-    <p class="muted small" style="margin:0">A simulation from recent behaviour, not a prediction. Results, news and events can do things the last 60 days never did.</p></div>`;
 }
 
 function storyList(alerts) {
@@ -244,12 +245,7 @@ function bindAlertButtons(root) {
     try { await post(`/api/live/alerts/${b.dataset.paper}/paper`, {}); toast("Paper trade opened"); } catch (err) { toast(err.message); }
     b.disabled = false;
   });
-  root.querySelectorAll("[data-tm]").forEach((b) => b.onclick = async (e) => {
-    e.preventDefault(); b.disabled = true; const t = b.textContent; b.textContent = "Replaying…";
-    try { const r = await post(`/api/live/alerts/${b.dataset.tm}/timemachine`, {}); const el = document.getElementById("tm-" + b.dataset.tm); if (el) el.innerHTML = tmCard(r); }
-    catch (err) { toast(err.message); }
-    b.disabled = false; b.textContent = t;
-  });
+  root.querySelectorAll("[data-tm]").forEach((b) => b.onclick = (e) => { e.preventDefault(); location.hash = `#/timemachine?alert=${b.dataset.tm}`; });
   root.querySelectorAll("[data-explain]").forEach((b) => b.onclick = async (e) => {
     e.preventDefault(); b.disabled = true; b.textContent = "Thinking…";
     try {
@@ -548,6 +544,9 @@ function symInsights(d) {
     ${g && g.profile ? `<div class="chart" id="gex-chart" style="height:220px;margin-top:14px"></div>` : ""}`;
 }
 
+// Plotly keeps the width it first measured; when the layout settles later, refit it to its box
+const plotFit = (el) => requestAnimationFrame(() => { try { if (el && el._fullLayout && Math.abs(el._fullLayout.width - el.clientWidth) > 4) Plotly.Plots.resize(el); } catch (_) {} });
+
 function drawGex(d) {
   const el = $("#gex-chart"); if (!el || !window.Plotly || !d.gex) return;
   const spot = d.metrics.spot;
@@ -559,6 +558,7 @@ function drawGex(d) {
         ...(d.gex.flip ? [{ type: "line", x0: d.gex.flip, x1: d.gex.flip, yref: "paper", y0: 0, y1: 1, line: { color: C.amber, width: 1.5, dash: "dash" } }] : [])],
       annotations: [{ x: spot, yref: "paper", y: 1, text: "Now", showarrow: false, yanchor: "bottom", font: { size: 11 } },
         ...(d.gex.flip ? [{ x: d.gex.flip, yref: "paper", y: 0.9, text: "Flip", showarrow: false, font: { size: 11, color: C.amber } }] : [])] }), plotCfg);
+  plotFit(el);
 }
 
 function drawSymChart(d) {
@@ -579,6 +579,7 @@ function drawSymChart(d) {
     plotLayout({ margin: { l: 56, r: 12, t: 8, b: 30 }, xaxis: { rangeslider: { visible: false }, gridcolor: "#EEF1F4", type: "date", tickformat: "%H:%M" },
       yaxis: { gridcolor: "#EEF1F4", range: [Math.min(lo, ...[o.support, m.vwap].filter(inRange)) - pad, Math.max(hi, ...[o.resistance, m.vwap].filter(inRange)) + pad] },
       shapes: lines.filter((l) => inRange(l.y0)), annotations: ann.filter((a) => inRange(a.y)), hovermode: "x" }), plotCfg);
+  plotFit(el);
 }
 
 /* ---------------- page: Alerts history */
@@ -590,7 +591,7 @@ async function pageAlerts() {
   const byKind = {};
   d.alerts.forEach((a) => { byKind[a.kind] = (byKind[a.kind] || 0) + 1; });
   const go = (p) => { const q = new URLSearchParams({ day: d.day || "", sev, sym, ...p }); location.hash = `#/alerts?${q}`; };
-  main.innerHTML = `<h1 class="page-title">Alerts</h1><p class="lede">Every alert, saved by day. ${d.alerts.length} ${d.day ? `on ${new Date(d.day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}` : ""}.</p>
+  main.innerHTML = `<h1 class="page-title">Alerts</h1><p class="lede">Every alert, saved by day. ${d.day ? `${d.alerts.length} on ${new Date(d.day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}.` : "None yet: they appear here as the scanner finds them."}</p>
     <div class="toolbar"><div class="btn-row">
       <label class="field inline">Day <select id="al-day">${d.days.map((x) => `<option value="${x.day}" ${x.day === d.day ? "selected" : ""}>${x.day} (${x.n})</option>`).join("") || `<option>No alerts yet</option>`}</select></label>
       <div class="seg">${[1, 2, 3].map((v) => `<button data-s="${v}" aria-pressed="${sev === v}">${v === 1 ? "All" : v === 2 ? "Important" : "Act now"}</button>`).join("")}</div>
@@ -701,7 +702,7 @@ async function pageConnect() {
       <label class="check"><input type="checkbox" id="s-pauto" ${s["live.paper.auto"] !== false ? "checked" : ""}><span>Auto paper-trade strong alerts<small>Buys the suggested option on important breakouts, surges, OI buildups and unusual option buying.</small></span></label>
       <input type="hidden" id="s-plots" value="${q(s["live.paper.lots"] ?? 1)}">
       <label class="field">Target<select id="s-ptgt">${[20, 30, 40, 50, 75, 100].map((v) => `<option value="${v}" ${Number(s["live.paper.target_pct"] || 30) === v ? "selected" : ""}>+${v}% on premium</option>`).join("")}</select></label>
-      <label class="field">Capital for sizing (₹)<input type="text" id="s-pcap" value="${q(s["live.paper.capital"] ?? 200000)}" inputmode="numeric"><small>Lots are sized so a stop-loss costs about the risk % below.</small></label>
+      <label class="field">Capital for sizing (₹)<input type="text" id="s-pcap" value="${q(s["live.paper.capital"] ?? 500000)}" inputmode="numeric"><small>One capital for the whole app: paper trades, the risk check and the Strategy desk.</small></label>
       <label class="field">Risk per trade<select id="s-prisk">${[0.5, 1, 1.5, 2].map((v) => `<option value="${v}" ${Number(s["live.paper.risk_pct"] ?? 1) === v ? "selected" : ""}>${v}% of capital</option>`).join("")}</select></label>
       <label class="field">Stop trading for the day after losing<select id="s-pdl">${[2, 3, 4, 5].map((v) => `<option value="${v}" ${Number(s["live.paper.max_daily_loss_pct"] ?? 3) === v ? "selected" : ""}>${v}% of capital</option>`).join("")}</select></label>
       <label class="field">Max trades per day<select id="s-pmt">${[5, 8, 12, 20].map((v) => `<option ${Number(s["live.paper.max_trades_day"] ?? 12) === v ? "selected" : ""}>${v}</option>`).join("")}</select></label>
@@ -715,7 +716,7 @@ async function pageConnect() {
     "ai.provider": $("#s-aip").value, "ai.api_key": $("#s-aik").value.trim(), "ai.explain_min_severity": Number($("#s-aisev").value),
     "ai.pulse_every_min": Number($("#s-aipulse").value), "live.paper.auto": $("#s-pauto").checked, "live.paper.lots": Number($("#s-plots").value),
     "live.paper.target_pct": Number($("#s-ptgt").value), "live.paper.stop_pct": Number($("#s-pstop").value),
-    "live.paper.capital": Number(String($("#s-pcap").value).replace(/[^0-9.]/g, "")) || 200000, "live.paper.risk_pct": Number($("#s-prisk").value),
+    "live.paper.capital": Number(String($("#s-pcap").value).replace(/[^0-9.]/g, "")) || 500000, "live.paper.risk_pct": Number($("#s-prisk").value),
     "live.paper.max_daily_loss_pct": Number($("#s-pdl").value), "live.paper.max_trades_day": Number($("#s-pmt").value),
     "live.filings": $("#s-fil").checked, "live.briefs": $("#s-brief").checked,
   });
@@ -864,7 +865,7 @@ async function pageDesk() {
           ${!st.synthetic && !Object.values(st.data).some((v) => v.months) ? `<button class="btn" id="lab-demo2">Demo on synthetic data</button>` : ""}</div>
         <p class="note">Re-run the backtest once a month (download first): the plan picks strategies on the latest 6 months.</p></div>
       <div class="panel"><h3>2. Money and risk</h3><div class="form-grid">
-        <label class="field">Capital (₹)<input type="text" id="l-cap" value="${q(settings["lab.capital"] ?? 500000)}" inputmode="numeric"></label>
+        <label class="field">Capital (₹)<input type="text" id="l-cap" value="${q(settings["lab.capital"] ?? 500000)}" inputmode="numeric"><small>Same capital as paper trading and the risk check.</small></label>
         <label class="field">Risk per trade<select id="l-risk">${[0.5, 1, 1.5, 2].map((v) => `<option value="${v}" ${Number(settings["lab.risk_pct"] ?? 1.5) === v ? "selected" : ""}>${v}% of capital</option>`).join("")}</select><small>Loss if the stops hit, plus a 50% buffer.</small></label>
         <label class="field">Daily loss limit<select id="l-stop">${[1, 1.5, 2, 3].map((v) => `<option value="${v}" ${Number(settings["lab.daily_stop_pct"] ?? 2) === v ? "selected" : ""}>${v}% of capital</option>`).join("")}</select><small>Everything closes for the day at this loss.</small></label>
         <label class="check"><input type="checkbox" id="l-auto" ${settings["lab.auto_trade"] !== false ? "checked" : ""}><span>Paper-trade the plan automatically<small>On live or simulator prices, every market day.</small></span></label>
@@ -941,7 +942,7 @@ function drawDeskLive(d) {
 
 function expiryCard(x) {
   const rs = (v) => v == null ? "–" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
-  const plan = x.plan.map((p) => `<li><b>${esc(p.sym)}</b>: ${esc(p.name)} <span class="muted small">${esc(p.pid)}</span></li>`).join("") || `<li class="muted">No strategy passed for this year: in cash.</li>`;
+  const plan = x.plan.map((p) => `<li><b>${esc(p.sym)}</b>: ${esc(p.name)} <span class="muted small">${esc(p.pid)}</span></li>`).join("") || ((x.cash || []).length ? "" : `<li class="muted">No strategy passed for this year: in cash.</li>`);
   const legs = (t) => t.legs.map((l) => `${l.q > 0 ? "Buy" : "Sell"} ${fx(l.strike)} ${l.side} @ ${l.entry}`).join(" · ");
   const open = x.open.map((t) => `<tr><td><b>${esc(t.sym)}</b><br><small class="muted">expiry ${esc(t.expiry)}</small></td><td class="small">${esc(legs(t))}</td><td class="r">${t.lots}</td><td class="r">${t.credit}</td><td class="r">${rupees(t.max_loss)}</td><td class="r">${rs(t.mtm)}</td></tr>`).join("");
   const closed = x.closed.slice(0, 12).map((t) => `<tr><td>${esc(t.sym)} <small class="muted">${esc(t.expiry)}</small></td><td class="r">${t.lots}</td><td class="r">${fx(t.settle)}</td><td class="r">${rs(t.net)}</td><td class="small muted">${esc(t.reason || "")}</td></tr>`).join("");
@@ -970,6 +971,7 @@ function eodCard(st, r) {
 }
 
 function edgeCard(e) {
+  if (!e) return "";
   const wf = e.walk_forward || {};
   const name = { ema_pullback: "EMA pullback", vwap_reclaim: "VWAP reclaim", cpr_breakout: "CPR breakout", pdh_break: "Prev-day high/low break", wall_fade: "OI wall rejection" };
   const rs = (x) => `<span class="${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : "−"}₹${Math.abs(Math.round(x)).toLocaleString("en-IN")}</span>`;
@@ -1051,6 +1053,7 @@ async function pageChart() {
       <div class="seg" role="group" aria-label="Days">${[1, 3, 5].map((d) => `<button data-days="${d}" aria-pressed="${CH.days === d}">${d}D</button>`).join("")}</div>
       <details class="ch-ind"><summary class="btn">Indicators &amp; levels</summary><div class="ch-menu">${CH_TOGGLES.map(([k, l]) => `<label class="check"><input type="checkbox" data-tog="${k}" ${chOn(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></details>
       <a class="btn" href="#/sym?s=${encodeURIComponent(CH.sym)}">Option chain</a>
+      <a class="btn" href="#/timemachine?s=${encodeURIComponent(CH.sym)}">Time Machine</a>
     </div>
     <div class="ch-wrap"><div id="ch-chart" class="ch-chart"></div>
       <aside class="ch-side"><div class="panel tight"><h3>Chart read</h3><div id="ch-read"><p class="muted">Loading…</p></div>
@@ -1299,6 +1302,10 @@ async function pageInsiders() {
   $("#ins-all").onchange = (e) => { LS.set("ins_all", e.target.checked); pageInsiders(); };
   main.querySelectorAll("tr[data-sym]").forEach((r) => r.onclick = () => { location.hash = `#/chart?s=${encodeURIComponent(r.dataset.sym)}`; });
   $("#ins-refresh").onclick = async (e) => { e.target.disabled = true; try { await post("/api/insiders/refresh", {}); toast("Reading NSE disclosures in the background"); setTimeout(pageInsiders, 3000); } catch (err) { toast(err.message); } };
+  if (!v.updated && !v.running && !L.insAuto) {        // first visit: start the first read by itself
+    L.insAuto = true;
+    post("/api/insiders/refresh", {}).then(() => setTimeout(() => state.page === "insiders" && pageInsiders(), 2500)).catch(() => {});
+  }
   L.pageTimer = setTimeout(() => state.page === "insiders" && pageInsiders(), v.running ? 10000 : 120000);
 }
 
@@ -1313,8 +1320,168 @@ function companyCard(c) {
   return qt + it;
 }
 
+/* ---------------- Time Machine: test a trade plan before taking it */
+const TM = { setup: null, last: null };
+const tmTime = (bar) => { const m = 555 + 5 * bar; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
+
+async function pageTimeMachine() {
+  stopPageTimer();
+  const qp = new URLSearchParams(location.hash.split("?")[1] || "");
+  let setup;
+  try { setup = await api("/api/timemachine/setup"); } catch (e) { setup = { symbols: [{ sym: "NIFTY" }, { sym: "BANKNIFTY" }], alerts: [] }; }
+  TM.setup = setup;
+  const keep = LS.get("tm_form", {}) || {};
+  const sym = (qp.get("s") || keep.sym || "NIFTY").toUpperCase();
+  const opts = setup.symbols.map((x) => `<option value="${esc(x.sym)}" ${x.sym === sym ? "selected" : ""}>${esc(x.sym)}${x.ltp ? " · " + fx(x.ltp) : ""}</option>`).join("");
+  const r5 = (t) => { const [h, m] = t.split(":").map(Number); const x = Math.ceil((h * 60 + m) / 5) * 5; return `${String(Math.floor(x / 60)).padStart(2, "0")}:${String(x % 60).padStart(2, "0")}`; };
+  const nowHM = setup.now && setup.now >= "09:20" && setup.now < "15:10" ? r5(setup.now) : "";
+  main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Time Machine</h1>
+      <p class="lede" style="margin-bottom:0">Test a trade before you take it. The rest of the day is replayed 10,000 times from this stock's own last 60 sessions (same time of day), and the same plan is checked on each real past session.</p></div></div>
+    <div class="tm-grid">
+      <form class="panel tm-form" id="tm-form" autocomplete="off" novalidate>
+        <label class="field">Stock or index<select id="tm-sym">${opts}</select></label>
+        <div class="field-group"><span class="field-label">Direction</span>
+          <div class="seg" role="group" aria-label="Direction"><button type="button" data-dir="up" aria-pressed="true">▲ Long (price up)</button><button type="button" data-dir="down" aria-pressed="false">▼ Short (price down)</button></div></div>
+        <div class="tm-three">
+          <label class="field">Entry<input type="text" id="tm-entry" inputmode="decimal"></label>
+          <label class="field">Stop<input type="text" id="tm-stop" inputmode="decimal"></label>
+          <label class="field">Target<input type="text" id="tm-target" inputmode="decimal"></label>
+        </div>
+        <p class="small muted tm-quick">Quick fill: stop <select id="tm-qs" aria-label="Stop distance">${[0.3, 0.5, 0.75, 1, 1.5].map((v) => `<option value="${v}" ${v === 0.5 ? "selected" : ""}>${v}%</option>`).join("")}</select> away, target <select id="tm-qr" aria-label="Target in R">${[1, 1.5, 2, 3].map((v) => `<option value="${v}" ${v === 2 ? "selected" : ""}>${v}R</option>`).join("")}</select> <button type="button" class="link-btn" id="tm-fill">Fill</button></p>
+        <label class="field">Entry time<input type="time" id="tm-start" min="09:20" max="15:10" step="300" value="${esc(qp.get("t") || nowHM || keep.start || "09:30")}"><small>Bars after this time are replayed up to the 15:15 square-off.</small></label>
+        <button class="btn primary" type="submit" id="tm-run">Run 10,000 replays</button>
+        <p class="small muted" id="tm-plan-note" style="margin:0"></p>
+      </form>
+      <section id="tm-result" class="tm-result" aria-live="polite">${tmEmpty()}</section>
+    </div>
+    <h2>Test today's alerts <span class="muted small">alerts with a stop and a target</span></h2>
+    <div class="table-wrap"><table><thead><tr><th>Time</th><th>Stock</th><th>Alert</th><th class="r">Entry</th><th class="r">Stop</th><th class="r">Target</th><th class="r">R:R</th><th></th></tr></thead>
+      <tbody>${setup.alerts.map((a) => `<tr><td>${hm(a.ts)}</td><td><b>${esc(a.sym)}</b></td><td>${arrow(a.direction)} ${esc(a.title)}</td><td class="r">${fx(a.entry)}</td><td class="r">${fx(a.stop)}</td><td class="r">${fx(a.target)}</td><td class="r">${a.rr ?? "–"}</td><td class="r"><button class="link-btn" data-tma="${a.id}">Test</button></td></tr>`).join("") || `<tr><td colspan="8" class="muted">No alert with a stop and target yet today. Start the scanner (Live), or type a plan above.</td></tr>`}</tbody></table></div>
+    <h2>Your recent tests</h2><div id="tm-hist"></div>
+    <p class="note">How to read it: a plan with a 2R target only has to reach the target first 33% of the time to break even, so a low win rate is not bad on its own. The replays assume the next hours behave like the last 60 sessions: results days, news and events can do things those sessions never did. A test, not a prediction.</p>`;
+
+  let dir = keep.dir === "down" ? "down" : "up";
+  const segBtns = main.querySelectorAll("[data-dir]");
+  const setDir = (d) => { dir = d; segBtns.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.dir === d))); planNote(); };
+  segBtns.forEach((b) => b.onclick = () => setDir(b.dataset.dir));
+  const ltpOf = (s2) => (TM.setup.symbols.find((x) => x.sym === s2) || {}).ltp;
+  const num = (id) => Number(String($(id).value).replace(/[^0-9.]/g, ""));
+  const fill = () => {
+    const e = num("#tm-entry") || ltpOf($("#tm-sym").value);
+    if (!e) { toast("Type an entry price first"); return; }
+    const sp = Number($("#tm-qs").value) / 100, r = Number($("#tm-qr").value), dd = dir === "up" ? 1 : -1;
+    const dec = e >= 1000 ? 1 : 2;
+    $("#tm-entry").value = e.toFixed(dec); $("#tm-stop").value = (e * (1 - dd * sp)).toFixed(dec); $("#tm-target").value = (e * (1 + dd * sp * r)).toFixed(dec);
+    planNote();
+  };
+  function planNote() {
+    const e = num("#tm-entry"), st = num("#tm-stop"), tg = num("#tm-target"), el = $("#tm-plan-note");
+    if (!el) return;
+    if (!e || !st || !tg) { el.textContent = ""; return; }
+    const ok = dir === "up" ? st < e && e < tg : tg < e && e < st;
+    if (!ok) { el.innerHTML = `<span class="down">For a ${dir === "up" ? "long" : "short"}, the stop must be ${dir === "up" ? "below" : "above"} the entry and the target ${dir === "up" ? "above" : "below"} it.</span>`; return; }
+    const rr = Math.abs(tg - e) / Math.abs(e - st);
+    el.innerHTML = `Risk ${(Math.abs(e - st) / e * 100).toFixed(2)}% · reward ${(Math.abs(tg - e) / e * 100).toFixed(2)}% · reward:risk <b>${rr.toFixed(2)}</b> · break-even needs the target first ${(100 / (1 + rr)).toFixed(0)}% of the time`;
+  }
+  ["#tm-entry", "#tm-stop", "#tm-target"].forEach((id) => $(id).addEventListener("input", planNote));
+  $("#tm-fill").onclick = fill;
+  $("#tm-sym").onchange = () => { const l = ltpOf($("#tm-sym").value); $("#tm-entry").value = l ? l : ""; $("#tm-stop").value = ""; $("#tm-target").value = ""; if (l) fill(); };
+  const run = async () => {
+    const body = { sym: $("#tm-sym").value, direction: dir, entry: num("#tm-entry"), stop: num("#tm-stop"), target: num("#tm-target"), start: $("#tm-start").value };
+    if (!body.entry || !body.stop || !body.target) { toast("Fill entry, stop and target (or use Fill)"); return; }
+    LS.set("tm_form", { sym: body.sym, dir, start: body.start });
+    const btn = $("#tm-run"); btn.disabled = true; btn.textContent = "Replaying…";
+    $("#tm-result").innerHTML = `<div class="panel"><p class="muted">Loading ${esc(body.sym)}'s last 60 sessions and replaying 10,000 times… (the first test of a stock each day takes a few seconds)</p></div>`;
+    try {
+      const r = await post("/api/timemachine", body);
+      TM.last = r;
+      $("#tm-result").innerHTML = tmResult(r);
+      tmFan(r);
+      const h = (LS.get("tm_hist", []) || []).filter((x) => !(x.sym === r.sym && x.entry === body.entry && x.stop === body.stop && x.target === body.target && x.start === r.start));
+      h.unshift({ sym: r.sym, direction: dir, entry: body.entry, stop: body.stop, target: body.target, start: r.start, tf: r.mc.target_first, sf: r.mc.stop_first, avg: r.mc.avg_r, grade: r.verdict.grade, at: Date.now() });
+      LS.set("tm_hist", h.slice(0, 10)); renderHist();
+    } catch (e) { $("#tm-result").innerHTML = `<div class="panel"><p class="down"><b>Couldn't run this test.</b> ${esc(e.message)}</p></div>`; }
+    btn.disabled = false; btn.textContent = "Run 10,000 replays";
+  };
+  $("#tm-form").onsubmit = (e) => { e.preventDefault(); run(); };
+  const load = (p, go) => {
+    if ([...$("#tm-sym").options].some((o) => o.value === p.sym)) $("#tm-sym").value = p.sym;
+    else { $("#tm-sym").insertAdjacentHTML("afterbegin", `<option value="${esc(p.sym)}">${esc(p.sym)}</option>`); $("#tm-sym").value = p.sym; }
+    setDir(p.direction); $("#tm-entry").value = p.entry; $("#tm-stop").value = p.stop; $("#tm-target").value = p.target;
+    if (p.start) $("#tm-start").value = p.start;
+    planNote(); window.scrollTo({ top: 0, behavior: "smooth" }); if (go) run();
+  };
+  const alertPlan = (id) => { const a = TM.setup.alerts.find((x) => String(x.id) === String(id)); if (!a) return null;
+    const t = hm(a.ts); return { ...a, start: t >= "09:20" && t < "15:10" ? t : "09:30" }; };
+  main.querySelectorAll("[data-tma]").forEach((b) => b.onclick = () => { const p = alertPlan(b.dataset.tma); if (p) load(p, true); });
+  function renderHist() {
+    const h = LS.get("tm_hist", []) || [];
+    const el = $("#tm-hist"); if (!el) return;
+    el.innerHTML = h.length ? `<div class="table-wrap"><table><thead><tr><th>Stock</th><th>Plan</th><th>From</th><th class="r">Target first</th><th class="r">Stop first</th><th class="r">Avg</th><th></th></tr></thead><tbody>${h.map((x, i) => `<tr><td><b>${esc(x.sym)}</b></td><td>${arrow(x.direction)} ${fx(x.entry)} · stop ${fx(x.stop)} · target ${fx(x.target)}</td><td>${esc(x.start || "")}</td><td class="r up">${x.tf}%</td><td class="r down">${x.sf}%</td><td class="r"><b class="${x.avg > 0 ? "up" : x.avg < 0 ? "down" : ""}">${x.avg > 0 ? "+" : ""}${x.avg}R</b></td><td class="r"><button class="link-btn" data-tmh="${i}">Run again</button></td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted small">Your tests appear here (kept in this browser).</p>`;
+    el.querySelectorAll("[data-tmh]").forEach((b) => b.onclick = () => load(h[Number(b.dataset.tmh)], true));
+  }
+  renderHist();
+  // start state: an alert from the Alerts page, a symbol from the chart, or the last form
+  const aid = qp.get("alert");
+  const ap = aid ? alertPlan(aid) : null;
+  if (ap) load(ap, true);
+  else {
+    if (keep.dir) setDir(keep.dir);
+    const l = ltpOf($("#tm-sym").value);
+    if (l) { $("#tm-entry").value = l; fill(); }
+    if (aid) toast("That alert is no longer in today's list: type its plan here.");
+  }
+}
+
+function tmEmpty() {
+  return `<div class="panel tm-empty"><h3>What you get</h3><ul class="plain small">
+    <li><b>Target first / stop first / neither</b> by 15:15, out of 10,000 replays.</li>
+    <li><b>Break-even check</b>: how often the target must come first for this reward:risk, against how often it did.</li>
+    <li><b>Price fan</b>: where the price went in 90% of replays, bar by bar until the square-off.</li>
+    <li><b>The real past</b>: the same plan on each of the last 60 sessions, at the same time of day.</li></ul>
+    <p class="small muted" style="margin:8px 0 0">History: Upstox 5-minute bars when you're logged in, otherwise Yahoo Finance (free). Works for indices and every F&amp;O stock, market open or closed.</p></div>`;
+}
+
+function tmResult(r) {
+  const m = r.mc, h = r.history, v = r.verdict, pl = r.plan;
+  const cls = v.grade === "edge" ? "up" : v.grade === "against" ? "down" : "amber";
+  const word = v.grade === "edge" ? "Leans to the target" : v.grade === "against" ? "Leans to the stop" : "No clear edge";
+  return `<div class="panel tm-panel">
+    <div class="tm-head"><div><b>${esc(r.sym)}</b> ${arrow(pl.direction)} ${pl.direction === "up" ? "long" : "short"} from ${fx(pl.entry)} · stop ${fx(pl.stop)} · target ${fx(pl.target)} · <b>${pl.r}R</b>
+      <div class="small muted">Entry at ${esc(r.start || tmTime(pl.start_bar))} · ${m.replays.toLocaleString("en-IN")} replays to 15:15 from ${h.sessions} sessions (${esc(h.from || "")} → ${esc(h.to || "")}) · seed ${m.seed}</div></div>
+      <span class="pill ${v.grade === "edge" ? "p-up" : v.grade === "against" ? "p-down" : "p-amber"}">${word}</span></div>
+    <div class="tm-stack" role="img" aria-label="Target first ${m.target_first}%, neither ${m.neither}%, stop first ${m.stop_first}%">
+      <i class="t" style="width:${m.target_first}%"></i><i class="n" style="width:${m.neither}%"></i><i class="s" style="width:${m.stop_first}%"></i></div>
+    <div class="kpis tm-kpis"><div class="kpi"><b class="up">${m.target_first}%</b><span>Target first</span></div><div class="kpi"><b class="down">${m.stop_first}%</b><span>Stop first</span></div>
+      <div class="kpi"><b>${m.neither}%</b><span>Neither by 15:15</span></div><div class="kpi"><b class="${m.avg_r > 0 ? "up" : m.avg_r < 0 ? "down" : ""}">${m.avg_r > 0 ? "+" : ""}${m.avg_r}R</b><span>Average result</span></div></div>
+    <p class="${cls}" style="margin:12px 0 4px"><b>${esc(v.line)}</b></p>
+    ${(v.notes || []).map((n) => `<p class="small" style="margin:2px 0">${esc(n)}</p>`).join("")}
+    <p class="small" style="margin:6px 0">Break-even for ${pl.r}R: the target must come first in <b>${v.needed_pct}%</b> of decided replays; it did in <b>${v.got_pct}%</b>.</p>
+    <div id="tm-fan" class="tm-fan"></div>
+    <p class="small" style="margin:6px 0">15:15 price: median ${fx(m.close_pct[2])}, 90% of replays between ${fx(m.close_pct[0])} and ${fx(m.close_pct[4])}.</p>
+    <p class="small" style="margin:6px 0"><b>Real past</b> (same time of day, same distances, ${h.sessions} sessions): ${h.target} target, ${h.stop} stop, ${h.neither} neither · average ${h.avg_r > 0 ? "+" : ""}${h.avg_r}R.</p></div>`;
+}
+
+function tmFan(r) {
+  const el = document.getElementById("tm-fan");
+  if (!el || !window.Plotly || !r.mc.fan) return;
+  const f = r.mc.fan, pl = r.plan, n = f.p50.length;
+  const x = Array.from({ length: n }, (_, i) => tmTime(pl.start_bar + i + 1));
+  const line = (y, color, name, dash) => ({ x: [x[0], x[n - 1]], y: [y, y], mode: "lines", line: { color, width: 1.2, dash }, name, hoverinfo: "name+y" });
+  Plotly.newPlot(el, [
+    { x, y: f.p95, mode: "lines", line: { width: 0 }, hoverinfo: "skip", name: "95%" },
+    { x, y: f.p5, mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: "rgba(61,47,168,.12)", name: "90% of replays", hovertemplate: "%{y:.2f}" },
+    { x, y: f.p50, mode: "lines", line: { color: C.signal || "#3D2FA8", width: 2 }, name: "Median" },
+    line(pl.target, "#1E8A5A", "Target", "dash"), line(pl.stop, "#C23B32", "Stop", "dash"), line(pl.entry, "#5E6B78", "Entry", "dot"),
+  ], plotLayout({ height: 260, margin: { l: 70, r: 16, t: 8, b: 36 }, hovermode: "x unified", xaxis: { gridcolor: "#EEF1F4", nticks: 8 },
+    yaxis: { gridcolor: "#EEF1F4", tickformat: pl.entry >= 1000 ? ",.0f" : ",.2f" } }), plotCfg);
+  plotFit(el);
+}
+
 /* ---------------- register */
 Object.assign(PAGES, { live: pageLive, scanner: pageScanner, sym: pageSym, alerts: pageAlerts, paper: pagePaper, connect: pageConnect,
-  context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk, chart: pageChart, world: pageWorld, insiders: pageInsiders });
+  context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk, chart: pageChart, world: pageWorld, insiders: pageInsiders,
+  timemachine: pageTimeMachine });
 window.addEventListener("hashchange", () => { stopPageTimer(); if (!location.hash.startsWith("#/chart") && CH.chart) { CH.chart.remove(); CH.chart = null; } main.classList.toggle("wide", location.hash.startsWith("#/chart")); });
 pollSnapshot();

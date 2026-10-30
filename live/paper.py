@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import time
 
 from .clock import IST
 
@@ -17,7 +16,7 @@ DEFAULTS = {
     "exit_time": "15:15",
     "no_entry_after": "14:45",
     "max_open": 6,
-    "capital": 200000,          # risk guard
+    "capital": 500000,          # risk guard
     "risk_pct": 1.0,            # rupees at risk per trade = capital x risk_pct, sizes the lots
     "max_lots": 5,
     "max_daily_loss_pct": 3.0,  # stop new auto trades after this loss in a day

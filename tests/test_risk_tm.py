@@ -16,7 +16,7 @@ def test_gate_pass_sizes_by_max_loss():
     opt = {"ltp": 100, "ask": 100.5, "bid": 100, "lot": 75}
     g = {"blocked": False, "loss_limit": -6000, "trades_today": 0}
     r = riskgate.check({"sym": "NIFTY", "data": {"setup_levels": {"rr": 2}}}, opt, now=_now(10, 30), paper_cfg=DEFAULTS, guard=g, open_syms=set())
-    assert r["verdict"] == "PASS" and r["lots"] == 1 and r["max_loss"] <= 2000      # 1% of 2 lakh
+    assert r["verdict"] == "PASS" and r["lots"] == 3 and r["max_loss"] <= 5000      # 1% of 5 lakh
 
 
 def test_gate_blocks_with_reasons():
@@ -55,3 +55,33 @@ def test_time_machine_is_honest_on_random_walk_and_sees_drift():
     up = run(_sessions(drift=0.0008), list(range(60)), entry=100, stop=99.5, target=100.5, direction="up", start_bar=10)
     assert up["mc"]["target_first"] > up["mc"]["stop_first"] + 15 and up["verdict"]["grade"] == "edge"
     assert up["history"]["target"] > up["history"]["stop"]
+
+
+def test_alert_levels_are_bounded():
+    """A stop inside the next 15 minutes' noise, or a target beyond the session's usual range, gets pulled to sane values."""
+    from live.record import levels
+
+    class _B:
+        bars = [(0, 100, 100.2, 99.9, 100.0)] * 15
+
+    class _S:
+        bars = {"X": _B()}
+
+    m = {"sym": "X", "spot": 100.0, "sigma_1m": 0.05, "vwap": 100.05, "day_l": 96.0, "opt": {}}
+    lv = levels(m, "down", _S())
+    assert lv["stop_pct"] >= 0.29 and lv["target_pct"] <= 0.83 and lv["rr"] < 3
+
+
+def test_sessions_accept_missing_last_bars():
+    """Yahoo's stock feed skips 15:25; sessions that reach the 15:15 square-off still count."""
+    import datetime as dt
+    import pandas as pd
+    from live.timemachine import BARS, sessions_from_minutes
+    rows = []
+    for k in range(2):
+        day = dt.datetime(2026, 10, 12 + k, 9, 15, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30)))
+        for b in range(BARS - 1 - k):          # day 1: 74 bars; day 2: 73 bars (to 15:15)
+            ts = int((day + dt.timedelta(minutes=5 * b)).timestamp())
+            rows.append({"ts": ts, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0 + b * 0.01})
+    days, s = sessions_from_minutes(pd.DataFrame(rows))
+    assert len(days) == 2 and s.shape == (2, BARS, 4) and s[0, -1, 3] == s[0, -2, 3]

@@ -171,34 +171,23 @@ historically losing signal types, reward:risk under 1.2, bid-ask spread over 3%,
 the stop loses at most your max loss per trade (if one lot is already too much, it is blocked, never rounded up).
 A reminder five minutes before the 15:15 square-off lists what is still open.
 
-**Time Machine** (any index or F&O stock): replays the rest of the day 10,000 times from the symbol's own last
-60 sessions of 5-minute bars (same time of day), plus the same plan on each real past session, and gives the odds
-of target first / stop first / neither and an honest verdict that weighs the reward:risk. Idea from the MIT
-day-trader-skill, rebuilt for NSE hours and Upstox data.
-
-**Insider trades**: promoter, director and key-manager trades disclosed under SEBI's insider-trading rules, for
-every F&O stock (₹50 lakh+ in the market), net by stock, with alerts for new ones over ₹1 crore. The chart page
-shows each company's last quarterly results (from NSE's integrated filings) and its insider trades. Since May 2026 NSE
-publishes these as XBRL filings; the app reads each filing once (first read about 10 minutes, then only the
-last ten days every 3 hours).
-
-**10 years of end-of-day data (NSE bhavcopy, free)**: every index option contract's daily prices since 2015.
-Tests hedged premium selling held to expiry (iron condor / iron fly) and buying straddles, walk-forward by year,
-plus the volatility risk premium year by year. The **Expiry desk** paper-trades the variant that passed for this
-year, entered near the close and settled at expiry.
-
-**World**: global index futures, currencies, commodities, US yields, VIX, crypto and Indian ADRs (vs NSE price),
-each with its past correlation to Nifty and an indicative "global pressure" on Nifty; this week's economic
-calendar, F&O results for 10 days, and global news tagged by likely impact on India. Big moves (crude, dollar,
-US futures, Asia) and high-impact events 15 minutes ahead come as alerts.
-
-**AI market brain**: every few minutes a desk note — bias with confidence, key levels, risks, watchlist and
-what changed. Works on rules with no key; written by AI when a Gemini key is set.
+**Time Machine** (its own tab under Test & research; any index or F&O stock): type a plan (direction, entry,
+stop, target, entry time) or pick one of today's alerts. The rest of the day is replayed 10,000 times from the
+symbol's own last 60 sessions of 5-minute bars (same time of day), and the same plan is run on each real past
+session. You get target first / stop first / neither by 15:15, the break-even check for that reward:risk, a price
+fan to the square-off, and your recent tests. History comes from Upstox when logged in, otherwise free from Yahoo
+Finance, so it works with the market closed too. The "Time Machine" button on any alert opens this tab with the
+alert's plan. Idea from the MIT day-trader-skill, rebuilt for NSE hours.
 
 ## Pages
 
+The menu is grouped: **Trade today** (Live, Alerts, Chart, Option chain, Scanner, Paper trades), **Test & research**
+(Time Machine, Strategy desk, Scorecard), **Market intel** (Market context, World, Insider trades, Briefs),
+**Daily radar** and **Setup**.
+
 | Page | What it answers |
 |---|---|
+| Time Machine | Test any trade plan before taking it: 10,000 replays of the rest of the day plus the real past. |
 | Chart | TradingView-style chart with indicators, levels, setups and markers, plus a chart read. |
 | World | Global markets, forex, commodities, rates, ADRs, economic and results calendars, global news. |
 | Insider trades | Promoter / director buying and selling in F&O stocks, net by stock, every disclosure. |
@@ -211,7 +200,7 @@ what changed. Works on rules with no key; written by AI when a Gemini key is set
 | Alerts | Every alert saved by day. |
 | Scorecard | Which alert types actually work, graded automatically, plus the learning model's status. |
 | Paper trades | Automatic and manual paper trades, P&L after charges, win rate by alert type. |
-| Live setup | Upstox keys and login, alert levels, Telegram, AI, paper trading settings. |
+| Live setup | Upstox keys and login, alert levels, Telegram, AI, paper trading settings (one capital for the whole app). |
 | Tomorrow | Will the next session be a big-move day? Expected range in points, direction lean, scheduled events, why the model thinks so, and how your recent calls turned out. |
 | History | Every big day on the chart: flagged, missed, or false alarm. Click any point for that day's story. |
 | Biggest days | The 60 widest-range days in 10 years, and whether the model saw them coming. |
