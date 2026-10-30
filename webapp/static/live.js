@@ -1127,13 +1127,14 @@ async function pageDesk() {
         </div>
         <div class="btn-row" style="margin-top:14px"><button class="btn" id="l-uptest" ${st.upstox ? "" : "disabled"}>Check access</button>
           <button class="btn primary" id="l-dl" ${st.upstox ? "" : "disabled"}>Download history</button></div>
-        <details style="margin-top:12px"><summary class="muted small">Or use Dhan instead (needs a Dhan account)</summary>
+        <details style="margin-top:12px" ${st.dhan ? "" : "open"}><summary><b>Dhan keys</b> <span class="muted small">for the 5-year Lab and the 200-level order book ${st.dhan ? "· saved" : ""}</span></summary>
         <div class="form-grid" style="margin-top:10px">
           <label class="field">Dhan client ID<input type="text" id="l-cid" value="${q(settings["lab.dhan_client_id"])}" autocomplete="off"></label>
-          <label class="field">Access token<input type="password" id="l-tok" value="${q(settings["lab.dhan_token"])}" autocomplete="off"><small>web.dhan.co → Profile → Access DhanHQ APIs (Data APIs ₹499 / 30 days).</small></label>
+          <label class="field">Access token<input type="password" id="l-tok" value="${q(settings["lab.dhan_token"])}" autocomplete="off"><small>web.dhan.co → Profile → DhanHQ Trading APIs → generate an access token (Data APIs plan). Only market data is read: no orders, no holdings.</small></label>
         </div>
         <div class="btn-row" style="margin-top:10px"><button class="btn" id="l-save">Save</button><button class="btn" id="l-test">Test Dhan</button>
-          <button class="btn" id="l-dl-dhan" ${st.dhan ? "" : "disabled"}>Download from Dhan</button></div></details>
+          <a class="btn" href="#/lab">Go to 5-year Lab →</a></div>
+        <p class="small muted">The 5-year download is on Strategy Lab → 5-year Lab: it keeps Dhan's data in its own folder, so the current Lab is not changed.</p></details>
         <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Index</th><th class="r">Months</th><th>Range</th><th class="r">Size</th></tr></thead><tbody>${dataRows}</tbody></table></div>
         <div class="btn-row" style="margin-top:12px"><button class="btn primary" id="l-bt" ${Object.values(st.data).some((v) => v.months) ? "" : "disabled"}>Run backtest</button>
           ${!st.synthetic && !Object.values(st.data).some((v) => v.months) ? `<button class="btn" id="lab-demo2">Demo on synthetic data</button>` : ""}</div>
@@ -1159,7 +1160,6 @@ async function pageDesk() {
   $("#l-save2").onclick = save;
   $("#l-test").onclick = async () => { if (!(await save())) return; try { const r = await post("/api/lab/dhan/test", {}); toast(`Dhan connected (${r.profile.dhanClientId || "ok"}${r.profile.dataPlan ? ", data plan: " + r.profile.dataPlan : ""})`); pageDesk(); } catch (e) { toast(e.message); } };
   $("#l-dl").onclick = async () => { if (await save()) job("/api/lab/download", { source: "upstox" }); };
-  $("#l-dl-dhan").onclick = async () => { if (await save()) job("/api/lab/download", { source: "dhan" }); };
   $("#l-uptest").onclick = async () => {
     try { const r = await post("/api/lab/upstox/test", {}); const e = r.expiries;
       toast(`Upstox Plus OK: Nifty ${e.NIFTY.n} expiries (from ${e.NIFTY.first}), Bank Nifty ${e.BANKNIFTY.n} (from ${e.BANKNIFTY.first})`);
