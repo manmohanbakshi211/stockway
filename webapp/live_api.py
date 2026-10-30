@@ -155,11 +155,11 @@ def live_chart(sym: str, tf: int = 5, days: int = 3):
     if tf not in (1, 3, 5, 15, 30, 60):
         raise HTTPException(400, "Timeframe must be 1, 3, 5, 15, 30 or 60 minutes")
     try:
-        d = e.charts.payload(sym.upper(), tf, max(1, min(5, days)))
+        d = e.charts.payload(sym.upper(), tf, max(1, min(10, days)))
     except PermissionError as ex:
         raise HTTPException(401, str(ex))
     if not d:
-        raise HTTPException(404, "No live data for this symbol yet. Start the live scanner (or the simulator) first.")
+        raise HTTPException(404, "No price history found for this symbol yet (Yahoo or Upstox didn't answer).")
     return clean(d)
 
 

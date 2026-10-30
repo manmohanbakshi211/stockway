@@ -59,7 +59,7 @@ class ChartData:
         rows = []
         try:
             key = urllib.parse.quote(u.key, safe="")
-            to, frm = (day - dt.timedelta(days=1)).isoformat(), (day - dt.timedelta(days=6)).isoformat()
+            to, frm = (day - dt.timedelta(days=1)).isoformat(), (day - dt.timedelta(days=16)).isoformat()
             data = self.e.rest.get(f"/v3/historical-candle/{key}/minutes/1/{to}/{frm}") or {}
             for c in data.get("candles", []):
                 t = dt.datetime.fromisoformat(c[0]).timestamp()
@@ -280,7 +280,7 @@ class ChartData:
             df = None
             if f.exists():
                 df = pd.read_parquet(f)
-                df = df[df["ts"] >= df["ts"].max() - 12 * 86400]
+                df = df[df["ts"] >= df["ts"].max() - 18 * 86400]
             else:
                 tf_ = base / "tm" / f"{sym}.parquet"
                 if tf_.exists() and dt.datetime.fromtimestamp(tf_.stat().st_mtime, IST).date() == day:
@@ -292,7 +292,7 @@ class ChartData:
                         tf_.parent.mkdir(parents=True, exist_ok=True)
                         df.to_parquet(tf_, index=False)
             if df is not None and len(df):
-                df = df[df["ts"] >= df["ts"].max() - 12 * 86400]
+                df = df[df["ts"] >= df["ts"].max() - 18 * 86400]
                 vol = df["volume"] if "volume" in df else 0
                 rows = [[float(a), float(b), float(c), float(d), float(e_), float(v or 0)] for a, b, c, d, e_, v in
                         zip(df["ts"], df["open"], df["high"], df["low"], df["close"], (vol if hasattr(vol, "__iter__") else [0] * len(df)))]
@@ -301,15 +301,21 @@ class ChartData:
         self.hist[k] = rows
         return rows
 
+    def _payload_offline(self, sym, tf, days):
+        return self.payload(sym, tf, days)
+
     def payload(self, sym, tf=5, days=3) -> dict | None:
         e = self.e
         day = e.clock.now().date()
         live_m = e.metrics.get(sym)
-        today = self.today_bars(sym) if live_m else []
+        t_open = self._session_start(day)
+        # only real session bars count as "today": before 9:15 the feed sends a few pre-open prices, and a lone
+        # 7:44 tick used to blank the whole chart
+        today = [r for r in (self.today_bars(sym) if live_m else []) if t_open <= r[0] < t_open + 6.5 * 3600]
         hist = self.history(sym) if (days > 1 or not today) and live_m else []
         offline = False
-        if not today and not hist:
-            hist = self.offline_rows(sym)
+        if (not today and not hist) or self.hist.pop((sym, day, "force_offline"), False):
+            today, hist = [], self.offline_rows(sym)
             offline = bool(hist)
         rows = hist + today
         if not rows:
@@ -343,6 +349,13 @@ class ChartData:
             if len(s):
                 segs.append(ta.resample(s[:, 0], s[:, 1], s[:, 2], s[:, 3], s[:, 4], s[:, 5], tf, t0))
         if not segs:
+            if not offline and not getattr(self, "_retry", False):    # whatever happened, fall back to saved history
+                self._retry = True
+                try:
+                    self.hist[(sym, day, "force_offline")] = True
+                    return self._payload_offline(sym, tf, days)
+                finally:
+                    self._retry = False
             return None
         t, o, h, l, c, v = (np.concatenate([sg[k] for sg in segs]) for k in range(6))
         vw = np.concatenate([ta.vwap_bands(sg[2], sg[3], sg[4], sg[5])[0] for sg in segs])

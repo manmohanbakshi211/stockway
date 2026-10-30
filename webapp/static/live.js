@@ -1171,7 +1171,7 @@ async function pageChart() {
         <optgroup label="F&amp;O stocks">${stocks.map((x) => `<option value="${esc(x)}" ${x === CH.sym ? "selected" : ""}>${esc(x)}</option>`).join("")}</optgroup></select>
         <span id="ch-price" class="ch-price"></span></div>
       <div class="seg" role="group" aria-label="Timeframe">${[1, 3, 5, 15].map((t) => `<button data-tf="${t}" aria-pressed="${CH.tf === t}">${t}m</button>`).join("")}</div>
-      <div class="seg" role="group" aria-label="Days">${[1, 3, 5].map((d) => `<button data-days="${d}" aria-pressed="${CH.days === d}">${d}D</button>`).join("")}</div>
+      <div class="seg" role="group" aria-label="Days">${[1, 3, 5, 10].map((d) => `<button data-days="${d}" aria-pressed="${CH.days === d}">${d}D</button>`).join("")}</div>
       <details class="ch-ind"><summary class="btn">Indicators &amp; levels</summary><div class="ch-menu">${CH_TOGGLES.map(([k, l]) => `<label class="check"><input type="checkbox" data-tog="${k}" ${chOn(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></details>
       <a class="btn" href="#/sym?s=${encodeURIComponent(CH.sym)}">Option chain</a>
       <a class="btn" href="#/timemachine?s=${encodeURIComponent(CH.sym)}">Time Machine</a>
@@ -1202,8 +1202,11 @@ async function pageChart() {
       if (first || !CH.chart || CH.hasVol !== CH.data.has_volume) { CH.hasVol = CH.data.has_volume; buildChart(CH.hasVol); first = true; }
       drawChart(CH.data, first);
     }
-    catch (err) { if (first) $("#ch-chart").innerHTML = `<div class="empty" style="margin:20px">${esc(err.message)}<br><br><a class="btn primary" href="#/live">Go to Live</a></div>`; }
-    L.pageTimer = setTimeout(() => tick(false), 2000);
+    catch (err) {
+      if (first || !CH.chart) $("#ch-chart").innerHTML = `<div class="empty" style="margin:20px"><h2>Loading ${esc(CH.sym)} history…</h2><p class="small muted">${esc(err.message)} Trying again every few seconds.</p></div>`;
+      L.pageTimer = setTimeout(() => tick(!CH.chart), 6000); return;
+    }
+    L.pageTimer = setTimeout(() => tick(false), CH.data && CH.data.offline ? 30000 : 2000);
   };
   tick(true);
 }
@@ -1314,7 +1317,7 @@ function drawChart(d, first) {
   if (first) {                       // show the last ~120 bars (at least 40 slots so a young session isn't stretched)
     const n = d.candles.length;
     const ahead = d.scenario && d.scenario.ready && chOn("scen") ? Math.ceil((d.scenario.horizon_max || 60) / d.tf) + 3 : 6;
-    if (n) CH.chart.timeScale().setVisibleLogicalRange({ from: n - Math.max(40, Math.min(n, 120)), to: n + ahead });
+    if (n) CH.chart.timeScale().setVisibleLogicalRange({ from: n - Math.min(n, 500), to: n + ahead });   // show every bar of the chosen days (like a trading app); scroll or zoom for detail
   }
   $("#ch-price").innerHTML = `<b>${fx(d.spot)}</b> ${fpc(d.chg_pct)} ${d.regime && d.regime.code !== "opening" ? `<span class="pill p-sig">${esc(d.regime.label)}</span>` : ""}${d.offline ? ` <span class="pill p-amber" title="${esc(d.offline.source)}">Last session · ${esc(d.offline.as_of)}</span>` : ""}`;
   const pats = (d.patterns || []).slice().reverse();
