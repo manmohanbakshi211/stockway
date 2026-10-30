@@ -160,9 +160,12 @@ class Brain:
         self.last_snap = None
         self.running = False
 
+    def _key(self, day) -> str:
+        return f"brain:sim:{day}" if getattr(self.e, "source", None) == "sim" else f"brain:{day}"
+
     def history(self, day=None) -> list:
         day = day or dt.datetime.now(IST).date().isoformat()
-        return self.e.store.get(f"brain:{day}", []) or []
+        return self.e.store.get(self._key(day), []) or []
 
     def latest(self):
         h = self.history()
@@ -182,10 +185,16 @@ class Brain:
                 note = rules(s, self.last_snap)
             note["ts"] = time.time()
             note["time"] = s["time"]
+            now = dt.datetime.now(IST)
+            if getattr(self.e, "source", None) != "sim" and not (now.weekday() < 5 and dt.time(9, 15) <= now.time() <= dt.time(15, 30)):
+                note["closed"] = True                     # numbers are from the last session, not live
+                note["headline"] = "Market closed (last session): " + (note.get("headline") or "")
+            if getattr(self.e, "source", None) == "sim":
+                note["sim"] = True
             self.last_snap = s
-            day = dt.datetime.now(IST).date().isoformat()
+            day = now.date().isoformat()
             h = self.history(day) + [note]
-            self.e.store.put(f"brain:{day}", h[-80:])
+            self.e.store.put(self._key(day), h[-80:])
             return note
         finally:
             self.running = False

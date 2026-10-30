@@ -10,7 +10,7 @@ const LS = {
   get(k, d) { try { const v = localStorage.getItem("sw." + k); return v == null ? d : JSON.parse(v); } catch (_) { return d; } },
   set(k, v) { try { localStorage.setItem("sw." + k, JSON.stringify(v)); } catch (_) {} },
 };
-L.sevFilter = LS.get("sevFilter", 1);
+L.sevFilter = LS.get("sevFilter2", 0);
 
 /* ---------------- formatting (live values are already in %) */
 const fp = (v, d = 2) => (v == null || isNaN(v) ? "–" : `${v > 0 ? "+" : ""}${v.toFixed(d)}%`);
@@ -69,9 +69,14 @@ async function pollSnapshot() {
   L.timer = setTimeout(pollSnapshot, livePage() ? 1000 : 4000);
 }
 
+const isFocus = (a) => (a.data && a.data.focus !== undefined) ? !!a.data.focus : (a.severity >= 3 && !(a.data && a.data.muted));
+const SEVSEG = [[0, "Focus"], [1, "All"], [2, "Important"], [3, "Act now"]];
+const sevPass = (a, f) => f === 0 ? isFocus(a) : a.severity >= f;
+
 function notify(a) {
   const min = LS.get("notifySev", 2);
   if (a.severity < min) return;
+  if (!LS.get("notifyAll", false) && !isFocus(a)) return;     // pop-ups and sounds for Focus alerts only
   if (LS.get("sound", true) && a.severity >= 3) beep();
   if ("Notification" in window && Notification.permission === "granted" && document.visibilityState !== "visible" || (LS.get("notifyAlways", false) && "Notification" in window && Notification.permission === "granted")) {
     const n = new Notification(`${a.direction === "up" ? "▲" : a.direction === "down" ? "▼" : "●"} ${a.title}`, { body: a.detail + (a.option ? `\nIdea: ${a.option.label} @ ₹${a.option.ltp}` : ""), tag: `sw-${a.id}` });
@@ -199,7 +204,8 @@ function alertItem(a, full = false, extra = "") {
   const lv = d.levels || {}, st = d.structure, tr = d.track;
   const link = d.link ? ` <a href="${esc(d.link)}" target="_blank" rel="noopener">Read</a>` : "";
   const score = d.score != null ? `<span class="score" style="--s:${d.score}" title="Signal score: confluence, track record, market type${d.model_p != null ? " and the learned model" : ""}">${d.score}</span>` : "";
-  const track = tr && tr.n ? `<span class="track ${tr.hit_rate >= 50 ? "good" : tr.hit_rate < 35 ? "bad" : ""}">Worked ${tr.hit_rate}% of ${tr.n} times</span>` :
+  const track = tr && tr.decided ? `<span class="track ${tr.hit_rate >= 60 ? "good" : tr.hit_rate < 45 ? "bad" : ""}" title="Option +20% before −20% within an hour, among ${tr.decided} decided of ${tr.n} alerts">Worked ${tr.hit_rate}% of ${tr.decided} decided</span>` :
+    tr && tr.n && tr.decided === undefined ? `<span class="track muted">Worked ${tr.hit_rate}% of ${tr.n} times (old count)</span>` :
     (a.direction === "up" || a.direction === "down") ? `<span class="track muted">New signal type: no track record yet</span>` : "";
   const ev = (d.evidence || []).map((e) => `<span class="ev ${e.agree ? "yes" : "no"}">${e.agree ? "✓" : "✗"} ${esc(e.label)}</span>`).join("");
   const plan = lv.stop ? `<div class="plan"><span>Target <b>${fx(lv.target)}</b> <small>(${lv.target_pct}%)</small></span><span>Wrong ${a.direction === "up" ? "below" : "above"} <b>${fx(lv.stop)}</b> <small>(${lv.stop_pct}%)</small></span>${lv.rr ? `<span>Reward:risk <b>${lv.rr}</b></span>` : ""}</div>` : "";
@@ -208,7 +214,7 @@ function alertItem(a, full = false, extra = "") {
     const s2 = st && st.type === "spread" && st.spread ? ` · or spread ${fk(st.spread.buy)}/${fk(st.spread.sell)} for ${rupees(st.spread.cost)}, max ${rupees(st.spread.max_profit)}` : "";
     const tag = st ? `<span class="pill ${st.type === "buy" ? "p-up" : st.type === "spread" ? "p-amber" : "p-down"}">${st.type === "buy" ? "Buy option" : st.type === "spread" ? "Use a spread" : "Skip"}</span>` : "";
     trade = `<div class="idea"><span>${tag} <b>${esc(o.label)}</b> @ ₹${fx(o.ltp)} · ${rupees(o.cost_per_lot)}/lot${s2}${st ? `<br><small class="muted">${esc(st.why)}</small>` : ""}</span>
-      <span class="btn-row">${lv.stop ? `<button class="link-btn" data-tm="${a.id}">Time Machine</button>` : ""}<button class="link-btn" data-paper="${a.id}">Paper trade</button><button class="link-btn" data-explain="${a.id}">Why?</button></span></div>`;
+      <span class="btn-row">${lv.stop ? `<button class="link-btn" data-tm="${a.id}">Time Machine</button>` : ""}<button class="link-btn${d.risk && d.risk.verdict !== "PASS" ? " muted" : ""}" data-paper="${a.id}" title="${d.risk && d.risk.verdict !== "PASS" ? "Risk check said BLOCK: re-checked when you click" : "Paper trade at the live price"}">${d.risk && d.risk.verdict !== "PASS" ? "Paper trade (blocked)" : "Paper trade"}</button><button class="link-btn" data-explain="${a.id}">Why?</button></span></div>`;
   } else trade = `<div class="idea"><span class="muted small">${esc(d.regime ? "Market: " + d.regime : "")}</span><span class="btn-row"><button class="link-btn" data-explain="${a.id}">Why?</button></span></div>`;
   return `<li class="alert sev${a.severity}" data-aid="${a.id}">
     <div class="al-time">${hms(a.ts)}<span class="sevtag s${a.severity}">${SEV[a.severity]}</span>${score}</div>
@@ -222,7 +228,7 @@ function alertItem(a, full = false, extra = "") {
 function riskLine(r) {
   if (!r) return "";
   if (r.verdict === "PASS") return `<p class="risk pass small"><b>Risk check: PASS</b> · ${r.lots} lot${r.lots > 1 ? "s" : ""} · max loss ${rupees(r.max_loss)} at the stop · uses ${rupees(r.capital_used)}${(r.warnings || []).length ? ` · <span class="amber">${r.warnings.map(esc).join(" ")}</span>` : ""}</p>`;
-  return `<p class="risk block small"><b>Risk check: BLOCK</b> · ${(r.reasons || []).map(esc).join(" ")} <span class="muted">No paper trade.</span></p>`;
+  return `<p class="risk block small"><b>Risk check: BLOCK</b> · ${(r.reasons || []).map(esc).join(" ")} <span class="muted">${r.can_override ? "No paper trade unless you override." : "No paper trade."}</span></p>`;
 }
 
 function storyList(alerts) {
@@ -242,7 +248,13 @@ function fmtAI(t) {
 function bindAlertButtons(root) {
   root.querySelectorAll("[data-paper]").forEach((b) => b.onclick = async (e) => {
     e.preventDefault(); b.disabled = true;
-    try { await post(`/api/live/alerts/${b.dataset.paper}/paper`, {}); toast("Paper trade opened"); } catch (err) { toast(err.message); }
+    try { await post(`/api/live/alerts/${b.dataset.paper}/paper`, {}); toast("Paper trade opened (risk check PASS)"); }
+    catch (err) {
+      if (err.status === 409 && err.detail && err.detail.can_override) {
+        const ok = window.confirm(`${err.message}\n\nTake it anyway as an OVERRIDE? 1 lot only, tagged "override" so its record stays separate.`);
+        if (ok) { try { await post(`/api/live/alerts/${b.dataset.paper}/paper`, { override: true }); toast("Override paper trade opened (1 lot)"); } catch (e2) { toast(e2.message); } }
+      } else toast(err.message);
+    }
     b.disabled = false;
   });
   root.querySelectorAll("[data-tm]").forEach((b) => b.onclick = (e) => { e.preventDefault(); location.hash = `#/timemachine?alert=${b.dataset.tm}`; });
@@ -302,7 +314,8 @@ function renderLive(force = false) {
   }
   const pulse = s.pulse || {};
   const pulseHTML = pulse.ai ? fmtAI(pulse.ai) + `<p class="muted small">AI pulse at ${hm(pulse.ts)}</p>` : (pulse.lines || []).map((l) => `<p>${esc(l)}</p>`).join("") || `<p class="muted">Building the picture…</p>`;
-  const alerts = L.alerts.filter((a) => a.severity >= L.sevFilter).slice(0, 60);
+  const alerts = L.alerts.filter((a) => sevPass(a, L.sevFilter)).slice(0, 60);
+  const nFocus = L.alerts.filter(isFocus).length;
   const mv = s.movers || { hot: [], gainers: [], losers: [] };
   const tab = LS.get("moversTab", "hot");
   const mrows = (mv[tab] || []).map((m) => `<tr class="click" data-sym="${esc(m.sym)}"><td><b>${esc(m.sym)}</b></td><td class="r">${fx(m.spot)}</td><td class="r">${fpc(m.chg_pct)}</td><td class="r">${m.rel_vol ? m.rel_vol.toFixed(1) + "×" : "–"}</td><td class="r">${m.heat ?? "–"}</td></tr>`).join("");
@@ -336,8 +349,8 @@ function renderLive(force = false) {
     ${watchStrip(s.watch)}
     <div class="live-grid">
       <section>
-        <div class="toolbar"><h2 style="margin:0">Alerts <span class="muted small">${L.alerts.length} today</span></h2>
-          <div class="seg" role="group" aria-label="Minimum importance">${[1, 2, 3].map((v) => `<button data-sev="${v}" aria-pressed="${L.sevFilter === v}">${v === 1 ? "All" : v === 2 ? "Important" : "Act now"}</button>`).join("")}</div></div>
+        <div class="toolbar"><h2 style="margin:0">Alerts <span class="muted small">${nFocus} in focus · ${L.alerts.length} in all</span></h2>
+          <div class="seg" role="group" aria-label="Which alerts">${SEVSEG.map(([v, l]) => `<button data-sev="${v}" aria-pressed="${L.sevFilter === v}" ${v === 0 ? `title="Act-now alerts that are not demoted, at most one per symbol per hour"` : ""}>${l}</button>`).join("")}</div></div>
         <ul class="alerts">${storyList(alerts) || `<li class="muted" style="padding:18px">No alerts yet. They appear here the moment something happens.</li>`}</ul>
       </section>
       <aside>
@@ -353,7 +366,7 @@ function renderLive(force = false) {
       </aside>
     </div>`;
   bindLiveButtons(body); bindAlertButtons(body);
-  body.querySelectorAll("[data-sev]").forEach((b) => b.onclick = () => { L.sevFilter = Number(b.dataset.sev); LS.set("sevFilter", L.sevFilter); renderLive(true); });
+  body.querySelectorAll("[data-sev]").forEach((b) => b.onclick = () => { L.sevFilter = Number(b.dataset.sev); LS.set("sevFilter2", L.sevFilter); renderLive(true); });
   body.querySelectorAll("[data-mtab]").forEach((b) => b.onclick = () => { LS.set("moversTab", b.dataset.mtab); renderLive(true); });
   body.querySelectorAll("[data-ctab]").forEach((b) => b.onclick = () => { LS.set("contribTab", b.dataset.ctab); renderLive(true); });
   body.querySelectorAll("[data-brain-run]").forEach((b) => b.onclick = async () => { b.disabled = true; b.textContent = "Thinking…"; try { L.brain = await post("/api/brain/run", {}); renderLive(true); } catch (e) { toast(e.message); b.disabled = false; } });
@@ -611,15 +624,16 @@ function drawSymChart(d) {
 async function pageAlerts() {
   stopPageTimer();
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
-  const day = params.get("day") || "latest", sev = Number(params.get("sev") || 1), sym = params.get("sym") || "";
-  const d = await api(`/api/live/alerts?day=${day}&min_sev=${sev}${sym ? `&sym=${encodeURIComponent(sym)}` : ""}`);
+  const day = params.get("day") || "latest", sev = Number(params.get("sev") ?? 0), sym = params.get("sym") || "";
+  const d = await api(`/api/live/alerts?day=${day}&min_sev=${Math.max(1, sev)}${sev === 0 ? "&focus=true" : ""}${sym ? `&sym=${encodeURIComponent(sym)}` : ""}`);
+  const nAll = d.total ?? d.alerts.length;
   const byKind = {};
   d.alerts.forEach((a) => { byKind[a.kind] = (byKind[a.kind] || 0) + 1; });
   const go = (p) => { const q = new URLSearchParams({ day: d.day || "", sev, sym, ...p }); location.hash = `#/alerts?${q}`; };
-  main.innerHTML = `<h1 class="page-title">Alerts</h1><p class="lede">Every alert, saved by day. ${d.day ? `${d.alerts.length} on ${new Date(d.day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}.` : "None yet: they appear here as the scanner finds them."}</p>
+  main.innerHTML = `<h1 class="page-title">Alerts</h1><p class="lede">Every alert, saved by day. ${d.day ? `${d.alerts.length}${sev === 0 ? ` in focus (of ${nAll})` : ""} on ${new Date(d.day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}.` : "None yet: they appear here as the scanner finds them."}</p>
     <div class="toolbar"><div class="btn-row">
       <label class="field inline">Day <select id="al-day">${d.days.map((x) => `<option value="${x.day}" ${x.day === d.day ? "selected" : ""}>${x.day} (${x.n})</option>`).join("") || `<option>No alerts yet</option>`}</select></label>
-      <div class="seg">${[1, 2, 3].map((v) => `<button data-s="${v}" aria-pressed="${sev === v}">${v === 1 ? "All" : v === 2 ? "Important" : "Act now"}</button>`).join("")}</div>
+      <div class="seg">${SEVSEG.map(([v, l]) => `<button data-s="${v}" aria-pressed="${sev === v}">${l}</button>`).join("")}</div>
       <input type="search" id="al-sym" placeholder="Symbol" value="${esc(sym)}" aria-label="Filter by symbol"></div>
       <div class="chips small">${Object.entries(byKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<span class="chip static">${esc(KIND[k] || k)} ${n}</span>`).join("")}</div></div>
     <ul class="alerts">${d.alerts.map((a) => alertItem(a, true)).join("") || `<li class="muted" style="padding:18px">No alerts for this filter.</li>`}</ul>`;
@@ -644,13 +658,13 @@ function drawPaper(p, first) {
   const s = p.settings || {};
   const open = p.open.map((t) => {
     const chg = t.last && t.entry ? (t.last / t.entry - 1) * 100 : null;
-    return `<tr><td><b>${esc(t.label)}</b><br><small class="muted">${esc(KIND[t.kind] || t.kind)}${t.manual ? " · by you" : ""}</small></td><td>${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r">${fx(t.last)} ${fpc(chg, 1)}</td>
+    return `<tr><td><b>${esc(t.label)}</b><br><small class="muted">${esc(KIND[t.kind] || t.kind)}${t.manual === 2 ? ` · <span class="down">override</span>` : t.manual ? " · by you" : " · auto"}</small></td><td>${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r">${fx(t.last)} ${fpc(chg, 1)}</td>
       <td class="r">${fx(t.target)} / ${fx(t.stop)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}">${rupees(t.unreal)}</td><td><button class="link-btn" data-close="${t.id}">Exit</button></td></tr>`;
   }).join("");
-  const closed = p.closed.map((t) => `<tr><td><b>${esc(t.label)}</b><br><small class="muted">${esc(KIND[t.kind] || t.kind)}</small></td><td>${t.day}<br><small class="muted">${hm(t.entry_ts)}–${hm(t.exit_ts)}</small></td><td class="r">${fx(t.entry)} → ${fx(t.exit)}</td><td>${esc(t.reason)}</td><td class="r muted">${rupees(t.costs)}</td><td class="r ${t.net >= 0 ? "up" : "down"}"><b>${rupees(t.net)}</b></td></tr>`).join("");
+  const closed = p.closed.map((t) => `<tr><td><b>${esc(t.label)}</b><br><small class="muted">${esc(KIND[t.kind] || t.kind)}${t.manual === 2 ? ` · <span class="down">override</span>` : t.manual ? " · by you" : " · auto"}</small></td><td>${t.day}<br><small class="muted">${hm(t.entry_ts)}–${hm(t.exit_ts)}</small></td><td class="r">${fx(t.entry)} → ${fx(t.exit)}</td><td>${esc(t.reason)}</td><td class="r muted">${rupees(t.costs)}</td><td class="r ${t.net >= 0 ? "up" : "down"}"><b>${rupees(t.net)}</b></td></tr>`).join("");
   const kinds = p.by_kind.map((b) => `<tr><td>${esc(KIND[b.kind] || b.kind)}</td><td class="r">${b.n}</td><td class="r">${b.win_rate}%</td><td class="r ${b.avg >= 0 ? "up" : "down"}">${rupees(b.avg)}</td><td class="r ${b.net >= 0 ? "up" : "down"}"><b>${rupees(b.net)}</b></td></tr>`).join("");
   main.innerHTML = `<h1 class="page-title">Paper trading</h1>
-    <p class="lede">Practice with zero risk. Strong alerts buy the suggested option automatically (lots sized to your risk, target +${s.target_pct}%, stop −${s.stop_pct}%, exit by ${s.exit_time}). Charges are real: brokerage, STT, exchange, GST, stamp. ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : ""}</p>
+    <p class="lede">Practice with zero risk. Strong alerts buy the suggested option automatically (lots sized to your risk, target +${s.target_pct}%, stop −${s.stop_pct}%, exit by ${s.exit_time}). Charges are real: brokerage, STT, exchange, GST, stamp. By hand you can take only ideas the risk check passed; a soft BLOCK can be overridden (1 lot, tagged "override"), hard rules (time window, day loss limit, cool-off, ban) cannot. <a href="#/briefs">Day report →</a> ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : ""}</p>
     <div class="kpis"><div class="kpi"><b class="${p.net >= 0 ? "up" : "down"}">${rupees(p.net)}</b><span>Booked P&amp;L after charges</span></div>
       <div class="kpi"><b>${p.n}</b><span>Closed trades</span></div><div class="kpi"><b>${p.win_rate != null ? p.win_rate + "%" : "–"}</b><span>Winning trades</span></div>
       <div class="kpi"><b class="${p.unreal >= 0 ? "up" : "down"}">${rupees(p.unreal)}</b><span>Open, not booked (${p.open.length})</span></div></div>
@@ -831,18 +845,19 @@ async function pageContext(auto = false) {
 function scoreBuckets(sc) {
   // Hit = the option gained 20% before losing 20% within an hour, so ~50% is break-even before costs.
   const nm = (r) => `${esc(KIND[r.kind] || r.kind)} <span class="muted">${r.is_index ? "indices" : "stocks"}</span>`;
-  const chip = (r) => `<li>${nm(r)} <b>${r.hit_rate}%</b> <span class="muted small">of ${r.n}</span></li>`;
+  const chip = (r) => `<li>${nm(r)} <b>${r.hit_rate}%</b> <span class="muted small">of ${r.decided ?? r.n} decided</span></li>`;
   const rows = (sc.rows || []).filter((r) => r.hit_rate != null);
-  const trust = rows.filter((r) => r.n >= 30 && r.hit_rate >= 55);
-  const prom = rows.filter((r) => r.n >= 10 && r.n < 30 && r.hit_rate >= 55);
-  const mute = rows.filter((r) => r.n >= 30 && r.hit_rate < 40);
-  const early = rows.filter((r) => r.n < 10).length;
+  const dc = (r) => r.decided ?? r.n;
+  const trust = rows.filter((r) => dc(r) >= 30 && r.hit_rate >= 60);
+  const prom = rows.filter((r) => dc(r) >= 10 && dc(r) < 30 && r.hit_rate >= 60);
+  const mute = rows.filter((r) => dc(r) >= 20 && r.hit_rate < 45);
+  const early = rows.filter((r) => dc(r) < 10).length;
   const box = (cls, title, why, list) => `<div class="sb ${cls}"><h4>${title}</h4><p class="small muted">${why}</p>${list.length ? `<ul class="plain small">${list.map(chip).join("")}</ul>` : `<p class="small muted">None yet.</p>`}</div>`;
   return `<div class="panel" style="margin-top:14px"><h3>In plain words</h3>
-    <div class="sbuckets">${box("ok", "Trust these", "Worked 55%+ of the time over 30+ alerts.", trust)}
-      ${box("mid", "Promising, keep watching", "55%+ but under 30 alerts: could still be luck.", prom)}
-      ${box("bad", "Ignore these", "Under 40% over 30+ alerts. Already demoted (no Telegram, no auto paper trade).", mute)}</div>
-    <p class="small muted" style="margin:8px 0 0">${early ? `${early} alert type${early > 1 ? "s have" : " has"} fewer than 10 graded alerts: too early to judge. ` : ""}About 50% is break-even before costs, because a hit is +20% on the option before −20%. Real-market results count; simulator results don't.</p></div>`;
+    <div class="sbuckets">${box("ok", "Trust these", "Worked 60%+ over 30+ decided alerts.", trust)}
+      ${box("mid", "Promising, keep watching", "60%+ but under 30 decided: could still be luck.", prom)}
+      ${box("bad", "Ignore these", "Under 45% over 20+ decided alerts. Already demoted: out of Focus, no Telegram, no auto paper trade.", mute)}</div>
+    <p class="small muted" style="margin:8px 0 0">${early ? `${early} alert type${early > 1 ? "s have" : " has"} fewer than 10 decided alerts: too early to judge. ` : ""}"Decided" = the option went +20% or −20% within an hour (the rest stayed flat). About 50% is break-even before costs. Real-market results count; simulator results don't.</p></div>`;
 }
 
 async function pageScorecard() {
@@ -851,10 +866,10 @@ async function pageScorecard() {
   const sc = await api(`/api/live/scorecard${params.get("src") ? `?source=${params.get("src")}` : ""}`);
   const m = sc.model || {};
   const rows = sc.rows.map((r) => `<tr><td><b>${esc(KIND[r.kind] || r.kind)}</b> <span class="muted small">${r.is_index ? "indices" : "stocks"}</span></td><td class="r">${r.n}</td>
-    <td class="r"><b class="${r.hit_rate >= 50 ? "up" : r.hit_rate < 35 ? "down" : ""}">${r.hit_rate ?? "–"}%</b><div class="meter thin"><i class="${r.hit_rate >= 50 ? "on" : ""}" style="width:${r.hit_rate || 0}%"></i></div></td>
+    <td class="r"><b class="${r.hit_rate >= 60 ? "up" : r.hit_rate < 45 ? "down" : ""}">${r.hit_rate ?? "–"}%</b> <small class="muted">${r.decided ?? ""} decided</small><div class="meter thin"><i class="${r.hit_rate >= 50 ? "on" : ""}" style="width:${r.hit_rate || 0}%"></i></div></td>
     <td class="r">${r.recent_rate != null ? r.recent_rate + "%" : "–"} <small class="muted">last ${r.recent_n}</small></td>
     <td class="r">${fpc(r.avg_o15, 1)}</td><td class="r">${fpc(r.avg_o60, 1)}</td><td class="r">${fpc(r.avg_r15, 2)}</td>
-    <td>${r.n >= 30 && r.hit_rate < 35 ? `<span class="pill p-down">Demoted</span>` : r.n < 10 ? `<span class="muted small">too few yet</span>` : r.hit_rate >= 50 ? `<span class="pill p-up">Reliable</span>` : ""}</td></tr>`).join("");
+    <td>${(r.decided ?? 0) >= 20 && r.hit_rate < 45 || (r.n >= 40 && (r.avg_o60 ?? 0) < -2) ? `<span class="pill p-down">Demoted</span>` : (r.decided ?? 0) < 10 ? `<span class="muted small">too few yet</span>` : r.hit_rate >= 60 ? `<span class="pill p-up">Reliable</span>` : ""}</td></tr>`).join("");
   const recent = sc.recent.slice(0, 80).map((o) => `<tr><td>${o.day.slice(5)} ${hm(o.ts)}</td><td>${arrow(o.direction)} ${esc(o.title || o.sym)}</td>
     <td>${o.result ? `<span class="pill ${o.result === "hit" ? "p-up" : o.result === "miss" ? "p-down" : ""}">${o.result === "hit" ? "Worked" : o.result === "miss" ? "Failed" : "Flat"}</span>` : `<span class="muted small">tracking…</span>`}</td>
     <td class="r">${fpc(o.r5, 2)}</td><td class="r">${fpc(o.r15, 2)}</td><td class="r">${fpc(o.r60, 2)}</td><td class="r">${o.o0 ? fpc(o.omax, 0) + " / " + fpc(o.omin, 0) : "–"}</td></tr>`).join("");
@@ -888,7 +903,13 @@ async function pageBriefs() {
       `<p class="muted">${kind === "pre" ? "Made automatically at 8:45 AM on market days (and sent to Telegram)." : "Made automatically when the market closes."}</p>`}</div>`;
   main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Briefs</h1><p class="lede" style="margin-bottom:0">Your morning plan and evening review, written from the data. Connect Claude (your Pro plan) or another AI in Live setup for a written analysis.</p></div>
       ${b.days.length ? `<label class="field inline">Day <select id="br-day">${b.days.map((d) => `<option ${d === b.day ? "selected" : ""}>${d}</option>`).join("")}</select></label>` : ""}</div>
+    <div id="day-report"></div>
     <div class="split" style="margin-top:18px">${card(b.pre, "🌅 Pre-market brief", "pre")}${card(b.post, "🌇 Post-market review", "post")}</div>`;
+  const drawRep = (rebuild) => api(`/api/live/report?day=${encodeURIComponent(b.day || "")}${rebuild ? "&rebuild=true" : ""}`)
+    .then((r) => { const el = $("#day-report"); if (!el) return; el.innerHTML = dayReportCard(r);
+      const rb = $("#rep-rebuild"); if (rb) rb.onclick = () => { rb.disabled = true; rb.textContent = "Building…"; drawRep(true); }; })
+    .catch(() => {});
+  if (b.day) drawRep(false);
   if ($("#br-day")) $("#br-day").onchange = (e) => { location.hash = `#/briefs?day=${e.target.value}`; };
   main.querySelectorAll("[data-mk]").forEach((btn) => btn.onclick = async () => {
     btn.disabled = true; btn.textContent = "Writing…";
@@ -896,6 +917,36 @@ async function pageBriefs() {
   });
 }
 
+
+/* End-of-day report (live/dayreport.py) */
+function dayReportCard(r) {
+  if (!r || !r.paper) return "";
+  const p = r.paper, a = r.alerts;
+  const rs = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
+  const g = p.by_gate || {};
+  const kb = (v) => `<b class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</b>`;
+  const gate = [["pass", "Risk check PASS"], ["override", "Overrides"], ["blocked", "Taken although BLOCKED"]].filter(([k]) => g[k])
+    .map(([k, l]) => `<div class="kpi">${kb(g[k].net)}<span>${l} · ${g[k].n} trade${g[k].n > 1 ? "s" : ""}</span></div>`).join("");
+  const tr = (t) => `<tr><td>${esc(t.time)}</td><td>${esc(t.label)}<div class="muted small">${esc(KIND[t.kind] || t.kind)} · ${esc(t.exit)}${t.gate !== "pass" ? ` · <span class="down">${t.gate === "override" ? "override" : "against risk check"}</span>` : ""}</div></td><td class="r">${rs(t.net)}</td></tr>`;
+  const kinds = (list) => list.map((k) => `<li>${esc(KIND[k.kind] || k.kind)} <b>${k.win_pct}%</b> <span class="muted small">of ${k.hits + k.misses} decided · option ${fpc(k.avg_o60, 1)} after 1h</span></li>`).join("") || `<li class="muted">Not enough decided alerts yet.</li>`;
+  const fg = a.focus_graded || {}, gg = a.graded || {};
+  return `<div class="panel" style="margin-top:18px"><div class="toolbar" style="margin:0 0 8px"><h2 style="margin:0">📋 Day report <span class="muted small">${esc(r.day)}${r.source === "sim" ? " · simulator" : ""}</span></h2>
+      <button class="btn" id="rep-rebuild">Rebuild</button></div>
+    <div class="kpis kpi6">
+      <div class="kpi">${kb(p.net)}<span>Paper net after ₹${Math.round(p.costs || 0).toLocaleString("en-IN")} charges</span></div>
+      <div class="kpi"><b>${p.wins} / ${p.losses}</b><span>Won / lost of ${p.n} trades</span></div>
+      ${gate}
+      <div class="kpi"><b>${a.focus} <small class="muted">/ ${a.total.toLocaleString("en-IN")}</small></b><span>Alerts in Focus / all (${a.symbols} symbols)</span></div>
+      <div class="kpi"><b>${fg.win_pct ?? "–"}% <small class="muted">vs ${gg.win_pct ?? "–"}%</small></b><span>Focus vs all alerts worked (decided)</span></div></div>
+    ${(r.lessons || []).length ? `<h3>Lessons for tomorrow</h3><ul class="brief-lines">${r.lessons.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
+    <div class="split" style="margin-top:10px">
+      <div><h3>Best and worst paper trades</h3><div class="table-wrap"><table class="mini"><tbody>${(p.best || []).map(tr).join("")}${(p.worst || []).map(tr).join("")}</tbody></table></div>
+        <p class="small muted">Exits: ${(p.by_exit || []).map((x) => `${esc(x.key)} ${x.n} (${rs(x.net)})`).join(" · ")}</p></div>
+      <div><h3>Alert types today</h3><p class="small muted">Worked = option +20% before −20% within an hour.</p>
+        <h4 class="small">Best</h4><ul class="plain small">${kinds(a.best_kinds || [])}</ul>
+        <h4 class="small">Worst</h4><ul class="plain small">${kinds(a.worst_kinds || [])}</ul></div></div>
+    <p class="note">From the app's own records. Paper only. One day is not evidence: the Scorecard decides over weeks.</p></div>`;
+}
 
 /* ---------------- page: Strategy desk */
 const SNAME = { iron_fly: "Iron fly", iron_condor: "Iron condor", expiry_condor: "Expiry-day condor", orb_spread: "Breakout debit spread", trend_spread: "Trend debit spread" };

@@ -210,18 +210,23 @@ def scorecard(store, source) -> dict:
     groups = {}
     for r in rows:
         for k in ((r["kind"], r["is_index"]), (r["kind"], r["is_index"], r["severity"]), (r["kind"],)):
-            g = groups.setdefault(k, {"n": 0, "hits": 0, "o15": [], "o60": [], "r15": [], "recent": []})
+            g = groups.setdefault(k, {"n": 0, "hits": 0, "misses": 0, "o15": [], "o60": [], "r15": [], "recent": []})
             g["n"] += 1
             g["hits"] += r["result"] == "hit"
+            g["misses"] += r["result"] == "miss"
             for f in ("o15", "o60", "r15"):
                 if r.get(f) is not None:
                     g[f].append(r[f])
-            if len(g["recent"]) < 20:
+            if len(g["recent"]) < 20 and r["result"] in ("hit", "miss"):
                 g["recent"].append(r["result"] == "hit")
     out = {}
     for k, g in groups.items():
         avg = lambda xs: round(sum(xs) / len(xs), 2) if xs else None
-        out[k] = {"n": g["n"], "hit_rate": round(g["hits"] / g["n"] * 100) if g["n"] else None,
+        dec = g["hits"] + g["misses"]
+        # hit rate among decided alerts (option +20% first vs -20% first); flat hours are not counted as failures
+        out[k] = {"n": g["n"], "decided": dec, "hits": g["hits"], "misses": g["misses"],
+                  "flat_pct": round((g["n"] - dec) / g["n"] * 100) if g["n"] else None,
+                  "hit_rate": round(g["hits"] / dec * 100) if dec else None,
                   "avg_o15": avg(g["o15"]), "avg_o60": avg(g["o60"]), "avg_r15": avg(g["r15"]),
                   "recent_rate": round(sum(g["recent"]) / len(g["recent"]) * 100) if g["recent"] else None,
                   "recent_n": len(g["recent"])}
@@ -307,8 +312,8 @@ def signal_score(sev: int, ev: list, stats: dict | None, regime_adj: int = 0, mo
     agree = sum(e["agree"] for e in ev)
     against = sum(not e["agree"] for e in ev)
     s = 35 + 8 * sev + 7 * agree - 9 * against + regime_adj
-    if stats and stats.get("n", 0) >= 20 and stats.get("hit_rate") is not None:
-        s += (stats["hit_rate"] - 45) * 0.6
+    if stats and stats.get("decided", 0) >= 15 and stats.get("hit_rate") is not None:
+        s += (stats["hit_rate"] - 55) * 0.6
     if model_p is not None:
         s = 0.5 * s + 0.5 * model_p * 100
     return int(max(1, min(99, round(s))))

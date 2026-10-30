@@ -14,7 +14,12 @@ async function api(path, opts = {}) {
   const r = await fetch(path, opts);
   let body = null;
   try { body = await r.json(); } catch (_) {}
-  if (!r.ok) throw new Error((body && body.detail) || `Request failed (${r.status})`);
+  if (!r.ok) {
+    const d = body && body.detail;
+    const err = new Error((typeof d === "string" ? d : d && d.message) || `Request failed (${r.status})`);
+    err.status = r.status; err.detail = d;
+    throw err;
+  }
   return body;
 }
 const post = (path, data) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });

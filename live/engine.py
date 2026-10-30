@@ -8,7 +8,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import briefs, detectors
+from . import briefs, dayreport, detectors
 from .analytics import compute, norm_iv, pct
 from .clock import IST, Clock, SimClock, is_market_hours, minutes_since_open
 from .context import Context
@@ -42,7 +42,7 @@ LIVE_DEFAULTS = {
     "news": True,
     "filings": True,
     "briefs": True,
-    "mute_hit_rate": 35,
+    "mute_hit_rate": 45,
     "keep_recordings_days": 365,          # alert types below this hit rate (30+ cases) are demoted
     "detectors": {},
     "paper": {},
@@ -129,6 +129,8 @@ class LiveEngine:
         self.daily = {}
         self.vix_prev = None
         self.pulse = {"lines": [], "ai": None, "ts": None}
+        self._explaining = threading.Lock()
+        self.focus_last = {}
         self.market = {}
         self.words = {}
         self.timers = collections.defaultdict(float)
@@ -718,26 +720,32 @@ class LiveEngine:
         p = self.ranker.predict(feats) if self.ranker else None
         sc = signal_score(a["severity"], ev, st, regime_adjust((reg or {}).get("code"), a["kind"], a["direction"]), p)
         muted = None
-        if st and st.get("n", 0) >= 30 and st.get("hit_rate") is not None and st["hit_rate"] < float(lc["mute_hit_rate"]) \
-                and a["direction"] in ("up", "down"):
-            muted = f"Demoted: this alert type has worked only {st['hit_rate']}% of {st['n']} times."
+        if st and a["direction"] in ("up", "down") and st.get("hit_rate") is not None and (
+                (st.get("decided", 0) >= 20 and st["hit_rate"] < float(lc["mute_hit_rate"])) or
+                (st.get("n", 0) >= 40 and (st.get("avg_o60") or 0) < -2.0)):
+            muted = (f"Demoted: on the live scorecard this alert type worked {st['hit_rate']}% of {st['decided']} decided cases, "
+                     f"option {st.get('avg_o60') or 0:+.1f}% after an hour on average.")
             a["severity"] = max(1, a["severity"] - 1)
+        # focus: what deserves your eyes. Strong (act-now) directional alerts that are not demoted, at most one per
+        # symbol per hour. Everything else is still recorded and graded, and shown under "All".
+        focus = False
+        if a["direction"] in ("up", "down") and not muted and a["severity"] >= int(lc.get("focus_min_severity") or 3):
+            lastf = self.focus_last.get(a["sym"])
+            if not lastf or ts - lastf >= float(lc.get("focus_gap_min") or 60) * 60:
+                focus = True
+                self.focus_last[a["sym"]] = ts
+        elif a["direction"] not in ("up", "down") and a["severity"] >= 3:
+            focus = True                      # market-wide news / macro events
         lv_setup = (a.get("data") or {}).get("setup_levels")
         a["data"] = {**(a.get("data") or {}), "evidence": ev,
                      "levels": lv_setup or (levels(m, a["direction"], self.state) if m else {}),
                      "structure": structure(a["direction"], m, ctx) if m else None,
-                     "track": st, "score": sc, "model_p": round(p * 100) if p is not None else None, "muted": muted,
+                     "track": st, "score": sc, "model_p": round(p * 100) if p is not None else None, "muted": muted, "focus": focus,
                      "regime": (reg or {}).get("label")}
         # risk gate: PASS / BLOCK with reasons and lots, before anything can become a paper trade
         try:
             if a.get("option") and self.paper:
-                inst = self.state.get(a["option"]["key"])
-                if inst:
-                    a["option"]["bid"], a["option"]["ask"] = inst.bid, inst.ask or a["option"].get("ask")
-                ban = (self.context.view().get("ban") or []) if self.context else []
-                a["data"]["risk"] = riskgate.check(a, a["option"], now=now, paper_cfg=self.paper.cfg, guard=self.paper.guard(now),
-                                                   open_syms={t["sym"] for t in self.paper.open_trades()}, ban=ban,
-                                                   cfg=(lc.get("risk") or {}))
+                a["data"]["risk"] = self.risk_for(a, now)
         except Exception as e:
             self.log(f"Risk gate failed: {e}")
         # stories: alerts on the same symbol within 30 minutes are one developing story
@@ -752,11 +760,11 @@ class LiveEngine:
         self.store.set_alert_story(a["id"], s["id"])
         a["ai"] = None
         self.alerts_mem.appendleft(a)
-        if a["severity"] >= int(lc["telegram_min_severity"]) and not muted:
+        if a["severity"] >= int(lc["telegram_min_severity"]) and not muted and (focus or not lc.get("telegram_focus_only", True)):
             self.telegram.send(telegram_text(a))
         aic = self.cfg().get("ai") or {}
-        if self.ai.enabled() and a["severity"] >= int(aic.get("explain_min_severity") or 3):
-            threading.Thread(target=self.explain, args=(a["id"],), daemon=True).start()
+        if self.ai.enabled() and a["severity"] >= int(aic.get("explain_min_severity") or 3) and self._auto_explain_ok(a, aic):
+            threading.Thread(target=self._explain_one, args=(a["id"],), daemon=True).start()
         try:
             self.tracker.add(a, m, self.state, self.clock.ts(), feats)
         except Exception as e:
@@ -789,6 +797,42 @@ class LiveEngine:
                 self.log(f"Warning: {h['open']} open files (limit {h['limit']}). Restart the app if it slows down.")
         except Exception:
             pass
+
+    def risk_for(self, a: dict, now) -> dict:
+        """The risk gate on an idea with live option prices, today's paper book and the ban list, right now."""
+        opt = dict(a.get("option") or {}) or None
+        if opt:
+            inst = self.state.get(opt["key"])
+            if inst:
+                opt["bid"], opt["ask"] = inst.bid, inst.ask or opt.get("ask")
+                opt["ltp"] = inst.ltp or opt.get("ltp")
+        ban = (self.context.view().get("ban") or []) if self.context else []
+        lc = self.cfg().get("live") or {}
+        return riskgate.check(a, opt, now=now, paper_cfg=self.paper.cfg, guard=self.paper.guard(now),
+                              open_syms={t["sym"] for t in self.paper.open_trades()}, ban=ban, cfg=(lc.get("risk") or {}))
+
+    BRAIN_RESERVE = 8          # automatic AI calls kept for the hourly market notes on the Pro plan
+
+    def _auto_explain_ok(self, a, aic) -> bool:
+        """Automatic 'Why?' notes: on the Pro plan (a small daily allowance) only for the strongest alerts the risk
+        check passed, never while another one is being written, and never eating the market notes' reserve."""
+        if aic.get("provider") != "claude_pro":
+            return True
+        risk = (a.get("data") or {}).get("risk") or {}
+        if a["severity"] < 3 or risk.get("verdict") != "PASS" or (a.get("data") or {}).get("muted"):
+            return False
+        cap = int(aic.get("pro_auto_per_day") or 12)
+        return self.ai.used_auto < cap - self.BRAIN_RESERVE and not self._explaining.locked()
+
+    def _explain_one(self, alert_id):
+        if not self._explaining.acquire(blocking=False):
+            return
+        try:
+            self.explain(alert_id)
+        except Exception as e:
+            self.log(f"Auto note failed: {e}")
+        finally:
+            self._explaining.release()
 
     def explain(self, alert_id, auto=True) -> str | None:
         """'Why?' on an alert: a short written explanation from the alert, its metrics and related news (cached)."""
@@ -1046,8 +1090,25 @@ class LiveEngine:
                     "opt": {k: (v.get("opt") or {}).get(k) for k in ("support", "resistance", "max_pain", "pcr")}}
                 for s, v in src.items()}
 
+    def session_day(self, now=None) -> dt.date:
+        """The trading session the current data belongs to: before 15:30 (or on a weekend) on the live feed,
+        that is the previous weekday's session; the simulator's clock is its own session."""
+        now = now or (self.clock.now() if self.running or self.metrics else dt.datetime.now(IST))
+        d = now.date()
+        if self.source == "sim":
+            return d
+        if now.weekday() >= 5 or now.time() < dt.time(15, 30):
+            if now.weekday() < 5 and now.time() >= dt.time(9, 15) and self.running:
+                return d                                   # market open now: today's session, still running
+            d -= dt.timedelta(days=1)
+            while d.weekday() >= 5:
+                d -= dt.timedelta(days=1)
+        return d
+
     def make_brief(self, kind: str, send=True) -> dict:
         day = (self.clock.now() if self.running or self.metrics else dt.datetime.now(IST)).date().isoformat()
+        if kind == "post":
+            day = self.session_day().isoformat()
         if kind == "pre":
             facts = briefs.premarket_facts(self.context.view(), self._last_levels())
         else:
@@ -1057,10 +1118,21 @@ class LiveEngine:
                                             [a for a in self.alerts_mem if a["day"] == day])
             self.store.put(f"last_levels:{self.source}", {s: self.index_view(self.metrics[s])
                                                           for s in ("NIFTY", "BANKNIFTY") if s in self.metrics})
+            try:
+                rep = self.day_report(day)
+                facts["day_report"] = {"paper": {k: rep["paper"][k] for k in ("n", "net", "win_rate", "by_gate", "outside_window")},
+                                       "alerts": {k: rep["alerts"][k] for k in ("total", "focus", "graded", "focus_graded", "best_kinds", "worst_kinds")},
+                                       "lessons": rep["lessons"]}
+            except Exception as e:
+                rep = None
+                self.log(f"Day report failed: {e}")
         b = briefs.make(kind, facts, self.ai)
+        if kind == "post" and rep:
+            b["lines"] = [l for l in b["lines"] if not l.startswith(("Alerts:", "Paper trading:"))] + dayreport.text(rep)
         b["day"] = day
         b["source"] = self.source if kind == "post" else "market"
-        self.store.put(f"brief:{day}:{kind}", b)
+        key = kind if not (kind == "post" and self.source == "sim") else "post_sim"   # a simulator day never replaces the real review
+        self.store.put(f"brief:{day}:{key}", b)
         days = self.store.get("brief_days", []) or []
         if day not in days:
             self.store.put("brief_days", ([day] + days)[:60])
@@ -1068,11 +1140,22 @@ class LiveEngine:
             self.telegram.send(briefs.telegram_text(b))
         return b
 
+    def day_report(self, day: str | None = None, save=True) -> dict:
+        """End-of-day report from the app's own records (live/dayreport.py). Real-market days only are saved."""
+        src = self.source or self.cfg()["live"]["source"]
+        day = day or self.session_day().isoformat()
+        idx = self._indices() if self.metrics and (self.session_day().isoformat() == day) else []
+        rep = dayreport.build(self.store, src, day, idx)
+        if save and src != "sim":
+            self.store.put(f"report:{day}", rep)
+        return rep
+
     def briefs_view(self, day=None) -> dict:
         days = self.store.get("brief_days", []) or []
         day = day or (days[0] if days else dt.datetime.now(IST).date().isoformat())
         return {"day": day, "days": days, "pre": self.store.get(f"brief:{day}:pre"),
-                "post": self.store.get(f"brief:{day}:post")}
+                "post": self.store.get(f"brief:{day}:post") or self.store.get(f"brief:{day}:post_sim"),
+                "report": self.store.get(f"report:{day}")}
 
     # ------------------------------------------------------------ background: watcher + news
     def _watch(self):
@@ -1237,7 +1320,7 @@ class LiveEngine:
         for k, v in sc.items():
             if len(k) == 2:
                 rows.append({"kind": k[0], "is_index": bool(k[1]), **v})
-        rows.sort(key=lambda r: (-(r["n"] >= 10), -(r["hit_rate"] or 0)))
+        rows.sort(key=lambda r: (-((r.get("decided") or 0) >= 10), -(r["hit_rate"] or 0)))
         recent = outcomes(self.store, src, limit=200)
         titles = {}
         if recent:

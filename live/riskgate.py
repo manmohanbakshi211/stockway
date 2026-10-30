@@ -13,6 +13,9 @@ you set? Checks, in order:
   price         option cheaper than `min_premium` (lottery tickets: most expire worthless)
   size          lots so that hitting the stop loses at most the max loss per trade; if even one lot is too much,
                 BLOCK (never round up to one lot)
+
+The first four are hard rules: a paper trade cannot be taken against them, even by hand. The rest can be
+overridden by hand with a confirmation; such trades are tagged "override" so their record is kept apart.
 """
 from __future__ import annotations
 
@@ -33,18 +36,25 @@ DEFAULTS = {
 def check(alert: dict, opt: dict | None, *, now: dt.datetime, paper_cfg: dict, guard: dict, open_syms: set,
           ban: list | None = None, cfg: dict | None = None) -> dict:
     c = {**DEFAULTS, **(cfg or {})}
-    reasons, warns = [], []
+    reasons, warns, hard = [], [], []
+
+    def stop(msg):                      # rules no override can break: time window, ban, duplicate, day limits
+        reasons.append(msg)
+        hard.append(msg)
     hm = now.strftime("%H:%M")
+    if now.weekday() >= 5:
+        stop("Market closed today (weekend).")
     if hm < c["window_start"]:
-        reasons.append(f"Before {c['window_start']}: the opening range is still forming.")
+        stop(f"Before {c['window_start']}: the opening range is still forming." if hm >= "09:15" else
+             "Market not open yet: pre-open prices are not tradable.")
     if hm >= min(c["window_end"], paper_cfg.get("no_entry_after", "14:45")):
-        reasons.append(f"After {min(c['window_end'], paper_cfg.get('no_entry_after', '14:45'))}: too late for a new intraday trade.")
+        stop(f"After {min(c['window_end'], paper_cfg.get('no_entry_after', '14:45'))}: too late for a new intraday trade.")
     if ban and alert.get("sym") in ban:
-        reasons.append(f"{alert['sym']} is in the F&O ban: the exchange allows no new positions.")
+        stop(f"{alert['sym']} is in the F&O ban: the exchange allows no new positions.")
     if alert.get("sym") in open_syms:
-        reasons.append(f"Already holding a {alert['sym']} position.")
+        stop(f"Already holding a {alert['sym']} position.")
     if guard.get("blocked"):
-        reasons.append(guard.get("why") or "Day limits reached.")
+        stop(guard.get("why") or "Day limits reached.")
     data = alert.get("data") or {}
     grade = (data.get("history") or {}).get("grade") or data.get("history_grade")
     if c["block_losing_history"] and grade == "losing":
@@ -54,7 +64,7 @@ def check(alert: dict, opt: dict | None, *, now: dt.datetime, paper_cfg: dict, g
         reasons.append(f"Reward:risk {float(rr):.2f} is under your minimum {c['min_rr']}.")
     lots, max_loss, capital_used, per_lot = 0, None, None, None
     if not opt:
-        reasons.append("No tradable option found for this idea.")
+        stop("No tradable option found for this idea.")
     else:
         ltp = opt.get("ltp") or 0
         ask = opt.get("ask") or ltp
@@ -79,7 +89,7 @@ def check(alert: dict, opt: dict | None, *, now: dt.datetime, paper_cfg: dict, g
             if capital_used > float(paper_cfg.get("capital", 500000)) * 0.25:
                 warns.append(f"Uses ₹{capital_used:,.0f}, over a quarter of the capital.")
     verdict = "BLOCK" if reasons else "PASS"
-    return {"verdict": verdict, "reasons": reasons, "warnings": warns, "lots": lots if verdict == "PASS" else 0,
+    return {"verdict": verdict, "reasons": reasons, "hard": hard, "can_override": bool(reasons) and not hard, "warnings": warns, "lots": lots if verdict == "PASS" else 0,
             "max_loss": max_loss, "capital_used": capital_used, "per_lot_loss": round(per_lot, 0) if per_lot else None,
             "rules": {"max_loss_per_trade": round(float(paper_cfg.get("capital", 500000)) * float(paper_cfg.get("risk_pct", 1.0)) / 100, 0),
                       "daily_loss_limit": guard.get("loss_limit"), "trades_today": guard.get("trades_today"),

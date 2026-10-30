@@ -125,7 +125,10 @@ live:
   detectors: {}                # override thresholds, see live/detectors.py DEFAULTS
   filings: true                # live NSE company filings (results, orders, M&A...)
   briefs: true                 # pre-market brief 8:45, post-market review at close
-  mute_hit_rate: 35            # alert types that work less than this % (30+ cases) are demoted
+  mute_hit_rate: 45            # alert types that work less than this % of decided cases (20+) are demoted
+  focus_min_severity: 3        # Focus feed: act-now alerts only (demoted ones drop out)
+  focus_gap_min: 60            # Focus feed: at most one alert per symbol per this many minutes
+  telegram_focus_only: true    # Telegram gets Focus alerts only
   keep_recordings_days: 365
   paper:
     auto: true

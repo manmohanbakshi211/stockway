@@ -114,6 +114,28 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Discipline, Focus and the day report (2.13)
+
+Built from the first live day (30 Oct 2026: 27 paper trades, 24 of them against the risk check, net −₹27,670; the 3 it
+passed made +₹948; 3,584 alerts):
+
+- **The risk check binds paper trades.** Clicking Paper trade re-checks the idea at that moment. Hard rules cannot be
+  broken, even by hand: market not open / before 09:20 / after 14:45, weekend, F&O ban, already holding the symbol,
+  daily loss limit, over-trading limit, and a 30-minute cool-off after two stop-losses in a row. Soft reasons (reward:risk,
+  spread, cheap option, losing history, size) can be overridden with a confirmation: 1 lot, tagged "override", reported apart.
+- **Focus feed (default).** Act-now alerts that are not demoted, at most one per symbol per hour. Pop-ups, sounds and
+  Telegram follow Focus. Everything is still recorded and graded; "All" shows it. On day 1, Focus alerts worked 78% of
+  decided cases (option +6.4% after an hour) vs 64% (+1.0%) for all alerts.
+- **Scorecard counts decided cases.** Hit rate = option +20% first vs −20% first, among alerts that reached either within
+  an hour; flat hours no longer count as failures. Alert types under 45% over 20+ decided cases, or losing over 2% of the
+  option on average over 40+ alerts, are demoted (out of Focus, no Telegram, no auto paper trade).
+- **Day report** (Briefs page, also in the post-market review): paper P&L, PASS vs blocked vs override, entries outside
+  the window, exits, best/worst trades, Focus vs all alerts, best/worst alert types, and lessons for tomorrow.
+- **Claude's allowance goes where it matters.** On the Pro plan, automatic "Why?" notes only for act-now alerts the risk
+  check passed, one at a time, with 8 calls kept for the hourly market notes.
+- Fixed: the post-market review is filed under the session it describes (not the next morning's date); simulator
+  notes and reviews never mix with real-market ones; notes made while the market is closed say so.
+
 ## Strategy desk (aim: a positive average day)
 
 Institution-style intraday strategies on Nifty and Bank Nifty, every one with a capped worst case:

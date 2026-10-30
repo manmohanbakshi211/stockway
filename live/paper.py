@@ -21,6 +21,7 @@ DEFAULTS = {
     "max_lots": 5,
     "max_daily_loss_pct": 3.0,  # stop new auto trades after this loss in a day
     "max_trades_day": 12,
+    "cooloff_min": 30,          # after two stop-losses in a row, no new trade for this long
 }
 
 
@@ -46,7 +47,8 @@ class PaperBook:
     def open_trades(self):
         return self.store.trades(status="open", source=self.source)
 
-    def try_open(self, alert: dict, state, now: dt.datetime, manual=False) -> int | None:
+    def try_open(self, alert: dict, state, now: dt.datetime, manual=False, override=False) -> int | None:
+        """manual: you clicked Paper trade (needs PASS); override: you confirmed taking a soft BLOCK (1 lot, tagged)."""
         c = self.cfg
         opt = alert.get("option")
         if not opt:
@@ -60,21 +62,25 @@ class PaperBook:
         if any(t["sym"] == alert["sym"] for t in opens) or (not manual and len(opens) >= c["max_open"]):
             return None
         g = self.guard(now)
-        if not manual and g["blocked"]:
+        if g["blocked"]:
             return None
         risk = (alert.get("data") or {}).get("risk")
-        if not manual and risk and risk.get("verdict") != "PASS":
-            return None                                   # the risk gate said no: no paper trade
+        if risk and risk.get("verdict") != "PASS":
+            if not (manual and override and risk.get("can_override")):
+                return None                               # the risk gate said no: no paper trade
         inst = state.get(opt["key"])
         if not inst or not inst.ltp:
             return None
         entry = inst.ask or inst.ltp
-        lots = int(risk["lots"]) if risk and risk.get("lots") else self.size(entry, opt["lot"])
+        if override:
+            lots = 1
+        else:
+            lots = int(risk["lots"]) if risk and risk.get("lots") else self.size(entry, opt["lot"])
         t = {"alert_id": alert.get("id"), "source": self.source, "day": now.date().isoformat(), "sym": alert["sym"],
              "kind": alert["kind"], "opt_key": opt["key"], "label": opt["label"], "side": opt["side"],
              "lot": opt["lot"], "lots": lots, "entry_ts": now.timestamp(), "entry": entry,
              "target": round(entry * (1 + c["target_pct"] / 100), 2), "stop": round(entry * (1 - c["stop_pct"] / 100), 2),
-             "peak": entry, "last": inst.ltp, "status": "open", "manual": int(manual)}
+             "peak": entry, "last": inst.ltp, "status": "open", "manual": 2 if override else int(manual)}
         tid = self.store.add_trade(t)
         self.log(f"Paper BUY {opt['label']} @ {entry:.2f} ({alert['title']})")
         return tid
@@ -99,6 +105,14 @@ class PaperBook:
             blocked, why = True, f"Daily loss limit hit (₹{booked:,.0f}). No new trades today."
         elif len(today) >= int(c["max_trades_day"]):
             blocked, why = True, f"{len(today)} trades today: over-trading guard reached."
+        else:
+            # tilt guard: two stop-losses in a row -> a cool-off before the next entry
+            done = sorted((t for t in today if t["status"] == "closed" and t.get("exit_ts")), key=lambda t: t["exit_ts"])
+            cool = float(c.get("cooloff_min", 30))
+            if len(done) >= 2 and all(t["reason"] == "stop loss" for t in done[-2:]) and cool > 0:
+                left = cool - (now.timestamp() - done[-1]["exit_ts"]) / 60
+                if left > 0:
+                    blocked, why = True, f"Two stop-losses in a row: {left:.0f}-minute cool-off before the next trade."
         return {"blocked": blocked, "why": why, "booked_today": round(booked, 2), "trades_today": len(today),
                 "loss_limit": round(limit, 0), "risk_per_trade": round(float(c["capital"]) * float(c["risk_pct"]) / 100, 0)}
 

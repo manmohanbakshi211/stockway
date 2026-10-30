@@ -193,15 +193,20 @@ def live_chart_ai(sym: str):
 
 
 @router.get("/api/live/alerts")
-def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1, source: str | None = None):
+def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1, source: str | None = None, limit: int = 1000,
+                focus: bool = False):
     e = engine()
     day = day or dt.datetime.now(IST).date().isoformat()
     if day == "latest":
         days = e.store.alert_days(1)
         day = days[0]["day"] if days else None
-    return clean({"day": day, "alerts": e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=min_sev,
-                                                        source=source, limit=1000),
-                  "days": e.store.alert_days(60)})
+    al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=min_sev, source=source,
+                        limit=6000 if focus else max(1, min(int(limit), 6000)))
+    total = len(al)
+    if focus:
+        from live.dayreport import _focus
+        al = [a for a in al if _focus(a)][:1000]
+    return clean({"day": day, "alerts": al, "total": total, "days": e.store.alert_days(60)})
 
 
 @router.post("/api/live/alerts/{alert_id}/explain")
@@ -344,17 +349,34 @@ def _tm(e, sym, entry, stop, target, direction, start=None):
 
 
 @router.post("/api/live/alerts/{alert_id}/paper")
-def live_paper_from_alert(alert_id: int):
+async def live_paper_from_alert(alert_id: int, request: Request):
+    """Paper trade from an alert. The risk gate is re-checked now: hard rules (time window, day loss limit, ban,
+    duplicate) always refuse; other BLOCK reasons need an explicit override, which takes 1 lot and is tagged."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    override = bool((body or {}).get("override"))
     e = engine()
     if not e.running or not e.paper:
         raise HTTPException(400, "Start the live scanner first.")
     a = next((x for x in e.alerts_mem if x["id"] == alert_id), None) or e.store.alert(alert_id)
     if not a or not a.get("option"):
         raise HTTPException(400, "This alert has no option idea to paper trade.")
-    tid = e.paper.try_open(a, e.state, e.clock.now(), manual=True)
+    now = e.clock.now()
+    a = {**a, "data": {**(a.get("data") or {})}}
+    risk = e.risk_for(a, now)
+    a["data"]["risk"] = risk
+    if risk["verdict"] != "PASS":
+        if risk.get("hard"):
+            raise HTTPException(400, {"message": "Risk check: BLOCK. " + " ".join(risk["hard"]) + " No paper trade (hard rule).",
+                                      "risk": risk})
+        if not override:
+            raise HTTPException(409, {"message": "Risk check: BLOCK. " + " ".join(risk["reasons"]), "risk": risk, "can_override": True})
+    tid = e.paper.try_open(a, e.state, now, manual=True, override=override and risk["verdict"] != "PASS")
     if not tid:
-        raise HTTPException(400, f"Already holding a paper trade in {a['sym']}, or no live price for the option.")
-    return {"ok": True, "id": tid}
+        raise HTTPException(400, f"No live price for {a['option'].get('label', 'the option')} right now.")
+    return {"ok": True, "id": tid, "override": risk["verdict"] != "PASS", "lots": 1 if risk["verdict"] != "PASS" else risk.get("lots")}
 
 
 @router.post("/api/live/paper/{trade_id}/close")
@@ -411,6 +433,20 @@ def live_scorecard(source: str | None = None):
 @router.get("/api/live/briefs")
 def live_briefs(day: str | None = None):
     return clean(engine().briefs_view(day))
+
+
+@router.get("/api/live/report")
+def live_report(day: str | None = None, rebuild: bool = False):
+    """End-of-day report: paper P&L, discipline vs the risk check, alerts and what worked, lessons."""
+    e = engine()
+    if day and not rebuild:
+        saved = e.store.get(f"report:{day}")
+        if saved:
+            return clean(saved)
+    try:
+        return clean(e.day_report(day, save=bool(day)))
+    except Exception as ex:
+        raise HTTPException(400, f"Could not build the report: {ex}")
 
 
 @router.post("/api/live/briefs/{kind}")
