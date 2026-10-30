@@ -802,6 +802,22 @@ def _start_live():
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
+@app.middleware("http")
+async def _no_stale_ui(request, call_next):
+    """The browser must re-check the app's own files on every load, so an update is never hidden by its cache."""
+    resp = await call_next(request)
+    p = request.url.path
+    if p == "/" or (p.startswith("/static/") and not p.startswith(("/static/vendor/", "/static/lib/"))):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return FileResponse(STATIC / "index.html")
+    """index.html with ?v=<version> on the app's own CSS/JS, so every update loads fresh files."""
+    from fastapi.responses import HTMLResponse as _H
+    v = (ROOT / "VERSION").read_text().strip() if (ROOT / "VERSION").exists() else str(int(time.time()))
+    html = (STATIC / "index.html").read_text()
+    for f in ("app.css", "app.js", "live.js"):
+        html = html.replace(f'/static/{f}"', f'/static/{f}?v={v}"')
+    return _H(html, headers={"Cache-Control": "no-cache"})
