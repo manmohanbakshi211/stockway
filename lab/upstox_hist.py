@@ -21,6 +21,13 @@ BAND = 10                 # strikes either side of the at-the-money strike, like
 RATE = 0.065              # risk-free rate for implied volatility
 
 
+STOCK_KEYS: dict = {}     # stock symbol -> NSE_EQ|ISIN (filled by lab/stock_hist.py)
+
+
+def key_of(sym):
+    return INDEX_KEY.get(sym) or STOCK_KEYS.get(sym) or UNDERLYINGS.get(sym, {}).get("key")
+
+
 class PlusRequired(PermissionError):
     pass
 
@@ -86,11 +93,11 @@ class UpstoxHistory:
 
     # ---------------------------------------------------------------- endpoints
     def expiries(self, sym):
-        return sorted(self.get("/v2/expired-instruments/expiries", {"instrument_key": INDEX_KEY[sym]}) or [])
+        return sorted(self.get("/v2/expired-instruments/expiries", {"instrument_key": key_of(sym)}) or [])
 
     def contracts(self, sym, expiry: str):
         return self.get("/v2/expired-instruments/option/contract",
-                        {"instrument_key": INDEX_KEY[sym], "expiry_date": expiry}) or []
+                        {"instrument_key": key_of(sym), "expiry_date": expiry}) or []
 
     def expired_candles(self, key, frm: dt.date, to: dt.date):
         q = urllib.parse.quote(key, safe="")
@@ -102,14 +109,14 @@ class UpstoxHistory:
         a = frm
         while a <= to:                                   # 1-minute data: up to one month per request
             b = min(to, a + dt.timedelta(days=27))
-            q = urllib.parse.quote(INDEX_KEY[sym], safe="")
+            q = urllib.parse.quote(key_of(sym), safe="")
             d = self.get(f"/v3/historical-candle/{q}/minutes/1/{b.isoformat()}/{a.isoformat()}") or {}
             out += d.get("candles") or []
             a = b + dt.timedelta(days=1)
         return out
 
     def index_daily(self, sym, frm: dt.date, to: dt.date):
-        q = urllib.parse.quote(INDEX_KEY[sym], safe="")
+        q = urllib.parse.quote(key_of(sym), safe="")
         d = self.get(f"/v3/historical-candle/{q}/days/1/{to.isoformat()}/{frm.isoformat()}") or {}
         return d.get("candles") or []
 
@@ -170,16 +177,17 @@ def _windows(expiries: list[str], start: dt.date, end: dt.date, monthly: bool):
 
 
 def build_expiry(up: UpstoxHistory, sym: str, expiry: dt.date, first: dt.date, last: dt.date, spot: pd.DataFrame,
-                 should_stop=lambda: False, tick=lambda: None) -> pd.DataFrame | None:
+                 should_stop=lambda: False, tick=lambda: None, band: int | None = None) -> pd.DataFrame | None:
     """All near-the-money contracts of one expiry, for the days it was the nearest expiry."""
-    step = UNDERLYINGS[sym]["step"]
     sp = spot[(spot["ts"] >= _day_ts(first)) & (spot["ts"] < _day_ts(last) + 86400)]
     if sp.empty:
         return None
-    lo = math.floor(sp["low"].min() / step) * step - BAND * step
-    hi = math.ceil(sp["high"].max() / step) * step + BAND * step
     cons = up.contracts(sym, expiry.isoformat())
     tick()
+    step = UNDERLYINGS[sym]["step"]
+    band = band if band is not None else BAND
+    lo = math.floor(sp["low"].min() / step) * step - band * step
+    hi = math.ceil(sp["high"].max() / step) * step + band * step
     want = []
     for c in cons:
         k = float(c.get("strike_price") or 0)

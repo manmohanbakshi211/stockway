@@ -171,6 +171,15 @@ def scheduler_loop():
             due = now.hour * 60 + now.minute >= hh * 60 + mm
             today = now.date().isoformat()
             has_model = model.load_bundle(c) is not None
+            # stock option history: after the close, fetch any newly expired month (only once stocks were downloaded)
+            if (now.weekday() < 5 and now.hour >= 17 and state.get("last_stock_hist") != today
+                    and any((ROOT / "data" / "history").glob("*/meta.json")) and not STOCK_HIST.running()):
+                state["last_stock_hist"] = today
+                state_f.write_text(json.dumps(state))
+                try:
+                    STOCK_HIST.start(months=2, why="nightly")
+                except Exception:
+                    pass
             if s.get("enabled") and due and has_model and not JOBS.busy():
                 if now.weekday() < 5 and state.get("last_forecast") != today:
                     state["last_forecast"] = today
@@ -742,6 +751,82 @@ async def factory_rule_live(rid: str, req: Request):
     from webapp.live_api import engine as _eng
     _eng()._fact_rules = (0.0, [])
     return {"ok": True, "live": r.get("live")}
+
+
+# ---- stock option history: its own background worker (hours long), so Lab runs and other jobs aren't blocked
+class StockHist:
+    def __init__(self):
+        self.st = {"status": "idle", "log": [], "done": 0, "total": 0, "started": None, "finished": None, "error": None}
+        self._stop = threading.Event()
+        self._t = None
+
+    def running(self):
+        return bool(self._t and self._t.is_alive())
+
+    def start(self, months=12, syms=None, why="manual"):
+        if self.running():
+            raise HTTPException(409, "The stock history download is already running.")
+        tok = _upstox_token()
+        if not tok:
+            raise HTTPException(401, "Log in to Upstox first (Live setup page). Stock option history needs Upstox Plus.")
+        self._stop.clear()
+        self.st = {"status": "running", "log": [], "done": 0, "total": 0, "why": why, "months": months,
+                   "started": dt.datetime.now().isoformat(timespec="seconds"), "finished": None, "error": None}
+
+        def log(m):
+            self.st["log"] = (self.st["log"] + [f"{dt.datetime.now():%H:%M:%S} {m}"])[-200:]
+
+        def prog(d, t):
+            self.st["done"], self.st["total"] = d, t
+
+        def run():
+            from lab import stock_hist
+            try:
+                keys = stock_hist.stock_keys(ROOT / "data", syms)
+                log(f"{len(keys)} F&O stocks: {', '.join(keys)}")
+                stock_hist.download(tok, ROOT / "data", keys, months=months, log=log, should_stop=self._stop.is_set, progress=prog)
+                self.st["status"] = "stopped" if self._stop.is_set() else "done"
+            except Exception as e:
+                self.st["status"], self.st["error"] = "failed", str(e) or type(e).__name__
+                log("Error: " + self.st["error"])
+            finally:
+                self.st["finished"] = dt.datetime.now().isoformat(timespec="seconds")
+        self._t = threading.Thread(target=run, daemon=True)
+        self._t.start()
+        return self.view()
+
+    def stop(self):
+        self._stop.set()
+        return self.view()
+
+    def view(self):
+        from lab import stock_hist
+        from lab.data import register_stocks
+        hd = ROOT / "data" / "history"
+        syms = register_stocks(ROOT / "data") or []
+        have = {p.parent.name for p in hd.glob("*/meta.json")}
+        expiries = sum(len(list((hd / s).glob("raw_*.parquet"))) for s in have)
+        return {**{k: v for k, v in self.st.items() if k != "log"}, "log": self.st["log"][-12:], "running": self.running(),
+                "stocks_on_disk": sorted(have), "expiries_on_disk": expiries, "default": stock_hist.DEFAULT}
+
+
+STOCK_HIST = StockHist()
+
+
+@app.get("/api/factory/stocks")
+def factory_stocks():
+    return clean(STOCK_HIST.view())
+
+
+@app.post("/api/factory/stocks/download")
+async def factory_stocks_download(req: Request):
+    b = await req.json() if (await req.body()) else {}
+    return clean(STOCK_HIST.start(months=max(1, min(36, int(b.get("months") or 12))), syms=b.get("syms") or None))
+
+
+@app.post("/api/factory/stocks/stop")
+def factory_stocks_stop():
+    return clean(STOCK_HIST.stop())
 
 
 @app.get("/api/lab/expiry")

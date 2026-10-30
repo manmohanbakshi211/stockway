@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .data import UNDERLYINGS, day_table, iter_days, vix_table
+from .data import UNDERLYINGS, day_table, iter_days, register_stocks, vix_table
 from .engine import charges, slip
 
 M_EXIT = 360                 # 15:15
@@ -68,6 +68,19 @@ FEATURES.update({
     "vs_sma20": ("price vs SMA 20 (5-min)", "%"), "cpr_width": ("CPR width (today's pivot band)", "%"),
     "cpr_pos": ("price vs the CPR (+ above top, - below bottom, 0 inside)", ""),
 })
+INDEX_SYMS = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX")
+STOCKS = "STOCKS"             # in a rule's syms: any F&O stock (tested on every stock with downloaded history)
+
+
+def sym_ok(syms, sym) -> bool:
+    return sym in syms or (STOCKS in syms and sym not in INDEX_SYMS)
+
+
+def lab_syms(data_dir) -> list:
+    register_stocks(data_dir)
+    return ["NIFTY", "BANKNIFTY"] + sorted(k for k, v in UNDERLYINGS.items() if v.get("stock"))
+
+
 WINDOWS = [(15, 120), (15, 330), (60, 240), (120, 330), (15, 75), (180, 330), (45, 180), (305, 330)]
 
 # selling the at-the-money straddle (both legs short), each leg with its own stop, out at 15:15
@@ -345,13 +358,16 @@ def _sim_fly(legs, wings, m0, sym, lot, loss_pct):
     return (credit - exit_cost) * lot - charges(fills, lot)
 
 
-def build(data_dir, syms=("NIFTY", "BANKNIFTY"), log=print, should_stop=lambda: False) -> pd.DataFrame:
-    """One row per (symbol, day, bar, direction): the bar's facts and the option-buy P&L per lot under each exit."""
+def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataFrame:
+    """One row per (symbol, day, bar, direction): the bar's facts and the option-buy P&L per lot under each exit.
+    Stocks get option-buying rows only (selling a stock straddle needs lakhs of margin)."""
+    syms = syms or lab_syms(data_dir)
     vix = vix_table(data_dir)
     vmap = dict(zip(pd.to_datetime(vix["date"]).dt.date, vix["vix_prev"])) if len(vix) else {}
     rows = []
     for sym in syms:
         lot = UNDERLYINGS[sym]["lot"]
+        stock = bool(UNDERLYINGS[sym].get("stock"))
         days = list(iter_days(data_dir, sym))
         if not days:
             continue
@@ -393,8 +409,8 @@ def build(data_dir, syms=("NIFTY", "BANKNIFTY"), log=print, should_stop=lambda: 
                 k = day.atm(m0)
                 base = {"sym": sym, "date": day.date, "bar": i, **{name: float(f[name][i]) for name in FEATURES}}
                 legs = [day.px.get((float(k), sd)) for sd in ("CE", "PE")]
-                if all(lg is not None for lg in legs):        # selling the ATM straddle / iron fly (non-directional)
-                    step = UNDERLYINGS[sym]["step"]
+                if not stock and all(lg is not None for lg in legs):        # selling the ATM straddle / iron fly (non-directional)
+                    step = day.step
                     wings = [day.px.get((float(k + FLY_WINGS * step), "CE")), day.px.get((float(k - FLY_WINGS * step), "PE"))]
                     row = {**base, "dir": 0, "premium": round(sp[m0] * lot * 0.12, 0)}
                     for rule, sl in SELL_EXITS.items():
@@ -423,10 +439,12 @@ def build(data_dir, syms=("NIFTY", "BANKNIFTY"), log=print, should_stop=lambda: 
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.sort_values(["date", "sym", "bar", "dir"]).reset_index(drop=True)
-        for c_ in ["pnl_" + r for r in ALL_EXITS]:
+        for c_ in ["pnl_" + r for r in ALL_EXITS] + list(FEATURES):
             if c_ not in df:
                 df[c_] = np.nan
             df[c_] = df[c_].astype("float32")
+        df["premium"] = df["premium"].astype("float32")
+        df["dir"] = df["dir"].astype("int8")
     return df
 
 
@@ -464,7 +482,8 @@ def words(s: dict) -> str:
     hm = lambda t: (dt.datetime(2000, 1, 1, 9, 15) + dt.timedelta(minutes=t)).strftime("%H:%M")
     side = ("Buy the ATM call" if s["dir"] > 0 else "Buy the ATM put" if s["dir"] < 0 else
             "Sell an iron fly (margin ~₹40-60K)" if s["exit"].startswith("fly") else "Sell the ATM straddle (needs ~₹1-2 lakh margin)")
-    return (f"{side} on {' / '.join(x.replace('BANKNIFTY', 'Bank Nifty').replace('NIFTY', 'Nifty') for x in s['syms'])} "
+    names = {"BANKNIFTY": "Bank Nifty", "NIFTY": "Nifty", STOCKS: "any F&O stock"}
+    return (f"{side} on {' / '.join(names.get(x, x) for x in s['syms'])} "
             f"between {hm(s['win'][0])} and {hm(s['win'][1])} when " + " and ".join(cs) +
             f". Exit {EXIT_WORDS[s['exit']]}. Max {s['max_day']} trade{'s' if s['max_day'] > 1 else ''} a day, none after a loss.")
 
@@ -485,7 +504,9 @@ def validate(s: dict) -> dict | None:
             w = [max(SELL_FIRST_TOD, min(int(x) for x in s.get("win", [5, 330]))), w[1]]
         else:
             ex = ex if ex in EXITS else "std"
-        syms = [x for x in (s.get("syms") or ["NIFTY", "BANKNIFTY"]) if x in UNDERLYINGS] or ["NIFTY", "BANKNIFTY"]
+        syms = [x for x in (s.get("syms") or ["NIFTY", "BANKNIFTY"]) if x in UNDERLYINGS or x == STOCKS] or ["NIFTY", "BANKNIFTY"]
+        if d == 0:
+            syms = [x for x in syms if x in ("NIFTY", "BANKNIFTY")] or ["NIFTY", "BANKNIFTY"]
         out = {"dir": d, "conds": conds, "win": w, "exit": ex, "max_day": 2 if int(s.get("max_day", 1)) > 1 else 1,
                "syms": sorted(syms), "source": str(s.get("source") or "manual")[:80], "note": str(s.get("note") or "")[:300]}
         out["id"] = sid(out)
@@ -509,7 +530,13 @@ class Book:
         self.cols = {c: df[c].to_numpy() for c in list(FEATURES) + ["dir", "sym"]}
         self.pnl = {r: df["pnl_" + r].to_numpy(dtype=float) for r in ALL_EXITS if "pnl_" + r in df}
         self.symcode = df["sym"].to_numpy()
-        self.symi = (self.symcode == "BANKNIFTY").astype(np.int64)
+        names = sorted(set(self.symcode))
+        self.n_sym = max(1, len(names))
+        code = {n: i for i, n in enumerate(names)}
+        self.symi = np.array([code[x] for x in self.symcode], dtype=np.int64)
+        self.stock_syms = [n for n in names if n not in INDEX_SYMS]
+        self.is_stock = np.isin(self.symcode, self.stock_syms)
+        self.sym_choices = [["NIFTY"], ["BANKNIFTY"], ["BANKNIFTY", "NIFTY"]] + ([[STOCKS], [STOCKS], [STOCKS]] if self.stock_syms else [])
         self.n_days = {0: a, 1: b - a, 2: len(dates) - b}
 
     def quantiles(self, feat, part=0):
@@ -519,7 +546,10 @@ class Book:
 
     def trades(self, s: dict, part: int | None = None) -> pd.DataFrame:
         m = (self.cols["dir"] == s["dir"]) & (self.cols["tod"] >= s["win"][0]) & (self.cols["tod"] <= s["win"][1])
-        m &= np.isin(self.symcode, s["syms"])
+        sm = np.isin(self.symcode, s["syms"])
+        if STOCKS in s["syms"]:
+            sm |= self.is_stock
+        m &= sm
         if part is not None:
             m &= self.part == part
         for feat, op, v in s["conds"]:
@@ -531,9 +561,17 @@ class Book:
         idx, pnl = idx[ok], pnl[ok]
         if not len(idx):
             return pd.DataFrame(columns=["day", "sym", "tod", "pnl", "part"])
-        key = self.dix[idx] * 2 + self.symi[idx]
+        grp = self.symi[idx]
+        if STOCKS in s["syms"]:                             # all stocks share one slot: a ₹40K account holds one trade at a time
+            grp = np.where(self.is_stock[idx], self.n_sym, grp)
+        key = self.dix[idx] * (self.n_sym + 1) + grp
         tod = self.cols["tod"][idx]
-        _, first = np.unique(key, return_index=True)        # rows are in time order: first signal of each day/symbol
+
+        def firsts(ix):                                     # earliest signal of each key (ties: first row)
+            o = ix[np.lexsort((tod[ix], key[ix]))]
+            _, f = np.unique(key[o], return_index=True)
+            return o[f]
+        first = firsts(np.arange(len(idx)))
         take = list(first)
         if s["max_day"] > 1:                                # a second trade only after a winning first, once it is over
             gap = max(30, EXITS.get(s["exit"], (0, 0, 360))[2])
@@ -542,8 +580,7 @@ class Book:
                 k_after = np.array([won.get(k, np.inf) for k in key])
                 cand = np.nonzero(tod >= k_after)[0]
                 if len(cand):
-                    _, f2 = np.unique(key[cand], return_index=True)
-                    take += list(cand[f2])
+                    take += list(firsts(cand))
         take = np.array(sorted(take), int)
         j = idx[take]
         return pd.DataFrame({"day": self.dix[j], "sym": self.symcode[j], "tod": self.cols["tod"][j], "pnl": pnl[take], "part": self.part[j]})
@@ -606,7 +643,9 @@ def random_rule(book: Book, rng: random.Random) -> dict:
     d = rng.choice([1, -1, 1, -1, 0]) if "ss25" in book.pnl else rng.choice([1, -1])
     win = list(rng.choice(WINDOWS + ([(5, 20), (5, 75), (75, 120)] if d == 0 else [])))
     s = {"dir": d, "conds": conds, "win": win, "exit": rng.choice(list(SELL_EXITS) if d == 0 else list(EXITS)),
-         "max_day": rng.choice([1, 1, 2]), "syms": rng.choice([["NIFTY"], ["BANKNIFTY"], ["BANKNIFTY", "NIFTY"]]), "source": "generated"}
+         "max_day": rng.choice([1, 1, 2]), "syms": rng.choice(book.sym_choices), "source": "generated"}
+    if d == 0:
+        s["syms"] = rng.choice(book.sym_choices[:3])
     s["id"] = sid(s)
     return s
 
@@ -631,7 +670,7 @@ def mutate(book: Book, s: dict, rng: random.Random) -> dict:
     elif what == "drop" and len(m["conds"]) > 1:
         m["conds"].pop(rng.randrange(len(m["conds"])))
     elif what == "syms":
-        m["syms"] = rng.choice([["NIFTY"], ["BANKNIFTY"], ["BANKNIFTY", "NIFTY"]])
+        m["syms"] = rng.choice(book.sym_choices[:3] if m["dir"] == 0 else book.sym_choices)
     m["source"] = s.get("source", "generated") if s.get("source", "").startswith(("ebook", "claude")) else "mutation"
     m["note"] = s.get("note", "")
     m["id"] = sid(m)
@@ -807,7 +846,7 @@ def promoted(data_dir) -> list:
 
 def signal_now(rule: dict, feats: dict, sym: str, i: int | None = None) -> bool:
     """Does a promoted rule fire on the latest closed bar of `sym`? feats: output of bar_features for today."""
-    if sym not in rule["syms"]:
+    if not sym_ok(rule["syms"], sym):
         return False
     i = len(feats["tod"]) - 1 if i is None else i
     tod = feats["tod"][i]

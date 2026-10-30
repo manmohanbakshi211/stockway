@@ -25,6 +25,21 @@ UNDERLYINGS = {
 }
 
 
+def register_stocks(data_dir) -> list:
+    """Stock underlyings downloaded into history/<SYM>/meta.json join UNDERLYINGS (step, lot, monthly expiries)."""
+    out = []
+    for f in sorted((Path(data_dir) / "history").glob("*/meta.json")):
+        try:
+            m = json.loads(f.read_text())
+        except Exception:
+            continue
+        sym = f.parent.name
+        if sym not in UNDERLYINGS or UNDERLYINGS[sym].get("stock"):
+            UNDERLYINGS[sym] = {"flag": "MONTH", "step": float(m["step"]), "lot": int(m["lot"]), "stock": True, "key": m.get("key")}
+            out.append(sym)
+    return out
+
+
 def hist_dir(data_dir) -> Path:
     d = Path(data_dir) / "history"
     d.mkdir(parents=True, exist_ok=True)
@@ -165,7 +180,13 @@ def build_days(raw: pd.DataFrame, sym: str) -> list[Day]:
     raw = raw.assign(date=t.dt.date, m=((t.dt.hour * 60 + t.dt.minute) - (9 * 60 + 15)).astype(int))
     raw = raw[(raw["m"] >= 0) & (raw["m"] < N_MIN)]
     days = []
+    stock = bool(UNDERLYINGS.get(sym, {}).get("stock"))
     for d, g in raw.groupby("date"):
+        if stock:                                          # a stock's strike gap can change between expiries
+            ks = np.unique(g["strike"].to_numpy())
+            gaps = np.diff(ks)
+            gaps = gaps[gaps > 1e-9]
+            step = float(gaps.min()) if len(gaps) else UNDERLYINGS[sym]["step"]
         spot = np.full(N_MIN, np.nan)
         sp = g.groupby("m")["spot"].median()
         spot[sp.index.to_numpy()] = sp.to_numpy()
@@ -186,6 +207,8 @@ def build_days(raw: pd.DataFrame, sym: str) -> list[Day]:
 
 
 def iter_days(data_dir, sym: str, start=None, end=None):
+    if sym not in UNDERLYINGS:
+        register_stocks(data_dir)
     hd = hist_dir(data_dir) / sym
     seen = set()
     for f in sorted(hd.glob("raw_*.parquet")):

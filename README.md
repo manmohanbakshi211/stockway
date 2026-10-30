@@ -114,6 +114,26 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Stock options and the conviction model (2.17)
+
+Aim: start with ₹40K buying options on stocks as well as indices, with alerts that weigh everything at once.
+
+- **Conviction score (0-100) on every alert**, from a model that learns which alerts are worth an option buy. It looks
+  at the stock (move, VWAP, futures buildup, order flow, unusual options, IV), the option you'd buy (price per lot,
+  bid-ask spread, delta) and everything around it: Nifty, breadth, the stock's sector, global markets, VIX change and
+  news from the last hour (news is now checked every minute in market hours). Trained on earlier days, judged on the
+  latest days it never saw; **trusted only with 5+ days and a holdout AUC of 0.60+**. Until then the score is hidden
+  and Focus works as before; once trusted, Focus = conviction 85+. Scorecard → Conviction model shows its state and
+  what drives it.
+- **₹40K chip / filter**: alerts whose option lot costs ≤ ₹10,000 (fits a ₹40K account). "₹40K only" on the alerts list.
+- **Context chips** on alerts: Nifty, sector, global, breadth and news, each with or against the trade.
+- **Stock option history** (Strategy Lab → Stock options data → Download 12 months): 1-minute option prices of 30
+  liquid F&O stocks from Upstox Plus, newest month first. 6-8 hours (Upstox's rate limit), in the background, resumable,
+  and each new month is added by itself after the close. Market data only.
+- **Strategy Lab on stocks**: once downloaded, the Lab tests rules on "any F&O stock" (one trade at a time, like a
+  ₹40K account; the earliest signal of the day wins), with stock slippage (wider spreads). Promoted stock rules scan
+  every F&O stock live and paper-trade like the index ones. No stock straddle selling (margin in lakhs).
+
 ## Strategy library, indicator settings and option selling in the Lab (2.16)
 
 - **Strategy library** (lab/library.py, "Test the strategy library" button): 16 well-known setups in our own words with

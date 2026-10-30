@@ -94,10 +94,14 @@ class ChartData:
         from lab import factory
         rules = self.e.factory_rules()
         rec = self.e.fact_bars
-        for sym in ("NIFTY", "BANKNIFTY"):
+        syms = ["NIFTY", "BANKNIFTY"]
+        if any(factory.STOCKS in r["syms"] for r in rules) and self.e.uni:   # stock rules: scan every F&O stock
+            syms += [u.symbol for u in self.e.uni.stocks]
+        for sym in syms:
             m = self.e.metrics.get(sym)
             if not m:
                 continue
+            is_stock = sym not in factory.INDEX_SYMS
             o = m.get("opt") or {}
             # remember ATM IV and the priced move for each closed bar (the backtest has them per bar too)
             day_rec = rec.setdefault((sym, now.date()), {})
@@ -131,6 +135,8 @@ class ChartData:
                 fired.append(now.timestamp())
                 d = r["dir"]
                 h = r["hold"]
+                if d == 0 and is_stock:
+                    continue
                 if d == 0:                                   # straddle selling: alert + paper-sell both legs (when margin allows)
                     took = self._paper_straddle(sym, m, r, now)
                     emit({"sym": sym, "kind": "factory", "direction": "neutral", "severity": 3,

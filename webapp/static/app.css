@@ -676,3 +676,7 @@ tr.best td { background: var(--up-soft); }
 .xcard small { width: 100%; font-size: 12px; }
 .live-px { font-variant-numeric: tabular-nums; }
 .wl td { font-size: 13px; } .wl .r { white-space: nowrap; }
+
+/* thin progress bar (stock history download) */
+.bar { height: 6px; border-radius: 3px; background: var(--rule-soft); overflow: hidden; margin-bottom: 4px; }
+.bar > i { display: block; height: 100%; background: var(--signal); transition: width .4s; }

@@ -138,6 +138,7 @@ class LiveEngine:
         self._fact_rules = (0.0, [])
         self.VIX_KEY = VIX_KEY
         self.focus_last = {}
+        self._mctx, self._mctx_at = {}, 0.0
         self.market = {}
         self.words = {}
         self.timers = collections.defaultdict(float)
@@ -592,7 +593,7 @@ class LiveEngine:
         self._refresh_stats()
         self.recorder.finalize(int(self.cfg()["live"].get("keep_recordings_days") or 365), self.log)
         try:
-            self.ranker.train(outcomes(self.store, self.source))
+            self.ranker.train(outcomes(self.store, self.source, limit=200000))
         except Exception as e:
             self.log(f"Model training failed: {e}")
         if self.cfg()["live"].get("briefs"):
@@ -789,6 +790,28 @@ class LiveEngine:
                 "gex": self.gex.get(sym),
                 "regime": (self.regimes.get(sym) or self.regimes.get("NIFTY") or {}).get("label"), "now": self.clock.now()}
 
+    def market_ctx(self, sym) -> dict:
+        """Everything outside the stock itself that an alert's strength may depend on: the index, breadth, its sector,
+        global markets, VIX and fresh news. Used as model features (cached ~10 s)."""
+        now = time.time()
+        if now - self._mctx_at > 10:
+            self._mctx_at = now
+            mk = self.market or {}
+            secs = {x["sector"]: x["chg"] for x in (mk.get("sectors") or [])}
+            try:
+                gp = (self.world.pressure() or {}).get("implied_pct")
+            except Exception:
+                gp = None
+            v = self._vix() or {}
+            self._mctx = {"nifty": self.metrics.get("NIFTY") or {}, "bank": self.metrics.get("BANKNIFTY") or {},
+                          "breadth": mk.get("breadth") or {}, "sectors": secs, "global": gp, "vix_chg": v.get("chg_pct")}
+        c = dict(self._mctx)
+        c["sector_chg"] = c["sectors"].get(self.context.sector_of(sym)) if self.context else None
+        news = [n for n in (self.news.items if self.news else []) if sym in n.get("syms", []) and n.get("ts", 0) > now - 3600]
+        c["news_n"] = len(news)
+        c["news_tone"] = sum(n.get("tone") or 0 for n in news) / len(news) if news else 0.0
+        return c
+
     def _emit(self, a, now, lc):
         ts = now.timestamp()
         key = (a["sym"], a["kind"], None if a["kind"] in detectors.NO_DIRECTION_COOLDOWN else a["direction"])
@@ -808,6 +831,10 @@ class LiveEngine:
         ev = evidence(m, a["direction"], self.metrics.get("NIFTY")) if m else []
         ctx = self._ctx_for(a["sym"], m)
         st = self.stats.get((a["kind"], int(a["is_index"]))) or self.stats.get((a["kind"],))
+        try:
+            ctx["mkt"] = self.market_ctx(a["sym"])
+        except Exception:
+            ctx["mkt"] = {}
         feats = features(a, m, ev, reg, mins, ctx)
         p = self.ranker.predict(feats) if self.ranker else None
         sc = signal_score(a["severity"], ev, st, regime_adjust((reg or {}).get("code"), a["kind"], a["direction"]), p)
@@ -820,8 +847,12 @@ class LiveEngine:
             a["severity"] = max(1, a["severity"] - 1)
         # focus: what deserves your eyes. Strong (act-now) directional alerts that are not demoted, at most one per
         # symbol per hour. Everything else is still recorded and graded, and shown under "All".
+        conv = self.ranker.conviction(p) if self.ranker else None
+        trusted = conv is not None
         focus = False
-        if a["direction"] in ("up", "down") and not muted and a["severity"] >= int(lc.get("focus_min_severity") or 3):
+        strong_enough = (conv >= int(lc.get("focus_min_conviction") or 85) and a["severity"] >= 2) if trusted \
+            else a["severity"] >= int(lc.get("focus_min_severity") or 3)
+        if a["direction"] in ("up", "down") and not muted and strong_enough:
             lastf = self.focus_last.get(a["sym"])
             if not lastf or ts - lastf >= float(lc.get("focus_gap_min") or 60) * 60:
                 focus = True
@@ -833,7 +864,9 @@ class LiveEngine:
                      "levels": lv_setup or (levels(m, a["direction"], self.state) if m else {}),
                      "structure": structure(a["direction"], m, ctx) if m else None,
                      "track": st, "score": sc, "model_p": round(p * 100) if p is not None else None, "muted": muted, "focus": focus,
-                     "regime": (reg or {}).get("label")}
+                     "conviction": conv, "regime": (reg or {}).get("label"),
+                     "fits_small": bool(a.get("option") and (a["option"].get("cost_per_lot") or 1e9) <= float(lc.get("small_lot_max") or 10000)),
+                     "context": {k: feats.get(k) for k in ("nifty_al", "sector_al", "global_al", "breadth_al", "news_n", "news_al")}}
         # risk gate: PASS / BLOCK with reasons and lots, before anything can become a paper trade
         try:
             if a.get("option") and self.paper:
@@ -1326,7 +1359,9 @@ class LiveEngine:
                             self._news_alert(n)
             except Exception as e:
                 self.log(f"News fetch failed: {e}")
-            time.sleep(300)
+            now = dt.datetime.now(IST)
+            busy = now.weekday() < 5 and dt.time(8, 30) <= now.time() <= dt.time(15, 30)
+            time.sleep(60 if busy else 300)            # every minute in market hours: news reaches alerts fast
 
     def _news_alert(self, n):
         sym = n["syms"][0]

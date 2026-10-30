@@ -13,7 +13,7 @@ SLIP = {"NIFTY": (0.30, 0.004), "BANKNIFTY": (0.80, 0.004), "FINNIFTY": (0.40, 0
 
 
 def slip(sym, px):
-    a, p = SLIP.get(sym, (0.5, 0.005))
+    a, p = SLIP.get(sym, (0.25, 0.01))           # stock options: wider spreads, 1% of the price per side
     return max(a, p * px)
 
 

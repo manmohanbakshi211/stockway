@@ -222,12 +222,18 @@ function alertItem(a, full = false, extra = "") {
     trade = `<div class="idea"><span>${tag} <b>${esc(o.label)}</b> @ ₹${fx(o.ltp)} · ${rupees(o.cost_per_lot)}/lot${s2}${st ? `<br><small class="muted">${esc(st.why)}</small>` : ""}</span>
       <span class="btn-row">${lv.stop ? `<button class="link-btn" data-tm="${a.id}">Time Machine</button>` : ""}${stale ? `<span class="muted small" title="Signals older than 5 minutes can't be paper-traded: the price has moved">${Math.round(ageMin)} min old</span>` : `<button class="link-btn${d.risk && d.risk.verdict !== "PASS" ? " muted" : ""}" data-paper="${a.id}" title="${d.risk && d.risk.verdict !== "PASS" ? "Risk check said BLOCK: re-checked when you click" : "Paper trade at the live price"}">${d.risk && d.risk.verdict !== "PASS" ? "Paper trade (blocked)" : "Paper trade"}</button>`}<button class="link-btn" data-explain="${a.id}">Why?</button></span></div>`;
   } else trade = `<div class="idea"><span class="muted small">${esc(d.regime ? "Market: " + d.regime : "")}</span><span class="btn-row"><button class="link-btn" data-explain="${a.id}">Why?</button></span></div>`;
+  const cx = d.context || {};
+  const ag = (v, label) => v == null || v === 0 ? "" : `<span class="ev ${v > 0 ? "yes" : "no"}">${v > 0 ? "✓" : "✗"} ${label}</span>`;
+  const ctxChips = [ag(cx.nifty_al, "Nifty"), ag(cx.sector_al, "sector"), ag(cx.global_al, "global"), ag(cx.breadth_al, "breadth"),
+    cx.news_n ? `<span class="ev ${cx.news_al > 0 ? "yes" : cx.news_al < 0 ? "no" : ""}">📰 ${cx.news_n} news</span>` : ""].join("");
+  const conv = d.conviction != null ? `<span class="pill ${d.conviction >= 85 ? "p-up" : ""}" title="Conviction: where this alert ranks among all graded alerts by the learned model (90 = top 10%)">Conviction ${d.conviction}</span>` : "";
+  const fits = d.fits_small ? `<span class="pill" title="One lot costs ₹10,000 or less: tradable from a ₹40K account">₹40K ✓</span>` : "";
   return `<li class="alert sev${a.severity}" data-aid="${a.id}">
     <div class="al-time">${hms(a.ts)}<span class="sevtag s${a.severity}">${SEV[a.severity]}</span>${score}</div>
     <div class="al-body"><div class="al-title">${arrow(a.direction)} <a href="${a.sym === "GLOBAL" ? "#/world" : `#/chart?s=${encodeURIComponent(a.sym)}`}">${esc(a.title)}</a></div>
       <p>${esc(a.detail)}${link} <span class="muted small">${esc(KIND[a.kind] || a.kind)}</span> ${track}</p>${live ? `<p class="small" style="margin:2px 0 6px">${live}</p>` : ""}
       ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}
-      ${ev ? `<div class="evs">${ev}</div>` : ""}${plan}${trade}${riskLine(d.risk)}
+      ${ev || ctxChips || conv || fits ? `<div class="evs">${conv}${fits}${ev}${ctxChips}</div>` : ""}${plan}${trade}${riskLine(d.risk)}
       ${a.ai ? `<div class="ai-text">${fmtAI(a.ai)}</div>` : ""}${extra}</div></li>`;
 }
 
@@ -328,7 +334,8 @@ function renderLive(force = false) {
   }
   const pulse = s.pulse || {};
   const pulseHTML = pulse.ai ? fmtAI(pulse.ai) + `<p class="muted small">AI pulse at ${hm(pulse.ts)}</p>` : (pulse.lines || []).map((l) => `<p>${esc(l)}</p>`).join("") || `<p class="muted">Building the picture…</p>`;
-  const alerts = L.alerts.filter((a) => sevPass(a, L.sevFilter)).slice(0, 60);
+  const small = LS.get("only40k", false);
+  const alerts = L.alerts.filter((a) => sevPass(a, L.sevFilter) && (!small || (a.data && a.data.fits_small) || !a.option)).slice(0, 60);
   const nFocus = L.alerts.filter(isFocus).length;
   const mv = s.movers || { hot: [], gainers: [], losers: [] };
   const tab = LS.get("moversTab", "hot");
@@ -365,7 +372,8 @@ function renderLive(force = false) {
     <div class="live-grid">
       <section>
         <div class="toolbar"><h2 style="margin:0">Alerts <span class="muted small">${nFocus} in focus · ${L.alerts.length} in all</span></h2>
-          <div class="seg" role="group" aria-label="Which alerts">${SEVSEG.map(([v, l]) => `<button data-sev="${v}" aria-pressed="${L.sevFilter === v}" ${v === 0 ? `title="Act-now alerts that are not demoted, at most one per symbol per hour"` : ""}>${l}</button>`).join("")}</div></div>
+          <div class="btn-row" style="margin:0"><label class="check small" title="Only ideas where one lot costs ₹10,000 or less"><input type="checkbox" id="only40k" ${small ? "checked" : ""}><span>₹40K only</span></label>
+          <div class="seg" role="group" aria-label="Which alerts">${SEVSEG.map(([v, l]) => `<button data-sev="${v}" aria-pressed="${L.sevFilter === v}" ${v === 0 ? `title="Act-now alerts that are not demoted, at most one per symbol per hour"` : ""}>${l}</button>`).join("")}</div></div></div>
         <ul class="alerts">${storyList(alerts) || `<li class="muted" style="padding:18px">No alerts yet. They appear here the moment something happens.</li>`}</ul>
       </section>
       <aside>
@@ -381,6 +389,7 @@ function renderLive(force = false) {
       </aside>
     </div>`;
   bindLiveButtons(body); bindAlertButtons(body);
+  const o4 = body.querySelector("#only40k"); if (o4) o4.onchange = (e) => { LS.set("only40k", e.target.checked); renderLive(true); };
   body.querySelectorAll("[data-sev]").forEach((b) => b.onclick = () => { L.sevFilter = Number(b.dataset.sev); LS.set("sevFilter2", L.sevFilter); renderLive(true); });
   body.querySelectorAll("[data-mtab]").forEach((b) => b.onclick = () => { LS.set("moversTab", b.dataset.mtab); renderLive(true); });
   body.querySelectorAll("[data-ctab]").forEach((b) => b.onclick = () => { LS.set("contribTab", b.dataset.ctab); renderLive(true); });
@@ -989,9 +998,13 @@ async function pageScorecard() {
     ${aiReviewBox("scorecard", "Claude's read on your alerts")}
     <div class="kpis"><div class="kpi"><b>${sc.graded}</b><span>Alerts graded (recent)</span></div>
       <div class="kpi"><b>${sc.overall != null ? sc.overall + "%" : "–"}</b><span>Worked overall</span></div>
-      <div class="kpi"><b>${m.trained ? `${m.auc}` : `${m.n || 0}/${m.need || 120}`}</b><span>${m.trained ? `Learning model accuracy (AUC; 0.5 = coin toss), ${m.n} alerts` : "Graded alerts needed before the learning model switches on"}</span></div>
+      <div class="kpi"><b class="${m.trained ? "up" : ""}">${m.auc != null ? m.auc : "–"}</b><span>Conviction model: holdout AUC (0.5 = coin toss, trusted at 0.60+ with 5+ days)</span></div>
       <div class="kpi"><b>${sc.recordings_mb} MB</b><span>Market data recorded on this Mac</span></div></div>
-    <p class="note">${esc(sc.rule)} Alert types that work under 35% of the time (30+ cases) are demoted automatically: no Telegram, no auto paper trade.</p>
+    <div class="panel tight" style="margin-top:14px"><h3>Conviction model <span class="pill ${m.trained ? "p-up" : ""}">${m.trained ? "trusted: it now picks Focus" : "learning"}</span></h3>
+      <p class="small">Learns which alerts are worth an option buy from every graded alert: the stock (move, VWAP, futures buildup, order flow, unusual options, IV), the option itself (price per lot, spread), and everything around it (Nifty, breadth, its sector, global markets, VIX, fresh news). Trained on earlier days, judged on the latest days it never saw.</p>
+      <p class="small">${m.n ? `${(m.n || 0).toLocaleString("en-IN")} graded alerts over ${m.days || 0} day${m.days === 1 ? "" : "s"}. ` : ""}${m.hold_n ? `Holdout ${m.hold_n.toLocaleString("en-IN")} alerts: top 10% by conviction worked ${m.top10_hit}% vs ${m.base_rate}% for all (option ${m.top10_o60 >= 0 ? "+" : ""}${m.top10_o60}% vs ${m.all_o60 >= 0 ? "+" : ""}${m.all_o60}% after an hour). ` : ""}<b>${esc(m.why || (m.need ? `needs ${m.need} graded alerts` : ""))}</b></p>
+      ${(m.drivers || []).length ? `<p class="small muted">What matters most so far: ${m.drivers.map((d) => esc(d.feature)).join(", ")}.</p>` : ""}</div>
+    <p class="note">${esc(sc.rule)} Alert types under 45% of decided cases (20+) are demoted automatically: out of Focus, no Telegram, no auto paper trade.</p>
     <h2>By alert type</h2>
     <div class="table-wrap"><table><thead><tr><th>Alert</th><th class="r">Graded</th><th class="r">Worked</th><th class="r">Recently</th><th class="r">Option 15 min</th><th class="r">Option 60 min</th><th class="r" title="Price move in the alert's favour">Price 15 min</th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="8" class="muted">Nothing graded yet. Run the scanner for a session.</td></tr>`}</tbody></table></div>
@@ -2026,6 +2039,7 @@ async function pageLab() {
     main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Strategy Lab</h1><p class="lede" style="margin-bottom:0">Thousands of intraday option rules tested at once on 2 years of real 1-minute option prices, from a search, your ebooks and Claude. A rule must win on three separate periods before it trades live (on paper). Every evening it runs again by itself.</p></div>
         <div class="btn-row" style="margin:0"><button class="btn primary" id="lab-run" ${f.has_history ? "" : "disabled"}>Run research now</button><button class="btn" id="lab-lib">Test the strategy library</button><button class="btn" id="lab-ideas" ${f.ai ? "" : "disabled title='Connect Claude in Live setup first'"}>Ask Claude for new ideas</button></div></div>
       ${f.has_history ? "" : `<div class="banner">Download the 1-minute option history first: Strategy desk → Download history (Upstox Plus).</div>`}
+      <div class="panel tight" id="lab-stocks" style="margin-top:14px"></div>
       <div class="kpis kpi6" style="margin-top:16px">
         <div class="kpi"><b>${(f.tried_total || 0).toLocaleString("en-IN")}</b><span>Rules tried so far</span></div>
         <div class="kpi"><b class="${prom ? "up" : ""}">${prom}</b><span>Passed all 3 periods (promoted)</span></div>
@@ -2064,7 +2078,25 @@ async function pageLab() {
       for (const fl of files) { try { const r = await fetch(`/api/factory/ebook?name=${encodeURIComponent(fl.name)}`, { method: "POST", body: fl }); if (!r.ok) throw new Error((await r.json()).detail); toast(`${fl.name} uploaded`); } catch (e) { toast(e.message); } }
       draw(); };
     main.querySelectorAll("[data-read]").forEach((b) => b.onclick = () => job("/api/factory/ebook/read", { name: b.dataset.read }));
+    drawStocks();
     main.querySelectorAll("[data-rlive]").forEach((c) => c.onchange = async () => { try { await post(`/api/factory/rule/${c.dataset.rlive}`, { on: c.checked }); toast(c.checked ? "Rule live on paper" : "Rule switched off"); } catch (e) { toast(e.message); } });
+  };
+  let stTimer = null;
+  const drawStocks = async () => {
+    const el = $("#lab-stocks"); if (!el) return;
+    let x; try { x = await api("/api/factory/stocks"); } catch (e) { el.innerHTML = `<span class="muted small">${esc(e.message)}</span>`; return; }
+    const pct = x.total ? Math.round(x.done / x.total * 100) : 0;
+    const have = (x.stocks_on_disk || []).length;
+    el.innerHTML = `<div class="toolbar" style="margin:0"><div><h3 style="margin:0">Stock options data <span class="muted small">${have ? `${have} stocks · ${x.expiries_on_disk} monthly expiries on your Mac` : "not downloaded yet"}</span></h3>
+        <p class="small muted" style="margin:4px 0 0">1-minute option prices of ${(x.default || []).length} liquid F&O stocks (Reliance, HDFC Bank, ICICI, SBI, Infosys…) from Upstox Plus, newest month first. With it the Lab tests rules on stock options too ("any F&O stock", one trade at a time like a ₹40K account) and the conviction model learns faster. About 6–8 hours for 12 months (Upstox's speed limit), runs in the background, resumes if stopped, adds each new month by itself after the close. Market data only, no orders.</p></div>
+        <div class="btn-row" style="margin:0">${x.running ? `<button class="btn" id="st-stop">Stop</button>` : `<button class="btn primary" id="st-go">${have ? "Update / continue" : "Download 12 months"}</button>`}</div></div>
+      ${x.running || x.status === "failed" ? `<div style="margin-top:8px"><div class="bar"><i style="width:${pct}%"></i></div><small class="muted">${x.running ? `${pct}% · ` : ""}${x.error ? `<span class="down">${esc(x.error)}</span> · ` : ""}${esc((x.log || []).slice(-1)[0] || "starting…")}</small></div>` : ""}
+      ${have ? `<p class="small" style="margin:6px 0 0">${have && !x.running ? `Done downloading? Click <b>Run research now</b>: the bar table is rebuilt with stocks (takes a few minutes the first time).` : ""}</p>` : ""}`;
+    const go = $("#st-go"), stop = $("#st-stop");
+    if (go) go.onclick = async () => { try { await post("/api/factory/stocks/download", { months: 12 }); toast("Stock option history download started"); drawStocks(); } catch (e) { toast(e.message); } };
+    if (stop) stop.onclick = async () => { await post("/api/factory/stocks/stop", {}); toast("Stopping: finished months are kept"); drawStocks(); };
+    clearTimeout(stTimer);
+    if (x.running) stTimer = setTimeout(() => { if (document.getElementById("lab-stocks")) drawStocks(); }, 5000);
   };
   draw();
 }
