@@ -390,20 +390,31 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
     """One row per (symbol, day, bar, direction): the bar's facts and the option-buy P&L per lot under each exit.
     Stocks get option-buying rows only (selling a stock straddle needs lakhs of margin)."""
     syms = syms or lab_syms(data_dir)
+    register_stocks(data_dir)
+    compact = Path(data_dir).name == "lab5y"              # 5-year Lab: stock entries every 15 min, 32-bit numbers (memory)
     vix = vix_table(data_dir)
     vmap = dict(zip(pd.to_datetime(vix["date"]).dt.date, vix["vix_prev"])) if len(vix) else {}
-    rows = []
+    rows, chunks = [], []
     for sym in syms:
         lot = UNDERLYINGS[sym]["lot"]
         stock = bool(UNDERLYINGS[sym].get("stock"))
-        days = list(iter_days(data_dir, sym))
-        if not days:
-            continue
+        if compact:                                       # two streaming passes instead of holding 5 years of minutes
+            dtab = day_table(data_dir, sym)
+            if dtab.empty:
+                continue
+            dtab = dtab.set_index("date")
+            days = iter_days(data_dir, sym)
+            n_days = len(dtab)
+        else:
+            days = list(iter_days(data_dir, sym))
+            if not days:
+                continue
+            dtab = day_table(data_dir, sym, days).set_index("date")
+            n_days = len(days)
         t0 = time.time()
-        dtab = day_table(data_dir, sym, days).set_index("date")
         for di, day in enumerate(days):
             if should_stop():
-                return pd.DataFrame(rows)
+                return pd.concat(chunks + [pd.DataFrame(rows)], ignore_index=True)
             r = dtab.loc[day.date] if day.date in dtab.index else None
             sp = day.spot
             nb = int(np.sum(~np.isnan(sp)) // 5)
@@ -450,6 +461,8 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                     rows.append(row)
                 if tod < FIRST_ENTRY_TOD:
                     continue
+                if compact and stock and i % 3 != 2:
+                    continue
                 for d, side in ((1, "CE"), (-1, "PE")):
                     px = day.px.get((float(k), side))
                     if px is None:
@@ -465,12 +478,20 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                         row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i])
                     rows.append(row)
             if (di + 1) % 100 == 0:
-                log(f"  {sym}: {di + 1} of {len(days)} days ({time.time() - t0:.0f}s)")
-        log(f"{sym}: {len(days)} days ready")
-    df = pd.DataFrame(rows)
+                log(f"  {sym}: {di + 1} of {n_days} days ({time.time() - t0:.0f}s)")
+        log(f"{sym}: {n_days} days ready")
+        if rows:                                          # one table per symbol keeps memory low with many stocks
+            part = pd.DataFrame(rows)
+            if compact:
+                for c_ in part.columns:
+                    if part[c_].dtype == np.float64:
+                        part[c_] = part[c_].astype("float32")
+            chunks.append(part)
+            rows = []
+    df = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
     if not df.empty:
         df = df.sort_values(["date", "sym", "bar", "dir"]).reset_index(drop=True)
-        for c_ in ["pnl_" + r for r in ALL_EXITS]:
+        for c_ in ["pnl_" + r for r in ALL_EXITS] + (list(FEATURES) if compact else []):
             if c_ not in df:
                 df[c_] = np.nan
             df[c_] = df[c_].astype("float32")

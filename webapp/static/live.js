@@ -176,6 +176,12 @@ function rangeBar(m) {
     <div class="rb-labels"><span>L ${fx(lo)}</span><span>H ${fx(hi)}</span></div>`;
 }
 
+function depthLine(d) {
+  if (!d) return "";
+  const buy = Math.round((1 + d.imb_near) / 2 * 100);
+  return `<p class="small" style="margin:4px 0" title="Dhan 200-level order book of the future: quantity waiting to buy vs sell within ±0.25% of the price (all 200 levels: ${Math.round((1 + d.imb) / 2 * 100)}% buyers). Biggest walls: buy ${fx(d.wall_bid)} (${d.wall_bid_qty.toLocaleString("en-IN")}), sell ${fx(d.wall_ask)} (${d.wall_ask_qty.toLocaleString("en-IN")}).">Order book: <b class="${buy >= 55 ? "up" : buy <= 45 ? "down" : ""}">${buy}% buyers</b> near price · walls ${fx(d.wall_bid)} / ${fx(d.wall_ask)}</p>`;
+}
+
 function indexCard(m) {
   const o = m.opt || {}, f = m.fut || {};
   const bu = f.buildup_label ? `<span class="pill ${f.buildup_sign > 0 ? "p-up" : "p-down"}">${esc(f.buildup_label)}</span>` : "";
@@ -194,6 +200,7 @@ function indexCard(m) {
       <div><dt>Flip</dt><dd>${m.gex.flip ? fk(Math.round(m.gex.flip)) : "–"}</dd></div>` : ""}
     </dl>
     ${m.regime && m.regime.code !== "opening" ? `<p class="ic-regime"><b>${esc(m.regime.label)}</b></p>` : ""}
+    ${depthLine(L.snap && L.snap.depth ? L.snap.depth[m.sym] : null)}
     ${biasMeter(m.score)}
     ${m.reasons && m.reasons.length ? `<p class="ic-why">${esc(m.reasons.slice(0, 3).join(" · "))}</p>` : ""}
   </a>`;
@@ -2056,6 +2063,7 @@ async function pageLab() {
         <div class="btn-row" style="margin:0"><button class="btn primary" id="lab-run" ${f.has_history ? "" : "disabled"}>Run research now</button><button class="btn" id="lab-lib">Test the strategy library</button><button class="btn" id="lab-ideas" ${f.ai ? "" : "disabled title='Connect Claude in Live setup first'"}>Ask Claude for new ideas</button></div></div>
       ${f.has_history ? "" : `<div class="banner">Download the 1-minute option history first: Strategy desk → Download history (Upstox Plus).</div>`}
       <div class="panel tight" id="lab-stocks" style="margin-top:14px"></div>
+      <div class="panel tight" id="lab-5y" style="margin-top:14px"></div>
       <div class="kpis kpi6" style="margin-top:16px">
         <div class="kpi"><b>${(f.tried_total || 0).toLocaleString("en-IN")}</b><span>Rules tried so far</span></div>
         <div class="kpi"><b class="${prom ? "up" : ""}">${prom}</b><span>Passed all 3 periods (promoted)</span></div>
@@ -2096,7 +2104,30 @@ async function pageLab() {
       draw(); };
     main.querySelectorAll("[data-read]").forEach((b) => b.onclick = () => job("/api/factory/ebook/read", { name: b.dataset.read }));
     drawStocks();
+    draw5y();
     main.querySelectorAll("[data-rlive]").forEach((c) => c.onchange = async () => { try { await post(`/api/factory/rule/${c.dataset.rlive}`, { on: c.checked }); toast(c.checked ? "Rule live on paper" : "Rule switched off"); } catch (e) { toast(e.message); } });
+  };
+  let t5 = null;
+  const draw5y = async () => {
+    const el = $("#lab-5y"); if (!el) return;
+    let x; try { x = await api("/api/factory/lab5y"); } catch (e) { el.innerHTML = `<span class="muted small">${esc(e.message)}</span>`; return; }
+    const ms = x.months || {}, nm = Object.values(ms).reduce((a, b) => a + b, 0);
+    const pct = x.total ? Math.round(x.done / x.total * 100) : 0;
+    const c = x.compare || {}, A = c.current || {}, B = c.five_year || {};
+    const row = (k, l) => `<tr><td>${l}</td><td class="r">${A[k] ?? "–"}</td><td class="r">${B[k] ?? "–"}</td></tr>`;
+    el.innerHTML = `<div class="toolbar" style="margin:0"><div><h3 style="margin:0">5-year Lab <span class="pill p-amber">challenger</span> <span class="muted small">${nm ? `${nm} months from Dhan on your Mac (${Object.keys(ms).length} symbols)` : "no Dhan data yet"}</span></h3>
+        <p class="small muted" style="margin:4px 0 0">Dhan's archive (1-minute options from 2021: Nifty, Bank Nifty ATM ±10, 30 stocks ATM ±3) joined with the Upstox history, tested in its own folder. The current Lab and its live rules are not touched; the two are compared here and switching is your call. Market data only.</p></div>
+        <div class="btn-row" style="margin:0">${x.running ? `<button class="btn" id="d5-stop">Stop</button>` : `<button class="btn ${nm ? "" : "primary"}" id="d5-go" ${x.dhan ? "" : "disabled title='Add Dhan keys on Strategy desk → Data and settings'"}>${nm ? "Update" : "Download 5 years"}</button>`}<button class="btn ${nm ? "primary" : ""}" id="d5-run" ${nm && !x.running ? "" : "disabled"}>Run 5-year research</button></div></div>
+      ${x.running || x.status === "failed" ? `<div style="margin-top:8px"><div class="bar"><i style="width:${pct}%"></i></div><small class="muted">${x.running ? `${pct}% · ` : ""}${x.error ? `<span class="down">${esc(x.error)}</span> · ` : ""}${esc((x.log || []).slice(-1)[0] || "starting…")}</small></div>` : ""}
+      ${B.updated ? `<div class="table-wrap" style="margin-top:8px"><table class="mini"><thead><tr><th></th><th class="r">Current (2 years)</th><th class="r">5-year</th></tr></thead><tbody>
+        ${row("days", "Days of history")}${row("tried", "Rules tried")}${row("promoted", "Passed all 3 periods")}${row("luck", "Would pass by luck")}${row("strong", "Moderate / strong evidence")}${row("buy_strong", "…of which option buying")}
+        <tr><td>₹40K finder</td><td class="small">${esc(A.plan40 || "–")}</td><td class="small">${esc(B.plan40 || "–")}</td></tr></tbody></table></div>` : ""}`;
+    const go = $("#d5-go"), stp = $("#d5-stop"), run = $("#d5-run");
+    if (go) go.onclick = async () => { try { await post("/api/factory/lab5y/download", {}); toast("5-year download started (Dhan)"); draw5y(); } catch (e) { toast(e.message); } };
+    if (stp) stp.onclick = async () => { await post("/api/factory/lab5y/stop", {}); toast("Stopping: finished months are kept"); draw5y(); };
+    if (run) run.onclick = async () => { try { await post("/api/factory/lab5y/run", { n: 8000 }); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
+    clearTimeout(t5);
+    if (x.running) t5 = setTimeout(() => { if (document.getElementById("lab-5y")) draw5y(); }, 5000);
   };
   let stTimer = null;
   const drawStocks = async () => {

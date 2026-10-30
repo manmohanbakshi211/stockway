@@ -116,6 +116,7 @@ class LiveEngine:
         self.recorder = None
         self.tracker = None
         self.shadow = None                           # exit styles graded in shadow on every alert (live/shadow.py)
+        self.depth = None                            # Dhan 200-level order book for index futures (live/dhandepth.py)
         self.ranker = None
         self.metrics = {}
         self.prev = {}
@@ -191,6 +192,12 @@ class LiveEngine:
         self.stop_evt.set()
         if self.feed:
             self.feed.stop()
+        if self.depth:
+            try:
+                self.depth.stop()
+            except Exception:
+                pass
+            self.depth = None
         if self.thread:
             self.thread.join(timeout=15)
         if self.status["state"] in ("running", "starting"):
@@ -272,6 +279,7 @@ class LiveEngine:
         self.feed = make_feed()
         self.feed.start()
         self.feed.subscribe(base_keys, "full")
+        self._start_depth()
         if self.source != "sim":                  # Sensex, live from Upstox (BSE index); optional, never blocks the start
             try:
                 self._seed(self.rest.quotes([SENSEX_KEY]))
@@ -559,6 +567,11 @@ class LiveEngine:
                     self.log(f"Expiry desk error: {e}")
             self._big_prints(now, lc)
             self.tracker.update(self.state, self.clock.ts())
+            if self.depth:
+                try:
+                    self.depth.tick(now)
+                except Exception:
+                    pass
             try:
                 self.shadow.update(self.state, self.clock.ts())
             except Exception as e:
@@ -620,6 +633,9 @@ class LiveEngine:
         self.set_status("closed", "Simulation day finished" if self.source == "sim" else "Market closed for today")
         if self.feed:
             self.feed.stop()
+        if self.depth:
+            self.depth.stop()
+            self.depth = None
 
     def _watchdog(self, now):
         if not self.feed or self.source == "sim" or not is_market_hours(now):
@@ -853,6 +869,27 @@ class LiveEngine:
                 "gex": self.gex.get(sym),
                 "regime": (self.regimes.get(sym) or self.regimes.get("NIFTY") or {}).get("label"), "now": self.clock.now()}
 
+    def _start_depth(self):
+        """Dhan 200-level order book for Nifty and Bank Nifty futures (needs Dhan keys with the Pro data plan).
+        Optional: any problem here only logs; the scanner never depends on it."""
+        if self.source == "sim" or self.depth:
+            return
+        lab = self.cfg().get("lab") or {}
+        if not (lab.get("dhan_client_id") and lab.get("dhan_token")) or lab.get("dhan_depth") is False:
+            return
+        try:
+            from .dhandepth import DepthFeed, futures_ids
+            ids = futures_ids(self.data_dir)
+            if not ids:
+                self.log("Order book (Dhan): index futures not found in Dhan's scrip master")
+                return
+            self.depth = DepthFeed(lab["dhan_client_id"], lab["dhan_token"], ids, self.data_dir, self.log)
+            self.depth.start()
+            self.log(f"Order book (Dhan 200-level): {', '.join(ids)} futures")
+        except Exception as e:
+            self.depth = None
+            self.log(f"Order book (Dhan) not started: {e}")
+
     def market_ctx(self, sym) -> dict:
         """Everything outside the stock itself that an alert's strength may depend on: the index, breadth, its sector,
         global markets, VIX and fresh news. Used as model features (cached ~10 s)."""
@@ -867,7 +904,8 @@ class LiveEngine:
                 gp = None
             v = self._vix() or {}
             self._mctx = {"nifty": self.metrics.get("NIFTY") or {}, "bank": self.metrics.get("BANKNIFTY") or {},
-                          "breadth": mk.get("breadth") or {}, "sectors": secs, "global": gp, "vix_chg": v.get("chg_pct")}
+                          "breadth": mk.get("breadth") or {}, "sectors": secs, "global": gp, "vix_chg": v.get("chg_pct"),
+                          "depth": {k: self.depth.view(k) for k in self.depth.ids} if self.depth else {}}
         c = dict(self._mctx)
         c["sector_chg"] = c["sectors"].get(self.context.sector_of(sym)) if self.context else None
         news = [n for n in (self.news.items if self.news else []) if sym in n.get("syms", []) and n.get("ts", 0) > now - 3600]
@@ -1426,6 +1464,13 @@ class LiveEngine:
                 mlstrat.run(self.data_dir, log=log)
             except Exception as e:
                 log(f"ML strategies failed: {e}")
+            try:                                          # the 5-year Lab (challenger) keeps searching too, once it has data
+                from lab import dhan_hist
+                r5 = dhan_hist.root(self.data_dir)
+                if any(r5.glob("history/*/raw_*.parquet")):
+                    factory.run(r5, n_random=3000, n_mutate=1500, log=lambda m: log("[5y] " + m))
+            except Exception as e:
+                log(f"5-year Lab failed: {e}")
             self._fact_rules = (0.0, [])
         except Exception as e:
             log(f"nightly run failed: {e}")
@@ -1508,6 +1553,7 @@ class LiveEngine:
                 "news": self.news.items[:12], "ai": {"enabled": self.ai.enabled(), "used": self.ai.used,
                                                      "error": self.ai.last_error},
                 "watch": self._watch(), "extra": self.extra_indices(),
+                "depth": {k: self.depth.view(k) for k in self.depth.ids} if self.depth else None,
                 "px": {k: [round(m["spot"], 2), round(m.get("chg_pct") or 0, 2)] for k, m in (self.metrics or {}).items() if m.get("spot")}}
 
     WATCH = (("Nasdaq 100 fut", "NQ=F"), ("Dow fut", "YM=F"), ("S&P 500 fut", "ES=F"))

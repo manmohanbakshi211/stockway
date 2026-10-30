@@ -66,6 +66,15 @@ def _n(x, cap=None):
     return max(-cap, min(cap, x)) if cap else x
 
 
+BANK_SYMS = {"BANKNIFTY", "HDFCBANK", "ICICIBANK", "SBIN", "AXISBANK", "KOTAKBANK", "INDUSINDBK", "BANKBARODA", "PNB",
+             "CANBK", "FEDERALBNK", "IDFCFIRSTB", "AUBANK", "BANDHANBNK"}
+
+
+def _depth(mk: dict, sym) -> dict:
+    d = mk.get("depth") or {}
+    return (d.get("BANKNIFTY") if sym in BANK_SYMS else d.get("NIFTY")) or {}
+
+
 def features(a: dict, m: dict | None, ev: list, reg: dict | None, mins: float, ctx: dict) -> dict:
     """Facts at the moment an alert fires, signed so that + means 'agrees with the alert's direction'.
     The stock itself, its options, the index, breadth, its sector, global markets, VIX and fresh news."""
@@ -97,14 +106,17 @@ def features(a: dict, m: dict | None, ev: list, reg: dict | None, mins: float, c
            "nifty_vwap_al": _n(sgn(nf.get("vs_vwap_pct")), 3),
            "breadth_al": _n(sgn((br.get("adv", 0) - br.get("dec", 0)) / br["n"]) if br.get("n") else None),
            "sector_al": _n(sgn(mk.get("sector_chg")), 8), "global_al": _n(sgn(mk.get("global")), 3),
-           "vix_chg": _n(mk.get("vix_chg"), 30), "news_n": mk.get("news_n") or 0, "news_al": _n(sgn(mk.get("news_tone")), 3)}
+           "vix_chg": _n(mk.get("vix_chg"), 30), "news_n": mk.get("news_n") or 0, "news_al": _n(sgn(mk.get("news_tone")), 3),
+           # 2.19: who is waiting to buy vs sell (Dhan 200-level book of the index future: Bank Nifty's for bank alerts)
+           "depth_al": _n(sgn(_depth(mk, a.get("sym")).get("imb_near")), 1),
+           "depth_all_al": _n(sgn(_depth(mk, a.get("sym")).get("imb")), 1)}
     return out
 
 
 NUM = ["severity", "is_index", "agree", "against", "rel_vol", "z5", "minute_bucket", "iv_hv", "dte", "score_bias", "mins",
        "chg_al", "ret5_al", "ret15_al", "vwap_al", "buildup_al", "flow_al", "unusual", "iv", "iv_chg15", "pcr", "iv_pct",
        "cost_lot", "opt_px", "spread_pct", "delta", "nifty_al", "nifty15_al", "nifty_vwap_al", "breadth_al", "sector_al",
-       "global_al", "vix_chg", "news_n", "news_al"]
+       "global_al", "vix_chg", "news_n", "news_al", "depth_al", "depth_all_al"]
 CAT = ["kind", "direction", "regime"]
 TRUST_AUC = 0.60
 MIN_DAYS = 5

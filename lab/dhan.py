@@ -75,11 +75,12 @@ class Dhan:
         return r.json()
 
     def rolling(self, sym: str, flag: str, offset: int, side: str, frm: str, to: str, code: int = 1,
-                interval: int = 1) -> dict:
+                interval: int = 1, security_id: int | None = None, instrument: str = "OPTIDX") -> dict:
         """1-minute data for a rolling strike (ATM + offset) between frm and to (to exclusive, max 31 days).
+        Index options: ATM ± 10; stock options (instrument OPTSTK, security_id of the stock): ATM ± 3.
         Returns arrays: timestamp, open, high, low, close, iv, volume, strike, oi, spot."""
         strike = "ATM" if offset == 0 else f"ATM{offset:+d}"
-        body = {"securityId": INDEX_IDS[sym], "exchangeSegment": "NSE_FNO", "instrument": "OPTIDX",
+        body = {"securityId": security_id or INDEX_IDS[sym], "exchangeSegment": "NSE_FNO", "instrument": instrument,
                 "expiryFlag": flag, "expiryCode": code, "strike": strike,
                 "drvOptionType": "CALL" if side == "CE" else "PUT", "requiredData": FIELDS,
                 "fromDate": frm, "toDate": to, "interval": interval}

@@ -825,6 +825,95 @@ class StockHist:
 STOCK_HIST = StockHist()
 
 
+class Dhan5y(StockHist):
+    """Dhan expired-options archive (2021 →) for the 5-year Lab challenger, in its own background worker."""
+
+    def start(self, months=None, syms=None, why="manual"):
+        if self.running():
+            raise HTTPException(409, "The 5-year download is already running.")
+        c = _lab_cfg()
+        if not (c.get("dhan_client_id") and c.get("dhan_token")):
+            raise HTTPException(400, "Add your Dhan client ID and access token first (Strategy desk → Data and settings).")
+        self._stop.clear()
+        self.st = {"status": "running", "log": [], "done": 0, "total": 0, "why": why,
+                   "started": dt.datetime.now().isoformat(timespec="seconds"), "finished": None, "error": None}
+
+        def log(m):
+            self.st["log"] = (self.st["log"] + [f"{dt.datetime.now():%H:%M:%S} {m}"])[-200:]
+
+        def prog(d, t):
+            self.st["done"], self.st["total"] = d, t
+
+        def run():
+            from lab import dhan_hist, stock_hist
+            from lab.dhan import Dhan
+            try:
+                d = Dhan(c["dhan_client_id"], c["dhan_token"])
+                dhan_hist.download(d, ROOT / "data", syms or stock_hist.DEFAULT, log=log, should_stop=self._stop.is_set, progress=prog)
+                self.st["status"] = "stopped" if self._stop.is_set() else "done"
+            except Exception as e:
+                self.st["status"], self.st["error"] = "failed", str(e) or type(e).__name__
+                log("Error: " + self.st["error"])
+            finally:
+                self.st["finished"] = dt.datetime.now().isoformat(timespec="seconds")
+        self._t = threading.Thread(target=run, daemon=True)
+        self._t.start()
+        return self.view()
+
+    def view(self):
+        from lab import dhan_hist
+        hd = dhan_hist.root(ROOT / "data") / "history"
+        months = {p.parent.name: 0 for p in hd.glob("*/raw_????-??.parquet")}
+        for p in hd.glob("*/raw_????-??.parquet"):
+            months[p.parent.name] += 1
+        out = {**{k: v for k, v in self.st.items() if k != "log"}, "log": self.st["log"][-12:], "running": self.running(),
+               "months": months, "dhan": bool(_lab_cfg().get("dhan_client_id") and _lab_cfg().get("dhan_token"))}
+        try:
+            out["compare"] = dhan_hist.compare(ROOT / "data")
+        except Exception as e:
+            out["compare"] = {"error": str(e)}
+        return out
+
+
+DHAN5Y = Dhan5y()
+
+
+@app.get("/api/factory/lab5y")
+def factory_lab5y():
+    return clean(DHAN5Y.view())
+
+
+@app.post("/api/factory/lab5y/download")
+def factory_lab5y_download():
+    return clean(DHAN5Y.start())
+
+
+@app.post("/api/factory/lab5y/stop")
+def factory_lab5y_stop():
+    return clean(DHAN5Y.stop())
+
+
+@app.post("/api/factory/lab5y/run")
+async def factory_lab5y_run(req: Request):
+    from lab import dhan_hist, factory
+    b = await req.json() if (await req.body()) else {}
+    n = max(500, min(int(b.get("n") or 6000), 30000))
+    root = dhan_hist.root(ROOT / "data")
+    if not any(root.glob("history/*/raw_*.parquet")):
+        raise HTTPException(400, "Download the 5-year history from Dhan first.")
+
+    def job(log, stop):
+        dhan_hist.link_upstox(ROOT / "data", ["NIFTY", "BANKNIFTY"] + [p.parent.name for p in (ROOT / "data" / "history").glob("*/meta.json")])
+        from lab import library
+        if not factory.load(root).get("rules"):
+            factory.add_ideas(root, library.rules(), source="library")
+        factory.run(root, n_random=n, n_mutate=n // 2, log=log, should_stop=stop)
+        if not stop():
+            from lab import mlstrat
+            mlstrat.run(root, log=log, should_stop=stop)
+    return {"id": JOBS.start("factory5y", f"5-year Lab: testing {n + n // 2:,} rules on 5 years", job)["id"]}
+
+
 @app.get("/api/factory/stocks")
 def factory_stocks():
     return clean(STOCK_HIST.view())

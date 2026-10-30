@@ -114,6 +114,22 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Dhan Pro data: 5-year Lab and the 200-level order book (2.19)
+
+Needs Dhan's Data API (Pro, ₹999/month): client ID + access token on Strategy desk → Data and settings. Market data
+only: no orders, no account or holdings data (Dhan's CAS feed is deliberately not used).
+
+- **5-year Lab (challenger)**: Strategy Lab → 5-year Lab → Download 5 years. Dhan's expired-options archive (1-minute
+  from 2021; Nifty / Bank Nifty ATM ±10, 30 stocks ATM ±3), only the months before the Upstox history, saved in
+  data/lab5y with the Upstox files linked in. Resumable, newest month first. "Run 5-year research" runs the same search,
+  library, ₹40K finder, exit board and model strategies there; the panel compares it with the current Lab. The current
+  Lab, its results and its live rules are not touched; switching is your call. It also runs every night once it has data.
+  Stock entries are every 15 minutes there and numbers are 32-bit, to fit 5 years of 30 stocks in memory.
+- **Order book (Dhan 200-level)**: Nifty and Bank Nifty futures, live from the market open: % of quantity waiting to buy
+  near the price and the biggest walls, on the Live page index cards. A row per minute is saved to data/depth (past
+  order books can't be bought, so recording starts now), and the imbalance is a new fact for the conviction model.
+- Next with the Pro plan: Dhan news headlines and market movers into the alerts (after checking their API with your token).
+
 ## Pro stop-loss / targets, the ₹40K finder and several models (2.18)
 
 - **Pro plan on every alert (testing):** entry, stop-loss and target set on the chart the way well-known traders do,
