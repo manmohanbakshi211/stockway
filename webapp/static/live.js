@@ -754,7 +754,10 @@ function drawPaper(p, first) {
   const kinds = p.by_kind.map((b) => `<tr><td>${esc(KIND[b.kind] || b.kind)}</td><td class="r">${b.n}</td><td class="r">${b.win_rate}%</td><td class="r ${b.avg >= 0 ? "up" : "down"}">${rupees(b.avg)}</td><td class="r ${b.net >= 0 ? "up" : "down"}"><b>${rupees(b.net)}</b></td></tr>`).join("");
   const cls = (v) => v >= 0 ? "up" : "down";
   main.innerHTML = `<div class="toolbar"><h1 class="page-title" style="margin:0">Paper trading</h1>
-      <div class="btn-row" style="margin:0">${p.open.length ? `<button class="btn danger" id="pp-closeall">Close all (${p.open.length})</button>` : ""}<a class="btn" href="#/briefs">Day report</a></div></div>
+      <div class="btn-row" style="margin:0">${p.open.length ? `<button class="btn danger" id="pp-closeall">Close all (${p.open.length})</button>` : ""}
+        <button class="btn" id="pp-preset" title="${(A.capital || 0) <= 60000 ? "Back to ₹5 lakh, normal limits" : "₹40K: 1 lot, max 2 trades a day, the day stops after one loss, a good day is locked in at +₹1,200"}">${(A.capital || 0) <= 60000 ? "Normal account (₹5L)" : "Small account (₹40K)"}</button>
+        <a class="btn" href="#/briefs">Day report</a></div></div>
+    ${(A.capital || 0) <= 60000 ? `<div class="note">Small-account mode: 1 lot, 1 position at a time, max 2 trades a day, no new trade after a loss, and the day is locked once +₹${fk(s.profit_lock || 0)} is booked. Fewer, cleaner trades; it can't make every day green, but it keeps red days small.</div>` : ""}
     <div class="kpis kpi6 acct">
       <div class="kpi"><b>${rupees(A.equity)}</b><span>Account value now <small class="${cls(A.return_pct || 0)}">${A.return_pct >= 0 ? "+" : ""}${(A.return_pct || 0).toFixed(2)}%</small></span></div>
       <div class="kpi"><b class="${cls(A.today || 0)}">${rupees(A.today)}</b><span>Today: booked ${rupees(A.today_booked)} + open ${rupees(A.unrealised)}</span></div>
@@ -774,6 +777,9 @@ function drawPaper(p, first) {
     <div class="table-wrap"><table><thead><tr><th>Option</th><th>Stock</th><th>When</th><th class="r">Price</th><th>Exit</th><th class="r">Charges</th><th class="r">Net</th></tr></thead><tbody>${closed || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>
     <p class="note">Paper only: no order ever reaches a broker. Charges are real (brokerage, STT, exchange, GST, stamp). Target +${s.target_pct}% / stop −${s.stop_pct}% on the option; alert trades exit after ${s.max_hold_min} min, all by ${esc(s.exit_time)}. ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : ""}</p>`;
   main.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => { try { await post(`/api/live/paper/${b.dataset.close}/close`, {}); toast("Closed"); pagePaper(); } catch (e) { toast(e.message); } });
+  $("#pp-preset").onclick = async () => { const small = !((A.capital || 0) <= 60000);
+    if (!window.confirm(small ? "Switch paper trading to the ₹40K small account (1 lot, max 2 trades a day, stop after one loss, lock +₹1,200)?" : "Switch back to the ₹5 lakh account with normal limits?")) return;
+    try { await post("/api/live/paper/preset", { name: small ? "small" : "normal" }); toast(small ? "Small account (₹40K) on" : "Normal account on"); pagePaper(); } catch (e) { toast(e.message); } };
   const ca = $("#pp-closeall");
   if (ca) ca.onclick = async () => { if (!window.confirm(`Close all ${p.open.length} open paper positions at the live price?`)) return;
     ca.disabled = true; try { const r = await post("/api/live/paper/close_all", {}); toast(`Closed ${r.closed} · net ${rupees(r.net)}`); pagePaper(); } catch (e) { toast(e.message); ca.disabled = false; } };
@@ -1995,10 +2001,69 @@ function drawWatchlist(w) {
     <p class="note">Bias = the scanner's combined read (trend, VWAP, flow, options). Support / resistance = biggest put / call open interest. Paper only.</p>`;
 }
 
+/* ---------------- page: Strategy Lab (lab/factory.py) */
+async function pageLab() {
+  stopPageTimer();
+  const draw = async () => {
+    let f;
+    try { f = await api("/api/factory"); } catch (e) { main.innerHTML = `<div class="empty"><h2>Strategy Lab</h2><p>${esc(e.message)}</p></div>`; return; }
+    const by = f.by_stage || {}, prom = by.promoted || 0;
+    const rs = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
+    const st = (x) => x && x.n ? `${x.n} · ${rs(x.avg)} · t ${x.t} · ${x.green_pct}% green` : `<span class="muted">–</span>`;
+    const stage = { promoted: ["p-up", "Promoted: passed all 3"], duplicate: ["", "Same trades as another rule"], "failed holdout": ["p-down", "Failed holdout"], "failed validation": ["", "Failed validation"], "failed train": ["", "Failed train"] };
+    const src = (s) => s === "generated" || s === "mutation" ? "search" : s.startsWith("ebook:") ? "📕 " + esc(s.slice(6)) : s === "claude" ? "Claude" : esc(s);
+    const rows = (f.rules || []).filter((r) => r.stage !== "failed train" && r.stage !== "duplicate").slice(0, 60).map((r) => `<tr>
+        <td><span class="pill ${stage[r.stage] ? stage[r.stage][0] : ""}">${stage[r.stage] ? stage[r.stage][1] : esc(r.stage)}</span>${r.stage === "promoted" ? ` <span class="pill ${r.evidence === "strong" ? "p-up" : r.evidence === "moderate" ? "p-amber" : ""}" title="Holdout t-stat: strong ≥ 2, moderate ≥ 1">evidence: ${esc(r.evidence || "weak")}</span>` : ""}<br><small class="muted">${r.id} · ${src(r.source || "")}</small></td>
+        <td class="small">${esc(r.rule)}${r.note ? `<br><span class="muted">${esc(r.note)}</span>` : ""}${r.live_record ? `<br><b>Live paper:</b> ${r.live_record.n} trades, ${rs(r.live_record.net)}` : ""}</td>
+        <td class="small">${st(r.train)}</td><td class="small">${st(r.valid)}</td><td class="small"><b>${st(r.hold)}</b>${r.hold && r.hold.n ? `<br>worst day ${rs(r.hold.worst_day)}` : ""}</td>
+        <td>${r.stage === "promoted" ? `<label class="check small"><input type="checkbox" data-rlive="${r.id}" ${r.live !== "off" ? "checked" : ""}><span>Live paper</span></label>` : ""}</td></tr>`).join("");
+    const books = (f.books || []).map((b) => `<tr><td>📕 ${esc(b.name)} <small class="muted">${b.mb} MB</small></td>
+        <td class="small">${b.error ? `<span class="down">${esc(b.error)}</span>` : b.done ? `${b.rules} rules found (${esc(b.at)})${b.cannot.length ? `<br><span class="muted">Can't test yet: ${b.cannot.slice(0, 4).map((c) => esc(c.idea || "") + (c.needs ? ` (needs ${esc(c.needs)})` : "")).join("; ")}</span>` : ""}` : `<span class="muted">not read yet</span>`}</td>
+        <td><button class="btn" data-read="${esc(b.name)}" ${f.ai ? "" : "disabled title='Connect Claude in Live setup first'"}>${b.done ? "Read again" : "Read with Claude"}</button></td></tr>`).join("");
+    const runs = (f.runs || []).slice().reverse().map((r) => `<tr><td>${esc((r.at || "").replace("T", " "))}</td><td class="r">${r.tried.toLocaleString("en-IN")}</td><td class="r">${r.train_pass}</td><td class="r"><b>${r.promoted}</b></td><td class="r">${r.luck_expected}</td><td class="r">${r.secs}s</td></tr>`).join("");
+    main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Strategy Lab</h1><p class="lede" style="margin-bottom:0">Thousands of intraday option rules tested at once on 2 years of real 1-minute option prices, from a search, your ebooks and Claude. A rule must win on three separate periods before it trades live (on paper). Every evening it runs again by itself.</p></div>
+        <div class="btn-row" style="margin:0"><button class="btn primary" id="lab-run" ${f.has_history ? "" : "disabled"}>Run research now</button><button class="btn" id="lab-ideas" ${f.ai ? "" : "disabled title='Connect Claude in Live setup first'"}>Ask Claude for new ideas</button></div></div>
+      ${f.has_history ? "" : `<div class="banner">Download the 1-minute option history first: Strategy desk → Download history (Upstox Plus).</div>`}
+      <div class="kpis kpi6" style="margin-top:16px">
+        <div class="kpi"><b>${(f.tried_total || 0).toLocaleString("en-IN")}</b><span>Rules tried so far</span></div>
+        <div class="kpi"><b class="${prom ? "up" : ""}">${prom}</b><span>Passed all 3 periods (promoted)</span></div>
+        <div class="kpi"><b>≤ ${f.luck_expected}</b><span>Would pass by pure luck (upper estimate)</span></div>
+        <div class="kpi"><b>${(by["failed validation"] || 0) + (by["failed holdout"] || 0)}</b><span>Looked good in train, then failed</span></div>
+        <div class="kpi"><b>${(f.live_rules || []).length}</b><span>Rules live on paper now</span></div>
+        <div class="kpi"><b>${f.n_days || "–"}</b><span>Days of history</span></div></div>
+      <div class="panel tight" style="margin-top:14px"><h3>How to read this</h3><ul class="small">
+        <li><b>Train</b> ${f.period ? `(${esc(f.period.train[0])} → ${esc(f.period.train[1])})` : ""} finds a rule; <b>Validation</b> ${f.period ? `(→ ${esc(f.period.valid[1])})` : ""} confirms it; <b>Holdout</b> ${f.period ? `(${esc(f.period.hold[0])} → ${esc(f.period.hold[1])})` : ""} was never used to choose anything: it is the honest test.</li>
+        <li>Each trade buys 1 lot of the at-the-money call or put, after real charges and slippage. A day stops after a losing trade (the small-account way), so "green" = % of trading days that ended in profit.</li>
+        <li>If promoted ≈ the luck number, nothing real was found yet. ${prom > f.luck_expected ? "" : `<b>That is the case right now</b>: ${prom} promoted vs up to ${f.luck_expected} by luck, so even the promoted rules may be luck. They trade on paper only to build a live record, and switch off by themselves if they lose over 15 trades. The search keeps going every evening, with your ebooks and Claude's ideas.`}</li></ul></div>
+      <h2>Rules <span class="muted small">promoted first, then the closest misses</span></h2>
+      <div class="table-wrap"><table class="lab"><thead><tr><th>Result</th><th>Rule</th><th>Train<br><small class="muted">trades · avg · t · green</small></th><th>Validation</th><th>Holdout</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="muted">Run research to fill this.</td></tr>`}</tbody></table></div>
+      <div class="split" style="margin-top:24px">
+        <div><h2 style="margin-top:0">Your ebooks</h2>
+          <p class="small muted">Upload trading-strategy books (PDF, EPUB, TXT). Claude reads the rule-heavy passages, turns each concrete rule into a testable one, and lists what it can't test yet. They face the same 3-period test. The book stays on your Mac.</p>
+          <div class="btn-row"><input type="file" id="lab-file" accept=".pdf,.epub,.txt,.md" multiple><button class="btn" id="lab-up">Upload</button></div>
+          <div class="table-wrap" style="margin-top:10px"><table><tbody>${books || `<tr><td class="muted">No books yet.</td></tr>`}</tbody></table></div>
+          ${f.pending_ideas ? `<p class="note">${f.pending_ideas} rules from books / Claude are waiting: they are tested on the next run.</p>` : ""}</div>
+        <div><h2 style="margin-top:0">Research runs</h2><div class="table-wrap"><table class="mini"><thead><tr><th>When</th><th class="r">Tried</th><th class="r">Train pass</th><th class="r">Promoted</th><th class="r">Luck</th><th class="r">Time</th></tr></thead><tbody>${runs || `<tr><td colspan="6" class="muted">None yet.</td></tr>`}</tbody></table></div></div></div>
+      <p class="note">Paper only. Promoted rules fire as "Strategy Lab" alerts (Act now) and are paper-traded with their own exit; a rule that loses money over 15 live paper trades is switched off automatically.</p>`;
+    const job = async (path, body = {}) => { try { await post(path, body); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
+    $("#lab-run").onclick = () => job("/api/factory/run", { n: 8000 });
+    $("#lab-ideas").onclick = async (e) => { e.target.disabled = true; e.target.textContent = "Claude is thinking…";
+      try { const r = await post("/api/factory/ideas", {}); toast(`Claude proposed ${r.queued} testable rules${r.rejected ? ` (${r.rejected} not usable)` : ""}: tested on the next run`); draw(); } catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = "Ask Claude for new ideas"; } };
+    $("#lab-up").onclick = async () => {
+      const files = [...($("#lab-file").files || [])]; if (!files.length) { toast("Choose a file first"); return; }
+      for (const fl of files) { try { const r = await fetch(`/api/factory/ebook?name=${encodeURIComponent(fl.name)}`, { method: "POST", body: fl }); if (!r.ok) throw new Error((await r.json()).detail); toast(`${fl.name} uploaded`); } catch (e) { toast(e.message); } }
+      draw(); };
+    main.querySelectorAll("[data-read]").forEach((b) => b.onclick = () => job("/api/factory/ebook/read", { name: b.dataset.read }));
+    main.querySelectorAll("[data-rlive]").forEach((c) => c.onchange = async () => { try { await post(`/api/factory/rule/${c.dataset.rlive}`, { on: c.checked }); toast(c.checked ? "Rule live on paper" : "Rule switched off"); } catch (e) { toast(e.message); } });
+  };
+  draw();
+}
+
 /* ---------------- register */
 Object.assign(PAGES, { live: pageLive, scanner: pageScanner, sym: pageSym, alerts: pageAlerts, paper: pagePaper, connect: pageConnect,
   context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk, chart: pageChart, world: pageWorld, insiders: pageInsiders,
-  timemachine: pageTimeMachine, ask: pageAsk, watchlist: pageWatchlist });
+  timemachine: pageTimeMachine, ask: pageAsk, watchlist: pageWatchlist, lab: pageLab });
 window.addEventListener("hashchange", () => { stopPageTimer(); if (!location.hash.startsWith("#/chart") && CH.chart) { CH.chart.remove(); CH.chart = null; } main.classList.toggle("wide", location.hash.startsWith("#/chart")); });
 pollSnapshot();
 aiStatus(true); setInterval(() => aiStatus(true), 5 * 60000);

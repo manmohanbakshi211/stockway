@@ -452,6 +452,26 @@ async def watchlist_change(request: Request):
     return {"manual": watchlist.change(e.store, add=sym or None, remove=b.get("remove"))}
 
 
+@router.post("/api/live/paper/preset")
+async def live_paper_preset(request: Request):
+    """'small': the ₹40K account (1 lot, 2 trades a day, stop after one loss, lock in a good day); 'normal': ₹5 lakh."""
+    from live.paper import DEFAULTS, SMALL_ACCOUNT
+    from radar.config import save_user_settings
+    b = await request.json()
+    if b.get("name") == "small":
+        p = SMALL_ACCOUNT
+    else:
+        p = {k: DEFAULTS[k] for k in SMALL_ACCOUNT if k != "aggressive"}
+        p.update(capital=500000, risk_pct=1.0, max_daily_loss_pct=3.0)
+    upd = {f"live.paper.{k}": v for k, v in p.items()}
+    upd["lab.capital"] = p["capital"]
+    save_user_settings(upd)
+    e = engine()
+    if e.paper:
+        e.paper.cfg.update(p)
+    return {"ok": True, "preset": b.get("name"), **p}
+
+
 @router.get("/api/live/paper/mini")
 def live_paper_mini():
     """For the side bar: today's net (booked + open) and the demo account."""

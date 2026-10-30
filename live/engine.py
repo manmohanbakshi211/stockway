@@ -133,6 +133,10 @@ class LiveEngine:
         self._explaining = threading.Lock()
         self.pinned: set = set()                     # option keys you traded by hand: kept streaming
         self.gift = GiftNifty(self.log)
+        self.fact_bars: dict = {}                    # (sym, day) -> {bar: (atm iv, straddle %)} for Strategy Lab rules
+        self.fact_fired: dict = {}                   # (rule, sym, day) -> times fired
+        self._fact_rules = (0.0, [])
+        self.VIX_KEY = VIX_KEY
         self.focus_last = {}
         self.market = {}
         self.words = {}
@@ -705,6 +709,29 @@ class LiveEngine:
                 "expiry": exp.isoformat(), "lot": o.lot, "ltp": i.ltp, "ask": i.ask, "iv": norm_iv(i.iv),
                 "delta": i.delta, "cost_per_lot": round((i.ask or i.ltp) * o.lot, 2)}
 
+    def factory_rules(self) -> list:
+        """Promoted Strategy Lab rules that are switched on (re-read every 10 minutes)."""
+        at, rules = self._fact_rules
+        if time.time() - at > 600:
+            try:
+                from lab import factory
+                rules = factory.promoted(self.data_dir)
+            except Exception:
+                rules = []
+            self._fact_rules = (time.time(), rules)
+        return rules
+
+    def factory_live_record(self) -> list:
+        """Paper results of Strategy Lab rules, for demotion: [{'rule', 'net'}]."""
+        out = []
+        for t in self.store.trades(source="upstox", limit=5000):
+            if t["kind"] == "factory" and t["status"] == "closed" and t.get("alert_id"):
+                a = self.store.alert(t["alert_id"])
+                rid = (((a or {}).get("data") or {}).get("factory") or {}).get("id")
+                if rid:
+                    out.append({"rule": rid, "net": t["net"]})
+        return out
+
     def find_option(self, key: str):
         """(underlying, Option) for an option instrument key, from the loaded universe."""
         for u in (self.uni.underlyings.values() if self.uni else []):
@@ -1235,6 +1262,10 @@ class LiveEngine:
                         self.context.refresh_daily()
                         self.context.refresh_global()
                         self.make_brief("pre")
+                lab_on = (self.cfg().get("lab") or {}).get("nightly", True)
+                if lab_on and now.time() >= dt.time(16, 15) and ("lab", today) not in self.brief_done and not self.running:
+                    self.brief_done.add(("lab", today))
+                    threading.Thread(target=self._nightly_lab, daemon=True).start()
                 if c["source"] != "upstox" or not c.get("auto_start") or now.weekday() >= 5:
                     continue
                 if not (dt.time(9, 0) <= now.time() < dt.time(15, 25)) or self.running:
@@ -1250,6 +1281,37 @@ class LiveEngine:
                     self.telegram.send("🔑 Stockway: log in with Upstox to start today's live scanner (open the app → Live).")
             except Exception as e:
                 self.log(f"Watcher error: {e}")
+
+    def _nightly_lab(self):
+        """Every evening: fetch new expiries (if logged in), switch off rules losing money live, ask Claude for a few
+        new ideas, then a research round. Results on the Strategy Lab page. Paper only."""
+        from lab import factory
+        log = lambda m: self.log(f"Strategy Lab: {m}")
+        try:
+            hist = self.data_dir / "history"
+            if not any(hist.glob("*/raw_*.parquet")):
+                return
+            tok = (self.tokens.load() or {}).get("access_token")
+            if tok:
+                try:
+                    from lab.upstox_hist import download
+                    end = dt.date.today() - dt.timedelta(days=1)
+                    download(tok, self.data_dir, start=end - dt.timedelta(days=45), end=end, log=lambda m: None)
+                except Exception as e:
+                    log(f"new history not fetched ({e})")
+            off = factory.apply_live_record(self.data_dir, self.factory_live_record())
+            if off:
+                log(f"switched off {len(off)} rule(s) that lost money in live paper trading: {', '.join(off)}")
+            if self.ai.enabled() and (self.cfg().get("lab") or {}).get("claude_ideas", True):
+                try:
+                    q = factory.ask_ideas(self.data_dir, self.ai, auto=True)
+                    log(f"Claude proposed {q['queued']} new rules")
+                except Exception as e:
+                    log(f"no Claude ideas tonight ({e})")
+            factory.run(self.data_dir, n_random=6000, n_mutate=3000, log=log)
+            self._fact_rules = (0.0, [])
+        except Exception as e:
+            log(f"nightly run failed: {e}")
 
     def _news_loop(self):
         time.sleep(5)

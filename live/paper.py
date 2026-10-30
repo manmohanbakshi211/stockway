@@ -8,7 +8,7 @@ from .clock import IST
 DEFAULTS = {
     "auto": True,
     "min_severity": 2,
-    "kinds": ["sharp_move", "orb", "volume_surge", "oi_buildup", "unusual_options", "beyond_priced"],
+    "kinds": ["sharp_move", "orb", "volume_surge", "oi_buildup", "unusual_options", "beyond_priced", "factory"],
     "lots": 1,
     "target_pct": 30.0,
     "stop_pct": 20.0,
@@ -27,7 +27,12 @@ DEFAULTS = {
     "aggressive_min_severity": 2,
     "aggressive_max_open": 15,
     "short_margin_pct": 15.0,   # rough margin for a short option: % of the underlying value of the position
+    "profit_lock": 0,           # stop new trades for the day once this much is booked (0 = off)
 }
+
+# the small-account preset (Paper page): ₹40K, 1 lot, 2 trades a day, the day ends after one loss, lock in a good day
+SMALL_ACCOUNT = {"capital": 40000, "risk_pct": 5.0, "max_lots": 1, "max_open": 1, "max_trades_day": 2,
+                 "max_daily_loss_pct": 4.0, "profit_lock": 1200, "aggressive": False}
 
 MODES = {0: "auto", 1: "you", 2: "override", 3: "aggressive", 4: "you (chain/chart)"}
 
@@ -93,9 +98,12 @@ class PaperBook:
         else:
             lots = int(risk["lots"]) if risk and risk.get("lots") else self.size(entry, opt["lot"])
         manual_code = 3 if aggressive else 2 if override else int(manual)
+        if int(c.get("max_lots") or 5) == 1:
+            lots = 1
+        ex = ((alert.get("data") or {}).get("factory") or {}).get("exit")   # a Strategy Lab rule brings its own exit
         return self._open(state, now, sym=alert["sym"], kind=alert["kind"], opt=opt, entry=entry, ltp=inst.ltp, lots=lots,
                           direction=1, manual=manual_code, alert_id=alert.get("id"), und_key=alert.get("und_key"),
-                          why=alert.get("title", ""))
+                          why=alert.get("title", ""), exit=ex)
 
     def open_manual(self, state, now: dt.datetime, *, sym: str, opt: dict, direction: int, lots: int = 1,
                     und_key: str | None = None, kind="manual") -> dict:
@@ -117,10 +125,17 @@ class PaperBook:
                          direction=direction, manual=4, und_key=und_key, why="by hand")
         return {"opened": tid}
 
-    def _open(self, state, now, *, sym, kind, opt, entry, ltp, lots, direction, manual, alert_id=None, und_key=None, why=""):
+    def _open(self, state, now, *, sym, kind, opt, entry, ltp, lots, direction, manual, alert_id=None, und_key=None, why="",
+              exit=None):
         c = self.cfg
         und = state.get(und_key) if und_key else None
         tp, sp = float(c["target_pct"]) / 100, float(c["stop_pct"]) / 100
+        hold, trail = None, None
+        if exit:                                          # [target %, stop %, max minutes, trail start %, keep fraction]
+            tp = (exit[0] or 1000) / 100
+            sp = exit[1] / 100
+            hold = int(exit[2])
+            trail = f"{exit[3]},{exit[4]}" if len(exit) > 4 and exit[3] else None
         t = {"alert_id": alert_id, "source": self.source, "day": now.date().isoformat(), "sym": sym,
              "kind": kind, "opt_key": opt["key"], "label": opt["label"], "side": opt["side"],
              "lot": opt["lot"], "lots": lots, "entry_ts": now.timestamp(), "entry": entry,
@@ -128,7 +143,7 @@ class PaperBook:
              "stop": round(entry * (1 - sp) if direction > 0 else entry * (1 + sp), 2),
              "peak": entry, "last": ltp, "status": "open", "manual": manual, "dir": direction,
              "und_key": und_key, "und_entry": und.ltp if und and und.ltp else None, "und_last": und.ltp if und and und.ltp else None,
-             "mode": MODES.get(manual, "auto")}
+             "mode": MODES.get(manual, "auto"), "hold_max": hold, "trail": trail}
         tid = self.store.add_trade(t)
         self.log(f"Paper {'BUY' if direction > 0 else 'SELL'} {opt['label']} @ {entry:.2f} ({why})")
         return tid
@@ -149,8 +164,11 @@ class PaperBook:
         booked = sum(t["net"] or 0 for t in today if t["status"] == "closed")
         limit = -float(c["capital"]) * float(c["max_daily_loss_pct"]) / 100
         blocked, why = False, None
+        lock = float(c.get("profit_lock") or 0)
         if booked <= limit:
             blocked, why = True, f"Daily loss limit hit (₹{booked:,.0f}). No new trades today."
+        elif lock > 0 and booked >= lock:
+            blocked, why = True, f"Good day locked in (₹{booked:,.0f} booked, lock at ₹{lock:,.0f}). No new trades today."
         elif len(today) >= int(c["max_trades_day"]):
             blocked, why = True, f"{len(today)} trades today: over-trading guard reached."
         else:
@@ -183,9 +201,16 @@ class PaperBook:
                 reason = "target"
             elif (d > 0 and px <= t["stop"]) or (d < 0 and px >= t["stop"]):
                 reason = "stop loss"
+            elif t.get("trail") and d > 0 and t["entry"]:
+                ts_, keep = (float(x) for x in t["trail"].split(","))
+                pk = (peak / t["entry"] - 1) * 100
+                if pk >= ts_ and (px / t["entry"] - 1) * 100 <= pk * keep:
+                    reason = "trailing stop"
+            if reason:
+                pass
             elif force_close or now.strftime("%H:%M") >= c["exit_time"]:
                 reason = "end of day"
-            elif held >= c["max_hold_min"] and t.get("manual") != 4:
+            elif held >= (t.get("hold_max") or c["max_hold_min"]) and t.get("manual") != 4:
                 reason = "time limit"                       # your own chain/chart trades are held until you exit
             if reason:
                 closed.append(self._close(t, px, now, reason, und))

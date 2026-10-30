@@ -651,6 +651,92 @@ def lab_scenario_run():
         raise HTTPException(400, str(ex))
 
 
+# ----------------------------------------------------------------- Strategy Lab (lab/factory.py, lab/ebooks.py)
+@app.get("/api/factory")
+def factory_view():
+    from lab import ebooks, factory
+    out = factory.view(ROOT / "data")
+    out["books"] = ebooks.books(ROOT / "data")
+    out["has_history"] = any((ROOT / "data" / "history").glob("*/raw_*.parquet"))
+    try:
+        from webapp.live_api import engine as _eng
+        e = _eng()
+        out["live_rules"] = [{"id": r["id"], "rule": r["rule"]} for r in e.factory_rules()]
+        out["ai"] = e.ai.enabled()
+    except Exception:
+        out["live_rules"], out["ai"] = [], False
+    return clean(out)
+
+
+@app.post("/api/factory/run")
+async def factory_run(req: Request):
+    from lab import factory
+    b = await req.json() if (await req.body()) else {}
+    n = max(500, min(int(b.get("n") or 6000), 30000))
+
+    def job(log, stop):
+        factory.run(ROOT / "data", n_random=n, n_mutate=n // 2, log=log, should_stop=stop)
+        try:
+            from webapp.live_api import engine as _eng
+            _eng()._fact_rules = (0.0, [])
+        except Exception:
+            pass
+    return {"id": JOBS.start("factory", f"Strategy Lab: testing {n + n // 2:,} rules on train / validation / holdout", job)["id"]}
+
+
+@app.post("/api/factory/ideas")
+def factory_ideas():
+    from lab import factory
+    from webapp.live_api import engine as _eng
+    try:
+        return factory.ask_ideas(ROOT / "data", _eng().ai, auto=False)
+    except PermissionError as ex:
+        raise HTTPException(401, str(ex))
+
+
+@app.post("/api/factory/ebook")
+async def factory_ebook_upload(req: Request, name: str):
+    """Upload one ebook (PDF / EPUB / TXT) into data/ebooks."""
+    from lab import ebooks
+    import re as _re
+    safe = _re.sub(r"[^A-Za-z0-9._ ()-]", "_", Path(name).name)[:120]
+    if not safe.lower().endswith((".pdf", ".epub", ".txt", ".md")):
+        raise HTTPException(400, "PDF, EPUB or TXT only.")
+    data = await req.body()
+    if len(data) > 80e6:
+        raise HTTPException(400, "File too large (80 MB max).")
+    (ebooks.book_dir(ROOT / "data") / safe).write_bytes(data)
+    return {"ok": True, "name": safe}
+
+
+@app.post("/api/factory/ebook/read")
+async def factory_ebook_read(req: Request):
+    from lab import ebooks
+    from webapp.live_api import engine as _eng
+    b = await req.json()
+    name = Path(str(b.get("name", ""))).name
+    e = _eng()
+    if not e.ai.enabled():
+        raise HTTPException(401, "Connect Claude (your Pro plan) in Live setup → AI first.")
+
+    def job(log, stop):
+        ebooks.extract(ROOT / "data", name, e.ai, log=log, should_stop=stop)
+    return {"id": JOBS.start("factory_book", f"Reading {name} with Claude", job)["id"]}
+
+
+@app.post("/api/factory/rule/{rid}")
+async def factory_rule_live(rid: str, req: Request):
+    from lab import factory
+    b = await req.json()
+    try:
+        r = factory.set_live(ROOT / "data", rid, bool(b.get("on")))
+    except KeyError:
+        raise HTTPException(404, "Unknown rule")
+    from webapp.live_api import engine as _eng
+    _eng()._fact_rules = (0.0, [])
+    return {"ok": True, "live": r.get("live")}
+
+
 @app.get("/api/lab/expiry")
 def lab_expiry():
     from webapp.live_api import engine as _eng

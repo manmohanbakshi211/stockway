@@ -89,6 +89,55 @@ class ChartData:
                 "support": o.get("support"), "gamma": g.get("regime"), "flip": g.get("flip"),
                 "call_wall": g.get("call_wall"), "put_wall": g.get("put_wall"), "max_pain": o.get("max_pain")}
 
+    def _factory(self, now, slot, emit):
+        """Promoted Strategy Lab rules on the bar that just closed (Nifty, Bank Nifty): same facts as the backtest."""
+        from lab import factory
+        rules = self.e.factory_rules()
+        rec = self.e.fact_bars
+        for sym in ("NIFTY", "BANKNIFTY"):
+            m = self.e.metrics.get(sym)
+            if not m:
+                continue
+            o = m.get("opt") or {}
+            # remember ATM IV and the priced move for each closed bar (the backtest has them per bar too)
+            day_rec = rec.setdefault((sym, now.date()), {})
+            st = o.get("straddle")
+            day_rec[slot - 1] = (o.get("atm_iv"), st / m["spot"] * 100 if st and m.get("spot") else None)
+            if not rules:
+                continue
+            b = self.five_min(sym, now.date())
+            if not b or len(b["c"]) < slot:
+                continue
+            o5, h5, l5, c5 = (np.asarray(b[k][:slot], float) for k in ("o", "h", "l", "c"))
+            ctx0 = self.context(sym, m)
+            pdc = ctx0.get("pdc")
+            vix = self.e.state.get(self.e.VIX_KEY) if hasattr(self.e, "VIX_KEY") else None
+            u = self.e.uni.underlyings.get(sym) if self.e.uni else None
+            exp = u.near_expiry(now.date()) if u else None
+            dte = int(np.busday_count(now.date(), exp)) if exp else None
+            ctx = {"prev_close": pdc, "prev_high": ctx0.get("pdh"), "prev_low": ctx0.get("pdl"),
+                   "gap": (o5[0] / pdc - 1) * 100 if pdc else None, "vix": getattr(vix, "cp", None) if vix else None,
+                   "dte": dte, "dow": now.weekday()}
+            ivs = [day_rec.get(i, (None, None))[0] for i in range(slot)]
+            prem = [day_rec.get(i, (None, None))[1] for i in range(slot)]
+            f = factory.bar_features(o5, h5, l5, c5, ctx, [np.nan if x is None else x for x in ivs],
+                                     [np.nan if x is None else x for x in prem])
+            for r in rules:
+                if not factory.signal_now(r, f, sym):
+                    continue
+                fired = self.e.fact_fired.setdefault((r["id"], sym, now.date()), [])
+                if len(fired) >= r["max_day"]:
+                    continue
+                fired.append(now.timestamp())
+                d = r["dir"]
+                h = r["hold"]
+                emit({"sym": sym, "kind": "factory", "direction": "up" if d > 0 else "down", "severity": 3,
+                      "title": f"{sym} Strategy Lab rule {r['id']}: {'BUY call' if d > 0 else 'BUY put'}",
+                      "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%.",
+                      "price": m.get("spot"),
+                      "data": {"factory": {"id": r["id"], "exit": list(factory.EXITS[r["exit"]][:3]) +
+                                           (list(factory.EXITS[r["exit"]][3]) if factory.EXITS[r["exit"]][3] else [])}}})
+
     def five_min(self, sym, day):
         rows = self.today_bars(sym)
         if len(rows) < 2:
@@ -108,6 +157,10 @@ class ChartData:
         if slot < 3 or slot == self.last_slot or now.timestamp() < t0:
             return
         self.last_slot = slot
+        try:
+            self._factory(now, slot, emit)
+        except Exception as ex:
+            self.e.log(f"Strategy Lab rules check failed: {ex}")
         for sym, m in list(self.e.metrics.items()):
             b = self.five_min(sym, now.date())
             if not b or len(b["c"]) < 4:

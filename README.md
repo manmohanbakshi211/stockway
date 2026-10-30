@@ -114,6 +114,30 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Strategy Lab: thousands of rules, ebooks and Claude, tested honestly (2.15)
+
+- **What it tests**: intraday rules that buy the at-the-money Nifty / Bank Nifty call or put one minute after a 5-minute
+  bar closes, on ~20 facts known at that moment (moves, VWAP, EMAs, RSI, opening range, yesterday's high/low, gap, range
+  expansion, VIX, ATM IV and its change, priced move, days to expiry, weekday), with five exit rules. Per lot, real
+  charges and slippage, on the 2-year 1-minute option history. ~7 ms per rule, so 10,000+ rules per run.
+- **Where rules come from**: a random search plus mutations of the best; **your ebooks** (PDF / EPUB / TXT on the Strategy
+  Lab page; Claude reads the rule-heavy passages, turns concrete rules into testable ones and lists what it can't test
+  yet); **Claude's own ideas** from what has worked and failed so far.
+- **The guard**: train (first 60% of days) → validation (next 20%) → holdout (last 20%, never used to choose). Promoted =
+  passed all three; evidence strong / moderate / weak by the holdout t-stat. The page shows how many rules were tried and
+  how many would pass by luck, and hides nothing that failed.
+- **Small-account accounting**: 1 lot, the day stops after a loss, so green-day % and worst day are what a ₹40K account
+  would have lived through. Paper page: **Small account (₹40K)** preset (1 lot, max 2 trades/day, stop after one loss,
+  lock the day at +₹1,200).
+- **Live**: promoted rules (switched on) fire as "Strategy Lab" Act-now alerts on the bar that closes, go through the risk
+  check, and are paper-traded with the rule's own exit (including the trailing exit). A rule that loses money over 15
+  live paper trades is switched off automatically.
+- **Every evening (16:15)**: new expiries are fetched (when logged in), losing live rules are switched off, Claude adds a
+  few ideas, and a research round runs.
+- **First result on real data (30 Oct 2026)**: 23,000+ rules tried; random entries lose ~₹220/trade; 3 rules promoted
+  (expiry-morning ATM put buys), all with weak holdout evidence and fewer than the ~43 expected by luck. No rule has a
+  proven edge yet; the 3 trade on paper only to build a live record.
+
 ## Paper account, watchlist and trading from the chain and chart (2.14)
 
 All of this is paper: nothing reaches a broker, ever.
