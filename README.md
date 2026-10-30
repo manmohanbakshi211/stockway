@@ -114,6 +114,28 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Strategy library, indicator settings and option selling in the Lab (2.16)
+
+- **Strategy library** (lab/library.py, "Test the strategy library" button): 16 well-known setups in our own words with
+  sources — first 5-min candle breakout ("9:20 setup" popular with Indian option buyers such as Ghanshyam Tech), 2:20
+  candle, Crabel opening-range breakout (15/30 min), Supertrend + VWAP (10,3 / 7,3 / 10,2), fresh Supertrend flip,
+  Raschke's Holy Grail, Connors' RSI(2), Bollinger squeeze and band fade (2.0 / 1.5 sd), VWAP bands, MACD + EMA, EMA 9/21,
+  Ochoa's narrow CPR, previous-day high/low breakout, the 9:20 short straddle (25/35/50% stops, 10:30 variant) and a
+  late-morning quiet-day straddle / iron fly. Every version × every exit is tested like any rule.
+- **Indicators with their usual settings** added as facts: Supertrend (3 settings), Bollinger %B and width (2 settings),
+  VWAP bands (z-score), MACD 12,26,9, ADX/DI 14, RSI 2/7/14, EMA 5/13 and 9/21, SMA 20, CPR width and position, first-candle,
+  30-min and 14:20-candle ranges. Computed within the day (as the live app does), so long settings start later in the day.
+- **Option selling** in the Lab: ATM straddle with a stop per leg (25/35/50%) to 15:15, and an iron fly (wings 4 strikes
+  away, ~₹40-60K margin) with a loss stop on the credit. Promoted selling rules alert and paper-sell both legs when the
+  paper account is ₹1.5 lakh or more.
+- **Live by evidence**: promoted rules trade on paper by themselves only with moderate/strong holdout evidence (holdout
+  t ≥ 1), or when you tick them.
+- **Result (2 years, 48,019 rules)**: all 16 famous setups fail (the 9:20 straddle made +₹1,738/lot a trade in 2024-25,
+  then lost in 2026, as reported when it got crowded). Random option buys lose ~₹220/trade, random straddle sells ~₹160,
+  random iron flies ~₹590 (four legs of costs). The strongest found: selling the ATM straddle (25% leg stops) when
+  +DI − −DI > 22 and the day's range is still under 0.82% — positive in all three periods, holdout 88 trades, +₹492 avg,
+  t 3.5, 74% green days, worst day −₹3,657; it needs straddle margin (~₹1-2 lakh), not ₹40K.
+
 ## Strategy Lab: thousands of rules, ebooks and Claude, tested honestly (2.15)
 
 - **What it tests**: intraday rules that buy the at-the-money Nifty / Bank Nifty call or put one minute after a 5-minute

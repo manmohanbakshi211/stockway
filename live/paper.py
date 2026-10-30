@@ -144,6 +144,11 @@ class PaperBook:
              "peak": entry, "last": ltp, "status": "open", "manual": manual, "dir": direction,
              "und_key": und_key, "und_entry": und.ltp if und and und.ltp else None, "und_last": und.ltp if und and und.ltp else None,
              "mode": MODES.get(manual, "auto"), "hold_max": hold, "trail": trail}
+        if kind == "factory":                             # remember which Strategy Lab rule took it (for its live record)
+            import re as _re
+            mm = _re.search(r"\b(S[0-9a-f]{8})\b", why or "")
+            if mm:
+                t["mode"] = f"factory:{mm.group(1)}"
         tid = self.store.add_trade(t)
         self.log(f"Paper {'BUY' if direction > 0 else 'SELL'} {opt['label']} @ {entry:.2f} ({why})")
         return tid

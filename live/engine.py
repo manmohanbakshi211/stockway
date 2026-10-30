@@ -725,9 +725,11 @@ class LiveEngine:
         """Paper results of Strategy Lab rules, for demotion: [{'rule', 'net'}]."""
         out = []
         for t in self.store.trades(source="upstox", limit=5000):
-            if t["kind"] == "factory" and t["status"] == "closed" and t.get("alert_id"):
-                a = self.store.alert(t["alert_id"])
-                rid = (((a or {}).get("data") or {}).get("factory") or {}).get("id")
+            if t["kind"] == "factory" and t["status"] == "closed":
+                rid = t["mode"][8:] if str(t.get("mode") or "").startswith("factory:") else None
+                if not rid and t.get("alert_id"):
+                    a = self.store.alert(t["alert_id"])
+                    rid = (((a or {}).get("data") or {}).get("factory") or {}).get("id")
                 if rid:
                     out.append({"rule": rid, "net": t["net"]})
         return out

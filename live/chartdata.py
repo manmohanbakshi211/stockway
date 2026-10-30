@@ -131,12 +131,48 @@ class ChartData:
                 fired.append(now.timestamp())
                 d = r["dir"]
                 h = r["hold"]
+                if d == 0:                                   # straddle selling: alert + paper-sell both legs (when margin allows)
+                    took = self._paper_straddle(sym, m, r, now)
+                    emit({"sym": sym, "kind": "factory", "direction": "neutral", "severity": 3,
+                          "title": f"{sym} Strategy Lab rule {r['id']}: SELL the ATM straddle",
+                          "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%. "
+                                    + (f"Paper-sold both legs ({took})." if took else "Not paper-traded: the paper account is too small for straddle margin or the day is stopped."),
+                          "price": m.get("spot"), "data": {"factory": {"id": r["id"], "sell": True}}})
+                    continue
                 emit({"sym": sym, "kind": "factory", "direction": "up" if d > 0 else "down", "severity": 3,
                       "title": f"{sym} Strategy Lab rule {r['id']}: {'BUY call' if d > 0 else 'BUY put'}",
                       "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%.",
                       "price": m.get("spot"),
                       "data": {"factory": {"id": r["id"], "exit": list(factory.EXITS[r["exit"]][:3]) +
                                            (list(factory.EXITS[r["exit"]][3]) if factory.EXITS[r["exit"]][3] else [])}}})
+
+    def _paper_straddle(self, sym, m, r, now) -> str | None:
+        """Paper-sell the ATM call and put of the nearest expiry, each with the rule's stop, held to 15:15."""
+        from lab import factory
+        pb = self.e.paper
+        if not pb or r["exit"] not in factory.SELL_EXITS or r["exit"].startswith("fly"):
+            return None
+        if float(pb.cfg.get("capital") or 0) < 150000 or (pb.guard(now)["blocked"] and not pb.cfg.get("aggressive")):
+            return None
+        u = self.e.uni.underlyings.get(sym) if self.e.uni else None
+        exp = u.near_expiry(now.date()) if u else None
+        ch = u.chains.get(exp, {}) if exp else {}
+        if not ch or not m.get("spot"):
+            return None
+        k = min(ch, key=lambda x: abs(x - m["spot"]))
+        und_key = u.key if self.e.state.get(u.key) and self.e.state.get(u.key).ltp else u.fut_key
+        done = []
+        for side in ("CE", "PE"):
+            o = ch[k].get(side)
+            inst = self.e.state.get(o.key) if o else None
+            if not inst or not inst.ltp or any(t["opt_key"] == o.key for t in pb.open_trades()):
+                continue
+            opt = {"key": o.key, "label": f"{sym} {k:g} {side} {exp:%d %b}", "side": side, "lot": o.lot}
+            pb._open(self.e.state, now, sym=sym, kind="factory", opt=opt, entry=inst.bid or inst.ltp, ltp=inst.ltp, lots=1,
+                     direction=-1, manual=0, und_key=und_key, why=f"Strategy Lab {r['id']}",
+                     exit=[None, factory.SELL_EXITS[r["exit"]], 400])
+            done.append(opt["label"])
+        return " + ".join(done) or None
 
     def five_min(self, sym, day):
         rows = self.today_bars(sym)

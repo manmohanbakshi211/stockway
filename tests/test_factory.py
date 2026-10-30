@@ -86,3 +86,23 @@ def test_ebook_to_queued_rules(tmp_path):
     assert rec["queued"] >= 1 and rec["cannot_test"]
     assert ebooks.books(tmp_path)[0]["done"]
     assert F.load(tmp_path)["ideas"][0]["source"] == "ebook:orb.txt"
+
+
+def test_selling_sims_and_library():
+    import numpy as np
+    from lab import library
+    n = 375
+    flat = {"c": np.full(n, 100.0)}
+    decay = {"c": np.linspace(100, 40, n)}
+    spike = {"c": np.r_[np.full(50, 100.0), np.full(n - 50, 200.0)]}
+    win = F._sim_short([decay, decay], 5, "NIFTY", 65, 25)
+    lose = F._sim_short([spike, flat], 5, "NIFTY", 65, 25)
+    assert win > 0 and lose < 0
+    wing = {"c": np.full(n, 10.0)}
+    fly = F._sim_fly([decay, decay], [wing, wing], 5, "NIFTY", 65, 30)
+    assert fly > 0
+    rs = library.rules()
+    assert rs and all(F.validate(r) for r in rs)
+    assert any(r["dir"] == 0 and r["exit"].startswith("fly") for r in rs)
+    s920 = F.validate({"dir": 0, "conds": [["tod", ">", 0]], "win": [5, 5], "exit": "ss25"})
+    assert s920["win"] == [5, 5] and "straddle" in F.words(s920)

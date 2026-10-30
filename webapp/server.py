@@ -684,6 +684,13 @@ async def factory_run(req: Request):
     return {"id": JOBS.start("factory", f"Strategy Lab: testing {n + n // 2:,} rules on train / validation / holdout", job)["id"]}
 
 
+@app.post("/api/factory/library")
+def factory_library():
+    """Queue the strategy library (famous setups, every exit and setting) for the next research run."""
+    from lab import factory, library
+    return factory.add_ideas(ROOT / "data", library.rules(), source="library")
+
+
 @app.post("/api/factory/ideas")
 def factory_ideas():
     from lab import factory

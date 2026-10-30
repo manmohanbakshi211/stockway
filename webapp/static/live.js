@@ -2011,18 +2011,20 @@ async function pageLab() {
     const rs = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
     const st = (x) => x && x.n ? `${x.n} · ${rs(x.avg)} · t ${x.t} · ${x.green_pct}% green` : `<span class="muted">–</span>`;
     const stage = { promoted: ["p-up", "Promoted: passed all 3"], duplicate: ["", "Same trades as another rule"], "failed holdout": ["p-down", "Failed holdout"], "failed validation": ["", "Failed validation"], "failed train": ["", "Failed train"] };
-    const src = (s) => s === "generated" || s === "mutation" ? "search" : s.startsWith("ebook:") ? "📕 " + esc(s.slice(6)) : s === "claude" ? "Claude" : esc(s);
-    const rows = (f.rules || []).filter((r) => r.stage !== "failed train" && r.stage !== "duplicate").slice(0, 60).map((r) => `<tr>
+    const src = (s) => s === "generated" || s === "mutation" ? "search" : s.startsWith("ebook:") ? "📕 " + esc(s.slice(6)) : s.startsWith("library:") ? "📚 " + esc(s.slice(8)) : s === "claude" ? "Claude" : esc(s);
+    const fits = (r) => r.dir !== 0 || String(r.exit || "").startsWith("fly");
+    const only40 = LS.get("lab40", false);
+    const rows = (f.rules || []).filter((r) => r.stage !== "failed train" && r.stage !== "duplicate" && (!only40 || fits(r))).slice(0, 60).map((r) => `<tr>
         <td><span class="pill ${stage[r.stage] ? stage[r.stage][0] : ""}">${stage[r.stage] ? stage[r.stage][1] : esc(r.stage)}</span>${r.stage === "promoted" ? ` <span class="pill ${r.evidence === "strong" ? "p-up" : r.evidence === "moderate" ? "p-amber" : ""}" title="Holdout t-stat: strong ≥ 2, moderate ≥ 1">evidence: ${esc(r.evidence || "weak")}</span>` : ""}<br><small class="muted">${r.id} · ${src(r.source || "")}</small></td>
         <td class="small">${esc(r.rule)}${r.note ? `<br><span class="muted">${esc(r.note)}</span>` : ""}${r.live_record ? `<br><b>Live paper:</b> ${r.live_record.n} trades, ${rs(r.live_record.net)}` : ""}</td>
         <td class="small">${st(r.train)}</td><td class="small">${st(r.valid)}</td><td class="small"><b>${st(r.hold)}</b>${r.hold && r.hold.n ? `<br>worst day ${rs(r.hold.worst_day)}` : ""}</td>
-        <td>${r.stage === "promoted" ? `<label class="check small"><input type="checkbox" data-rlive="${r.id}" ${r.live !== "off" ? "checked" : ""}><span>Live paper</span></label>` : ""}</td></tr>`).join("");
+        <td>${r.stage === "promoted" ? `<label class="check small"><input type="checkbox" data-rlive="${r.id}" ${r.is_live ? "checked" : ""}><span>Live paper</span></label>` : ""}</td></tr>`).join("");
     const books = (f.books || []).map((b) => `<tr><td>📕 ${esc(b.name)} <small class="muted">${b.mb} MB</small></td>
         <td class="small">${b.error ? `<span class="down">${esc(b.error)}</span>` : b.done ? `${b.rules} rules found (${esc(b.at)})${b.cannot.length ? `<br><span class="muted">Can't test yet: ${b.cannot.slice(0, 4).map((c) => esc(c.idea || "") + (c.needs ? ` (needs ${esc(c.needs)})` : "")).join("; ")}</span>` : ""}` : `<span class="muted">not read yet</span>`}</td>
         <td><button class="btn" data-read="${esc(b.name)}" ${f.ai ? "" : "disabled title='Connect Claude in Live setup first'"}>${b.done ? "Read again" : "Read with Claude"}</button></td></tr>`).join("");
     const runs = (f.runs || []).slice().reverse().map((r) => `<tr><td>${esc((r.at || "").replace("T", " "))}</td><td class="r">${r.tried.toLocaleString("en-IN")}</td><td class="r">${r.train_pass}</td><td class="r"><b>${r.promoted}</b></td><td class="r">${r.luck_expected}</td><td class="r">${r.secs}s</td></tr>`).join("");
     main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Strategy Lab</h1><p class="lede" style="margin-bottom:0">Thousands of intraday option rules tested at once on 2 years of real 1-minute option prices, from a search, your ebooks and Claude. A rule must win on three separate periods before it trades live (on paper). Every evening it runs again by itself.</p></div>
-        <div class="btn-row" style="margin:0"><button class="btn primary" id="lab-run" ${f.has_history ? "" : "disabled"}>Run research now</button><button class="btn" id="lab-ideas" ${f.ai ? "" : "disabled title='Connect Claude in Live setup first'"}>Ask Claude for new ideas</button></div></div>
+        <div class="btn-row" style="margin:0"><button class="btn primary" id="lab-run" ${f.has_history ? "" : "disabled"}>Run research now</button><button class="btn" id="lab-lib">Test the strategy library</button><button class="btn" id="lab-ideas" ${f.ai ? "" : "disabled title='Connect Claude in Live setup first'"}>Ask Claude for new ideas</button></div></div>
       ${f.has_history ? "" : `<div class="banner">Download the 1-minute option history first: Strategy desk → Download history (Upstox Plus).</div>`}
       <div class="kpis kpi6" style="margin-top:16px">
         <div class="kpi"><b>${(f.tried_total || 0).toLocaleString("en-IN")}</b><span>Rules tried so far</span></div>
@@ -2035,7 +2037,12 @@ async function pageLab() {
         <li><b>Train</b> ${f.period ? `(${esc(f.period.train[0])} → ${esc(f.period.train[1])})` : ""} finds a rule; <b>Validation</b> ${f.period ? `(→ ${esc(f.period.valid[1])})` : ""} confirms it; <b>Holdout</b> ${f.period ? `(${esc(f.period.hold[0])} → ${esc(f.period.hold[1])})` : ""} was never used to choose anything: it is the honest test.</li>
         <li>Each trade buys 1 lot of the at-the-money call or put, after real charges and slippage. A day stops after a losing trade (the small-account way), so "green" = % of trading days that ended in profit.</li>
         <li>If promoted ≈ the luck number, nothing real was found yet. ${prom > f.luck_expected ? "" : `<b>That is the case right now</b>: ${prom} promoted vs up to ${f.luck_expected} by luck, so even the promoted rules may be luck. They trade on paper only to build a live record, and switch off by themselves if they lose over 15 trades. The search keeps going every evening, with your ebooks and Claude's ideas.`}</li></ul></div>
-      <h2>Rules <span class="muted small">promoted first, then the closest misses</span></h2>
+      ${(f.library || []).length ? `<h2>Strategy library <span class="muted small">famous setups from top traders and books, every exit and indicator setting tested</span></h2>
+      <div class="table-wrap"><table class="lab"><thead><tr><th>Setup</th><th>Best version</th><th>Train</th><th>Validation</th><th>Holdout</th></tr></thead><tbody>
+        ${f.library.map((x) => { const r = x.best; return `<tr><td><b>${esc(x.name)}</b><br><span class="pill ${stage[r.stage] ? stage[r.stage][0] : ""}">${stage[r.stage] ? stage[r.stage][1] : esc(r.stage)}</span> <small class="muted">${x.n_rules} versions</small></td>
+          <td class="small">${esc(r.rule)}<br><span class="muted">${esc((r.note || "").split(". ").slice(1).join(". "))}</span></td><td class="small">${st(r.train)}</td><td class="small">${st(r.valid)}</td><td class="small"><b>${st(r.hold)}</b></td></tr>`; }).join("")}</tbody></table></div>` : ""}
+      <div class="toolbar" style="margin-top:28px"><h2 style="margin:0">Rules <span class="muted small">promoted first, then the closest misses</span></h2>
+        <label class="check small"><input type="checkbox" id="lab-40" ${only40 ? "checked" : ""}><span>Only what a ₹40K account can trade (option buying, iron fly)</span></label></div>
       <div class="table-wrap"><table class="lab"><thead><tr><th>Result</th><th>Rule</th><th>Train<br><small class="muted">trades · avg · t · green</small></th><th>Validation</th><th>Holdout</th><th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="6" class="muted">Run research to fill this.</td></tr>`}</tbody></table></div>
       <div class="split" style="margin-top:24px">
@@ -2045,9 +2052,11 @@ async function pageLab() {
           <div class="table-wrap" style="margin-top:10px"><table><tbody>${books || `<tr><td class="muted">No books yet.</td></tr>`}</tbody></table></div>
           ${f.pending_ideas ? `<p class="note">${f.pending_ideas} rules from books / Claude are waiting: they are tested on the next run.</p>` : ""}</div>
         <div><h2 style="margin-top:0">Research runs</h2><div class="table-wrap"><table class="mini"><thead><tr><th>When</th><th class="r">Tried</th><th class="r">Train pass</th><th class="r">Promoted</th><th class="r">Luck</th><th class="r">Time</th></tr></thead><tbody>${runs || `<tr><td colspan="6" class="muted">None yet.</td></tr>`}</tbody></table></div></div></div>
-      <p class="note">Paper only. Promoted rules fire as "Strategy Lab" alerts (Act now) and are paper-traded with their own exit; a rule that loses money over 15 live paper trades is switched off automatically.</p>`;
+      <p class="note">Paper only. Promoted rules with moderate or strong holdout evidence (or ones you tick) fire as "Strategy Lab" alerts and are paper-traded with their own exit (straddle sells only when the paper account is ₹1.5 lakh or more); a rule that loses money over 15 live paper trades is switched off automatically.</p>`;
     const job = async (path, body = {}) => { try { await post(path, body); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
     $("#lab-run").onclick = () => job("/api/factory/run", { n: 8000 });
+    $("#lab-40").onchange = (e) => { LS.set("lab40", e.target.checked); draw(); };
+    $("#lab-lib").onclick = async () => { try { const r = await post("/api/factory/library", {}); toast(`${r.queued} library rules queued: running the test now`); job("/api/factory/run", { n: 4000 }); } catch (e) { toast(e.message); } };
     $("#lab-ideas").onclick = async (e) => { e.target.disabled = true; e.target.textContent = "Claude is thinking…";
       try { const r = await post("/api/factory/ideas", {}); toast(`Claude proposed ${r.queued} testable rules${r.rejected ? ` (${r.rejected} not usable)` : ""}: tested on the next run`); draw(); } catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = "Ask Claude for new ideas"; } };
     $("#lab-up").onclick = async () => {

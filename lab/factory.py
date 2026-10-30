@@ -54,7 +54,92 @@ FEATURES = {
     "vix": ("India VIX (yesterday)", ""), "iv": ("ATM implied volatility", ""), "iv_chg3": ("IV change over 15 min", "pts"),
     "prem_pct": ("ATM straddle as % of price (priced move)", "%"), "dte": ("trading days to expiry", "d"), "dow": ("weekday (0 Mon)", ""),
 }
-WINDOWS = [(15, 120), (15, 330), (60, 240), (120, 330), (15, 75), (180, 330), (45, 180)]
+# indicators with the settings traders use (several settings each, so the Lab can tell which works best)
+FEATURES.update({
+    "fc_pos": ("position vs the first 5-min candle (9:15-9:20; ±0.5 = at its high/low)", ""),
+    "or30_pos": ("position vs the 30-min opening range (±0.5 = at its edge)", ""),
+    "pm_pos": ("position vs the 14:15-14:20 candle (±0.5 = at its high/low)", ""),
+    "st_10_3": ("Supertrend 10,3 direction (+1 up / -1 down)", ""), "st_7_3": ("Supertrend 7,3 direction", ""),
+    "st_10_2": ("Supertrend 10,2 direction", ""), "st_flip": ("bars since Supertrend 10,3 flipped", ""),
+    "bb_pctb": ("Bollinger 20,2 %B (0 lower band, 1 upper band)", ""), "bb_width": ("Bollinger 20,2 width", "%"),
+    "bb15_pctb": ("Bollinger 20,1.5 %B", ""), "vwap_z": ("distance from the day's average price in std-devs (VWAP bands)", ""),
+    "macd_h": ("MACD 12,26,9 histogram", "%"), "adx": ("ADX 14 (trend strength)", ""), "di_diff": ("+DI minus -DI (14)", ""),
+    "rsi2": ("RSI 2 (Connors)", ""), "rsi7": ("RSI 7", ""), "ema5_13": ("EMA 5 minus EMA 13", "%"),
+    "vs_sma20": ("price vs SMA 20 (5-min)", "%"), "cpr_width": ("CPR width (today's pivot band)", "%"),
+    "cpr_pos": ("price vs the CPR (+ above top, - below bottom, 0 inside)", ""),
+})
+WINDOWS = [(15, 120), (15, 330), (60, 240), (120, 330), (15, 75), (180, 330), (45, 180), (305, 330)]
+
+# selling the at-the-money straddle (both legs short), each leg with its own stop, out at 15:15
+SELL_EXITS = {"ss25": 25, "ss35": 35, "ss50": 50, "fly30": 30, "fly60": 60}
+FLY_WINGS = 4                 # iron fly: long wings 4 strikes away (Nifty ±200, Bank Nifty ±400): fits a ~₹40-60K margin
+EXIT_WORDS.update({"ss25": "sell ATM call + put, 25% stop on each leg, out by 15:15",
+                   "ss35": "sell ATM call + put, 35% stop on each leg, out by 15:15",
+                   "ss50": "sell ATM call + put, 50% stop on each leg, out by 15:15",
+                   "fly30": "iron fly: sell ATM call + put, buy wings 4 strikes away; out if the loss reaches 30% of the credit, or 15:15",
+                   "fly60": "iron fly (wings 4 strikes away); out at a loss of 60% of the credit, or 15:15"})
+
+
+def _wilder(x, n):
+    out = np.full(len(x), np.nan)
+    if len(x) < n:
+        return out
+    out[n - 1] = np.nanmean(x[:n])
+    for i in range(n, len(x)):
+        out[i] = (out[i - 1] * (n - 1) + x[i]) / n
+    return out
+
+
+def _tr(h, l, c):
+    pc = np.concatenate([[c[0]], c[:-1]])
+    return np.maximum(h - l, np.maximum(abs(h - pc), abs(l - pc)))
+
+
+def supertrend(h, l, c, n=10, m=3.0):
+    """Supertrend direction per bar (+1 / -1; 0 until there is enough data). Standard final-band rules."""
+    atr = _wilder(_tr(h, l, c), n)
+    mid = (h + l) / 2
+    bu, bl = mid + m * atr, mid - m * atr
+    d = np.zeros(len(c))
+    fu = fl = np.nan
+    trend = 1
+    for i in range(len(c)):
+        if np.isnan(atr[i]):
+            continue
+        if np.isnan(fu):
+            fu, fl = bu[i], bl[i]
+        else:
+            fu = bu[i] if (bu[i] < fu or c[i - 1] > fu) else fu
+            fl = bl[i] if (bl[i] > fl or c[i - 1] < fl) else fl
+        if trend < 0 and c[i] > fu:
+            trend = 1
+        elif trend > 0 and c[i] < fl:
+            trend = -1
+        d[i] = trend
+    return d
+
+
+def adx(h, l, c, n=14):
+    upm = np.concatenate([[0], np.diff(h)])
+    dnm = np.concatenate([[0], -np.diff(l)])
+    pdm = np.where((upm > dnm) & (upm > 0), upm, 0.0)
+    ndm = np.where((dnm > upm) & (dnm > 0), dnm, 0.0)
+    atr = _wilder(_tr(h, l, c), n)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pdi = 100 * _wilder(pdm, n) / atr
+        ndi = 100 * _wilder(ndm, n) / atr
+        dx = 100 * abs(pdi - ndi) / (pdi + ndi)
+    ok = ~np.isnan(dx)
+    a = np.full(len(c), np.nan)
+    if ok.sum() >= n:
+        first = np.argmax(ok)
+        a[first:] = _wilder(np.nan_to_num(dx[first:]), n)
+    return a, pdi - ndi
+
+
+def _box_pos(c, hi, lo):
+    rng = hi - lo
+    return (c - (hi + lo) / 2) / rng if rng and rng > 0 else np.full(len(c), np.nan)
 
 
 # ------------------------------------------------------------------ features (shared with the live app)
@@ -126,6 +211,51 @@ def bar_features(o, h, l, c, ctx: dict, iv=None, prem=None) -> dict:
     f["prem_pct"] = np.asarray(prem, float) if prem is not None else np.full(n, np.nan)
     f["dte"] = np.full(n, ctx.get("dte") if ctx.get("dte") is not None else np.nan)
     f["dow"] = np.full(n, ctx.get("dow", np.nan))
+    # opening candles
+    f["fc_pos"] = _box_pos(c, h[0], l[0]) if n else np.full(n, np.nan)
+    f["fc_pos"][:1] = np.nan
+    f["or30_pos"] = np.full(n, np.nan)
+    if n > 6:
+        f["or30_pos"][6:] = _box_pos(c[6:], h[:6].max(), l[:6].min())
+    f["pm_pos"] = np.full(n, np.nan)
+    if n > 61:                                           # bar 60 closes at 14:20
+        f["pm_pos"][61:] = _box_pos(c[61:], h[60], l[60])
+    # Supertrend (three settings) and how fresh the 10,3 trend is
+    f["st_10_3"], f["st_7_3"], f["st_10_2"] = supertrend(h, l, c, 10, 3), supertrend(h, l, c, 7, 3), supertrend(h, l, c, 10, 2)
+    fl = np.zeros(n)
+    for i in range(1, n):
+        fl[i] = 0 if f["st_10_3"][i] != f["st_10_3"][i - 1] else fl[i - 1] + 1
+    f["st_flip"] = np.where(f["st_10_3"] == 0, np.nan, fl)
+    # Bollinger bands
+    s = pd.Series(c)
+    for key, k in (("bb_pctb", 2.0), ("bb15_pctb", 1.5)):
+        ma, sd = s.rolling(20).mean(), s.rolling(20).std(ddof=0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            f[key] = ((s - (ma - k * sd)) / (2 * k * sd)).to_numpy()
+        if key == "bb_pctb":
+            f["bb_width"] = (4 * sd / ma * 100).to_numpy()
+    # VWAP bands (indices have no volume: the day's average price and its spread)
+    tw = np.cumsum(c) / (np.arange(n) + 1)
+    dev = pd.Series(c - tw).expanding(min_periods=6).std(ddof=0).to_numpy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        f["vwap_z"] = np.where(dev > 0, (c - tw) / dev, np.nan)
+    macd = _ema(c, 12) - _ema(c, 26)
+    f["macd_h"] = (macd - _ema(macd, 9)) / c * 100
+    f["macd_h"][:26] = np.nan
+    f["adx"], f["di_diff"] = adx(h, l, c, 14)
+    f["rsi2"], f["rsi7"] = _rsi(c, 2), _rsi(c, 7)
+    f["ema5_13"] = (_ema(c, 5) - _ema(c, 13)) / c * 100
+    f["vs_sma20"] = (c / s.rolling(20).mean().to_numpy() - 1) * 100
+    ph, pl, pcl = ctx.get("prev_high"), ctx.get("prev_low"), ctx.get("prev_close")
+    if ph and pl and pcl:
+        piv = (ph + pl + pcl) / 3
+        bc = (ph + pl) / 2
+        tc = 2 * piv - bc
+        top, bot = max(tc, bc), min(tc, bc)
+        f["cpr_width"] = np.full(n, (top - bot) / piv * 100)
+        f["cpr_pos"] = np.where(c > top, (c - top) / piv * 100, np.where(c < bot, (c - bot) / piv * 100, 0.0))
+    else:
+        f["cpr_width"], f["cpr_pos"] = np.full(n, np.nan), np.full(n, np.nan)
     return f
 
 
@@ -153,6 +283,66 @@ def _sim(c, sp, m0, entry, sym, lot, rule):
         x = seg[ok[-1]]
     ex = max(0.05, x - slip(sym, x))
     return (ex - entry) * lot - charges([(1, entry), (-1, ex)], lot)
+
+
+SELL_FIRST_TOD = 5            # the straddle can be sold from 09:20 (the famous 9:20 straddle)
+ALL_EXITS = list(EXITS) + list(SELL_EXITS)
+
+
+def _sim_short(legs, m0, sym, lot, sl_pct):
+    """Sell the ATM call and put at m0; each leg is bought back at its own stop (+sl %) or at 15:15."""
+    pnl, fills = 0.0, []
+    for px in legs:
+        c = px["c"]
+        e = c[m0]
+        if math.isnan(e) or e <= 0.5:
+            return math.nan
+        entry = max(0.05, e - slip(sym, e))
+        seg = c[m0 + 1:M_EXIT + 1]
+        hit = np.nan_to_num(seg, nan=-1) >= entry * (1 + sl_pct / 100)
+        if hit.any():
+            x = seg[int(np.argmax(hit))]
+        else:
+            ok = np.where(~np.isnan(seg))[0]
+            if not len(ok):
+                return math.nan
+            x = seg[ok[-1]]
+        ex = x + slip(sym, x)
+        pnl += (entry - ex) * lot
+        fills += [(-1, entry), (1, ex)]
+    return pnl - charges(fills, lot)
+
+
+def _sim_fly(legs, wings, m0, sym, lot, loss_pct):
+    """Iron fly at m0: short ATM call + put, long the wings. Out when the position has lost loss_pct of the credit, or 15:15."""
+    sc, spp = legs[0]["c"], legs[1]["c"]
+    wc, wp = wings[0]["c"], wings[1]["c"]
+    e = [sc[m0], spp[m0], wc[m0], wp[m0]]
+    if any(math.isnan(x) or x <= 0 for x in e[:2]) or any(math.isnan(x) for x in e[2:]):
+        return math.nan
+    sells = [max(0.05, x - slip(sym, x)) for x in e[:2]]
+    buys = [x + slip(sym, x) for x in e[2:]]
+    credit = sum(sells) - sum(buys)
+    if credit <= 0:
+        return math.nan
+    seg = np.vstack([sc[m0 + 1:M_EXIT + 1], spp[m0 + 1:M_EXIT + 1], wc[m0 + 1:M_EXIT + 1], wp[m0 + 1:M_EXIT + 1]])
+    value = seg[0] + seg[1] - seg[2] - seg[3]                  # cost to close now (mid)
+    hit = np.nan_to_num(value, nan=-1e9) >= credit * (1 + loss_pct / 100)
+    j = int(np.argmax(hit)) if hit.any() else None
+    if j is None:
+        ok = np.where(~np.isnan(value))[0]
+        if not len(ok):
+            return math.nan
+        j = ok[-1]
+    x = seg[:, j]
+    if np.isnan(x).any():
+        return math.nan
+    close_sells = [v + slip(sym, v) for v in x[:2]]
+    close_buys = [max(0.05, v - slip(sym, v)) for v in x[2:]]
+    exit_cost = sum(close_sells) - sum(close_buys)
+    fills = [(-1, sells[0]), (-1, sells[1]), (1, buys[0]), (1, buys[1]),
+             (1, close_sells[0]), (1, close_sells[1]), (-1, close_buys[0]), (-1, close_buys[1])]
+    return (credit - exit_cost) * lot - charges(fills, lot)
 
 
 def build(data_dir, syms=("NIFTY", "BANKNIFTY"), log=print, should_stop=lambda: False) -> pd.DataFrame:
@@ -195,13 +385,26 @@ def build(data_dir, syms=("NIFTY", "BANKNIFTY"), log=print, should_stop=lambda: 
             f = bar_features(o, h, l, c, ctx, ivs, prem)
             for i in range(nb):
                 tod = (i + 1) * 5
-                if tod < FIRST_ENTRY_TOD or tod > LAST_ENTRY_TOD:
+                if tod < SELL_FIRST_TOD or tod > LAST_ENTRY_TOD:
                     continue
                 m0 = 5 * i + 5
                 if m0 >= M_EXIT:
                     continue
                 k = day.atm(m0)
                 base = {"sym": sym, "date": day.date, "bar": i, **{name: float(f[name][i]) for name in FEATURES}}
+                legs = [day.px.get((float(k), sd)) for sd in ("CE", "PE")]
+                if all(lg is not None for lg in legs):        # selling the ATM straddle / iron fly (non-directional)
+                    step = UNDERLYINGS[sym]["step"]
+                    wings = [day.px.get((float(k + FLY_WINGS * step), "CE")), day.px.get((float(k - FLY_WINGS * step), "PE"))]
+                    row = {**base, "dir": 0, "premium": round(sp[m0] * lot * 0.12, 0)}
+                    for rule, sl in SELL_EXITS.items():
+                        if rule.startswith("fly"):
+                            row["pnl_" + rule] = _sim_fly(legs, wings, m0, sym, lot, sl) if all(w is not None for w in wings) else math.nan
+                        else:
+                            row["pnl_" + rule] = _sim_short(legs, m0, sym, lot, sl)
+                    rows.append(row)
+                if tod < FIRST_ENTRY_TOD:
+                    continue
                 for d, side in ((1, "CE"), (-1, "PE")):
                     px = day.px.get((float(k), side))
                     if px is None:
@@ -220,7 +423,9 @@ def build(data_dir, syms=("NIFTY", "BANKNIFTY"), log=print, should_stop=lambda: 
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.sort_values(["date", "sym", "bar", "dir"]).reset_index(drop=True)
-        for c_ in ("pnl_" + r for r in EXITS):
+        for c_ in ["pnl_" + r for r in ALL_EXITS]:
+            if c_ not in df:
+                df[c_] = np.nan
             df[c_] = df[c_].astype("float32")
     return df
 
@@ -257,7 +462,8 @@ def words(s: dict) -> str:
         name, unit = FEATURES.get(feat, (feat, ""))
         cs.append(f"{name} {ops.get(op, op)} {v:g}{unit if unit in ('%', '×', 'min', 'd', 'pts') else ''}")
     hm = lambda t: (dt.datetime(2000, 1, 1, 9, 15) + dt.timedelta(minutes=t)).strftime("%H:%M")
-    side = "Buy the ATM call" if s["dir"] > 0 else "Buy the ATM put"
+    side = ("Buy the ATM call" if s["dir"] > 0 else "Buy the ATM put" if s["dir"] < 0 else
+            "Sell an iron fly (margin ~₹40-60K)" if s["exit"].startswith("fly") else "Sell the ATM straddle (needs ~₹1-2 lakh margin)")
     return (f"{side} on {' / '.join(x.replace('BANKNIFTY', 'Bank Nifty').replace('NIFTY', 'Nifty') for x in s['syms'])} "
             f"between {hm(s['win'][0])} and {hm(s['win'][1])} when " + " and ".join(cs) +
             f". Exit {EXIT_WORDS[s['exit']]}. Max {s['max_day']} trade{'s' if s['max_day'] > 1 else ''} a day, none after a loss.")
@@ -269,10 +475,16 @@ def validate(s: dict) -> dict | None:
         conds = [[str(f), str(o), float(v)] for f, o, v in s.get("conds", [])]
         if not conds or len(conds) > 4 or any(f not in FEATURES or o not in (">", "<") for f, o, _ in conds):
             return None
-        d = 1 if int(s.get("dir", 1)) > 0 else -1
+        d0 = int(s.get("dir", 1))
+        d = 1 if d0 > 0 else -1 if d0 < 0 else 0
         w = [int(s.get("win", [15, 330])[0]), int(s.get("win", [15, 330])[1])]
         w = [max(FIRST_ENTRY_TOD, min(w)), min(LAST_ENTRY_TOD, max(w))]
-        ex = s.get("exit") if s.get("exit") in EXITS else "std"
+        ex = s.get("exit")
+        if d == 0:
+            ex = ex if ex in SELL_EXITS else "ss25"
+            w = [max(SELL_FIRST_TOD, min(int(x) for x in s.get("win", [5, 330]))), w[1]]
+        else:
+            ex = ex if ex in EXITS else "std"
         syms = [x for x in (s.get("syms") or ["NIFTY", "BANKNIFTY"]) if x in UNDERLYINGS] or ["NIFTY", "BANKNIFTY"]
         out = {"dir": d, "conds": conds, "win": w, "exit": ex, "max_day": 2 if int(s.get("max_day", 1)) > 1 else 1,
                "syms": sorted(syms), "source": str(s.get("source") or "manual")[:80], "note": str(s.get("note") or "")[:300]}
@@ -295,7 +507,7 @@ class Book:
         self.dix = df["date"].map(di).to_numpy()
         self.part = np.where(self.dix < a, 0, np.where(self.dix < b, 1, 2))
         self.cols = {c: df[c].to_numpy() for c in list(FEATURES) + ["dir", "sym"]}
-        self.pnl = {r: df["pnl_" + r].to_numpy(dtype=float) for r in EXITS}
+        self.pnl = {r: df["pnl_" + r].to_numpy(dtype=float) for r in ALL_EXITS if "pnl_" + r in df}
         self.symcode = df["sym"].to_numpy()
         self.symi = (self.symcode == "BANKNIFTY").astype(np.int64)
         self.n_days = {0: a, 1: b - a, 2: len(dates) - b}
@@ -324,7 +536,7 @@ class Book:
         _, first = np.unique(key, return_index=True)        # rows are in time order: first signal of each day/symbol
         take = list(first)
         if s["max_day"] > 1:                                # a second trade only after a winning first, once it is over
-            gap = max(30, EXITS[s["exit"]][2])
+            gap = max(30, EXITS.get(s["exit"], (0, 0, 360))[2])
             won = {key[j]: tod[j] + gap for j in first if pnl[j] > 0}
             if won:
                 k_after = np.array([won.get(k, np.inf) for k in key])
@@ -391,7 +603,9 @@ def random_rule(book: Book, rng: random.Random) -> dict:
         conds.append([feat, rng.choice([">", "<"]), float(rng.choice(list(q)))])
     if not conds:
         conds = [["ret_b3", ">", 0.1]]
-    s = {"dir": rng.choice([1, -1]), "conds": conds, "win": list(rng.choice(WINDOWS)), "exit": rng.choice(list(EXITS)),
+    d = rng.choice([1, -1, 1, -1, 0]) if "ss25" in book.pnl else rng.choice([1, -1])
+    win = list(rng.choice(WINDOWS + ([(5, 20), (5, 75), (75, 120)] if d == 0 else [])))
+    s = {"dir": d, "conds": conds, "win": win, "exit": rng.choice(list(SELL_EXITS) if d == 0 else list(EXITS)),
          "max_day": rng.choice([1, 1, 2]), "syms": rng.choice([["NIFTY"], ["BANKNIFTY"], ["BANKNIFTY", "NIFTY"]]), "source": "generated"}
     s["id"] = sid(s)
     return s
@@ -406,7 +620,7 @@ def mutate(book: Book, s: dict, rng: random.Random) -> dict:
         if q:
             c[2] = float(rng.choice(q))
     elif what == "exit":
-        m["exit"] = rng.choice(list(EXITS))
+        m["exit"] = rng.choice(list(SELL_EXITS) if m["dir"] == 0 else list(EXITS))
     elif what == "win":
         m["win"] = list(rng.choice(WINDOWS))
     elif what == "add" and len(m["conds"]) < 3:
@@ -544,7 +758,22 @@ def view(data_dir) -> dict:
     by = {}
     for r in rules:
         by[r["stage"]] = by.get(r["stage"], 0) + 1
-    return {"updated": st.get("updated"), "tried_total": st.get("tried_total", 0), "luck_expected": round(st.get("tried_total", 0) * P_LUCK, 1),
+    order = {"promoted": 0, "failed holdout": 1, "failed validation": 2, "failed train": 3, "duplicate": 4}
+    lib = {}
+    for r in st.get("rules", {}).values():
+        if not str(r.get("source", "")).startswith("library:"):
+            continue
+        name = r["source"][8:]
+        cur = lib.get(name)
+        key = (order.get(r["stage"], 9), -(r["hold"].get("avg") or -1e9) if r["stage"] == "promoted" else -(r["train"].get("t") or -9))
+        if cur is None or key < cur["_k"]:
+            lib[name] = {"_k": key, "best": r, "n_rules": 0}
+        lib[name]["n_rules"] = lib[name].get("n_rules", 0) + 1
+    library = sorted(({"name": k, "n_rules": v["n_rules"], "best": v["best"]} for k, v in lib.items()),
+                     key=lambda x: (order.get(x["best"]["stage"], 9), -(x["best"]["hold"].get("avg") or -1e9)))
+    for r in rules:
+        r["is_live"] = is_live(r)
+    return {"updated": st.get("updated"), "tried_total": st.get("tried_total", 0), "library": library, "luck_expected": round(st.get("tried_total", 0) * P_LUCK, 1),
             "period": st.get("period"), "n_days": st.get("n_days"), "runs": st.get("runs", [])[-10:], "by_stage": by,
             "rules": rules[:120], "features": {k: v[0] for k, v in FEATURES.items()}, "exits": EXIT_WORDS,
             "pending_ideas": len(st.get("ideas", []))}
@@ -555,7 +784,7 @@ def add_ideas(data_dir, ideas: list, source: str) -> dict:
     st = load(data_dir)
     ok, bad = [], 0
     for x in ideas:
-        v = validate({**x, "source": source})
+        v = validate({**x, "source": x.get("source") or source})
         if v:
             ok.append(v)
         else:
@@ -565,8 +794,15 @@ def add_ideas(data_dir, ideas: list, source: str) -> dict:
     return {"queued": len(ok), "rejected": bad}
 
 
+def is_live(r: dict) -> bool:
+    """Promoted rules trade on paper when their holdout evidence is moderate or strong, or when you switched them on."""
+    if r.get("stage") != "promoted" or r.get("live") == "off":
+        return False
+    return r.get("live") == "on" or r.get("evidence") in ("strong", "moderate")
+
+
 def promoted(data_dir) -> list:
-    return [r for r in load(data_dir).get("rules", {}).values() if r.get("stage") == "promoted" and r.get("live") != "off"]
+    return [r for r in load(data_dir).get("rules", {}).values() if is_live(r)]
 
 
 def signal_now(rule: dict, feats: dict, sym: str, i: int | None = None) -> bool:
