@@ -666,6 +666,11 @@ def factory_view():
     from lab import ebooks, factory
     out = factory.view(ROOT / "data")
     out["books"] = ebooks.books(ROOT / "data")
+    try:
+        from lab import mlstrat
+        out["ml"] = mlstrat.load(ROOT / "data")
+    except Exception:
+        out["ml"] = {}
     out["has_history"] = any((ROOT / "data" / "history").glob("*/raw_*.parquet"))
     try:
         from webapp.live_api import engine as _eng
@@ -685,6 +690,13 @@ async def factory_run(req: Request):
 
     def job(log, stop):
         factory.run(ROOT / "data", n_random=n, n_mutate=n // 2, log=log, should_stop=stop)
+        if not stop():
+            try:
+                from lab import mlstrat
+                log("Training model-based strategies (3 models) on the same periods…")
+                mlstrat.run(ROOT / "data", log=log, should_stop=stop)
+            except Exception as e:
+                log(f"ML strategies failed: {e}")
         try:
             from webapp.live_api import engine as _eng
             _eng()._fact_rules = (0.0, [])

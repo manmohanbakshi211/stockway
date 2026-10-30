@@ -38,7 +38,8 @@ class Store:
                 self.db.execute("ALTER TABLE alerts ADD COLUMN story INTEGER")
             pcols = {r[1] for r in self.db.execute("PRAGMA table_info(paper)").fetchall()}
             for c, t in (("dir", "INTEGER DEFAULT 1"), ("und_key", "TEXT"), ("und_entry", "REAL"), ("und_exit", "REAL"),
-                         ("und_last", "REAL"), ("mode", "TEXT"), ("hold_max", "INTEGER"), ("trail", "TEXT")):
+                         ("und_last", "REAL"), ("mode", "TEXT"), ("hold_max", "INTEGER"), ("trail", "TEXT"),
+                         ("plan", "TEXT")):                 # 2.18: chart-level exit (lab/exits.py) for Strategy Lab rules
                 if c not in pcols:                     # 2.14: short positions, underlying price, how the trade was taken
                     self.db.execute(f"ALTER TABLE paper ADD COLUMN {c} {t}")
             self.db.commit()

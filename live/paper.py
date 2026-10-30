@@ -100,10 +100,11 @@ class PaperBook:
         manual_code = 3 if aggressive else 2 if override else int(manual)
         if int(c.get("max_lots") or 5) == 1:
             lots = 1
-        ex = ((alert.get("data") or {}).get("factory") or {}).get("exit")   # a Strategy Lab rule brings its own exit
+        fac = (alert.get("data") or {}).get("factory") or {}
+        ex = fac.get("exit")                              # a Strategy Lab rule brings its own exit
         return self._open(state, now, sym=alert["sym"], kind=alert["kind"], opt=opt, entry=entry, ltp=inst.ltp, lots=lots,
                           direction=1, manual=manual_code, alert_id=alert.get("id"), und_key=alert.get("und_key"),
-                          why=alert.get("title", ""), exit=ex)
+                          why=alert.get("title", ""), exit=ex, plan=fac.get("plan"))
 
     def open_manual(self, state, now: dt.datetime, *, sym: str, opt: dict, direction: int, lots: int = 1,
                     und_key: str | None = None, kind="manual") -> dict:
@@ -126,7 +127,7 @@ class PaperBook:
         return {"opened": tid}
 
     def _open(self, state, now, *, sym, kind, opt, entry, ltp, lots, direction, manual, alert_id=None, und_key=None, why="",
-              exit=None):
+              exit=None, plan=None):
         c = self.cfg
         und = state.get(und_key) if und_key else None
         tp, sp = float(c["target_pct"]) / 100, float(c["stop_pct"]) / 100
@@ -144,6 +145,14 @@ class PaperBook:
              "peak": entry, "last": ltp, "status": "open", "manual": manual, "dir": direction,
              "und_key": und_key, "und_entry": und.ltp if und and und.ltp else None, "und_last": und.ltp if und and und.ltp else None,
              "mode": MODES.get(manual, "auto"), "hold_max": hold, "trail": trail}
+        if plan and t["und_entry"] and plan.get("R"):     # chart-level exit: stop / target on the underlying (lab/exits.py)
+            import json as _json
+            from lab.exits import PREM_STOP, STYLES, LivePlan
+            lp = LivePlan(plan["style"], t["und_entry"], 1 if opt["side"] == "CE" else -1, float(plan["R"]), entry, now.timestamp())
+            t["plan"] = _json.dumps(lp.to_dict())
+            t["target"] = round(entry * 100, 2)            # the chart target decides, not a premium %
+            t["stop"] = round(entry * (1 - PREM_STOP / 100), 2)
+            t["hold_max"] = STYLES[plan["style"]]["max"]
         if kind == "factory":                             # remember which Strategy Lab rule took it (for its live record)
             import re as _re
             mm = _re.search(r"\b(S[0-9a-f]{8})\b", why or "")
@@ -202,7 +211,17 @@ class PaperBook:
             peak = max(t["peak"] or 0, inst.ltp) if d > 0 else min(t["peak"] or inst.ltp, inst.ltp)
             held = (now.timestamp() - t["entry_ts"]) / 60
             reason = None
-            if (d > 0 and px >= t["target"]) or (d < 0 and px <= t["target"]):
+            lp = None
+            if t.get("plan"):
+                import json as _json
+                from lab.exits import LivePlan
+                lp = LivePlan.from_dict(_json.loads(t["plan"]))
+                why = lp.check(und.ltp if und and und.ltp else None, inst.ltp, now.timestamp())
+                reason = {"stop": "chart stop", "premium stop": "stop loss", "target": "chart target",
+                          "time": "time limit"}.get(why) if why else None
+            if reason:
+                pass
+            elif (d > 0 and px >= t["target"]) or (d < 0 and px <= t["target"]):
                 reason = "target"
             elif (d > 0 and px <= t["stop"]) or (d < 0 and px >= t["stop"]):
                 reason = "stop loss"
@@ -221,6 +240,8 @@ class PaperBook:
                 closed.append(self._close(t, px, now, reason, und))
             else:
                 upd = {"peak": peak, "last": inst.ltp}
+                if lp:
+                    upd["plan"] = _json.dumps(lp.to_dict())
                 if und and und.ltp:
                     upd["und_last"] = und.ltp
                 self.store.update_trade(t["id"], **upd)

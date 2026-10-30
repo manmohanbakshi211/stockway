@@ -209,6 +209,11 @@ function alertItem(a, full = false, extra = "") {
     (a.direction === "up" || a.direction === "down") ? `<span class="track muted">New signal type: no track record yet</span>` : "";
   const ev = (d.evidence || []).map((e) => `<span class="ev ${e.agree ? "yes" : "no"}">${e.agree ? "✓" : "✗"} ${esc(e.label)}</span>`).join("");
   const plan = lv.stop ? `<div class="plan"><span>Target <b>${fx(lv.target)}</b> <small>(${lv.target_pct}%)</small></span><span>Wrong ${a.direction === "up" ? "below" : "above"} <b>${fx(lv.stop)}</b> <small>(${lv.stop_pct}%)</small></span>${lv.rr ? `<span>Reward:risk <b>${lv.rr}</b></span>` : ""}</div>` : "";
+  const pp = d.plan;
+  const pro = pp && (a.direction === "up" || a.direction === "down") ? `<details class="pro-plan"><summary><b>Pro plan</b> <span class="pill p-amber" title="Shown to learn from; paper trades keep the current exits until this wins on live results">testing</span> <small class="muted">${esc(pp.who)}</small></summary>
+      <div class="plan"><span>Chart entry <b>${fx(pp.und_entry)}</b></span><span>Stop-loss <b>${fx(pp.und_stop)}</b> <small>(1R = ${fx(pp.R_pts)} pts, ATR ${fx(pp.atr)})</small></span><span>1R <b>${fx(pp.und_1r)}</b></span>${pp.und_target ? `<span>Target <b>${fx(pp.und_target)}</b> <small>(${pp.rr}R)</small></span>` : `<span>Trail: best − 2.5 ATR</span>`}</div>
+      ${pp.opt_entry ? `<div class="plan"><span>Option: buy up to <b>₹${fx(pp.opt_entry_max)}</b></span><span>SL ≈ <b>₹${fx(pp.opt_stop)}</b></span>${pp.opt_target ? `<span>Target ≈ <b>₹${fx(pp.opt_target)}</b></span>` : ""}<span>Max loss <b>${rupees(pp.max_loss)}</b>/lot</span><span class="${pp.lots ? "up" : "down"}">${esc(pp.fits)}</span></div>` : ""}
+      <p class="small muted" style="margin:2px 0 0">${esc(pp.words)}. Option levels are estimates from delta; the chart levels decide.</p></details>` : "";
   const nowTs = L.snap && L.snap.clock ? Date.parse(L.snap.clock) / 1000 : Date.now() / 1000;
   const ageMin = (nowTs - a.ts) / 60;
   const stale = ageMin > 5;
@@ -233,8 +238,17 @@ function alertItem(a, full = false, extra = "") {
     <div class="al-body"><div class="al-title">${arrow(a.direction)} <a href="${a.sym === "GLOBAL" ? "#/world" : `#/chart?s=${encodeURIComponent(a.sym)}`}">${esc(a.title)}</a></div>
       <p>${esc(a.detail)}${link} <span class="muted small">${esc(KIND[a.kind] || a.kind)}</span> ${track}</p>${live ? `<p class="small" style="margin:2px 0 6px">${live}</p>` : ""}
       ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}
-      ${ev || ctxChips || conv || fits ? `<div class="evs">${conv}${fits}${ev}${ctxChips}</div>` : ""}${plan}${trade}${riskLine(d.risk)}
+      ${ev || ctxChips || conv || fits ? `<div class="evs">${conv}${fits}${ev}${ctxChips}</div>` : ""}${plan}${pro}${trade}${riskLine(d.risk)}
       ${a.ai ? `<div class="ai-text">${fmtAI(a.ai)}</div>` : ""}${extra}</div></li>`;
+}
+
+function exitBoardLive(x) {
+  if (!x || !(x.styles || []).length) return `<div class="panel tight" style="margin-top:14px"><h3>Stop-loss &amp; target styles <span class="pill p-amber">shadow</span></h3><p class="small muted">Every directional alert's option is followed under the current exit and 4 chart-level styles (ATR 2R, signal candle 2R, breakeven 3R, Chandelier trail). Results appear after the first live session.</p></div>`;
+  const rs = (v) => v == null ? "–" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(v).toLocaleString("en-IN")}</span>`;
+  return `<div class="panel tight" style="margin-top:14px"><h3>Stop-loss &amp; target styles on live alerts <span class="pill p-amber">shadow</span></h3>
+    <p class="small muted">${esc(x.note)}</p>
+    <div class="table-wrap"><table class="mini"><thead><tr><th>Exit style</th><th class="r">Alerts</th><th class="r">Days</th><th class="r">Option avg</th><th class="r">Won</th><th class="r">₹ per lot</th><th class="r">₹40K lots: ₹/lot</th></tr></thead><tbody>
+    ${x.styles.map((r) => `<tr><td>${r.style === "current" ? "<b>Current exit</b> (champion)" : esc(r.style)} <small class="muted">${esc(r.who)}</small></td><td class="r">${r.n}</td><td class="r">${r.days}</td><td class="r">${r.avg_pct >= 0 ? "+" : ""}${r.avg_pct}%</td><td class="r">${r.win_pct}%</td><td class="r">${rs(r.avg_rs)}</td><td class="r">${r.n40 ? rs(r.avg_rs40) + ` <small class="muted">(${r.n40})</small>` : "–"}</td></tr>`).join("")}</tbody></table></div></div>`;
 }
 
 function riskLine(r) {
@@ -1003,7 +1017,9 @@ async function pageScorecard() {
     <div class="panel tight" style="margin-top:14px"><h3>Conviction model <span class="pill ${m.trained ? "p-up" : ""}">${m.trained ? "trusted: it now picks Focus" : "learning"}</span></h3>
       <p class="small">Learns which alerts are worth an option buy from every graded alert: the stock (move, VWAP, futures buildup, order flow, unusual options, IV), the option itself (price per lot, spread), and everything around it (Nifty, breadth, its sector, global markets, VIX, fresh news). Trained on earlier days, judged on the latest days it never saw.</p>
       <p class="small">${m.n ? `${(m.n || 0).toLocaleString("en-IN")} graded alerts over ${m.days || 0} day${m.days === 1 ? "" : "s"}. ` : ""}${m.hold_n ? `Holdout ${m.hold_n.toLocaleString("en-IN")} alerts: top 10% by conviction worked ${m.top10_hit}% vs ${m.base_rate}% for all (option ${m.top10_o60 >= 0 ? "+" : ""}${m.top10_o60}% vs ${m.all_o60 >= 0 ? "+" : ""}${m.all_o60}% after an hour). ` : ""}<b>${esc(m.why || (m.need ? `needs ${m.need} graded alerts` : ""))}</b></p>
-      ${(m.drivers || []).length ? `<p class="small muted">What matters most so far: ${m.drivers.map((d) => esc(d.feature)).join(", ")}.</p>` : ""}</div>
+      ${(m.drivers || []).length ? `<p class="small muted">What matters most so far: ${m.drivers.map((d) => esc(d.feature)).join(", ")}.</p>` : ""}
+      ${(m.models || []).length ? `<p class="small">Models compared on the same unseen days: ${m.models.map((x) => `${esc(x.name)} <b>${x.auc}</b>${x.chosen ? " ✓ in use" : ""}${x.champion ? " (champion)" : ""}`).join(" · ")}. A challenger replaces the champion only if it is 0.02 AUC better.</p>` : ""}</div>
+    ${exitBoardLive(sc.exits)}
     <p class="note">${esc(sc.rule)} Alert types under 45% of decided cases (20+) are demoted automatically: out of Focus, no Telegram, no auto paper trade.</p>
     <h2>By alert type</h2>
     <div class="table-wrap"><table><thead><tr><th>Alert</th><th class="r">Graded</th><th class="r">Worked</th><th class="r">Recently</th><th class="r">Option 15 min</th><th class="r">Option 60 min</th><th class="r" title="Price move in the alert's favour">Price 15 min</th><th></th></tr></thead>
@@ -2051,6 +2067,7 @@ async function pageLab() {
         <li><b>Train</b> ${f.period ? `(${esc(f.period.train[0])} → ${esc(f.period.train[1])})` : ""} finds a rule; <b>Validation</b> ${f.period ? `(→ ${esc(f.period.valid[1])})` : ""} confirms it; <b>Holdout</b> ${f.period ? `(${esc(f.period.hold[0])} → ${esc(f.period.hold[1])})` : ""} was never used to choose anything: it is the honest test.</li>
         <li>Each trade buys 1 lot of the at-the-money call or put, after real charges and slippage. A day stops after a losing trade (the small-account way), so "green" = % of trading days that ended in profit.</li>
         <li>If promoted ≈ the luck number, nothing real was found yet. ${prom > f.luck_expected ? "" : `<b>That is the case right now</b>: ${prom} promoted vs up to ${f.luck_expected} by luck, so even the promoted rules may be luck. They trade on paper only to build a live record, and switch off by themselves if they lose over 15 trades. The search keeps going every evening, with your ebooks and Claude's ideas.`}</li></ul></div>
+      ${lab40(f)}${labExits(f)}${labML(f)}
       ${(f.library || []).length ? `<h2>Strategy library <span class="muted small">famous setups from top traders and books, every exit and indicator setting tested</span></h2>
       <div class="table-wrap"><table class="lab"><thead><tr><th>Setup</th><th>Best version</th><th>Train</th><th>Validation</th><th>Holdout</th></tr></thead><tbody>
         ${f.library.map((x) => { const r = x.best; return `<tr><td><b>${esc(x.name)}</b><br><span class="pill ${stage[r.stage] ? stage[r.stage][0] : ""}">${stage[r.stage] ? stage[r.stage][1] : esc(r.stage)}</span> <small class="muted">${x.n_rules} versions</small></td>
@@ -2099,6 +2116,40 @@ async function pageLab() {
     if (x.running) stTimer = setTimeout(() => { if (document.getElementById("lab-stocks")) drawStocks(); }, 5000);
   };
   draw();
+}
+
+const rsL = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
+const stL = (x) => x && x.n ? `${x.n} · ${rsL(x.avg)} · t ${x.t} · ${x.green_pct}% green` : `<span class="muted">–</span>`;
+
+function lab40(f) {
+  const p = f.plan40;
+  if (!p) return `<div class="panel tight" style="margin-top:14px"><h3>Start with ₹40K</h3><p class="small muted">Run research once: the Lab then re-tests every option-buying rule only on trades whose lot costs ≤ ₹10K, and runs a ₹40K account through the holdout.</p></div>`;
+  const rows = (p.best || []).map((x) => `<tr><td class="small">${esc(x.rule)}${x.stocks ? ` <span class="pill">stocks</span>` : ""}<br><small class="muted">${esc(x.id)}</small></td>
+    <td class="small">${stL(x.valid)}</td><td class="small"><b>${stL(x.hold)}</b></td>
+    <td class="small">${x.acct && x.acct.n ? `₹40K → <b>${rsL(x.acct.end).replace("+", "")}</b> (${x.acct.ret_pct >= 0 ? "+" : ""}${x.acct.ret_pct}%)<br>worst day ${rsL(x.acct.worst_day)} · deepest fall ${x.acct.max_dd_pct}%${x.acct.lost_half ? ` · <span class="down">lost half</span>` : ""}` : "–"}</td></tr>`).join("");
+  return `<div class="panel tight" style="margin-top:14px"><h3>Start with ₹40K <span class="muted small">option buying, lot ≤ ₹${(p.lot_max || 10000).toLocaleString("en-IN")}, index + stocks</span></h3>
+    <p class="small"><b>${esc(p.verdict)}</b> Chosen on validation, judged on the holdout (picking on the holdout would flatter them). Account: ₹40K, 1 lot, one trade a day, stop for the day after a loss, real charges.</p>
+    ${rows ? `<div class="table-wrap"><table class="lab"><thead><tr><th>Rule</th><th>Validation</th><th>Holdout</th><th>₹40K account over the holdout</th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}</div>`;
+}
+
+function labExits(f) {
+  const e = f.exit_board;
+  if (!e) return "";
+  const rows = e.board.map((b) => `<tr><td><b>${esc(b.exit)}</b> <span class="pill ${b.kind === "chart level" ? "p-amber" : ""}">${esc(b.kind)}</span><br><small class="muted">${esc(b.who)}: ${esc(b.words)}</small></td>
+    <td class="r">${b.random_hold && b.random_hold.avg != null ? rsL(b.random_hold.avg) : "–"}</td><td class="r">${rsL(b.rules_valid_avg)}</td><td class="r"><b>${rsL(b.rules_hold_avg)}</b></td><td class="r">${b.best_on_valid}</td></tr>`).join("");
+  return `<div class="panel tight" style="margin-top:14px"><h3>Stop-loss &amp; target: which way works <span class="muted small">current % exits vs pro chart-level styles</span></h3>
+    <p class="small">${e.style_beats_current ? `<b class="up">The chart-level style "${esc(e.best_style)}" beats the current exits on validation and holdout.</b> It still runs in shadow on live alerts before it replaces anything.` : `<b>The current % exits are still the champion.</b> Best chart-level style: "${esc(e.best_style)}" (shown as the Pro plan on alerts, testing).`} Compared on the ${e.rules_compared} best rules, each re-run with every exit.</p>
+    <div class="table-wrap"><table class="mini"><thead><tr><th>Exit</th><th class="r" title="Average over every possible entry in the holdout">Any entry (holdout)</th><th class="r">Best rules: validation</th><th class="r">Best rules: holdout</th><th class="r" title="How many rules did best with this exit on validation">Best for</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function labML(f) {
+  const m = f.ml;
+  if (!m || !m.best) return "";
+  const rows = m.best.slice(0, 8).map((r) => `<tr><td><b>${esc(r.model)}</b> · ${r.dir > 0 ? "calls" : "puts"} · exit ${esc(r.exit)} · top ${Math.round((1 - r.q) * 100)}%<br><span class="pill ${r.stage === "promoted" ? "p-up" : ""}">${esc(r.stage)}</span> <small class="muted">${esc(r.evidence || "")}</small></td>
+    <td class="small">${stL(r.valid)}</td><td class="small"><b>${stL(r.hold)}</b></td><td class="small">${r.acct40 && r.acct40.n ? `₹40K → ${rsL(r.acct40.end).replace("+", "")} · worst day ${rsL(r.acct40.worst_day)}` : "–"}</td></tr>`).join("");
+  return `<div class="panel tight" style="margin-top:14px"><h3>Model strategies <span class="muted small">3 machine-learning models read all bar facts at once</span></h3>
+    <p class="small">${esc(m.note)} ${m.promoted && m.promoted.length ? `<b>${m.promoted.length} passed</b>; those with moderate/strong evidence fire live on paper.` : "<b>None passed yet.</b>"}</p>
+    <div class="table-wrap"><table class="lab"><thead><tr><th>Model</th><th>Validation</th><th>Holdout</th><th>₹40K (lots ≤ ₹10K)</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 /* ---------------- register */

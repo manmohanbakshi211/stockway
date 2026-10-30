@@ -6,6 +6,8 @@ import datetime as dt
 import threading
 import time
 import traceback
+
+import numpy as np
 from pathlib import Path
 
 from . import briefs, dayreport, detectors
@@ -113,6 +115,7 @@ class LiveEngine:
         self.source = None
         self.recorder = None
         self.tracker = None
+        self.shadow = None                           # exit styles graded in shadow on every alert (live/shadow.py)
         self.ranker = None
         self.metrics = {}
         self.prev = {}
@@ -208,6 +211,8 @@ class LiveEngine:
             if self.tracker:
                 try:
                     self.tracker.update(self.state, self.clock.ts(), force=True)
+                    if self.shadow:
+                        self.shadow.update(self.state, self.clock.ts(), force=True)
                 except Exception:
                     pass
 
@@ -250,6 +255,8 @@ class LiveEngine:
         self.state.flow_keys = {u.key for u in self.uni.stocks} | {u.fut_key for u in self.uni.underlyings.values() if u.fut_key}
         self.recorder = Recorder(self.data_dir, self.source, day)
         self.tracker = Tracker(self.store, self.source)
+        from .shadow import ShadowExits
+        self.shadow = ShadowExits(self.store, self.source, self.log)
         self.ranker = Ranker(self.data_dir, self.source, self.log)
         if self.source != "sim":
             self.context.fo_symbols = set(self.uni.underlyings)
@@ -552,6 +559,11 @@ class LiveEngine:
                     self.log(f"Expiry desk error: {e}")
             self._big_prints(now, lc)
             self.tracker.update(self.state, self.clock.ts())
+            try:
+                self.shadow.update(self.state, self.clock.ts())
+            except Exception as e:
+                if self._every("shadow_err", 300, clock_time=False):
+                    self.log(f"Shadow exits error: {e}")
             self.paper.update(self.state, now)
             self._flat_by_reminder(now, lc)
             if self._every("pulse", 5, clock_time=False):
@@ -585,6 +597,10 @@ class LiveEngine:
         self._compute_all(now, mins, emit=False)
         self._market_view()
         self.tracker.update(self.state, self.clock.ts(), force=True)
+        try:
+            self.shadow.update(self.state, self.clock.ts(), force=True)
+        except Exception:
+            pass
         try:
             self.recorder.snapshot(int(now.timestamp() // 60) * 60, self.state, self.metrics, self.record_view)
         except Exception:
@@ -710,6 +726,48 @@ class LiveEngine:
                 "expiry": exp.isoformat(), "lot": o.lot, "ltp": i.ltp, "ask": i.ask, "iv": norm_iv(i.iv),
                 "delta": i.delta, "cost_per_lot": round((i.ask or i.ltp) * o.lot, 2)}
 
+    def trade_plan(self, a, m, now):
+        """Entry, stop-loss and targets for an alert, set on the chart the way pro traders do (lab/exits.py), plus the
+        risk in each exit style for shadow grading. Shown as "Pro plan (testing)"; paper trades keep their exits."""
+        from lab import exits
+        if not m or a.get("direction") not in ("up", "down") or not m.get("spot"):
+            return None, None, None
+        b = self.charts.five_min(a["sym"], now.date())
+        if not b:
+            return None, None, None
+        t0 = self.charts._session_start(now.date())
+        n = max(0, min(len(b["c"]), int((now.timestamp() - t0) // 300)))      # closed 5-minute bars only
+        if n < 3:
+            return None, None, None
+        h, l, c = (np.asarray(b[k][:n], float) for k in ("h", "l", "c"))
+        atr = exits.atr14(h, l, c)[-1]
+        if not np.isfinite(atr):                         # before 10:25: average true range of the bars so far
+            pc = np.r_[c[0], c[:-1]]
+            atr = float(np.nanmean(np.maximum(h - l, np.maximum(abs(h - pc), abs(l - pc)))))
+        d = 1 if a["direction"] == "up" else -1
+        s0 = float(m["spot"])
+        R = {st: exits.risk_pts(st, s0, d, atr, l[-1], h[-1]) for st in exits.STYLES}
+        o = a.get("option") or {}
+        style = self.best_style()
+        p = exits.plan(style, s0, d, atr, o.get("ask") or o.get("ltp"), o.get("delta"), o.get("lot"), l[-1], h[-1],
+                       capital=40000, risk_pct=5.0)          # always judged for the ₹40K account (small-account preset)
+        if p:
+            p["status"] = "testing"
+        return p, {k: v for k, v in R.items() if np.isfinite(v)}, s0
+
+    def best_style(self) -> str:
+        """The chart-exit style shown on alerts: the Lab's best on holdout (random entries), else ATR 2R."""
+        c = getattr(self, "_best_style", None)
+        if c and time.time() - c[1] < 600:
+            return c[0]
+        try:
+            from lab import factory
+            st = (factory.load(self.data_dir).get("exit_board") or {}).get("best_style") or "atr2r"
+        except Exception:
+            st = "atr2r"
+        self._best_style = (st, time.time())
+        return st
+
     def factory_rules(self) -> list:
         """Promoted Strategy Lab rules that are switched on (re-read every 10 minutes)."""
         at, rules = self._fact_rules
@@ -719,6 +777,11 @@ class LiveEngine:
                 rules = factory.promoted(self.data_dir)
             except Exception:
                 rules = []
+            try:
+                from lab import mlstrat                  # model-based strategies that passed the same test
+                rules = rules + mlstrat.live_rules(self.data_dir)
+            except Exception:
+                pass
             self._fact_rules = (time.time(), rules)
         return rules
 
@@ -860,11 +923,17 @@ class LiveEngine:
         elif a["direction"] not in ("up", "down") and a["severity"] >= 3:
             focus = True                      # market-wide news / macro events
         lv_setup = (a.get("data") or {}).get("setup_levels")
+        tp_plan, tp_R, tp_s0 = None, None, None
+        try:
+            tp_plan, tp_R, tp_s0 = self.trade_plan(a, m, now)
+        except Exception as e:
+            self.log(f"Trade plan failed: {e}")
         a["data"] = {**(a.get("data") or {}), "evidence": ev,
                      "levels": lv_setup or (levels(m, a["direction"], self.state) if m else {}),
                      "structure": structure(a["direction"], m, ctx) if m else None,
                      "track": st, "score": sc, "model_p": round(p * 100) if p is not None else None, "muted": muted, "focus": focus,
                      "conviction": conv, "regime": (reg or {}).get("label"),
+                     "plan": tp_plan,
                      "fits_small": bool(a.get("option") and (a["option"].get("cost_per_lot") or 1e9) <= float(lc.get("small_lot_max") or 10000)),
                      "context": {k: feats.get(k) for k in ("nifty_al", "sector_al", "global_al", "breadth_al", "news_n", "news_al")}}
         # risk gate: PASS / BLOCK with reasons and lots, before anything can become a paper trade
@@ -894,6 +963,14 @@ class LiveEngine:
             self.tracker.add(a, m, self.state, self.clock.ts(), feats)
         except Exception as e:
             self.log(f"Tracking failed: {e}")
+        try:
+            if tp_R and self.shadow:
+                pc = self.paper.cfg if self.paper else {}
+                self.shadow.add(a, tp_s0, tp_R, (float(pc.get("target_pct") or 20), float(pc.get("stop_pct") or 15),
+                                                 float(pc.get("max_hold_min") or 60)), self.clock.ts(),
+                                float(lc.get("small_lot_max") or 10000))
+        except Exception as e:
+            self.log(f"Shadow exits failed: {e}")
         if not muted:
             try:
                 self.paper.try_open(a, self.state, now)
@@ -1344,6 +1421,11 @@ class LiveEngine:
                 except Exception as e:
                     log(f"no Claude ideas tonight ({e})")
             factory.run(self.data_dir, n_random=6000, n_mutate=3000, log=log)
+            try:
+                from lab import mlstrat
+                mlstrat.run(self.data_dir, log=log)
+            except Exception as e:
+                log(f"ML strategies failed: {e}")
             self._fact_rules = (0.0, [])
         except Exception as e:
             log(f"nightly run failed: {e}")
@@ -1491,6 +1573,15 @@ class LiveEngine:
                 "filings": [f for f in self.context.filings if f["sym"] == sym][:10],
                 "news": [n for n in self.news.items if sym in n["syms"]][:10]}
 
+    def _shadow_board(self, src):
+        try:
+            from .shadow import SQL, board
+            with self.store.lock:
+                self.store.db.executescript(SQL)
+            return board(self.store, src)
+        except Exception as e:
+            return {"styles": [], "error": str(e)}
+
     def scorecard_view(self, source=None) -> dict:
         src = source or self.source or self.cfg()["live"]["source"]
         sc = scorecard(self.store, src)
@@ -1513,6 +1604,6 @@ class LiveEngine:
         ranker = self.ranker or Ranker(self.data_dir, src, self.log)
         return {"source": src, "rows": rows, "recent": recent[:120], "graded": len(graded),
                 "overall": round(sum(r["result"] == "hit" for r in graded) / len(graded) * 100) if graded else None,
-                "model": ranker.info, "recordings_mb": size_mb(self.data_dir),
+                "model": ranker.info, "recordings_mb": size_mb(self.data_dir), "exits": self._shadow_board(src),
                 "rule": "With an option idea: hit = option +20% before −20% within 60 minutes. Without: price moves "
                         "about one 30-minute sigma in the alert's direction before the same against it. Neither = flat."}

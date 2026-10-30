@@ -30,6 +30,7 @@ import pandas as pd
 
 from .data import UNDERLYINGS, day_table, iter_days, register_stocks, vix_table
 from .engine import charges, slip
+from .exits import STYLES, atr14, first_exit, risk_pts
 
 M_EXIT = 360                 # 15:15
 LAST_ENTRY_TOD = 330         # no entries after 14:45 (minutes since 09:15)
@@ -299,7 +300,34 @@ def _sim(c, sp, m0, entry, sym, lot, rule):
 
 
 SELL_FIRST_TOD = 5            # the straddle can be sold from 09:20 (the famous 9:20 straddle)
-ALL_EXITS = list(EXITS) + list(SELL_EXITS)
+ALL_EXITS = list(EXITS) + list(SELL_EXITS) + list(STYLES)
+BUY_EXITS = list(EXITS) + list(STYLES)                  # premium-% exits (current) + chart-level exits (challengers)
+EXIT_WORDS.update({k: v["words"] for k, v in STYLES.items()})
+
+
+def hold_of(ex: str) -> int:
+    return EXITS[ex][2] if ex in EXITS else STYLES[ex]["max"] if ex in STYLES else 360
+
+
+def _sim_lv(c, sp, m0, entry, sym, lot, d, style, atr, bar_lo, bar_hi):
+    """Option bought at m0, out when a chart level (lab/exits.py) is touched; the option's price at that minute."""
+    end = min(M_EXIT, m0 + STYLES[style]["max"])
+    seg, sseg = c[m0 + 1:end + 1], sp[m0 + 1:end + 1]
+    if not len(seg):
+        return math.nan
+    R = risk_pts(style, sp[m0], d, atr, bar_lo, bar_hi)
+    if not math.isfinite(R):
+        return math.nan
+    k, _ = first_exit(style, sseg, seg, sp[m0], entry, d, R)
+    k = len(seg) - 1 if k is None else k
+    x = seg[k]
+    if math.isnan(x):
+        ok = np.where(~np.isnan(seg[:k + 1]))[0]
+        if not len(ok):
+            return math.nan
+        x = seg[ok[-1]]
+    ex = max(0.05, x - slip(sym, x))
+    return (ex - entry) * lot - charges([(1, entry), (-1, ex)], lot)
 
 
 def _sim_short(legs, m0, sym, lot, sl_pct):
@@ -399,6 +427,7 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                 if ctx[key] is not None and (isinstance(ctx[key], float) and math.isnan(ctx[key])):
                     ctx[key] = None
             f = bar_features(o, h, l, c, ctx, ivs, prem)
+            atr = atr14(h, l, c)
             for i in range(nb):
                 tod = (i + 1) * 5
                 if tod < SELL_FIRST_TOD or tod > LAST_ENTRY_TOD:
@@ -432,6 +461,8 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                     row = {**base, "dir": d, "premium": round(entry * lot, 0)}
                     for rule in EXITS:
                         row["pnl_" + rule] = _sim(px["c"], sp, m0, entry, sym, lot, rule)
+                    for style in STYLES:
+                        row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i])
                     rows.append(row)
             if (di + 1) % 100 == 0:
                 log(f"  {sym}: {di + 1} of {len(days)} days ({time.time() - t0:.0f}s)")
@@ -439,12 +470,10 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.sort_values(["date", "sym", "bar", "dir"]).reset_index(drop=True)
-        for c_ in ["pnl_" + r for r in ALL_EXITS] + list(FEATURES):
+        for c_ in ["pnl_" + r for r in ALL_EXITS]:
             if c_ not in df:
                 df[c_] = np.nan
             df[c_] = df[c_].astype("float32")
-        df["premium"] = df["premium"].astype("float32")
-        df["dir"] = df["dir"].astype("int8")
     return df
 
 
@@ -457,7 +486,10 @@ def load_or_build(data_dir, log=print, should_stop=lambda: False, rebuild=False)
     hist = Path(data_dir) / "history"
     newest = max((p.stat().st_mtime for p in hist.glob("*/raw_*.parquet")), default=0)
     if f.exists() and not rebuild and f.stat().st_mtime >= newest:
-        return pd.read_parquet(f)
+        df = pd.read_parquet(f)
+        if all("pnl_" + s in df.columns for s in STYLES):
+            return df
+        log("New exit styles to test: rebuilding the bar table once…")
     log("Building the bar table from the option history (once; later runs reuse it)…")
     df = build(data_dir, log=log, should_stop=should_stop)
     if not df.empty:
@@ -503,7 +535,7 @@ def validate(s: dict) -> dict | None:
             ex = ex if ex in SELL_EXITS else "ss25"
             w = [max(SELL_FIRST_TOD, min(int(x) for x in s.get("win", [5, 330]))), w[1]]
         else:
-            ex = ex if ex in EXITS else "std"
+            ex = ex if ex in EXITS or ex in STYLES else "std"
         syms = [x for x in (s.get("syms") or ["NIFTY", "BANKNIFTY"]) if x in UNDERLYINGS or x == STOCKS] or ["NIFTY", "BANKNIFTY"]
         if d == 0:
             syms = [x for x in syms if x in ("NIFTY", "BANKNIFTY")] or ["NIFTY", "BANKNIFTY"]
@@ -530,6 +562,7 @@ class Book:
         self.cols = {c: df[c].to_numpy() for c in list(FEATURES) + ["dir", "sym"]}
         self.pnl = {r: df["pnl_" + r].to_numpy(dtype=float) for r in ALL_EXITS if "pnl_" + r in df}
         self.symcode = df["sym"].to_numpy()
+        self.prem = df["premium"].to_numpy(dtype=float) if "premium" in df else np.zeros(len(df))
         names = sorted(set(self.symcode))
         self.n_sym = max(1, len(names))
         code = {n: i for i, n in enumerate(names)}
@@ -544,7 +577,7 @@ class Book:
         x = x[~np.isnan(x)]
         return np.unique(np.round(np.quantile(x, [0.1, 0.25, 0.5, 0.75, 0.9]), 3)) if len(x) else np.array([])
 
-    def trades(self, s: dict, part: int | None = None) -> pd.DataFrame:
+    def trades(self, s: dict, part: int | None = None, max_premium: float | None = None) -> pd.DataFrame:
         m = (self.cols["dir"] == s["dir"]) & (self.cols["tod"] >= s["win"][0]) & (self.cols["tod"] <= s["win"][1])
         sm = np.isin(self.symcode, s["syms"])
         if STOCKS in s["syms"]:
@@ -552,10 +585,14 @@ class Book:
         m &= sm
         if part is not None:
             m &= self.part == part
+        if max_premium:                                     # only options whose lot the account can pay for
+            m &= self.prem <= max_premium
         for feat, op, v in s["conds"]:
             x = self.cols[feat]
             m &= (x > v) if op == ">" else (x < v)
         idx = np.nonzero(m)[0]
+        if s["exit"] not in self.pnl:
+            return pd.DataFrame(columns=["day", "sym", "tod", "pnl", "part"])
         pnl = self.pnl[s["exit"]][idx]
         ok = ~np.isnan(pnl)
         idx, pnl = idx[ok], pnl[ok]
@@ -574,7 +611,7 @@ class Book:
         first = firsts(np.arange(len(idx)))
         take = list(first)
         if s["max_day"] > 1:                                # a second trade only after a winning first, once it is over
-            gap = max(30, EXITS.get(s["exit"], (0, 0, 360))[2])
+            gap = max(30, hold_of(s["exit"]))
             won = {key[j]: tod[j] + gap for j in first if pnl[j] > 0}
             if won:
                 k_after = np.array([won.get(k, np.inf) for k in key])
@@ -629,6 +666,101 @@ def score(book: Book, s: dict) -> dict:
     return out
 
 
+# ------------------------------------------------------------------ ₹40K: what a small account can actually trade
+SMALL_CAPITAL = 40000
+SMALL_LOT_MAX = 10000          # the same "fits ₹40K" line the live alerts use (option lot ≤ ₹10K)
+
+
+def equity40(t: pd.DataFrame, capital=SMALL_CAPITAL) -> dict:
+    """Day-by-day account from ₹40K: end, worst day, deepest fall, months to double, and whether it ever lost half."""
+    if t is None or not len(t):
+        return {"n": 0}
+    daily = t.groupby("day")["pnl"].sum()
+    eq = capital + daily.cumsum()
+    dd = float((eq - eq.cummax()).min())
+    avg = float(daily.mean())
+    return {"n": int(len(t)), "days": int(len(daily)), "end": round(float(eq.iloc[-1])), "ret_pct": round(float(eq.iloc[-1] / capital - 1) * 100, 1),
+            "avg_day": round(avg), "per_month": round(avg * 21), "worst_day": round(float(daily.min())),
+            "max_dd": round(dd), "max_dd_pct": round(dd / capital * 100, 1), "green_pct": round(float((daily > 0).mean() * 100), 1),
+            "lost_half": bool(eq.min() <= capital / 2)}
+
+
+def plan40(book: Book, rules: list, top=8) -> dict:
+    """Ways to start with ₹40K: option-buying rules re-tested only on trades whose lot costs ≤ ₹10K, chosen on the
+    VALIDATION period and judged on the HOLDOUT (choosing on holdout would flatter them)."""
+    out = []
+    for r in rules:
+        if r.get("dir") == 0 or r.get("stage") in ("failed train", "duplicate"):
+            continue
+        tr = book.trades(r, max_premium=SMALL_LOT_MAX)
+        if not len(tr):
+            continue
+        v, h = tr[tr["part"] == 1], tr[tr["part"] == 2]
+        sv = stats(v, book.n_days[1])
+        if sv.get("n", 0) < 10 or (sv.get("avg") or 0) <= 0:
+            continue
+        out.append({"id": r["id"], "rule": r["rule"], "exit": r["exit"], "syms": r["syms"], "stocks": STOCKS in r["syms"],
+                    "valid": sv, "hold": stats(h, book.n_days[2]), "acct": equity40(h)})
+    out.sort(key=lambda x: (-(x["valid"].get("t") or 0), len(x["rule"])))
+    seen, uniq = set(), []
+    for x in out:                                         # the same trades under different wording count once
+        sig = (x["valid"].get("n"), x["valid"].get("total"), x["hold"].get("n"), x["hold"].get("total"))
+        if sig not in seen:
+            seen.add(sig)
+            uniq.append(x)
+    out = uniq
+    ok = [x for x in out if x["hold"].get("n", 0) >= 10 and (x["hold"].get("avg") or 0) > 0]
+    return {"capital": SMALL_CAPITAL, "lot_max": SMALL_LOT_MAX, "candidates": len(out), "held_up": len(ok),
+            "best": out[:top], "verdict": (f"{len(ok)} of the {len(out)} rules that made money on validation also made money on "
+                                           f"the holdout with lots ≤ ₹{SMALL_LOT_MAX:,}." if out else
+                                           "No option-buying rule that fits ₹40K made money on validation yet.")}
+
+
+def exit_board(book: Book, rules: list, top=40) -> dict:
+    """Which way of exiting works best: (1) every possible entry (random entries) per exit, (2) the best rules re-run with
+    each exit, the exit picked on VALIDATION and checked on HOLDOUT. Chart-level styles are challengers to the % exits."""
+    ex = [e for e in BUY_EXITS if e in book.pnl]
+    buy = book.cols["dir"] != 0
+    base = {}
+    for e in ex:
+        x = book.pnl[e][buy & (book.part == 2)]
+        x = x[~np.isnan(x)]
+        base[e] = {"avg": round(float(x.mean()), 1) if len(x) else None, "win_pct": round(float((x > 0).mean() * 100), 1) if len(x) else None}
+    cand = sorted((r for r in rules if r.get("dir") != 0 and r.get("stage") != "duplicate"),
+                  key=lambda r: -(r.get("valid", {}).get("t") or -9))[:top]
+    tally = {e: {"valid_sum": 0.0, "hold_sum": 0.0, "n": 0, "best_on_valid": 0} for e in ex}
+    for r in cand:
+        res = {}
+        for e in ex:
+            tr = book.trades({**r, "exit": e})
+            v, h = tr[tr["part"] == 1]["pnl"], tr[tr["part"] == 2]["pnl"]
+            res[e] = (float(v.mean()) if len(v) else np.nan, float(h.mean()) if len(h) else np.nan)
+        good = {e: x for e, x in res.items() if np.isfinite(x[0])}
+        if not good:
+            continue
+        best = max(good, key=lambda e: good[e][0])
+        tally[best]["best_on_valid"] += 1
+        for e, (va, ho) in good.items():
+            if np.isfinite(ho):
+                tally[e]["valid_sum"] += va
+                tally[e]["hold_sum"] += ho
+                tally[e]["n"] += 1
+    board = [{"exit": e, "words": EXIT_WORDS.get(e, e), "kind": "chart level" if e in STYLES else "premium %",
+              "who": STYLES[e]["who"] if e in STYLES else "current", "random_hold": base[e],
+              "rules_valid_avg": round(t["valid_sum"] / t["n"], 1) if t["n"] else None,
+              "rules_hold_avg": round(t["hold_sum"] / t["n"], 1) if t["n"] else None, "best_on_valid": t["best_on_valid"]}
+             for e, t in tally.items()]
+    board.sort(key=lambda b: -(b["rules_valid_avg"] if b["rules_valid_avg"] is not None else -1e9))
+    styles = [b for b in board if b["exit"] in STYLES and b["rules_valid_avg"] is not None]
+    champ = [b for b in board if b["exit"] in EXITS and b["rules_valid_avg"] is not None]
+    # the style shown on alerts: best worst-case over the two periods it wasn't fitted on (robust, not the luckiest)
+    best_style = max(styles, key=lambda b: min(b["rules_valid_avg"], b["rules_hold_avg"] if b["rules_hold_avg"] is not None else -1e9))["exit"] \
+        if styles else "atr2r"
+    beats = bool(styles and champ and styles[0]["rules_valid_avg"] > champ[0]["rules_valid_avg"]
+                 and (styles[0]["rules_hold_avg"] or -1e9) > (champ[0]["rules_hold_avg"] or -1e9))
+    return {"board": board, "rules_compared": len(cand), "best_style": best_style, "style_beats_current": beats}
+
+
 # ------------------------------------------------------------------ search
 def random_rule(book: Book, rng: random.Random) -> dict:
     feats = [f for f in FEATURES if f not in ("tod",)]
@@ -642,7 +774,7 @@ def random_rule(book: Book, rng: random.Random) -> dict:
         conds = [["ret_b3", ">", 0.1]]
     d = rng.choice([1, -1, 1, -1, 0]) if "ss25" in book.pnl else rng.choice([1, -1])
     win = list(rng.choice(WINDOWS + ([(5, 20), (5, 75), (75, 120)] if d == 0 else [])))
-    s = {"dir": d, "conds": conds, "win": win, "exit": rng.choice(list(SELL_EXITS) if d == 0 else list(EXITS)),
+    s = {"dir": d, "conds": conds, "win": win, "exit": rng.choice(list(SELL_EXITS) if d == 0 else [e for e in BUY_EXITS if e in book.pnl]),
          "max_day": rng.choice([1, 1, 2]), "syms": rng.choice(book.sym_choices), "source": "generated"}
     if d == 0:
         s["syms"] = rng.choice(book.sym_choices[:3])
@@ -659,7 +791,7 @@ def mutate(book: Book, s: dict, rng: random.Random) -> dict:
         if q:
             c[2] = float(rng.choice(q))
     elif what == "exit":
-        m["exit"] = rng.choice(list(SELL_EXITS) if m["dir"] == 0 else list(EXITS))
+        m["exit"] = rng.choice(list(SELL_EXITS) if m["dir"] == 0 else [e for e in BUY_EXITS if e in book.pnl])
     elif what == "win":
         m["win"] = list(rng.choice(WINDOWS))
     elif what == "add" and len(m["conds"]) < 3:
@@ -783,6 +915,14 @@ def run(data_dir, n_random=2000, n_mutate=1000, log=print, should_stop=lambda: F
                "promoted": len(prom), "luck_expected": round(st["tried_total"] * P_LUCK, 1), "secs": round(time.time() - t0)}
     st["runs"] = (st.get("runs", []) + [run_rec])[-50:]
     st["period"] = {k: [str(a), str(b)] for k, (a, b) in book.split_dates.items()}
+    try:
+        st["exit_board"] = exit_board(book, list(keep.values()))
+        st["plan40"] = plan40(book, list(keep.values()))
+        log(f"Exits: best chart-level style {st['exit_board']['best_style']} "
+            f"({'beats' if st['exit_board']['style_beats_current'] else 'does not beat'} the current % exits on validation + holdout). "
+            f"₹40K: {st['plan40']['verdict']}")
+    except Exception as e:
+        log(f"Exit board / ₹40K report failed: {e}")
     st["n_days"] = len(book.dates)
     st["updated"] = run_rec["at"]
     save(data_dir, st)
@@ -815,7 +955,7 @@ def view(data_dir) -> dict:
     return {"updated": st.get("updated"), "tried_total": st.get("tried_total", 0), "library": library, "luck_expected": round(st.get("tried_total", 0) * P_LUCK, 1),
             "period": st.get("period"), "n_days": st.get("n_days"), "runs": st.get("runs", [])[-10:], "by_stage": by,
             "rules": rules[:120], "features": {k: v[0] for k, v in FEATURES.items()}, "exits": EXIT_WORDS,
-            "pending_ideas": len(st.get("ideas", []))}
+            "pending_ideas": len(st.get("ideas", [])), "exit_board": st.get("exit_board"), "plan40": st.get("plan40")}
 
 
 def add_ideas(data_dir, ideas: list, source: str) -> dict:

@@ -114,6 +114,27 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Pro stop-loss / targets, the ₹40K finder and several models (2.18)
+
+- **Pro plan on every alert (testing):** entry, stop-loss and target set on the chart the way well-known traders do,
+  plus the option's estimated SL / target, max loss per lot and whether it fits ₹40K (lot ≤ ₹10K, loss ≤ ₹2,000).
+  Four styles (lab/exits.py): ATR 2R (Van Tharp R-multiples + Wilder ATR), signal candle 2R (Linda Raschke /
+  Al Brooks), breakeven 3R, Chandelier trail (Chuck LeBeau). The one shown is the style with the best worst case over
+  validation and holdout. Paper trades keep the current exits (champion) until a style wins.
+- **Champion vs challengers, on history and live:** the Lab re-runs the best rules with every exit (Strategy Lab →
+  Stop-loss & target), and every live alert's option is followed in shadow under the current exit and all 4 styles
+  (Scorecard → Stop-loss & target styles on live alerts). First result (2 years, Nifty + Bank Nifty): no chart style
+  beats the current % exits out of sample yet; on random entries every exit loses (−₹208 to −₹261 a trade).
+- **Start with ₹40K (Strategy Lab):** every option-buying rule re-tested only on lots ≤ ₹10K, chosen on validation,
+  judged on the holdout, with a ₹40K account run through it (end balance, worst day, deepest fall). Index and stocks.
+  First result: 10 of 43 rules that made money on validation also made money on the holdout; none with strong evidence.
+- **Several models:** the conviction model now compares gradient-boosted trees (champion), logistic regression and a
+  random forest on the same unseen days; a challenger replaces it only with 0.02+ better AUC. The Lab also trains
+  model strategies (3 models × 4 exits × 4 score cut-offs × calls / puts) with the same train / validation / holdout
+  test; ones that pass fire live on paper. First result: 0 of 96 passed.
+- Lab rules can now use the chart-level exits; their paper trades follow the chart stop / target (paper only).
+- Regression check: the 594 saved Lab results are identical after rebuilding the bar table with this code.
+
 ## Stock options and the conviction model (2.17)
 
 Aim: start with ₹40K buying options on stocks as well as indices, with alerts that weigh everything at once.

@@ -132,6 +132,33 @@ def _prep(X, cols, cats):
     return X
 
 
+CHALLENGE_MARGIN = 0.02       # a challenger model replaces the champion only if its holdout AUC is this much higher
+
+
+def make_model(kind: str, cols: list):
+    """Champion: gradient-boosted trees. Challengers: logistic regression and a random forest (scaled / imputed)."""
+    from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+    if kind == "hgb":
+        return HistGradientBoostingClassifier(max_iter=250, learning_rate=0.05, max_leaf_nodes=15, min_samples_leaf=50,
+                                              l2_regularization=1.0, categorical_features="from_dtype", random_state=0)
+    from sklearn.compose import ColumnTransformer
+    from sklearn.impute import SimpleImputer
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import OneHotEncoder, StandardScaler
+    num = [c for c in cols if c not in CAT]
+    cat = [c for c in cols if c in CAT]
+    pre = ColumnTransformer([("num", make_pipeline(SimpleImputer(strategy="median"), StandardScaler()), num),
+                             ("cat", OneHotEncoder(handle_unknown="ignore"), cat)])
+    if kind == "logit":
+        return make_pipeline(pre, LogisticRegression(C=0.3, max_iter=2000))
+    return make_pipeline(pre, RandomForestClassifier(n_estimators=300, min_samples_leaf=40, max_features="sqrt",
+                                                     n_jobs=-1, random_state=0))
+
+
+MODEL_NAMES = {"hgb": "gradient-boosted trees", "logit": "logistic regression", "forest": "random forest"}
+
+
 class Ranker:
     """Conviction model: which alerts are worth an option buy. Gradient-boosted trees on every graded alert (option +20%
     before -20% within an hour = worth it), trained on earlier days and judged on the most recent ones it never saw.
@@ -170,21 +197,33 @@ class Ranker:
             # holdout = the most recent 20% of days (at least one day), never used to fit
             hold_days = set(days[-max(1, len(days) // 5):]) if len(days) > 1 else set()
             te = np.array([r["day"] in hold_days for r in rows]) if hold_days else np.arange(len(rows)) >= int(len(rows) * 0.8)
-            mk = lambda: HistGradientBoostingClassifier(max_iter=250, learning_rate=0.05, max_leaf_nodes=15, min_samples_leaf=50,
-                                                         l2_regularization=1.0, categorical_features="from_dtype", random_state=0)
-            m = mk().fit(X[~te], y[~te])
-            p = m.predict_proba(X[te])[:, 1]
-            auc = float(roc_auc_score(y[te], p)) if len(set(y[te])) > 1 else 0.5
+            # champion vs challengers, all judged on the same unseen days
+            board = {}
+            for kind in ("hgb", "logit", "forest"):
+                try:
+                    mk_ = make_model(kind, cols).fit(X[~te], y[~te])
+                    pk = mk_.predict_proba(X[te])[:, 1]
+                    board[kind] = (float(roc_auc_score(y[te], pk)) if len(set(y[te])) > 1 else 0.5, mk_, pk)
+                except Exception as ex_:
+                    self.log(f"Conviction model {kind} failed: {ex_}")
+            best = "hgb"
+            for kind, (a_, _, _) in board.items():
+                if kind != "hgb" and a_ >= board.get("hgb", (0,))[0] + CHALLENGE_MARGIN and a_ > board.get(best, (0,))[0]:
+                    best = kind
+            auc, m, p = board[best]
             q = np.quantile(p, 0.9)
             top = p >= q
             info = {"n": len(rows), "days": len(days), "hold_n": int(te.sum()), "base_rate": round(float(y[te].mean()) * 100, 1),
                     "auc": round(auc, 3), "top10_hit": round(float(y[te][top].mean()) * 100, 1),
                     "top10_o60": round(float(np.nanmean(o60[te][top])), 2) if top.any() else None,
-                    "all_o60": round(float(np.nanmean(o60[te])), 2), "when": time.time(), "cols": cols, "cats": cats}
+                    "all_o60": round(float(np.nanmean(o60[te])), 2), "when": time.time(), "cols": cols, "cats": cats,
+                    "model": best, "model_name": MODEL_NAMES[best],
+                    "models": [{"kind": k, "name": MODEL_NAMES[k], "auc": round(v[0], 3), "champion": k == "hgb", "chosen": k == best}
+                               for k, v in board.items()]}
             info["trained"] = bool(auc >= TRUST_AUC and len(days) >= MIN_DAYS)
             info["why"] = ("trusted" if info["trained"] else
                            f"needs {MIN_DAYS}+ days (has {len(days)})" if len(days) < MIN_DAYS else f"holdout AUC {auc:.2f} < {TRUST_AUC}")
-            final = mk().fit(X, y)                    # use every day for live predictions
+            final = make_model(best, cols).fit(X, y)  # use every day for live predictions
             self.cuts = np.quantile(final.predict_proba(X)[:, 1], np.linspace(0, 1, 101))
             self.model, self.info = final, info
             try:

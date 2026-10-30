@@ -87,7 +87,7 @@ def test_download_registers_stock_and_lab_reads_it(tmp_path, monkeypatch):
         assert len(days) > 20 and all(d.step == 10 for d in days)
         df = F.build(tmp_path, syms=["TESTCO"], log=lambda m: None)
         assert len(df) and set(df["dir"].unique()) == {1, -1}     # stocks: option buying only
-        assert df["ret_b3"].dtype == np.float32
+        assert df["pnl_std"].dtype == np.float32 and df["pnl_atr2r"].notna().any()   # chart-level exits computed too
     finally:
         UNDERLYINGS.pop("TESTCO", None)
 

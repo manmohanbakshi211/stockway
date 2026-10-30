@@ -127,7 +127,11 @@ class ChartData:
             f = factory.bar_features(o5, h5, l5, c5, ctx, [np.nan if x is None else x for x in ivs],
                                      [np.nan if x is None else x for x in prem])
             for r in rules:
-                if not factory.signal_now(r, f, sym):
+                if r.get("ml"):
+                    from lab import mlstrat
+                    if not factory.sym_ok(r["syms"], sym) or not mlstrat.fires(self.e.data_dir, r, f):
+                        continue
+                elif not factory.signal_now(r, f, sym):
                     continue
                 fired = self.e.fact_fired.setdefault((r["id"], sym, now.date()), [])
                 if len(fired) >= r["max_day"]:
@@ -145,12 +149,19 @@ class ChartData:
                                     + (f"Paper-sold both legs ({took})." if took else "Not paper-traded: the paper account is too small for straddle margin or the day is stopped."),
                           "price": m.get("spot"), "data": {"factory": {"id": r["id"], "sell": True}}})
                     continue
+                if r["exit"] in factory.STYLES:              # chart-level exit: risk in points from today's 5-min ATR
+                    from lab import exits as X
+                    R = X.risk_pts(r["exit"], m["spot"], d, X.atr14(h5, l5, c5)[-1], l5[-1], h5[-1])
+                    if not np.isfinite(R):
+                        continue
+                    fac = {"id": r["id"], "plan": {"style": r["exit"], "R": round(float(R), 2)}}
+                else:
+                    fac = {"id": r["id"], "exit": list(factory.EXITS[r["exit"]][:3]) +
+                           (list(factory.EXITS[r["exit"]][3]) if factory.EXITS[r["exit"]][3] else [])}
                 emit({"sym": sym, "kind": "factory", "direction": "up" if d > 0 else "down", "severity": 3,
                       "title": f"{sym} Strategy Lab rule {r['id']}: {'BUY call' if d > 0 else 'BUY put'}",
                       "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%.",
-                      "price": m.get("spot"),
-                      "data": {"factory": {"id": r["id"], "exit": list(factory.EXITS[r["exit"]][:3]) +
-                                           (list(factory.EXITS[r["exit"]][3]) if factory.EXITS[r["exit"]][3] else [])}}})
+                      "price": m.get("spot"), "data": {"factory": fac}})
 
     def _paper_straddle(self, sym, m, r, now) -> str | None:
         """Paper-sell the ATM call and put of the nearest expiry, each with the rule's stop, held to 15:15."""

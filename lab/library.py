@@ -7,7 +7,7 @@ are not published in text (several YouTube-taught setups), the common public ver
 """
 from __future__ import annotations
 
-from .factory import EXITS, SELL_EXITS
+from .factory import BUY_EXITS, SELL_EXITS
 
 B = ["BANKNIFTY", "NIFTY"]
 
@@ -95,11 +95,11 @@ LIBRARY = {
 
 
 def rules() -> list:
-    """Every library rule with every exit that fits it (buys: 5 exits; straddle: 3 stops), both indices together."""
+    """Every library rule with every exit that fits it (buys: 5 premium exits + 4 chart-level exits; selling: 5), both indices."""
     out = []
     for name, (note, rs) in LIBRARY.items():
         for r in rs:
-            for ex in (SELL_EXITS if r["dir"] == 0 else EXITS):
+            for ex in (SELL_EXITS if r["dir"] == 0 else BUY_EXITS):
                 out.append({**r, "exit": ex, "max_day": 1, "syms": B, "note": f"{name}. {note}"[:300],
                             "source": f"library:{name}"[:80]})
     return out
