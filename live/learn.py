@@ -75,6 +75,13 @@ def _depth(mk: dict, sym) -> dict:
     return (d.get("BANKNIFTY") if sym in BANK_SYMS else d.get("NIFTY")) or {}
 
 
+def _mover_dir(mv) -> int | None:
+    if not mv or not mv.get("lists"):
+        return None if not mv else 0
+    ls = mv["lists"]
+    return ("price_gainers" in ls) - ("price_losers" in ls)
+
+
 def features(a: dict, m: dict | None, ev: list, reg: dict | None, mins: float, ctx: dict) -> dict:
     """Facts at the moment an alert fires, signed so that + means 'agrees with the alert's direction'.
     The stock itself, its options, the index, breadth, its sector, global markets, VIX and fresh news."""
@@ -109,14 +116,18 @@ def features(a: dict, m: dict | None, ev: list, reg: dict | None, mins: float, c
            "vix_chg": _n(mk.get("vix_chg"), 30), "news_n": mk.get("news_n") or 0, "news_al": _n(sgn(mk.get("news_tone")), 3),
            # 2.19: who is waiting to buy vs sell (Dhan 200-level book of the index future: Bank Nifty's for bank alerts)
            "depth_al": _n(sgn(_depth(mk, a.get("sym")).get("imb_near")), 1),
-           "depth_all_al": _n(sgn(_depth(mk, a.get("sym")).get("imb")), 1)}
+           "depth_all_al": _n(sgn(_depth(mk, a.get("sym")).get("imb")), 1),
+           # 2.19: Dhan market movers: is the stock in play (OI / volume / price lists) and which way
+           "mover_rank": _n((mk.get("mover") or {}).get("rank")),
+           "mover_lists": len((mk.get("mover") or {}).get("lists") or []) if mk.get("mover") else None,
+           "mover_al": _n(sgn(_mover_dir(mk.get("mover"))))}
     return out
 
 
 NUM = ["severity", "is_index", "agree", "against", "rel_vol", "z5", "minute_bucket", "iv_hv", "dte", "score_bias", "mins",
        "chg_al", "ret5_al", "ret15_al", "vwap_al", "buildup_al", "flow_al", "unusual", "iv", "iv_chg15", "pcr", "iv_pct",
        "cost_lot", "opt_px", "spread_pct", "delta", "nifty_al", "nifty15_al", "nifty_vwap_al", "breadth_al", "sector_al",
-       "global_al", "vix_chg", "news_n", "news_al", "depth_al", "depth_all_al"]
+       "global_al", "vix_chg", "news_n", "news_al", "depth_al", "depth_all_al", "mover_rank", "mover_lists", "mover_al"]
 CAT = ["kind", "direction", "regime"]
 TRUST_AUC = 0.60
 MIN_DAYS = 5

@@ -25,6 +25,8 @@ SCRIP_MASTER = "https://images.dhan.co/api-data/api-scrip-master.csv"
 INDEX_OFFSETS = range(-10, 11)
 STOCK_OFFSETS = range(-3, 4)
 INDEX_FLAG = {"NIFTY": "WEEK", "BANKNIFTY": "MONTH"}
+DAILY_CAP = 90000          # Dhan Data APIs allow 100,000 calls a day (5 a second); 10,000 stay free for live news / movers
+# Dhan returns at most ONE day per rolling-option call, so a month of an index is ~22 days × 42 calls.
 
 
 def root(data_dir) -> Path:
@@ -105,44 +107,85 @@ def plan(data_dir, stocks: list, end: dt.date | None = None) -> list:
     return jobs
 
 
+def _budget(data_dir) -> dict:
+    f = root(data_dir) / "dhan_calls.json"
+    try:
+        b = json.loads(f.read_text()) if f.exists() else {}
+    except Exception:
+        b = {}
+    today = dt.date.today().isoformat()
+    return {"f": f, "day": today, "used": int(b.get(today, 0))}
+
+
+def _spend(bud: dict, n: int):
+    bud["used"] += n
+    bud["f"].write_text(json.dumps({bud["day"]: bud["used"]}))
+
+
+def _days(m0: dt.date, m1: dt.date):
+    d = m0
+    while d < m1:
+        if d.weekday() < 5:
+            yield d
+        d += dt.timedelta(days=1)
+
+
 def download(dhan, data_dir, stocks: list, log=print, should_stop=lambda: False, progress=lambda d, t: None) -> dict:
-    """Fetch every missing month (resumable). ~42 requests per index month, ~14 per stock month."""
+    """Fetch every missing month (resumable), one trading day per call (Dhan's limit), within the daily call budget:
+    ~22 × 42 calls per index month, ~22 × 14 per stock month. When today's budget is used, it stops and continues
+    by itself the next evening."""
     ids = stock_ids(Path(data_dir), stocks) if stocks else {}
     miss = [s for s in stocks if s not in ids]
     if miss:
         log(f"Not in Dhan's scrip master (skipped): {', '.join(miss)}")
     jobs = plan(data_dir, list(ids))
     hd5 = root(data_dir) / "history"
-    total = sum(len(INDEX_OFFSETS) * 2 if k == "index" else len(STOCK_OFFSETS) * 2 for *_, k in jobs) or 1
+    per = lambda kind: (len(INDEX_OFFSETS) if kind == "index" else len(STOCK_OFFSETS)) * 2
+    month_calls = lambda j: per(j[3]) * sum(1 for _ in _days(j[1], min(j[2], dt.date.today())))
+    total = sum(month_calls(j) for j in jobs) or 1
+    bud = _budget(data_dir)
     done = 0
-    log(f"5-year Lab: {len(jobs)} months to fetch from Dhan (about {total:,} requests)")
+    log(f"5-year Lab: {len(jobs)} months to fetch from Dhan (about {total:,} calls; up to {DAILY_CAP:,} a day, "
+        f"{bud['used']:,} used today, so about {max(1, -(-total // DAILY_CAP))} day(s))")
     for sym, m0, m1, kind in jobs:
         if should_stop():
             log("Stopped. Finished months are kept; run again to continue.")
             break
+        need = month_calls((sym, m0, m1, kind))
+        if bud["used"] + need > DAILY_CAP:
+            log(f"Today's Dhan call budget is used ({bud['used']:,}). It continues by itself tomorrow evening.")
+            break
         parts = []
         offs = INDEX_OFFSETS if kind == "index" else STOCK_OFFSETS
-        to = min(m1, dt.date.today())
-        for off in offs:
-            for side in ("CE", "PE"):
-                if should_stop():
+        for day in _days(m0, min(m1, dt.date.today())):
+            nxt = (day + dt.timedelta(days=1)).isoformat()
+            empty_day = True
+            for off in offs:
+                for side in ("CE", "PE"):
+                    if should_stop():
+                        break
+                    try:
+                        if kind == "index":
+                            arr = dhan.rolling(sym, INDEX_FLAG[sym], off, side, day.isoformat(), nxt)
+                        else:
+                            arr = dhan.rolling(sym, "MONTH", off, side, day.isoformat(), nxt,
+                                               security_id=ids[sym]["id"], instrument="OPTSTK")
+                    except PermissionError:
+                        raise
+                    except Exception as e:
+                        log(f"  {sym} {day} ATM{off:+d} {side}: {e}")
+                        arr = {}
+                    _spend(bud, 1)
+                    df = _frame(arr, off, side)
+                    if df is not None:
+                        parts.append(df)
+                        empty_day = False
+                    done += 1
+                    progress(done, total)
+                    if empty_day and off == offs[0] and side == "PE":
+                        break                          # holiday: the first strike came back empty both sides
+                if empty_day and off == offs[0]:
                     break
-                try:
-                    if kind == "index":
-                        arr = dhan.rolling(sym, INDEX_FLAG[sym], off, side, m0.isoformat(), to.isoformat())
-                    else:
-                        arr = dhan.rolling(sym, "MONTH", off, side, m0.isoformat(), to.isoformat(),
-                                           security_id=ids[sym]["id"], instrument="OPTSTK")
-                except PermissionError:
-                    raise
-                except Exception as e:
-                    log(f"  {sym} {m0:%b %Y} ATM{off:+d} {side}: {e}")
-                    arr = {}
-                df = _frame(arr, off, side)
-                if df is not None:
-                    parts.append(df)
-                done += 1
-                progress(done, total)
         if should_stop():
             break
         f = hd5 / sym / f"raw_{m0:%Y-%m}.parquet"

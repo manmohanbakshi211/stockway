@@ -117,6 +117,7 @@ class LiveEngine:
         self.tracker = None
         self.shadow = None                           # exit styles graded in shadow on every alert (live/shadow.py)
         self.depth = None                            # Dhan 200-level order book for index futures (live/dhandepth.py)
+        self.dhan_intel = None                       # Dhan news headlines + market movers (live/dhanintel.py)
         self.ranker = None
         self.metrics = {}
         self.prev = {}
@@ -889,6 +890,36 @@ class LiveEngine:
         except Exception as e:
             self.depth = None
             self.log(f"Order book (Dhan) not started: {e}")
+        if not self.dhan_intel:
+            try:
+                from lab.dhan import Dhan
+                from .dhanintel import DhanIntel
+                self.dhan_intel = DhanIntel(Dhan(lab["dhan_client_id"], lab["dhan_token"], per_sec=2.0), self.data_dir, self.log)
+                threading.Thread(target=self._movers_loop, daemon=True, name="dhan-movers").start()
+                self.log("Dhan news headlines and market movers: on")
+            except Exception as e:
+                self.dhan_intel = None
+                self.log(f"Dhan news / movers not started: {e}")
+
+    def _movers_loop(self):
+        """Market movers every minute in market hours (stock options / futures OI and volume, F&O stock price)."""
+        while self.dhan_intel:
+            now = dt.datetime.now(IST)
+            if now.weekday() < 5 and dt.time(9, 15) <= now.time() <= dt.time(15, 30) and self.running:
+                try:
+                    exp = None
+                    for u in (self.uni.stocks if self.uni else []):
+                        exp = u.near_expiry(now.date())
+                        if exp:
+                            break
+                    self.dhan_intel.refresh_movers(exp)
+                except PermissionError as e:
+                    self.log(f"Dhan movers: {e}")
+                    time.sleep(1800)
+                except Exception as e:
+                    if self._every("movers_err", 600, clock_time=False):
+                        self.log(f"Dhan movers failed: {e}")
+            time.sleep(60)
 
     def market_ctx(self, sym) -> dict:
         """Everything outside the stock itself that an alert's strength may depend on: the index, breadth, its sector,
@@ -910,6 +941,7 @@ class LiveEngine:
         c["sector_chg"] = c["sectors"].get(self.context.sector_of(sym)) if self.context else None
         news = [n for n in (self.news.items if self.news else []) if sym in n.get("syms", []) and n.get("ts", 0) > now - 3600]
         c["news_n"] = len(news)
+        c["mover"] = self.dhan_intel.mover_rank(sym) if self.dhan_intel else {}
         c["news_tone"] = sum(n.get("tone") or 0 for n in news) / len(news) if news else 0.0
         return c
 
@@ -1481,6 +1513,7 @@ class LiveEngine:
             try:
                 if self.cfg()["live"].get("news"):
                     new = self.news.fetch(self.words or {})
+                    new += self._dhan_news()
                     for n in new:
                         if n["syms"] and self.running and n["ts"] > time.time() - 1800:
                             self._news_alert(n)
@@ -1489,6 +1522,22 @@ class LiveEngine:
             now = dt.datetime.now(IST)
             busy = now.weekday() < 5 and dt.time(8, 30) <= now.time() <= dt.time(15, 30)
             time.sleep(60 if busy else 300)            # every minute in market hours: news reaches alerts fast
+
+    def _dhan_news(self) -> list:
+        """Dhan's headlines into the same news list (symbols from Dhan's tags + the app's name matching)."""
+        if not self.dhan_intel:
+            return []
+        from .notify import match_symbols, tone
+        added = []
+        for n in self.dhan_intel.news():
+            if n["title"] in self.news.seen:
+                continue
+            self.news.seen.add(n["title"])
+            syms = sorted(set(n.pop("dhan_syms")) | set(match_symbols(n["title"], self.words or {})))[:5]
+            added.append({**n, "syms": syms, "tone": tone(n["title"])})
+        if added:
+            self.news.items = sorted(added + self.news.items, key=lambda x: -x["ts"])[:300]
+        return added
 
     def _news_alert(self, n):
         sym = n["syms"][0]
@@ -1554,6 +1603,10 @@ class LiveEngine:
                                                      "error": self.ai.last_error},
                 "watch": self._watch(), "extra": self.extra_indices(),
                 "depth": {k: self.depth.view(k) for k in self.depth.ids} if self.depth else None,
+                "dhan": {"depth": dict(self.depth.status) if self.depth else None,
+                         "movers": {k: len(v) for k, v in self.dhan_intel.movers.items()} if self.dhan_intel else None,
+                         "in_play": sorted({x for v in self.dhan_intel.movers.values() for x in v[:5]})[:12] if self.dhan_intel else [],
+                         "errors": dict(self.dhan_intel.errors) if self.dhan_intel else {}} if (self.depth or self.dhan_intel) else None,
                 "px": {k: [round(m["spot"], 2), round(m.get("chg_pct") or 0, 2)] for k, m in (self.metrics or {}).items() if m.get("spot")}}
 
     WATCH = (("Nasdaq 100 fut", "NQ=F"), ("Dow fut", "YM=F"), ("S&P 500 fut", "ES=F"))

@@ -114,6 +114,19 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Dhan Pro, checked against Dhan's own docs (2.20)
+
+- **5-year download fixed to Dhan's real limits:** one trading day per call, 5 calls a second, 100,000 a day. The app
+  spends up to 90,000 a day (10,000 stay free for live news / movers), skips holidays after one call, and continues by
+  itself every evening until done: Nifty + Bank Nifty in about a day, the 30 stocks over about 5 more.
+- **Dhan news headlines** (every minute in market hours) join the news feed with Dhan's own stock tags, so news alerts
+  and the "news with / against" fact see them sooner.
+- **Dhan market movers** every minute: stock options / futures by OI gainers and volume, F&O stocks by price. The Live
+  page shows the names in play; rank, lists and direction are new conviction-model facts.
+- **200-level order book:** packet format confirmed (41 = buy side, 51 = sell side, little-endian).
+- Not used on purpose: Dhan technical data (no history, so it can't be backtested; the Lab computes the same
+  indicators itself) and the CAS / portfolio feeds (your real account).
+
 ## Dhan Pro data: 5-year Lab and the 200-level order book (2.19)
 
 Needs Dhan's Data API (Pro, ₹999/month): client ID + access token on Strategy desk → Data and settings. Market data

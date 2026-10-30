@@ -68,3 +68,45 @@ def test_five_year_download_is_separate_and_resumable(tmp_path, monkeypatch):
         assert len(df) and df["ret_b3"].dtype.name == "float32" and set(df["bar"] % 3) == {2}   # compact: 15-min entries
     finally:
         UNDERLYINGS.pop("TESTCO", None)
+
+
+def test_daily_call_budget_stops_and_resumes(tmp_path, monkeypatch):
+    from lab import dhan_hist as H
+    monkeypatch.setattr(H, "START", dt.date(2024, 8, 1))
+    monkeypatch.setattr(H, "DAILY_CAP", 42 * 25)            # about one index month
+    monkeypatch.setattr(H, "stock_ids", lambda cache, syms, fetch=True: {})
+    logs = []
+    H.download(FakeDhan(), tmp_path, [], log=logs.append)
+    got = sorted(p.name for p in (H.root(tmp_path) / "history").glob("*/raw_*.parquet"))
+    assert len(got) == 1 and any("budget" in m for m in logs)
+    monkeypatch.setattr(H, "_budget", lambda d: {"f": tmp_path / "b.json", "day": "x", "used": 0})
+    monkeypatch.setattr(H, "DAILY_CAP", 10 ** 6)
+    H.download(FakeDhan(), tmp_path, [], log=logs.append)
+    assert len(list((H.root(tmp_path) / "history").glob("*/raw_*.parquet"))) > 1
+
+
+def test_news_and_movers_parsing(tmp_path):
+    from live import dhanintel as I
+
+    class FD:
+        client_id = "1"
+
+        def post(self, path, body):
+            assert "PORTFOLIO" not in str(body) and "order" not in path
+            if path == "/data/newsheadline":
+                return {"data": [{"headline": "Reliance jumps on results", "timestamp": 1793000000000, "securityIds": ["2885"]}]}
+            if body["category"] == "PRICE_GAINERS":
+                return {"data": [{"symbol": "TATASTEEL"}, {"securityId": "2885"}]}
+            if body["category"] == "PRICE_LOSERS":
+                return {"data": []}
+            return {"data": {"list": [{"tradingSymbol": "RELIANCE-Nov2026-1400-CE"}]}}
+    it = I.DhanIntel(FD(), tmp_path)
+    it.ids = {"2885": "RELIANCE"}
+    n = it.news()
+    assert n[0]["dhan_syms"] == ["RELIANCE"] and abs(n[0]["ts"] - 1793000000) < 1
+    it.refresh_movers(dt.date(2026, 11, 24))
+    assert it.movers["price_gainers"] == ["TATASTEEL", "RELIANCE"] and it.movers["opt_oi_gainers"] == ["RELIANCE"]
+    r = it.mover_rank("RELIANCE")
+    assert r["rank"] == 1 and "price_gainers" in r["lists"]
+    from live.learn import _mover_dir
+    assert _mover_dir(r) == 1 and _mover_dir({"rank": None, "lists": []}) == 0 and _mover_dir({}) is None

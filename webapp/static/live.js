@@ -176,6 +176,14 @@ function rangeBar(m) {
     <div class="rb-labels"><span>L ${fx(lo)}</span><span>H ${fx(hi)}</span></div>`;
 }
 
+function dhanStrip(x) {
+  if (!x) return "";
+  const dep = x.depth ? Object.entries(x.depth).map(([k, v]) => `${esc(k)} ${v === "live" ? "✓" : esc(v)}`).join(", ") : "off";
+  const mv = x.movers ? Object.values(x.movers).reduce((a, b) => a + b, 0) : 0;
+  const err = Object.entries(x.errors || {}).map(([k, v]) => `${k}: ${v}`).join(" · ");
+  return `<p class="small muted" style="margin:6px 0">Dhan Pro: order book ${dep} · market movers ${mv ? `${mv} names` : "waiting"}${(x.in_play || []).length ? ` · in play: <b>${x.in_play.map((s) => `<a href="#/chart?s=${encodeURIComponent(s)}">${esc(s)}</a>`).join(", ")}</b>` : ""}${err ? ` · <span class="down">${esc(err)}</span>` : ""}</p>`;
+}
+
 function depthLine(d) {
   if (!d) return "";
   const buy = Math.round((1 + d.imb_near) / 2 * 100);
@@ -387,7 +395,7 @@ function renderLive(force = false) {
     ${cb ? `<div class="contrib">${cb.rows.slice(0, 8).map((r) => `<div class="cb-row"><span>${esc(r.sym)}</span><div class="cb-bar"><i class="${r.points >= 0 ? "pos" : "neg"}" style="width:${Math.abs(r.points) / maxPts * 50}%;${r.points >= 0 ? "left:50%" : `right:50%`}"></i></div><b class="${r.points >= 0 ? "up" : "down"}">${r.points > 0 ? "+" : ""}${r.points.toFixed(0)}</b></div>`).join("")}</div>
       <p class="muted small" style="margin:6px 0 0">Points from index moves × approximate weights. These explain ${cb.explained > 0 ? "+" : ""}${cb.explained.toFixed(0)} of the ${cb.actual > 0 ? "+" : ""}${cb.actual.toFixed(0)}-point move.</p>` : ""}</div>` : "";
   body.innerHTML = `${strip}
-    ${extraIdx(s.extra)}
+    ${extraIdx(s.extra)}${dhanStrip(s.dhan)}
     <div class="icards">${s.indices.slice(0, 4).map(indexCard).join("")}</div>
     ${watchStrip(s.watch)}
     <div class="live-grid">
@@ -2116,7 +2124,7 @@ async function pageLab() {
     const c = x.compare || {}, A = c.current || {}, B = c.five_year || {};
     const row = (k, l) => `<tr><td>${l}</td><td class="r">${A[k] ?? "–"}</td><td class="r">${B[k] ?? "–"}</td></tr>`;
     el.innerHTML = `<div class="toolbar" style="margin:0"><div><h3 style="margin:0">5-year Lab <span class="pill p-amber">challenger</span> <span class="muted small">${nm ? `${nm} months from Dhan on your Mac (${Object.keys(ms).length} symbols)` : "no Dhan data yet"}</span></h3>
-        <p class="small muted" style="margin:4px 0 0">Dhan's archive (1-minute options from 2021: Nifty, Bank Nifty ATM ±10, 30 stocks ATM ±3) joined with the Upstox history, tested in its own folder. The current Lab and its live rules are not touched; the two are compared here and switching is your call. Market data only.</p></div>
+        <p class="small muted" style="margin:4px 0 0">Dhan's archive (1-minute options from 2021: Nifty, Bank Nifty ATM ±10, 30 stocks ATM ±3) joined with the Upstox history, tested in its own folder. Dhan serves one day per call and ~100,000 calls a day: Nifty and Bank Nifty finish in about a day, the 30 stocks over about 5 more; it continues by itself every evening, newest months first. The current Lab and its live rules are not touched; the two are compared here and switching is your call. Market data only.</p></div>
         <div class="btn-row" style="margin:0">${x.running ? `<button class="btn" id="d5-stop">Stop</button>` : `<button class="btn ${nm ? "" : "primary"}" id="d5-go" ${x.dhan ? "" : "disabled title='Add Dhan keys on Strategy desk → Data and settings'"}>${nm ? "Update" : "Download 5 years"}</button>`}<button class="btn ${nm ? "primary" : ""}" id="d5-run" ${nm && !x.running ? "" : "disabled"}>Run 5-year research</button></div></div>
       ${x.running || x.status === "failed" ? `<div style="margin-top:8px"><div class="bar"><i style="width:${pct}%"></i></div><small class="muted">${x.running ? `${pct}% · ` : ""}${x.error ? `<span class="down">${esc(x.error)}</span> · ` : ""}${esc((x.log || []).slice(-1)[0] || "starting…")}</small></div>` : ""}
       ${B.updated ? `<div class="table-wrap" style="margin-top:8px"><table class="mini"><thead><tr><th></th><th class="r">Current (2 years)</th><th class="r">5-year</th></tr></thead><tbody>

@@ -180,6 +180,16 @@ def scheduler_loop():
                     STOCK_HIST.start(months=2, why="nightly")
                 except Exception:
                     pass
+            # 5-year Lab: Dhan allows ~100k calls a day, so the download continues by itself each evening until complete
+            if (now.hour >= 18 and state.get("last_dhan5y") != today and not DHAN5Y.running()
+                    and any((ROOT / "data" / "lab5y" / "history").glob("*/raw_????-??.parquet"))
+                    and (_lab_cfg().get("dhan_client_id") and _lab_cfg().get("dhan_token"))):
+                state["last_dhan5y"] = today
+                state_f.write_text(json.dumps(state))
+                try:
+                    DHAN5Y.start(why="nightly")
+                except Exception:
+                    pass
             if s.get("enabled") and due and has_model and not JOBS.busy():
                 if now.weekday() < 5 and state.get("last_forecast") != today:
                     state["last_forecast"] = today
