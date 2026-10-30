@@ -64,3 +64,10 @@ def test_every_setting_the_app_saves_is_allowed():
     js = (root / "live.js").read_text() + (root / "app.js").read_text()
     sent = set(re.findall(r'"((?:live|ai|lab|schedule|telegram|data|model|radar|target|news)\.[a-z_.]+)"\s*:', js))
     assert sent and not [k for k in sent if k not in EDITABLE]
+
+
+def test_pro_explains_unavailable_model(tmp_path):
+    cli = _fake_cli(tmp_path, 'cat > /dev/null; echo "Error: model opus is not available on your plan" >&2; exit 1\n')
+    ai = AI(lambda: {"ai": {"provider": "claude_pro", "pro_model": "opus"}})
+    ai._cli = cli
+    assert ai.ask("x", auto=False) is None and "choose Sonnet" in ai.last_error

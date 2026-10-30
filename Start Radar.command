@@ -56,4 +56,6 @@ elif [ -n "$REQ_BEFORE" ] && [ "$REQ_BEFORE" != "$(git rev-parse HEAD:requiremen
   .venv/bin/python -m pip install $PIP_OPTS -r requirements.txt --quiet || echo "Package install failed; the app may still work."
 fi
 
+# library deprecation notices (yfinance on newer pandas) would flood this window: keep them out
+export PYTHONWARNINGS="ignore::DeprecationWarning,ignore::FutureWarning"
 .venv/bin/python app.py

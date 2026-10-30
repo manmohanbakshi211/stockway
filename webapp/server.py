@@ -9,7 +9,14 @@ import threading
 import time
 import traceback
 import uuid
+import warnings
 from pathlib import Path
+
+# Library deprecation notices (yfinance on newer pandas) flood the Terminal and hide real problems: keep them out.
+warnings.filterwarnings("ignore", message=r".*inplace keyword.*")
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"yfinance(\..*)?")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"yfinance(\..*)?")
+import radar  # noqa: E402,F401  (installs the quiet warning printer for every thread)
 
 import numpy as np
 import pandas as pd

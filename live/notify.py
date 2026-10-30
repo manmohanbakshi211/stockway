@@ -207,6 +207,9 @@ class AI:
         low = last.lower()
         if "login" in low or "log in" in low or "auth" in low:
             raise RuntimeError("Claude Code is not logged in: open Terminal, type claude, and log in with your Claude account.")
+        if "model" in low and any(w in low for w in ("not available", "not found", "invalid", "access", "not supported")):
+            raise RuntimeError(f"The model '{model or 'default'}' isn't available on your Claude plan in Claude Code: "
+                               "choose Sonnet in Live setup → AI.")
         if "limit" in low:
             raise RuntimeError("Your Claude plan's usage limit is reached for now; it resets in a few hours.")
         raise RuntimeError(last[:300] or "Claude Code returned nothing.")
