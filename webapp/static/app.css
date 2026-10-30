@@ -643,3 +643,12 @@ main.wide { max-width: none; }
 .tm-typ-row small { color: var(--muted); font-weight: 600; }
 tr.best td { background: var(--up-soft); }
 .form-grid > * { min-width: 0; } label.field select, label.field input { min-width: 0; max-width: 100%; }
+
+/* Days like today */
+.scen-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:6px 0 10px}
+.scen-today{background:var(--fog);border-radius:var(--radius);padding:10px 12px}
+.scen-today ul{margin:6px 0;padding-left:18px}
+.scen-best{border-left:3px solid var(--up);padding:8px 12px;margin:8px 0;background:var(--up-soft);border-radius:0 var(--radius) var(--radius) 0}
+.scen-best p{margin:6px 0 0}
+.scen .sc-m{display:none}
+@media (max-width: 600px){.scen .sc-x{display:none}.scen td:first-child{max-width:150px}.scen .sc-m{display:inline-block;margin-top:4px}.scen td,.scen th{padding-left:6px;padding-right:6px}}

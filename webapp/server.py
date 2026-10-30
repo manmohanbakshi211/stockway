@@ -617,7 +617,38 @@ def lab_eod_run():
             _eng().expiry.load_plan()
         except Exception:
             pass
+        try:
+            from lab.scenario import run as scen
+            scen(ROOT / "data", log=log)
+        except Exception as ex:
+            log(f"Days-like-today check skipped: {ex}")
     return {"id": JOBS.start("lab_eod", "Testing strategies on 10+ years of end-of-day data", job)["id"]}
+
+
+@app.get("/api/lab/scenario")
+def lab_scenario():
+    """Days like today: refreshed automatically when a newer end-of-day file or a new 10-year test exists."""
+    from lab import scenario
+    from lab.walk import lab_dir
+    f = lab_dir(ROOT / "data") / "scenario.json"
+    if scenario.stale(ROOT / "data"):
+        try:
+            return clean(scenario.run(ROOT / "data", log=lambda m: None))
+        except Exception as ex:
+            if not f.exists():
+                return {"error": str(ex)}
+    if not f.exists():
+        return None
+    return clean(json.loads(f.read_text()))
+
+
+@app.post("/api/lab/scenario/run")
+def lab_scenario_run():
+    from lab import scenario
+    try:
+        return clean(scenario.run(ROOT / "data", log=lambda m: None))
+    except Exception as ex:
+        raise HTTPException(400, str(ex))
 
 
 @app.get("/api/lab/expiry")

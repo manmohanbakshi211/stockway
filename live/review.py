@@ -30,7 +30,8 @@ ASK = {
                    "symbol's last 60 sessions, plus the same plan on each real past session). Judge the plan: is the edge real "
                    "or noise, is the stop or target badly placed given the price fan, and what variation is worth testing.",
     "desk": "These are the Strategy desk results: intraday walk-forward backtests, the 10-year end-of-day test (iron condor / "
-            "iron fly / straddles), the chart-setup edge study and the live paper desks. Say which strategies deserve paper "
+            "iron fly / straddles), the 'days like today' check (how each strategy did when VIX, trend and option prices "
+            "looked like now), the chart-setup edge study and the live paper desks. Say which strategies deserve paper "
             "money, which to drop, and what to test next.",
     "scorecard": "This is the alert Scorecard: every live alert followed for 60 minutes and graded. Say which alert types work, "
                  "which to mute, whether the sample is big enough, and what to change.",
@@ -60,7 +61,7 @@ def _read(f: Path):
 def desk_context(e, data_dir: Path) -> dict:
     lab = data_dir / "lab"
     d = {"intraday_backtest": slim(_read(lab / "results.json")), "ten_year_eod": slim(_read(lab / "eod_results.json"), max_list=20),
-         "setup_edge_study": slim(_read(lab / "meta.json"))}
+         "setup_edge_study": slim(_read(lab / "meta.json")), "days_like_today": slim(_read(lab / "scenario.json"), max_list=20)}
     try:
         d["expiry_desk_paper"] = slim(e.expiry.view())
     except Exception:

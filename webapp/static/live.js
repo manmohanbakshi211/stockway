@@ -912,6 +912,7 @@ async function pageDesk() {
     ${st.synthetic ? `<div class="banner">⚠️ You are looking at a <b>demo on synthetic (fake) data</b>. It shows how the desk works, not whether it makes money. Download real history below (Upstox Plus).</div>` : ""}
     <div id="desk-guide"><div class="panel"><p class="muted">Loading your research status…</p></div></div>
     ${aiReviewBox("desk", "Claude research review of the desk")}
+    <div id="desk-scenario"></div>
     <div id="desk-live"></div>
     <div id="desk-edge"></div>
     <div id="desk-eod"></div>
@@ -976,6 +977,10 @@ async function pageDesk() {
       el.querySelectorAll("[data-gjob]").forEach((b) => b.onclick = () => job(b.dataset.gjob));
       el.querySelectorAll("[data-gscroll]").forEach((b) => b.onclick = () => document.getElementById(b.dataset.gscroll)?.scrollIntoView({ behavior: "smooth" })); });
   api("/api/lab/edge").then((e) => { const el = $("#desk-edge"); if (el) el.innerHTML = edgeCard(e); }).catch(() => {});
+  const drawScen = (x) => { const el = $("#desk-scenario"); if (!el) return; el.innerHTML = likeTodayCard(x);
+    const b = $("#scen-run"); if (b) b.onclick = async () => { b.disabled = true; b.textContent = "Checking…";
+      try { drawScen(await post("/api/lab/scenario/run", {})); toast("Checked against the latest close"); } catch (e) { toast(e.message); b.disabled = false; b.textContent = "Check again"; } }; };
+  api("/api/lab/scenario").then(drawScen).catch(() => {});
   api("/api/lab/expiry").then((x) => { const el = $("#desk-expiry"); if (el) el.innerHTML = expiryCard(x); }).catch(() => {});
   Promise.all([api("/api/lab/eod/status"), api("/api/lab/eod").catch(() => null)]).then(([st2, r]) => {
     const el = $("#desk-eod"); if (!el) return;
@@ -1072,6 +1077,35 @@ function expiryCard(x) {
     <p class="small">Paper result so far: ${x.n ? `${rs(x.total)} over ${x.n} expiries, ${x.won} won` : "no expiry settled yet"}. Entry about 15:20 on the entry day at live bid/ask; settled at the expiry close.</p>
     ${open ? `<div class="table-wrap"><table><thead><tr><th>Open</th><th>Legs</th><th class="r">Lots</th><th class="r">Credit (pts)</th><th class="r">Max loss</th><th class="r">Now</th></tr></thead><tbody>${open}</tbody></table></div>` : ""}
     ${closed ? `<div class="table-wrap"><table><thead><tr><th>Settled</th><th class="r">Lots</th><th class="r">Index at expiry</th><th class="r">Net</th><th></th></tr></thead><tbody>${closed}</tbody></table></div>` : ""}</div>`;
+}
+
+/* Days like today: how each end-of-day strategy did when the market looked like now (lab/scenario.py) */
+function likeTodayCard(x) {
+  if (!x) return "";
+  if (x.error) return `<div class="panel"><h3>Days like today</h3><p class="muted small">${esc(x.error)}</p></div>`;
+  const rs = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
+  const idx = (s) => s === "BANKNIFTY" ? "Bank Nifty" : s === "NIFTY" ? "Nifty" : esc(s);
+  const pill = { good: "p-up", bad: "p-down", weak: "p-down", maybe: "", few: "" };
+  const today = Object.entries(x.today || {}).map(([s, t]) => `<div class="scen-today"><b>${idx(s)} ${fk(t.spot)}</b> <span class="muted small">close ${esc(t.date)} · next expiry ${esc(t.next_expiry)}</span>
+    <ul class="small">${(t.conditions || []).map((c) => `<li>${esc(c)}</li>`).join("")}</ul><span class="muted small">${t.similar_days} similar past days found</span></div>`).join("");
+  const b = x.best;
+  const best = b ? `<div class="scen-best"><div class="small muted">Best match for these conditions</div>
+      <b>${idx(b.sym)} ${esc(b.name)}, enter ${esc(b.entry_name)}</b> <span class="pill p-up">next: ${esc(b.next_entry)}</span>
+      <p class="small">On ${b.near.n} similar past days: won ${Math.round(b.near.win_pct)}%, average ${rs(b.near.avg)} per lot, worst ${rs(b.near.worst)}.
+      ${b.strict && b.strict.near && b.strict.near.n ? `The strict 10-year test's own picks on those days: ${b.strict.near.n} trades, won ${Math.round(b.strict.near.win_pct)}%, average ${rs(b.strict.near.avg)}, worst ${rs(b.strict.near.worst)}.` : ""}
+      The Expiry desk below paper-trades it automatically on that day.</p></div>`
+    : `<div class="scen-best"><b>Nothing clearly worked in days like today.</b> <span class="small">Sitting out is a valid choice; the desks stay on paper.</span></div>`;
+  const order = { good: 0, maybe: 1, few: 2, weak: 3, bad: 4 };
+  const rows = (x.strategies || []).slice().sort((a, c) => (order[a.verdict] - order[c.verdict]) || ((c.near.avg || 0) - (a.near.avg || 0))).map((r) => `<tr>
+      <td><b>${idx(r.sym)}</b> ${esc(r.name)}<div class="muted small">${esc(r.entry_name)} · next ${esc(r.next_entry || "–")}</div><span class="pill sc-m ${pill[r.verdict] || ""}">${esc(r.verdict_text)}</span></td>
+      <td class="r">${r.near.n || 0}</td><td class="r">${r.near.n ? Math.round(r.near.win_pct) + "%" : "–"}</td><td class="r">${rs(r.near.avg)}</td><td class="r sc-x">${rs(r.near.worst)}</td>
+      <td class="r sc-x">${rs(r.all.avg)}</td><td class="sc-x"><span class="pill ${pill[r.verdict] || ""}">${esc(r.verdict_text)}</span></td></tr>`).join("");
+  return `<div class="panel scen"><div class="toolbar" style="margin:0 0 8px"><h3 style="margin:0">Days like today <span class="muted small">which strategy worked when the market looked like now · ${esc((x.generated || "").replace("T", " "))}</span></h3>
+      <div class="btn-row" style="margin:0"><button class="btn" id="scen-run">Check again</button></div></div>
+    <div class="scen-grid">${today}</div>${best}
+    <details style="margin-top:10px"><summary class="small">All strategies in these conditions (${(x.strategies || []).length})</summary>
+    <div class="table-wrap"><table><thead><tr><th>Strategy</th><th class="r">Similar <span class="sc-x">days</span></th><th class="r">Won</th><th class="r">Avg / lot</th><th class="r sc-x">Worst</th><th class="r sc-x">Avg, all days</th><th class="sc-x"></th></tr></thead><tbody>${rows}</tbody></table></div></details>
+    <p class="note">${(x.notes || []).map(esc).join(" ")}</p></div>`;
 }
 
 function eodCard(st, r) {

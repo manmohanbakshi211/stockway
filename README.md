@@ -146,6 +146,12 @@ signals, win rate, average ₹ per lot and whether it beats luck. Live Nifty/Ban
 setups that historically lose become info-only (no paper trade). An AI filter (gradient boosting on ~25 facts known
 at the signal) is tested month by month on unseen months and is used live only if it passes.
 
+**Days like today.** On top of the 10-year end-of-day test (iron condor / iron fly / straddles held to expiry), the
+desk finds the 20% of past entry days that looked most like the latest close (India VIX level and direction, trend
+vs the 20-day average, the day's move, how rich options are vs recent moves) and shows how each strategy and entry
+timing did on those days, next to all days and next to the strict walk-forward's own picks, with the next entry date.
+It refreshes itself after each new end-of-day file. History, not a forecast; paper only.
+
 Setup: log in to Upstox (Plus plan) on Live setup → Strategy desk → Check access → Download history (about
 1–1.5 hours per year of history, resumable; data starts 2022) → Run backtest. Re-run monthly.
 Dhan works too (Client ID + token under "Or use Dhan instead").
