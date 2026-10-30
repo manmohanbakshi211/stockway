@@ -100,10 +100,17 @@ Each alert suggests the at-the-money option in its direction. Strong alerts are 
 automatically (1 lot, +30% target, −20% stop, exit by 3:15 PM, real charges). The **Paper trades**
 page shows which alert types actually make money. Use that before risking real money.
 
-Optional: a free Google Gemini key (https://aistudio.google.com/apikey) adds a written market pulse
-and a "Why?" answer on alerts. Only prices and public headlines are sent.
+**AI (optional): your Claude Pro plan works here.** Live setup → 4. AI → "Claude: my Pro / Max plan". Stockway
+asks Claude Code on your Mac, which is logged in with your Claude account, so there is no API key and no extra bill:
+it uses your plan's normal limits (shared with your Claude chats). One-time setup: in Terminal run
+`curl -fsSL https://claude.ai/install.sh | bash`, then type `claude` and log in. Claude Code runs with every tool
+switched off (it cannot read files, run commands or browse), in an empty folder; it only answers. Automatic notes are
+capped per day (12 by default) and spread out; questions you ask are not capped by that.
+It powers **Ask Stockway** (chat in English or Hinglish, answered from the app's live data), the "Why?" answer on
+alerts, the AI chart read, briefs and the market brain. Other choices: a free Google Gemini key, or a Claude API key.
+Only prices and public headlines are sent.
 
-Costs: Upstox data is free with an account. Gemini free tier is free. Telegram is free.
+Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
 ## Strategy desk (aim: a positive average day)
 
@@ -181,12 +188,13 @@ alert's plan. Idea from the MIT day-trader-skill, rebuilt for NSE hours.
 
 ## Pages
 
-The menu is grouped: **Trade today** (Live, Alerts, Chart, Option chain, Scanner, Paper trades), **Test & research**
+The menu is grouped: **Trade today** (Live, Ask Stockway, Alerts, Chart, Option chain, Scanner, Paper trades), **Test & research**
 (Time Machine, Strategy desk, Scorecard), **Market intel** (Market context, World, Insider trades, Briefs),
 **Daily radar** and **Setup**.
 
 | Page | What it answers |
 |---|---|
+| Ask Stockway | Ask about the market right now (English or Hinglish); answered by Claude from the app's live data. |
 | Time Machine | Test any trade plan before taking it: 10,000 replays of the rest of the day plus the real past. |
 | Chart | TradingView-style chart with indicators, levels, setups and markers, plus a chart read. |
 | World | Global markets, forex, commodities, rates, ADRs, economic and results calendars, global news. |

@@ -168,7 +168,7 @@ def live_chart_ai(sym: str):
     from live.notify import SYSTEM_STYLE, _compact_json, _slim_metrics
     e = engine()
     if not e.ai.enabled():
-        raise HTTPException(400, "Add an AI key in Live setup to get an AI chart reading.")
+        raise HTTPException(400, "Choose an AI in Live setup (your Claude Pro plan works) to get an AI chart reading.")
     sym = sym.upper()
     d = e.charts.payload(sym, 5, 1)
     if not d:
@@ -186,7 +186,7 @@ def live_chart_ai(sym: str):
               "1) structure and trend, 2) where price sits vs the key levels, 3) the best trade setup now with entry, stop and "
               "target levels (or 'no trade' and why), 4) what would change your mind, 5) one risk. Use only the numbers given.\n\n"
               + _compact_json(facts))
-    text = e.ai.ask(prompt, 450)
+    text = e.ai.ask(prompt, 450, auto=False)
     if not text:
         raise HTTPException(502, e.ai.last_error or "AI did not answer.")
     return {"text": text}
@@ -208,8 +208,8 @@ def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1
 def live_explain(alert_id: int):
     e = engine()
     if not e.ai.enabled():
-        raise HTTPException(400, "Add an AI key in Settings → AI to get explanations.")
-    text = e.explain(alert_id)
+        raise HTTPException(400, "Choose an AI in Live setup (your Claude Pro plan works) to get explanations.")
+    text = e.explain(alert_id, auto=False)
     if not text:
         raise HTTPException(502, e.ai.last_error or "AI did not answer. Try again in a minute.")
     return {"text": text}
@@ -430,6 +430,49 @@ def insiders_refresh():
         return {"started": False}
     threading.Thread(target=e._insiders_refresh, daemon=True).start()
     return {"started": True}
+
+
+@router.post("/api/ask")
+async def ask_stockway(req: Request):
+    """Ask Stockway: a question answered from the app's live data by the AI chosen in Live setup."""
+    from live.ask import answer
+    b = await req.json()
+    e = engine()
+    try:
+        return clean(await _run_blocking(answer, e, str(b.get("q") or ""), b.get("history") or []))
+    except PermissionError as ex:
+        raise HTTPException(400, str(ex))
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    except RuntimeError as ex:
+        raise HTTPException(502, str(ex))
+
+
+@router.get("/api/ai/status")
+def ai_status():
+    """Which AI is set, whether Claude Code (your Pro plan) is installed on this Mac, and today's use."""
+    from live.notify import find_claude_cli
+    e = engine()
+    c = e.cfg().get("ai") or {}
+    return {"provider": e.ai.provider(), "label": e.ai.label(), "enabled": e.ai.enabled(), "claude_cli": find_claude_cli(),
+            "used": e.ai.used, "used_auto": e.ai.used_auto, "daily_limit": c.get("daily_limit"),
+            "pro_auto_per_day": c.get("pro_auto_per_day") or 12, "last_error": e.ai.last_error}
+
+
+@router.post("/api/ai/test")
+async def ai_test():
+    e = engine()
+    if not e.ai.enabled():
+        raise HTTPException(400, "Claude Code was not found on this Mac." if e.ai.provider() == "claude_pro" else "Add an API key first.")
+    text = await _run_blocking(e.ai.ask, "Reply with exactly: Stockway connected", 20, False)
+    if not text:
+        raise HTTPException(502, e.ai.last_error or "No answer.")
+    return {"ok": True, "text": text[:200], "by": e.ai.label()}
+
+
+async def _run_blocking(fn, *args):
+    import asyncio
+    return await asyncio.get_running_loop().run_in_executor(None, lambda: fn(*args))
 
 
 @router.get("/api/company/{sym}")

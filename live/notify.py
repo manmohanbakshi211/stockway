@@ -79,36 +79,82 @@ def telegram_text(a: dict) -> str:
 
 
 # ---------------------------------------------------------------- AI
+CLAUDE_PATHS = ("~/.local/bin/claude", "~/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude",
+                "~/.npm-global/bin/claude", "~/.volta/bin/claude", "~/.bun/bin/claude")
+
+
+def find_claude_cli() -> str | None:
+    """The Claude Code command on this Mac (it logs in with your Claude Pro or Max account)."""
+    import os
+    import shutil
+    p = shutil.which("claude")
+    if p:
+        return p
+    for c in CLAUDE_PATHS:
+        c = os.path.expanduser(c)
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return None
+
+
 class AI:
-    """Gemini (free tier) or Claude. Only market data and public headlines are ever sent."""
+    """Gemini (free tier), Claude with an API key, or Claude through your Pro/Max plan (Claude Code on this Mac).
+
+    Only market data and public headlines are ever sent. With the Pro plan, Claude Code runs with every tool switched
+    off (it cannot read files, run commands or browse), in an empty folder, as a plain question-and-answer.
+    Pro usage is shared with your Claude chats, so automatic notes are capped separately from questions you ask.
+    """
 
     def __init__(self, get_cfg, log=print):
         self.get_cfg = get_cfg
         self.log = log
         self.day = None
         self.used = 0
+        self.used_auto = 0
         self.last_error = None
+        self._cli = None
 
     def cfg(self):
         return self.get_cfg().get("ai", {}) or {}
 
+    def provider(self):
+        return self.cfg().get("provider") or "gemini"
+
+    def cli(self):
+        if self._cli is None or not __import__("os").path.exists(self._cli):
+            self._cli = find_claude_cli()
+        return self._cli
+
     def enabled(self):
         c = self.cfg()
+        if c.get("provider") == "claude_pro":
+            return bool(self.cli())
         return bool(c.get("api_key")) and c.get("provider") in ("gemini", "claude")
 
-    def ask(self, prompt: str, max_tokens=400) -> str | None:
+    def label(self):
+        return {"claude_pro": "Claude (your Pro plan)", "claude": "Claude API", "gemini": "Gemini"}.get(self.provider(), "AI")
+
+    def ask(self, prompt: str, max_tokens=400, auto=True) -> str | None:
+        """auto=True for notes the app writes by itself; False when you clicked or asked."""
         if not self.enabled():
             return None
         c = self.cfg()
         today = dt.date.today()
         if self.day != today:
-            self.day, self.used = today, 0
-        if self.used >= int(c.get("daily_limit") or 200):
+            self.day, self.used, self.used_auto = today, 0, 0
+        pro = c.get("provider") == "claude_pro"
+        if self.used >= int(c.get("daily_limit") or (80 if pro else 200)):
             self.last_error = "Daily AI limit reached"
             return None
+        if pro and auto and self.used_auto >= int(c.get("pro_auto_per_day") or 12):
+            self.last_error = "Automatic notes on the Pro plan are used up for today (questions still work)"
+            return None
         self.used += 1
+        self.used_auto += 1 if auto else 0
         try:
-            if c["provider"] == "gemini":
+            if pro:
+                text = self._ask_claude_code(prompt, c)
+            elif c["provider"] == "gemini":
                 model = c.get("model") or "gemini-flash-lite-latest"
                 r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                                   params={"key": c["api_key"]},
@@ -130,9 +176,40 @@ class AI:
             self.last_error = None
             return text.strip()
         except Exception as e:
-            self.last_error = str(e)[:200]
+            self.last_error = str(e)[:300]
             self.log(f"AI request failed: {self.last_error}")
             return None
+
+    def _ask_claude_code(self, prompt: str, c: dict) -> str:
+        import os
+        import subprocess
+        import tempfile
+        cli = self.cli()
+        if not cli:
+            raise RuntimeError("Claude Code is not installed on this Mac (see Live setup).")
+        env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}  # use the Pro login
+        sandbox = os.path.join(tempfile.gettempdir(), "stockway-ai")
+        os.makedirs(sandbox, exist_ok=True)
+        model = (c.get("pro_model") or "").strip()
+        core = [cli, "-p", "--output-format", "text"] + (["--model", model] if model else [])
+        attempts = [core + ["--no-session-persistence", "--strict-mcp-config", "--disable-slash-commands", "--tools", ""],
+                    core + ["--disallowedTools", "Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch",
+                            "WebSearch", "Task", "Read", "Glob", "Grep"]]                   # older Claude Code
+        last = ""
+        for cmd in attempts:
+            r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=int(c.get("pro_timeout") or 150),
+                               cwd=sandbox, env=env)
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout
+            last = (r.stderr or r.stdout or "").strip()
+            if "unknown option" not in last.lower() and "error: option" not in last.lower():
+                break
+        low = last.lower()
+        if "login" in low or "log in" in low or "auth" in low:
+            raise RuntimeError("Claude Code is not logged in: open Terminal, type claude, and log in with your Claude account.")
+        if "limit" in low:
+            raise RuntimeError("Your Claude plan's usage limit is reached for now; it resets in a few hours.")
+        raise RuntimeError(last[:300] or "Claude Code returned nothing.")
 
 
 SYSTEM_STYLE = ("You are a sharp Indian F&O market desk analyst. Write in simple English a retail trader understands. "

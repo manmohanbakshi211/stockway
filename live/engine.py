@@ -13,7 +13,7 @@ from .analytics import compute, norm_iv, pct
 from .clock import IST, Clock, SimClock, is_market_hours, minutes_since_open
 from .context import Context
 from .learn import Ranker, features, regime, regime_adjust
-from .notify import AI, News, Telegram, match_symbols, pulse_prompt, rule_pulse, symbol_words, telegram_text
+from .notify import AI, News, Telegram, alert_prompt, match_symbols, pulse_prompt, rule_pulse, symbol_words, telegram_text
 from .paper import PaperBook
 from .record import Recorder, Tracker, evidence, levels, outcomes, scorecard, signal_score, size_mb
 from .state import MarketState
@@ -542,10 +542,14 @@ class LiveEngine:
             if self._every("stats", 300, clock_time=False):
                 self._refresh_stats()
             aic = self.cfg().get("ai") or {}
+            pro = aic.get("provider") == "claude_pro"          # Pro plan: spread the few automatic notes over the day
             every = int(aic.get("brain_every_min") or 10) * 60 if self.ai.enabled() else 300
+            pulse_every = int(aic.get("pulse_every_min") or 15) * 60
+            if pro and self.ai.enabled():
+                every, pulse_every = max(every, 3600), max(pulse_every, 3600)
             if mins >= 3 and self._every("brain", every, clock_time=False):
                 threading.Thread(target=self._brain_safe, daemon=True).start()
-            if self._every("ai_pulse", int((self.cfg().get("ai") or {}).get("pulse_every_min") or 15) * 60, clock_time=False) \
+            if self._every("ai_pulse", pulse_every, clock_time=False) \
                     and self.ai.enabled() and mins >= 5:
                 threading.Thread(target=self._ai_pulse, daemon=True).start()
             self.status["loop_ms"] = round((time.time() - t0) * 1000)
@@ -762,6 +766,22 @@ class LiveEngine:
                 self.paper.try_open(a, self.state, now)
             except Exception as e:
                 self.log(f"Paper trade failed: {e}")
+
+    def explain(self, alert_id, auto=True) -> str | None:
+        """'Why?' on an alert: a short written explanation from the alert, its metrics and related news (cached)."""
+        a = next((x for x in self.alerts_mem if x["id"] == alert_id), None) or self.store.alert(alert_id)
+        if not a:
+            return None
+        if a.get("ai"):
+            return a["ai"]
+        news = [n for n in self.news.items if a["sym"] in n.get("syms", [])]
+        text = self.ai.ask(alert_prompt(a, self.metrics.get(a["sym"]), news), 300, auto=auto)
+        if text:
+            self.store.set_alert_ai(alert_id, text)
+            for x in self.alerts_mem:
+                if x["id"] == alert_id:
+                    x["ai"] = text
+        return text
 
     def _refresh_stats(self):
         try:

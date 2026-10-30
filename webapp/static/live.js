@@ -655,7 +655,7 @@ async function pageConnect() {
   const q = (v) => (v == null ? "" : esc(v));
   const perm = "Notification" in window ? Notification.permission : "unsupported";
   main.innerHTML = `<h1 class="page-title">Live setup</h1>
-    <p class="lede">Connect Upstox for live data, add free AI for explanations, and choose how you get alerts.</p>
+    <p class="lede">Connect Upstox for live data, connect Claude (your Pro plan) or another AI, and choose how you get alerts.</p>
     <div class="panel"><h2 style="margin-top:0">1. Upstox ${info.logged_in ? `<span class="pill p-up">Logged in${info.user ? " as " + esc(info.user) : ""}</span>` : info.has_keys ? `<span class="pill p-amber">Keys saved, log in needed</span>` : ""}</h2>
       <ol class="steps">
         <li>Open <a href="https://account.upstox.com/developer/apps" target="_blank" rel="noopener">account.upstox.com/developer/apps</a> and log in with your Upstox account. (No Upstox account? Open one free, it takes a day.)</li>
@@ -689,14 +689,21 @@ async function pageConnect() {
         <small>${info.telegram ? "Telegram is set up." : `Add your bot in <a href="#/data">Data &amp; settings</a> first (free).`}</small></label>
     </div></div>
 
-    <div class="panel" style="margin-top:18px"><h2 style="margin-top:0">4. AI explanations <span class="muted small">optional</span></h2>
-      <p class="muted" style="margin-top:0">Adds a written market pulse every 15 minutes and a "Why?" answer on any alert. Google Gemini has a free tier: get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Only prices and public headlines are sent.</p>
+    <div class="panel" style="margin-top:18px" id="ai-panel"><h2 style="margin-top:0">4. AI: Ask Stockway, "Why?", briefs <span class="muted small">optional</span></h2>
+      <p class="muted" style="margin-top:0">Powers the Ask Stockway chat, the "Why?" answer on alerts, the AI chart read and the written notes. Only prices and public headlines are sent.</p>
       <div class="form-grid">
-        <label class="field">Provider<select id="s-aip"><option value="gemini" ${s["ai.provider"] !== "claude" ? "selected" : ""}>Google Gemini (free tier)</option><option value="claude" ${s["ai.provider"] === "claude" ? "selected" : ""}>Claude (paid, about ₹300–600/month)</option></select></label>
-        <label class="field">API key<input type="password" id="s-aik" value="${q(s["ai.api_key"])}" autocomplete="off"></label>
+        <label class="field">AI<select id="s-aip">
+          <option value="claude_pro" ${s["ai.provider"] === "claude_pro" ? "selected" : ""}>Claude: my Pro / Max plan (via Claude Code on this Mac)</option>
+          <option value="gemini" ${!["claude", "claude_pro"].includes(s["ai.provider"]) ? "selected" : ""}>Google Gemini (free tier, needs a key)</option>
+          <option value="claude" ${s["ai.provider"] === "claude" ? "selected" : ""}>Claude API (pay per use, needs a key)</option></select></label>
+        <label class="field" id="f-aik">API key<input type="password" id="s-aik" value="${q(s["ai.api_key"])}" autocomplete="off"></label>
+        <label class="field" id="f-aim">Claude model<select id="s-aim">${[["sonnet", "Sonnet (recommended)"], ["opus", "Opus (deepest, uses your limit faster)"], ["haiku", "Haiku (fastest, lightest)"], ["", "Claude Code's default"]].map(([v, l]) => `<option value="${v}" ${(s["ai.pro_model"] ?? "sonnet") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="field">Explain automatically<select id="s-aisev">${[[2, "Important and act-now alerts"], [3, "Only act-now alerts"], [9, "Never (only when I click Why?)"]].map(([v, l]) => `<option value="${v}" ${Number(s["ai.explain_min_severity"] || 3) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="field">Market pulse every<select id="s-aipulse">${[5, 10, 15, 30, 60].map((v) => `<option value="${v}" ${Number(s["ai.pulse_every_min"] || 15) === v ? "selected" : ""}>${v} minutes</option>`).join("")}</select></label>
-      </div></div>
+        <label class="field" id="f-aiauto">Automatic AI notes per day<select id="s-aiauto">${[0, 6, 12, 24].map((v) => `<option value="${v}" ${Number(s["ai.pro_auto_per_day"] ?? 12) === v ? "selected" : ""}>${v === 0 ? "None (only when I ask)" : v}</option>`).join("")}</select><small>Your Pro limit is shared with your Claude chats; questions you ask are not capped by this.</small></label>
+      </div>
+      <div id="ai-pro-box" class="ai-pro"></div>
+      <div class="btn-row" style="margin-top:12px"><button class="btn" id="ai-test" type="button">Save and test AI</button><span class="small muted" id="ai-test-out"></span></div></div>
 
     <div class="panel" style="margin-top:18px"><h2 style="margin-top:0">5. Paper trading</h2><div class="form-grid">
       <label class="check"><input type="checkbox" id="s-pauto" ${s["live.paper.auto"] !== false ? "checked" : ""}><span>Auto paper-trade strong alerts<small>Buys the suggested option on important breakouts, surges, OI buildups and unusual option buying.</small></span></label>
@@ -714,6 +721,7 @@ async function pageConnect() {
     "live.auto_start": $("#s-auto").checked, "live.source": $("#s-src").value, "live.news": $("#s-news").checked,
     "live.sim_speed": Number($("#s-speed").value), "live.telegram_min_severity": Number($("#s-tsev").value),
     "ai.provider": $("#s-aip").value, "ai.api_key": $("#s-aik").value.trim(), "ai.explain_min_severity": Number($("#s-aisev").value),
+    "ai.pro_model": $("#s-aim").value, "ai.pro_auto_per_day": Number($("#s-aiauto").value),
     "ai.pulse_every_min": Number($("#s-aipulse").value), "live.paper.auto": $("#s-pauto").checked, "live.paper.lots": Number($("#s-plots").value),
     "live.paper.target_pct": Number($("#s-ptgt").value), "live.paper.stop_pct": Number($("#s-pstop").value),
     "live.paper.capital": Number(String($("#s-pcap").value).replace(/[^0-9.]/g, "")) || 500000, "live.paper.risk_pct": Number($("#s-prisk").value),
@@ -730,6 +738,27 @@ async function pageConnect() {
   if ($("#up-logout")) $("#up-logout").onclick = async () => { await post("/api/live/logout", {}); toast("Logged out"); pageConnect(); };
   $("#np-btn").onclick = async () => { const r = await Notification.requestPermission(); toast(r === "granted" ? "Pop-up alerts on" : "Not allowed"); pageConnect(); };
   ["#s-nsev", "#s-sound"].forEach((id) => $(id).addEventListener("change", () => { LS.set("notifySev", Number($("#s-nsev").value)); LS.set("sound", $("#s-sound").checked); }));
+  const aiShow = async () => {
+    const pro = $("#s-aip").value === "claude_pro";
+    $("#f-aik").style.display = pro ? "none" : ""; $("#f-aim").style.display = pro ? "" : "none"; $("#f-aiauto").style.display = pro ? "" : "none";
+    const box = $("#ai-pro-box");
+    if (!pro) { box.innerHTML = ""; return; }
+    let st = {}; try { st = await api("/api/ai/status"); } catch (_) {}
+    box.innerHTML = st.claude_cli
+      ? `<p class="small" style="margin:12px 0 0"><span class="pill p-up">Claude Code found</span> <span class="muted">${esc(st.claude_cli)}</span> · uses the Claude account Claude Code is logged in with. Runs with every tool switched off: it can't read your files, run commands or browse; it only answers.</p>`
+      : `<div class="ai-steps"><p class="small" style="margin:12px 0 6px"><span class="pill p-amber">Claude Code not found on this Mac</span> One-time setup (5 minutes):</p>
+         <ol class="steps small"><li>Open <b>Terminal</b> and paste: <code>curl -fsSL https://claude.ai/install.sh | bash</code></li>
+         <li>Type <code>claude</code>, press Enter, and log in with your Claude Pro account (the same one you chat with).</li>
+         <li>Close Terminal, restart Stockway, come back here and click <b>Save and test AI</b>.</li></ol></div>`;
+  };
+  $("#s-aip").onchange = aiShow; aiShow();
+  $("#ai-test").onclick = async (e) => {
+    const out = $("#ai-test-out"); e.target.disabled = true; out.textContent = "Saving and asking…";
+    if (!(await save())) { e.target.disabled = false; out.textContent = ""; return; }
+    try { const r = await post("/api/ai/test", {}); out.innerHTML = `<span class="up">✓ ${esc(r.by)} answered: “${esc(r.text)}”</span>`; }
+    catch (err) { out.innerHTML = `<span class="down">${esc(err.message)}</span>`; }
+    e.target.disabled = false;
+  };
 }
 
 
@@ -811,7 +840,7 @@ async function pageBriefs() {
     ${x ? `${x.ai ? `<div class="ai-text big">${fmtAI(x.ai)}</div><details><summary class="small muted">Facts used</summary><ul>${x.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></details>` : `<ul class="brief-lines">${x.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`}
       <p class="muted small">Made ${new Date(x.ts).toLocaleString("en-IN", { hour12: false })}${x.source === "sim" ? " · simulator day" : ""}</p>` :
       `<p class="muted">${kind === "pre" ? "Made automatically at 8:45 AM on market days (and sent to Telegram)." : "Made automatically when the market closes."}</p>`}</div>`;
-  main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Briefs</h1><p class="lede" style="margin-bottom:0">Your morning plan and evening review, written from the data. Add an AI key in Live setup for a written analysis.</p></div>
+  main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Briefs</h1><p class="lede" style="margin-bottom:0">Your morning plan and evening review, written from the data. Connect Claude (your Pro plan) or another AI in Live setup for a written analysis.</p></div>
       ${b.days.length ? `<label class="field inline">Day <select id="br-day">${b.days.map((d) => `<option ${d === b.day ? "selected" : ""}>${d}</option>`).join("")}</select></label>` : ""}</div>
     <div class="split" style="margin-top:18px">${card(b.pre, "🌅 Pre-market brief", "pre")}${card(b.post, "🌇 Post-market review", "post")}</div>`;
   if ($("#br-day")) $("#br-day").onchange = (e) => { location.hash = `#/briefs?day=${e.target.value}`; };
@@ -1479,9 +1508,53 @@ function tmFan(r) {
   plotFit(el);
 }
 
+/* ---------------- Ask Stockway: questions answered from the app's live data */
+const ASK_SAMPLES = ["Bank Nifty aaj kis taraf lag raha hai, aur key levels kya hain?", "Abhi sabse strong setup kaunsa hai? Entry, stop, target ke saath.",
+  "FII positioning kya bol rahi hai?", "RELIANCE mein aaj kya ho raha hai?", "Meri paper trading aaj kaisi chal rahi hai?", "Kal ke liye kya dhyan rakhna hai?"];
+
+async function pageAsk() {
+  stopPageTimer();
+  let st = {};
+  try { st = await api("/api/ai/status"); } catch (_) {}
+  const hist = () => LS.get("ask_hist", []) || [];
+  const fmt = (t) => fmtAI(t);
+  const bubble = (h) => `<div class="ask-q">${esc(h.q)}</div><div class="ask-a">${h.a ? fmt(h.a) : `<p class="${h.err ? "down" : "muted"}">${esc(h.err || "Thinking…")}</p>`}${h.by ? `<p class="small muted ask-by">${esc(h.by)}${h.secs ? ` · ${h.secs}s` : ""}</p>` : ""}</div>`;
+  main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Ask Stockway</h1>
+      <p class="lede" style="margin-bottom:0">Ask anything about the market right now, in English or Hinglish. The answer comes from the app's own live data: indices, option chains, FII positioning, alerts, your paper trades, insider trades and world cues.</p></div>
+      <div style="text-align:right"><span class="pill ${st.enabled ? "p-up" : "p-amber"}">${st.enabled ? esc(st.label) : "No AI connected"}</span>${st.enabled ? `<p class="small muted" style="margin:6px 0 0">${st.used || 0} used today</p>` : ""}</div></div>
+    ${st.enabled ? "" : `<div class="banner" style="margin-top:12px">Connect an AI first: <a href="#/connect">Live setup → 4. AI</a>. Your Claude Pro plan works there (through Claude Code on this Mac), no extra payment.</div>`}
+    <div class="ask-wrap">
+      <div class="ask-log" id="ask-log">${hist().map(bubble).join("") || `<p class="muted">Try one of these:</p>`}</div>
+      <div class="chips ask-chips" id="ask-chips">${ASK_SAMPLES.map((q) => `<button class="chip" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>
+      <form class="ask-form" id="ask-form" autocomplete="off"><input type="text" id="ask-q" placeholder="e.g. Nifty 25,300 todega kya aaj?" maxlength="800" aria-label="Your question">
+        <button class="btn primary" id="ask-send">Ask</button></form>
+      <p class="small muted" style="margin:6px 0 0">${hist().length ? `<button class="link-btn small" id="ask-clear" type="button">Clear chat</button> · ` : ""}Answers use the data in the app at this moment. Stockway never places orders: ideas come as alerts, paper trades or Time Machine tests.</p>
+    </div>`;
+  const log = $("#ask-log");
+  log.scrollTop = log.scrollHeight;
+  const send = async (q) => {
+    q = (q || "").trim(); if (!q) return;
+    const h = hist(); const item = { q }; h.push(item);
+    log.innerHTML = h.map(bubble).join(""); log.scrollTop = log.scrollHeight;
+    $("#ask-q").value = ""; $("#ask-send").disabled = true;
+    try {
+      const r = await post("/api/ask", { q, history: h.slice(-4, -1).filter((x) => x.a).map((x) => ({ q: x.q, a: x.a })) });
+      Object.assign(item, { a: r.answer, by: r.by, secs: r.secs });
+    } catch (e) { item.err = e.message; }
+    LS.set("ask_hist", h.slice(-20));
+    if (state.page !== "ask") return;
+    log.innerHTML = h.map(bubble).join(""); log.scrollTop = log.scrollHeight; $("#ask-send").disabled = false; $("#ask-q").focus();
+  };
+  $("#ask-form").onsubmit = (e) => { e.preventDefault(); send($("#ask-q").value); };
+  main.querySelectorAll("[data-q]").forEach((b) => b.onclick = () => send(b.dataset.q));
+  if ($("#ask-clear")) $("#ask-clear").onclick = () => { LS.set("ask_hist", []); pageAsk(); };
+  const pre = new URLSearchParams(location.hash.split("?")[1] || "").get("q");
+  if (pre) send(pre);
+}
+
 /* ---------------- register */
 Object.assign(PAGES, { live: pageLive, scanner: pageScanner, sym: pageSym, alerts: pageAlerts, paper: pagePaper, connect: pageConnect,
   context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk, chart: pageChart, world: pageWorld, insiders: pageInsiders,
-  timemachine: pageTimeMachine });
+  timemachine: pageTimeMachine, ask: pageAsk });
 window.addEventListener("hashchange", () => { stopPageTimer(); if (!location.hash.startsWith("#/chart") && CH.chart) { CH.chart.remove(); CH.chart = null; } main.classList.toggle("wide", location.hash.startsWith("#/chart")); });
 pollSnapshot();

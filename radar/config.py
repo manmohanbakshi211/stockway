@@ -53,6 +53,9 @@ EDITABLE = {
     "ai.explain_min_severity": int,
     "ai.brain_every_min": int,
     "ai.brain_telegram": int,
+    "ai.pro_model": str,
+    "ai.pro_auto_per_day": int,
+    "ai.daily_limit": int,
 }
 SECRET_KEYS = {"telegram.bot_token", "live.upstox_api_secret", "ai.api_key", "lab.dhan_token"}
 

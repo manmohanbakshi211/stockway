@@ -580,3 +580,17 @@ main.wide { max-width: none; }
   .alert-pop:nth-child(n+2) { display: none; }      /* phone: one pop-up at a time */
 }
 .world-grid > .panel { overflow-x: auto; }
+
+/* ---------- Ask Stockway */
+.ask-wrap { margin-top: 16px; display: grid; gap: 10px; max-width: 860px; }
+.ask-log { background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius); padding: 16px; min-height: 220px; max-height: calc(100vh - 360px); overflow-y: auto; display: grid; gap: 10px; align-content: start; }
+.ask-q { justify-self: end; max-width: 80%; background: var(--signal-soft); color: var(--ink); padding: 8px 12px; border-radius: 12px 12px 2px 12px; font-weight: 500; }
+.ask-a { justify-self: start; max-width: 92%; border: 1px solid var(--rule-soft); padding: 8px 12px; border-radius: 12px 12px 12px 2px; }
+.ask-a p { margin: 4px 0; }
+.ask-by { margin-top: 6px !important; }
+.ask-form { display: flex; gap: 8px; }
+.ask-form input { flex: 1; min-width: 0; font: inherit; padding: 10px 12px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); }
+.ask-chips .chip { text-align: left; }
+.ai-pro code, .ai-steps code { background: var(--fog); padding: 1px 6px; border-radius: 4px; font-size: 12.5px; }
+@media (max-width: 900px) { .ask-q { max-width: 92%; } .ask-log { max-height: none; } }
+[hidden] { display: none !important; }
