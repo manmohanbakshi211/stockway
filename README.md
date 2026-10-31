@@ -114,6 +114,18 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Dhan token renews by itself (2.20.1)
+
+Dhan Web tokens last 24 hours. While the app is open it now checks the token every 10 minutes and, about 3 hours
+before it expires, calls Dhan's Renew Token API (Authentication → Access Token → Renew Token), saves the new token and
+every running Dhan connection (5-year download, order book, news, movers) switches to it on its next call. The Dhan
+keys box shows "valid till … · last renewed …".
+
+- No PIN, TOTP or password is stored or used: only the token you pasted.
+- An expired token can't be renewed. If the Mac or the app is off for more than a day, make one new token on
+  web.dhan.co, paste it once, and it renews by itself from there.
+- Market data only: renewing the token doesn't touch orders, funds or holdings.
+
 ## Dhan Pro, checked against Dhan's own docs (2.20)
 
 - **5-year download fixed to Dhan's real limits:** one trading day per call, 5 calls a second, 100,000 a day. The app

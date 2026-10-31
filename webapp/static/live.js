@@ -1140,6 +1140,7 @@ async function pageDesk() {
           <label class="field">Dhan client ID<input type="text" id="l-cid" value="${q(settings["lab.dhan_client_id"])}" autocomplete="off"></label>
           <label class="field">Access token<input type="password" id="l-tok" value="${q(settings["lab.dhan_token"])}" autocomplete="off"><small>web.dhan.co → Profile → DhanHQ Trading APIs → generate an access token (Data APIs plan). Only market data is read: no orders, no holdings.</small></label>
         </div>
+        ${st.dhan_token && st.dhan_token.expires ? `<p class="small" style="margin:10px 0 0;${st.dhan_token.error ? "color:#C23B32" : ""}">Token valid till <b>${st.dhan_token.expires}</b> (${st.dhan_token.hours_left} h left). It renews by itself about 3 hours before it expires, while the app is open${st.dhan_token.renewed ? ` · last renewed ${st.dhan_token.renewed}` : ""}.${st.dhan_token.error ? ` ${q(st.dhan_token.error)}` : ""}</p>` : ""}
         <div class="btn-row" style="margin-top:10px"><button class="btn" id="l-save">Save</button><button class="btn" id="l-test">Test Dhan</button>
           <a class="btn" href="#/lab">Go to 5-year Lab →</a></div>
         <p class="small muted">The 5-year download is on Strategy Lab → 5-year Lab: it keeps Dhan's data in its own folder, so the current Lab is not changed.</p></details>
@@ -1166,7 +1167,7 @@ async function pageDesk() {
   const job = async (path, body = {}) => { try { await post(path, body); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
   $("#l-save").onclick = async () => { if (await save()) pageDesk(); };
   $("#l-save2").onclick = save;
-  $("#l-test").onclick = async () => { if (!(await save())) return; try { const r = await post("/api/lab/dhan/test", {}); toast(`Dhan connected (${r.profile.dhanClientId || "ok"}${r.profile.dataPlan ? ", data plan: " + r.profile.dataPlan : ""})`); pageDesk(); } catch (e) { toast(e.message); } };
+  $("#l-test").onclick = async () => { if (!(await save())) return; try { const r = await post("/api/lab/dhan/test", {}); toast(`Dhan connected (${r.profile.dhanClientId || "ok"}${r.profile.dataPlan ? ", data plan: " + r.profile.dataPlan : ""}${r.token && r.token.expires ? ", token valid till " + r.token.expires + ", auto-renews" : ""})`); pageDesk(); } catch (e) { toast(e.message); } };
   $("#l-dl").onclick = async () => { if (await save()) job("/api/lab/download", { source: "upstox" }); };
   $("#l-uptest").onclick = async () => {
     try { const r = await post("/api/lab/upstox/test", {}); const e = r.expiries;

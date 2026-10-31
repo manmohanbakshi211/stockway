@@ -28,6 +28,7 @@ class Dhan:
         self.s.headers.update({"access-token": token, "client-id": str(client_id), "Content-Type": "application/json",
                                "Accept": "application/json"})
         self.client_id = str(client_id)
+        self.token = token
         self.gap = 1.0 / per_sec
         self.last = 0.0
         self.lock = threading.Lock()
@@ -40,7 +41,18 @@ class Dhan:
                 time.sleep(d)
             self.last = time.time()
 
+    def _fresh_token(self) -> bool:
+        """After a renew (or a new paste) the app holds a newer token: switch to it. True if switched."""
+        from .dhan_token import latest
+        new = latest()
+        if new and new != self.token:
+            self.token = new
+            self.s.headers["access-token"] = new
+            return True
+        return False
+
     def post(self, path: str, body: dict, tries: int = 5) -> dict:
+        swapped = False
         for i in range(tries):
             self._wait()
             try:
@@ -59,6 +71,9 @@ class Dhan:
             except ValueError:
                 body_json = {}
             if r.status_code == 401 or str(body_json.get("errorCode", "")).startswith(("DH-901", "DH-902")):
+                if not swapped and self._fresh_token():
+                    swapped = True
+                    continue
                 raise PermissionError("Dhan rejected the access token. Create a new token on web.dhan.co and paste it in Strategy lab settings.")
             if r.status_code >= 400 or body_json.get("status") == "failure" or body_json.get("errorType"):
                 msg = body_json.get("errorMessage") or body_json.get("remarks") or r.text[:200]
@@ -69,6 +84,8 @@ class Dhan:
     def profile(self) -> dict:
         self._wait()
         r = self.s.get(API + "/profile", timeout=30, headers={"dhanClientId": self.client_id})
+        if r.status_code == 401 and self._fresh_token():
+            r = self.s.get(API + "/profile", timeout=30, headers={"dhanClientId": self.client_id})
         if r.status_code == 401:
             raise PermissionError("Dhan rejected the access token.")
         r.raise_for_status()

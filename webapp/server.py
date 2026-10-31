@@ -190,6 +190,11 @@ def scheduler_loop():
                     DHAN5Y.start(why="nightly")
                 except Exception:
                     pass
+            try:                                  # Dhan token: renew before it expires (24 h tokens), no PIN / TOTP involved
+                from lab import dhan_token
+                dhan_token.maybe_renew(log=lambda m: print(f"[dhan] {m}"))
+            except Exception:
+                pass
             if s.get("enabled") and due and has_model and not JOBS.busy():
                 if now.weekday() < 5 and state.get("last_forecast") != today:
                     state["last_forecast"] = today
@@ -212,6 +217,9 @@ def _startup():
         from plotly.offline import get_plotlyjs
         vendor.parent.mkdir(parents=True, exist_ok=True)
         vendor.write_text(get_plotlyjs(), encoding="utf-8")
+    from lab import dhan_token
+    dhan_token.setup(ROOT / "data", lambda: (_lab_cfg().get("dhan_client_id"), _lab_cfg().get("dhan_token")),
+                     lambda tok: save_user_settings({"lab.dhan_token": tok}))
     threading.Thread(target=scheduler_loop, daemon=True).start()
 
 
@@ -595,6 +603,7 @@ def lab_status():
         res = {"generated": r.get("generated"), "summary": r.get("summary"), "period": r.get("period")}
     return clean({"data": have_data(ROOT / "data"), "synthetic": (hist_dir(ROOT / "data") / "SYNTHETIC").exists(),
                   "dhan": bool(c.get("dhan_client_id") and c.get("dhan_token")), "upstox": bool(_upstox_token()), "results": res,
+                  "dhan_token": _dhan_token_status(),
                   "years": c.get("years", 3)})
 
 
@@ -976,7 +985,16 @@ def lab_dhan_test():
         raise HTTPException(401, str(e))
     except Exception as e:
         raise HTTPException(502, f"Dhan did not answer: {e}")
-    return {"ok": True, "profile": {k: p.get(k) for k in ("dhanClientId", "tokenValidity", "activeSegment", "dataPlan", "dataValidity")}}
+    return {"ok": True, "profile": {k: p.get(k) for k in ("dhanClientId", "tokenValidity", "activeSegment", "dataPlan", "dataValidity")},
+            "token": _dhan_token_status()}
+
+
+def _dhan_token_status():
+    try:
+        from lab import dhan_token
+        return dhan_token.status()
+    except Exception:
+        return None
 
 
 def _upstox_token():

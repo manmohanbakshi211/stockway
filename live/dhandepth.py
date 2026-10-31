@@ -128,6 +128,8 @@ class DepthFeed:
 
             def on_err(ws, e):
                 self.status[sym] = f"error: {str(e)[:80]}"
+            from lab.dhan_token import latest
+            self.token = latest() or self.token          # picks up a renewed token on every reconnect
             ws = websocket.WebSocketApp(URL.format(token=self.token, cid=self.cid), on_open=on_open, on_message=on_msg, on_error=on_err)
             ws.run_forever(ping_interval=20, ping_timeout=10)
             if self.stop_ev.is_set():
