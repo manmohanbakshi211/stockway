@@ -211,10 +211,27 @@ function indexCard(m) {
       <div><dt>Flip</dt><dd>${m.gex.flip ? fk(Math.round(m.gex.flip)) : "–"}</dd></div>` : ""}
     </dl>
     ${m.regime && m.regime.code !== "opening" ? `<p class="ic-regime"><b>${esc(m.regime.label)}</b></p>` : ""}
+    ${idxMore(m)}
     ${depthLine(L.snap && L.snap.depth ? L.snap.depth[m.sym] : null)}
     ${biasMeter(m.score)}
     ${m.reasons && m.reasons.length ? `<p class="ic-why">${esc(m.reasons.slice(0, 3).join(" · "))}</p>` : ""}
   </a>`;
+}
+
+/* 2.29: day / 52-week / all-time range, merged support and resistance, daily and weekly trend */
+function idxMore(m) {
+  const e = m.ext || {}, lv = m.levels || {}, tr = m.trend || {};
+  const arrowT = (v) => v == null ? "–" : v > 0 ? `<span class="up">↑ up</span>` : v < 0 ? `<span class="down">↓ down</span>` : "sideways";
+  const zone = (z) => `<li title="${esc(z.names.join(" + "))}"><b>${fk(Math.round(z.price))}</b> <small class="muted">${esc(z.names.slice(0, 2).join(" + "))}${z.names.length > 2 ? " +" + (z.names.length - 2) : ""}</small> <small class="${Math.abs(z.dist_pct) < 0.3 ? "amber" : "muted"}">${z.dist_pct > 0 ? "+" : ""}${z.dist_pct}%</small></li>`;
+  const rows = [
+    m.day_h && m.day_l ? `<div><dt>Day</dt><dd>${fk(Math.round(m.day_l))} – ${fk(Math.round(m.day_h))}</dd></div>` : "",
+    e.hi52 ? `<div><dt>52 weeks</dt><dd>${fk(Math.round(e.lo52))} – ${fk(Math.round(e.hi52))}</dd></div>` : "",
+    e.ath && Number(e.since) <= new Date().getFullYear() - 3 ? `<div title="All-time high (${esc(e.ath_date || "")}) and low (${esc(e.atl_date || "")}) since ${esc(e.since || "")}, Yahoo"><dt>All-time high</dt><dd>${fk(Math.round(e.ath))} <small class="${(e.from_ath_pct ?? -1) >= -1 ? "up" : "muted"}">${e.from_ath_pct != null ? e.from_ath_pct + "%" : ""}</small></dd></div>
+      <div><dt>All-time low</dt><dd>${fk(Math.round(e.atl))} <small class="muted">${esc(e.atl_date || "")}</small></dd></div>` : "",
+    tr.daily !== undefined ? `<div><dt>Daily trend</dt><dd>${arrowT(tr.daily)}</dd></div><div><dt>Weekly</dt><dd>${arrowT(tr.weekly)}</dd></div>` : ""].join("");
+  const sr = (lv.support || []).length || (lv.resistance || []).length ? `<div class="ic-sr"><div><span class="down">Resistance</span><ul>${(lv.resistance || []).map(zone).join("") || `<li class="muted">–</li>`}</ul></div>
+      <div><span class="up">Support</span><ul>${(lv.support || []).map(zone).join("") || `<li class="muted">–</li>`}</ul></div></div>` : "";
+  return (rows ? `<dl class="ic-grid ic-more">${rows}</dl>` : "") + sr;
 }
 
 function alertItem(a, full = false, extra = "") {
@@ -334,6 +351,9 @@ async function pageLive() {
       <p class="lede" style="margin-bottom:14px">Nifty, Bank Nifty and every F&amp;O stock with its options, checked every second.</p></div></div>
     <div id="lv-bar"></div><div id="lv-body"></div>`;
   renderLive(true);
+  loadWorldBoard();
+  const tick = () => { if (state.page !== "live") return; loadWorldBoard(); L.pageTimer = setTimeout(tick, 30000); };
+  L.pageTimer = setTimeout(tick, 30000);
 }
 
 function setupCard() {
@@ -345,11 +365,44 @@ function setupCard() {
 }
 
 function extraIdx(x) {
-  // Sensex (Upstox live) and GIFT Nifty (NSE IX near-month future) beside the main index cards
+  // Sensex (Upstox live, else Yahoo) and GIFT Nifty (NSE IX near-month future) beside the main index cards
   if (!x || !x.length) return "";
-  return `<div class="xcards">${x.map((c) => `<div class="xcard"><span>${esc(c.name)}</span>
+  const row = (k, v) => v ? `<div><dt>${k}</dt><dd>${v}</dd></div>` : "";
+  const pts = (v) => v == null ? "" : `<small class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : ""}${fx(v)}</small>`;
+  return `<div class="xcards">${x.map((c) => {
+    const e = c.ext || {};
+    const giftGap = c.vs_nifty != null ? `<span class="${c.vs_nifty >= 0 ? "up" : "down"}" title="GIFT Nifty minus Nifty ${c.vs_nifty_when === "now" ? "now (futures premium)" : "at its last close (hint for the next open)"}">${c.vs_nifty >= 0 ? "+" : ""}${fx(c.vs_nifty)} pts</span> <small class="muted">${c.vs_nifty_when === "now" ? "now" : "close"} ${fx(c.nifty_ref)}</small>` : "";
+    const grid = [row("Change", c.chg != null ? pts(c.chg) : ""), row("Open", c.open ? fx(c.open) : ""), row("Prev close", c.prev ? fx(c.prev) : ""),
+      row("Day range", c.day_l && c.day_h ? `${fx(c.day_l)} – ${fx(c.day_h)}` : ""), row("52 weeks", e.hi52 ? `${fk(Math.round(e.lo52))} – ${fk(Math.round(e.hi52))}` : ""),
+      row("All-time high", e.ath ? `${fk(Math.round(e.ath))} <small class="muted">${esc(e.ath_date || "")}</small>` : ""),
+      row("Avg price", c.atp ? fx(c.atp) : ""), row("Contracts", c.contracts ? fk(Math.round(c.contracts)) : ""),
+      row(c.name === "GIFT Nifty" ? "vs Nifty" : "", giftGap)].join("");
+    const lv = c.levels || {};
+    const sr = (lv.support || []).length ? `<p class="small" style="margin:6px 0 0"><span class="down">R</span> ${(lv.resistance || []).slice(0, 2).map((z) => fk(Math.round(z.price))).join(" · ") || "–"} &nbsp; <span class="up">S</span> ${(lv.support || []).slice(0, 2).map((z) => fk(Math.round(z.price))).join(" · ")}</p>` : "";
+    return `<div class="xcard"><span>${esc(c.name)}</span>
       <b>${c.spot != null ? fx(c.spot) : "–"}</b> ${c.chg_pct != null ? `<em class="${c.chg_pct >= 0 ? "up" : "down"}">${c.chg_pct >= 0 ? "+" : ""}${c.chg_pct.toFixed(2)}%</em>` : ""}
-      ${c.day_l && c.day_h ? `<small class="muted">${fx(c.day_l)} – ${fx(c.day_h)}</small>` : ""}<small class="muted">${esc(c.src || "")}${c.expiry ? ` · ${esc(c.expiry)}` : ""}</small></div>`).join("")}</div>`;
+      ${grid ? `<dl class="ic-grid xc-grid">${grid}</dl>` : ""}${sr}
+      <small class="muted">${esc(c.src || "")}${c.expiry ? ` · expiry ${esc(c.expiry)}` : ""}${c.at ? ` · ${esc(c.at.slice(-8, -3))}` : ""}</small></div>`; }).join("")}</div>`;
+}
+
+/* World markets that move India (Yahoo, about a minute behind): grouped cards, refreshed every 30 s */
+function worldBoard(w) {
+  if (!w || !(w.groups || []).length) return `<div id="lv-world"></div>`;
+  const sp = (a, up) => { if (!a || a.length < 2) return ""; const lo = Math.min(...a), hi = Math.max(...a), r = hi - lo || 1;
+    return `<svg viewBox="0 0 60 16" class="spark" aria-hidden="true"><polyline fill="none" stroke="${up ? "#1E8A5A" : "#C23B32"}" stroke-width="1.3" points="${a.map((v, i) => `${(i / (a.length - 1)) * 60},${15 - ((v - lo) / r) * 13}`).join(" ")}"/></svg>`; };
+  const pr = w.pressure || {};
+  return `<div id="lv-world" class="panel tight wboard"><div class="toolbar" style="margin:0 0 6px"><h3 style="margin:0">World markets</h3>
+      ${pr.implied_pct != null ? `<span class="small">Overnight pressure on Nifty: <b class="${pr.implied_pct >= 0 ? "up" : "down"}">${pr.implied_pct >= 0 ? "+" : ""}${pr.implied_pct}%</b></span>` : ""}
+      <a class="small" href="#/world">World page →</a></div>
+    ${w.groups.map((g) => `<h4 class="wb-group">${esc(g.group)}</h4><div class="wb-grid">${g.items.map((x) => `<a class="wb" href="#/world" title="${x.day_l && x.day_h ? `Day ${fx(x.day_l)} – ${fx(x.day_h)}` : ""}${x.hi52 ? ` · 52 weeks ${fx(x.lo52)} – ${fx(x.hi52)}` : ""}${x.ath ? ` · all-time high ${fx(x.ath)}` : ""}">
+        <span>${esc(x.name)}</span><b>${fx(x.last)}</b> ${fpc(x.chg_pct)}${sp(x.spark, (x.chg_pct || 0) >= 0)}
+        ${x.day_l && x.day_h ? `<small class="muted">${fx(x.day_l)} – ${fx(x.day_h)}</small>` : ""}</a>`).join("")}</div>`).join("")}
+    <p class="muted small" style="margin:6px 0 0">Yahoo, about 1 minute behind${w.updated ? ` · updated ${hm(w.updated)}` : ""}. Hover a card for its day, 52-week and all-time range.</p></div>`;
+}
+
+async function loadWorldBoard() {
+  try { L.world = await api("/api/live/markets"); } catch (_) { return; }
+  const el = $("#lv-world"); if (el) el.outerHTML = worldBoard(L.world);
 }
 
 function watchStrip(w) {
@@ -368,14 +421,13 @@ function renderLive(force = false) {
   if (!force && body.querySelector("details.story[open]")) return;             // reading a story: hold still
   bar.innerHTML = statusBar(); bindLiveButtons(bar);
   const s = L.snap;
-  if (!s.status.running && !s.indices.length) {
-    body.innerHTML = extraIdx(s.extra) + watchStrip(s.watch) + (s.status.logged_in ? `<div class="empty" style="max-width:none"><h2>${esc(s.status.message || "Scanner is off")}</h2><p>It starts by itself at 9:00 AM on market days. Start now to scan immediately.</p><div class="btn-row"><button class="btn primary" data-live-start="upstox">Start live</button><button class="btn" data-live-start="sim">Run simulator</button></div></div>` : setupCard());
+  if (!s.status.running && !s.indices.length && !s.status.logged_in) {
+    body.innerHTML = extraIdx(s.extra) + worldBoard(L.world) + setupCard();
     bindLiveButtons(body); return;
   }
+  const closedNote = !s.status.running && s.last_session && s.last_session.asof ? `<p class="banner small">Scanner off: showing the last session (${new Date(s.last_session.asof * 1000).toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}). It starts by itself at 9:00 AM on market days.</p>` : !s.status.running ? `<p class="banner small">Scanner off. It starts by itself at 9:00 AM on market days.</p>` : "";
   const pulse = s.pulse || {};
   const pulseHTML = pulse.ai ? fmtAI(pulse.ai) + `<p class="muted small">AI pulse at ${hm(pulse.ts)}</p>` : (pulse.lines || []).map((l) => `<p>${esc(l)}</p>`).join("") || `<p class="muted">Building the picture…</p>`;
-  const small = LS.get("only40k", false);
-  const alerts = L.alerts.filter((a) => sevPass(a, L.sevFilter) && (!small || (a.data && a.data.fits_small) || !a.option)).slice(0, 60);
   const nFocus = L.alerts.filter(isFocus).length;
   const mv = s.movers || { hot: [], gainers: [], losers: [] };
   const tab = LS.get("moversTab", "hot");
@@ -405,21 +457,18 @@ function renderLive(force = false) {
       <div class="seg small-seg">${Object.keys(mk.contrib).map((k) => `<button data-ctab="${k}" aria-pressed="${ctab === k}">${k === "BANKNIFTY" ? "Bank Nifty" : "Nifty"}</button>`).join("")}</div></div>
     ${cb ? `<div class="contrib">${cb.rows.slice(0, 8).map((r) => `<div class="cb-row"><span>${esc(r.sym)}</span><div class="cb-bar"><i class="${r.points >= 0 ? "pos" : "neg"}" style="width:${Math.abs(r.points) / maxPts * 50}%;${r.points >= 0 ? "left:50%" : `right:50%`}"></i></div><b class="${r.points >= 0 ? "up" : "down"}">${r.points > 0 ? "+" : ""}${r.points.toFixed(0)}</b></div>`).join("")}</div>
       <p class="muted small" style="margin:6px 0 0">Points from index moves × approximate weights. These explain ${cb.explained > 0 ? "+" : ""}${cb.explained.toFixed(0)} of the ${cb.actual > 0 ? "+" : ""}${cb.actual.toFixed(0)}-point move.</p>` : ""}</div>` : "";
-  body.innerHTML = `${strip}
-    ${extraIdx(s.extra)}${dhanStrip(s.dhan)}
+  body.innerHTML = `${closedNote}${strip}
     <div class="icards">${s.indices.slice(0, 4).map(indexCard).join("")}</div>
-    ${watchStrip(s.watch)}
+    ${extraIdx(s.extra)}${dhanStrip(s.dhan)}
+    ${worldBoard(L.world)}
     <div class="live-grid">
       <section>
-        <div class="toolbar"><h2 style="margin:0">Alerts <span class="muted small">${nFocus} in focus · ${L.alerts.length} in all</span></h2>
-          <div class="btn-row" style="margin:0"><label class="check small" title="Only ideas where one lot costs ₹10,000 or less"><input type="checkbox" id="only40k" ${small ? "checked" : ""}><span>₹40K only</span></label>
-          <div class="seg" role="group" aria-label="Which alerts">${SEVSEG.map(([v, l]) => `<button data-sev="${v}" aria-pressed="${L.sevFilter === v}" ${v === 0 ? `title="Act-now alerts that are not demoted, at most one per symbol per hour"` : ""}>${l}</button>`).join("")}</div></div></div>
-        <ul class="alerts">${storyList(alerts) || `<li class="muted" style="padding:18px">No alerts yet. They appear here the moment something happens.</li>`}</ul>
-      </section>
-      <aside>
         ${brainCard(L.brain, { button: true })}
         <div class="panel pulse"><h3>Market pulse</h3>${pulseHTML}</div>
         ${contribHTML}${secHTML}
+        <p class="small"><a href="#/alerts">Alerts${L.alerts.length ? ` (${nFocus} in focus · ${L.alerts.length} today)` : ""} →</a></p>
+      </section>
+      <aside>
         <div class="panel tight"><div class="toolbar" style="margin:0 0 6px"><h3>Movers</h3>
           <div class="seg small-seg">${[["hot", "Most active"], ["gainers", "Gainers"], ["losers", "Losers"]].map(([k, l]) => `<button data-mtab="${k}" aria-pressed="${tab === k}">${l}</button>`).join("")}</div></div>
           <table class="mini"><thead><tr><th>Stock</th><th class="r">Price</th><th class="r">Chg</th><th class="r">Vol</th><th class="r">Heat</th></tr></thead><tbody>${mrows}</tbody></table>
@@ -428,9 +477,7 @@ function renderLive(force = false) {
         <div class="panel tight"><h3>Market news</h3><ul class="news">${news || `<li class="muted">Loading headlines…</li>`}</ul></div>
       </aside>
     </div>`;
-  bindLiveButtons(body); bindAlertButtons(body);
-  const o4 = body.querySelector("#only40k"); if (o4) o4.onchange = (e) => { LS.set("only40k", e.target.checked); renderLive(true); };
-  body.querySelectorAll("[data-sev]").forEach((b) => b.onclick = () => { L.sevFilter = Number(b.dataset.sev); LS.set("sevFilter2", L.sevFilter); renderLive(true); });
+  bindLiveButtons(body);
   body.querySelectorAll("[data-mtab]").forEach((b) => b.onclick = () => { LS.set("moversTab", b.dataset.mtab); renderLive(true); });
   body.querySelectorAll("[data-ctab]").forEach((b) => b.onclick = () => { LS.set("contribTab", b.dataset.ctab); renderLive(true); });
   body.querySelectorAll("[data-brain-run]").forEach((b) => b.onclick = async () => { b.disabled = true; b.textContent = "Thinking…"; try { L.brain = await post("/api/brain/run", {}); renderLive(true); } catch (e) { toast(e.message); b.disabled = false; } });
@@ -747,22 +794,34 @@ function drawSymChart(d) {
 /* ---------------- page: Alerts history */
 async function pageAlerts() {
   stopPageTimer();
+  // 2.29: Act now → Focus (with the other important ones) → All; type chips filter; choices remembered
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
-  const day = params.get("day") || "latest", sev = Number(params.get("sev") ?? 0), sym = params.get("sym") || "";
-  const d = await api(`/api/live/alerts?day=${day}&min_sev=${Math.max(1, sev)}${sev === 0 ? "&focus=true" : ""}${sym ? `&sym=${encodeURIComponent(sym)}` : ""}`);
-  const nAll = d.total ?? d.alerts.length;
+  const VIEWS = [["act", "Act now", "Strongest alerts (act now)"], ["focus", "Focus", "Focus alerts plus the other important ones that are not demoted"], ["all", "All", "Every alert"]];
+  const view = params.get("view") || LS.get("alertsView", "focus");
+  const sym = params.has("sym") ? params.get("sym") : LS.get("alertsSym", "");
+  const kind = params.has("kind") ? params.get("kind") : LS.get("alertsKind", "");
+  const day = params.get("day") || "latest";
+  LS.set("alertsView", view); LS.set("alertsSym", sym); LS.set("alertsKind", kind);
+  const d = await api(`/api/live/alerts?day=${day}&view=${view}${sym ? `&sym=${encodeURIComponent(sym)}` : ""}`);
+  const cnt = d.counts || {};
   const byKind = {};
   d.alerts.forEach((a) => { byKind[a.kind] = (byKind[a.kind] || 0) + 1; });
-  const go = (p) => { const q = new URLSearchParams({ day: d.day || "", sev, sym, ...p }); location.hash = `#/alerts?${q}`; };
-  main.innerHTML = `<h1 class="page-title">Alerts</h1><p class="lede">Every alert, saved by day. ${d.day ? `${d.alerts.length}${sev === 0 ? ` in focus (of ${nAll})` : ""} on ${new Date(d.day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}.` : "None yet: they appear here as the scanner finds them."}</p>
+  const shown = kind ? d.alerts.filter((a) => a.kind === kind) : d.alerts;
+  const go = (p) => { const q = new URLSearchParams({ day: d.day || "", view, sym, kind, ...p }); location.hash = `#/alerts?${q}`; };
+  const vName = (VIEWS.find((v) => v[0] === view) || VIEWS[1])[1];
+  main.innerHTML = `<h1 class="page-title">Alerts</h1><p class="lede">Every alert, saved by day. ${d.day ? `${shown.length} ${esc(vName.toLowerCase())}${kind ? ` · ${esc(KIND[kind] || kind)}` : ""} (of ${d.total}) on ${new Date(d.day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}.` : "None yet: they appear here as the scanner finds them."}</p>
     <div class="toolbar"><div class="btn-row">
       <label class="field inline">Day <select id="al-day">${d.days.map((x) => `<option value="${x.day}" ${x.day === d.day ? "selected" : ""}>${x.day} (${x.n})</option>`).join("") || `<option>No alerts yet</option>`}</select></label>
-      <div class="seg">${SEVSEG.map(([v, l]) => `<button data-s="${v}" aria-pressed="${sev === v}">${l}</button>`).join("")}</div>
-      <input type="search" id="al-sym" placeholder="Symbol" value="${esc(sym)}" aria-label="Filter by symbol"></div>
-      <div class="chips small">${Object.entries(byKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<span class="chip static">${esc(KIND[k] || k)} ${n}</span>`).join("")}</div></div>
-    <ul class="alerts">${d.alerts.map((a) => alertItem(a, true)).join("") || `<li class="muted" style="padding:18px">No alerts for this filter.</li>`}</ul>`;
+      <div class="seg">${VIEWS.map(([v, l, t]) => `<button data-v="${v}" aria-pressed="${view === v}" title="${esc(t)}">${l}${cnt[v] != null ? ` <small class="muted">${cnt[v]}</small>` : ""}</button>`).join("")}</div>
+      <input type="search" id="al-sym" placeholder="Symbol" value="${esc(sym)}" aria-label="Filter by symbol"></div></div>
+    <div class="chips small al-kinds" role="group" aria-label="Filter by alert type">
+      <button class="chip${kind ? "" : " on"}" data-k="" aria-pressed="${!kind}">All types ${d.alerts.length}</button>
+      ${Object.entries(byKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<button class="chip${kind === k ? " on" : ""}" data-k="${esc(k)}" aria-pressed="${kind === k}">${esc(KIND[k] || k)} ${n}</button>`).join("")}
+      ${kind && !byKind[kind] ? `<button class="chip on" data-k="${esc(kind)}" aria-pressed="true">${esc(KIND[kind] || kind)} 0</button>` : ""}</div>
+    <ul class="alerts">${shown.map((a) => alertItem(a, true)).join("") || `<li class="muted" style="padding:18px">No alerts for this filter.</li>`}</ul>`;
   $("#al-day").onchange = (e) => go({ day: e.target.value });
-  main.querySelectorAll("[data-s]").forEach((b) => b.onclick = () => go({ sev: b.dataset.s }));
+  main.querySelectorAll("[data-v]").forEach((b) => b.onclick = () => go({ view: b.dataset.v }));
+  main.querySelectorAll("[data-k]").forEach((b) => b.onclick = () => go({ kind: b.dataset.k }));
   $("#al-sym").onchange = (e) => go({ sym: e.target.value.trim().toUpperCase() });
   bindAlertButtons(main);
 }
@@ -1438,22 +1497,49 @@ function drawDeskCharts(r) {
 
 
 /* ---------------- page: Pro chart (TradingView Lightweight Charts) */
-const CH = { chart: null, sym: null, tf: 5, days: 3, series: {}, lines: [], markers: null, sig: "", data: null };
-const CH_TOGGLES = [["vwap", "VWAP + bands"], ["ema", "EMA 9/21/50"], ["st", "Supertrend"], ["prev", "Yesterday H/L/C"], ["cpr", "CPR + pivots"],
-  ["or", "Opening range"], ["oi", "OI walls + max pain"], ["gamma", "Gamma levels"], ["em", "Expected move"], ["marks", "Alerts + trades"],
-  ["vol", "Volume"], ["rsi", "RSI"], ["macd", "MACD"], ["scen", "Scenarios: up / sideways / down"], ["pat", "Chart patterns"],
-  ["swing", "Swing labels (HH / HL / LH / LL)"]];
+const CH = { chart: null, sym: null, tf: "5m", tfMin: 5, series: {}, lines: [], markers: null, sig: "", data: null, bars: [], more: false, loading: false };
+const CH_TOGGLES = [["scen", "Move prediction (scenarios)"], ["em", "Expected move (from options)"], ["vol", "Volume"],
+  ["vwap", "VWAP + bands"], ["ema", "EMA 9/21/50"], ["st", "Supertrend"], ["prev", "Yesterday H/L/C"], ["cpr", "CPR + pivots"],
+  ["or", "Opening range"], ["oi", "OI walls + max pain"], ["gamma", "Gamma levels"], ["marks", "Alerts + trades"],
+  ["rsi", "RSI"], ["macd", "MACD"], ["pat", "Chart patterns"], ["swing", "Swing labels (HH / HL / LH / LL)"]];
 const PAT_SHORT = { double_top: "DT", double_bottom: "DB", head_shoulders: "H&S", inv_hs: "iH&S", triangle: "Tri", flag: "Flag",
   breakout_retest: "Retest", rsi_divergence: "Div", candle_at_level: "Candle" };
-function chOn(k) { return LS.get("ch_" + k, !["macd", "em"].includes(k)); }
+// 2.29: a clean chart by default (candles + the move prediction); every layer is one click away and remembered
+function chOn(k) { return LS.get("ch2_" + k, ["scen", "em"].includes(k)); }
+const CH_TFS = ["1m", "3m", "5m", "15m", "30m", "1H", "1D", "1W", "1M"];
+const CH_MIN = { "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60, "1D": 1440, "1W": 10080, "1M": 43200 };
+const CH_VIEW = { "1m": 150, "3m": 125, "5m": 150, "15m": 130, "30m": 130, "1H": 140, "1D": 130, "1W": 156, "1M": 120 };   // bars in view at first
+const chIntraday = () => CH_MIN[CH.tf] < 1440;
+function chTf(v) { const old = { 1: "1m", 3: "3m", 5: "5m", 15: "15m", 30: "30m", 60: "1H" }; v = String(v || ""); return CH_TFS.includes(v) ? v : old[Number(v)] || "5m"; }
+
+/* client-side indicators on every loaded bar (so they cover the whole scrolled history) */
+const IND = {
+  ema(c, n) { const k = 2 / (n + 1); const o = []; c.forEach((x, i) => o.push(i ? x * k + o[i - 1] * (1 - k) : x)); return o; },
+  rsi(c, n = 14) { const o = Array(c.length).fill(null); let g = 0, l = 0;
+    for (let i = 1; i < c.length; i++) { const d = c[i] - c[i - 1], up = Math.max(d, 0), dn = Math.max(-d, 0);
+      if (i <= n) { g += up / n; l += dn / n; if (i === n) o[i] = l ? 100 - 100 / (1 + g / l) : 100; }
+      else { g = (g * (n - 1) + up) / n; l = (l * (n - 1) + dn) / n; o[i] = l ? 100 - 100 / (1 + g / l) : 100; } } return o; },
+  macd(c) { const a = IND.ema(c, 12), b = IND.ema(c, 26), m = a.map((x, i) => x - b[i]), s = IND.ema(m, 9); return { m, s, h: m.map((x, i) => x - s[i]) }; },
+  st(h, l, c, n = 10, k = 3) { const tr = c.map((x, i) => i ? Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])) : h[i] - l[i]);
+    const atr = []; tr.forEach((x, i) => atr.push(i < n ? (i ? (atr[i - 1] * i + x) / (i + 1) : x) : (atr[i - 1] * (n - 1) + x) / n));
+    const line = [], dir = []; let fu = 0, fd = 0, d = 1;
+    for (let i = 0; i < c.length; i++) { const m = (h[i] + l[i]) / 2, up = m - k * atr[i], dn = m + k * atr[i];
+      fu = i && c[i - 1] > fu ? Math.max(up, fu) : up; fd = i && c[i - 1] < fd ? Math.min(dn, fd) : dn;
+      if (d === 1 && c[i] < fu) d = -1; else if (d === -1 && c[i] > fd) d = 1; dir.push(d); line.push(d === 1 ? fu : fd); } return { line, dir }; },
+  vwap(bars, vol) { const out = { v: [], u1: [], d1: [], u2: [], d2: [] }; let day = null, pv = 0, vv = 0, p2 = 0;
+    bars.forEach((b, i) => { const dd = Math.floor((b.time) / 86400); if (dd !== day) { day = dd; pv = 0; vv = 0; p2 = 0; }
+      const w = vol && vol[i] && vol[i].value > 0 ? vol[i].value : 1, tp = (b.high + b.low + b.close) / 3;
+      pv += tp * w; vv += w; p2 += tp * tp * w; const m = pv / vv, sd = Math.sqrt(Math.max(0, p2 / vv - m * m));
+      out.v.push(m); out.u1.push(m + sd); out.d1.push(m - sd); out.u2.push(m + 2 * sd); out.d2.push(m - 2 * sd); }); return out; },
+};
 
 async function pageChart() {
   stopPageTimer();
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   CH.sym = (params.get("s") || LS.get("lastSym", "NIFTY")).toUpperCase();
-  CH.tf = Number(params.get("tf") || LS.get("ch_tf", 5));
-  CH.days = Number(LS.get("ch_days", 3));
-  LS.set("lastSym", CH.sym);
+  CH.tf = chTf(params.get("tf") || LS.get("ch2_tf", "5m"));
+  CH.tfMin = CH_MIN[CH.tf];
+  LS.set("lastSym", CH.sym); LS.set("ch2_tf", CH.tf);
   const IDX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"];
   const stocks = (await symbolList()).stocks.filter((x) => !IDX.includes(x));
   if (!IDX.includes(CH.sym) && !stocks.includes(CH.sym)) stocks.unshift(CH.sym);
@@ -1462,8 +1548,7 @@ async function pageChart() {
       <div class="ch-sym"><select id="ch-sym" aria-label="Symbol"><optgroup label="Indices">${IDX.map((x) => `<option value="${x}" ${x === CH.sym ? "selected" : ""}>${x}</option>`).join("")}</optgroup>
         <optgroup label="F&amp;O stocks">${stocks.map((x) => `<option value="${esc(x)}" ${x === CH.sym ? "selected" : ""}>${esc(x)}</option>`).join("")}</optgroup></select>
         <span id="ch-price" class="ch-price"></span></div>
-      <div class="seg" role="group" aria-label="Timeframe">${[1, 3, 5, 15].map((t) => `<button data-tf="${t}" aria-pressed="${CH.tf === t}">${t}m</button>`).join("")}</div>
-      <div class="seg" role="group" aria-label="Days">${[1, 3, 5, 10].map((d) => `<button data-days="${d}" aria-pressed="${CH.days === d}">${d}D</button>`).join("")}</div>
+      <div class="seg ch-tfs" role="group" aria-label="Timeframe">${CH_TFS.map((t) => `<button data-tf="${t}" aria-pressed="${CH.tf === t}">${t}</button>`).join("")}</div>
       <details class="ch-ind"><summary class="btn">Indicators &amp; levels</summary><div class="ch-menu">${CH_TOGGLES.map(([k, l]) => `<label class="check"><input type="checkbox" data-tog="${k}" ${chOn(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></details>
       <a class="btn" href="#/sym?s=${encodeURIComponent(CH.sym)}">Option chain</a>
       <a class="btn" href="#/timemachine?s=${encodeURIComponent(CH.sym)}">Time Machine</a>
@@ -1471,7 +1556,8 @@ async function pageChart() {
     </div>
     <div class="ch-wrap"><div id="ch-chart" class="ch-chart"></div>
       <aside class="ch-side"><div class="panel tight"><h3>Trade signals <span class="muted small">BUY / SELL marks on the chart</span></h3><div id="ch-sigs"><p class="muted small">Focus alerts on this symbol show here.</p></div></div>
-        <div class="panel tight"><h3>Chart read</h3><div id="ch-read"><p class="muted">Loading…</p></div>
+        <div class="panel tight"><h3>All timeframes read <span class="muted small">5m → daily</span></h3><div id="ch-mtfread"><p class="muted small">Loading…</p></div></div>
+        <div class="panel tight"><h3>Chart read <span class="muted small">this chart</span></h3><div id="ch-read"><p class="muted">Loading…</p></div>
         <button class="link-btn" id="ch-ai">AI read this chart</button><div id="ch-ai-out"></div></div>
         <div class="panel tight"><h3>Patterns <span class="muted small">on this chart</span></h3><div id="ch-pats"></div></div>
         ${["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"].includes(CH.sym) ? "" : `<div class="panel tight"><h3>Company <span class="muted small">results and insiders</span></h3><div id="ch-company"><p class="muted small">Loading…</p></div></div>`}
@@ -1492,9 +1578,8 @@ async function pageChart() {
     </section>
     <p class="note">Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts. ${""}Index VWAP counts each bar equally (indices have no volume).</p>`;
   $("#ch-sym").onchange = (e) => { location.hash = `#/chart?s=${encodeURIComponent(e.target.value)}&tf=${CH.tf}`; };
-  main.querySelectorAll("[data-tf]").forEach((b) => b.onclick = () => { LS.set("ch_tf", Number(b.dataset.tf)); location.hash = `#/chart?s=${encodeURIComponent(CH.sym)}&tf=${b.dataset.tf}`; });
-  main.querySelectorAll("[data-days]").forEach((b) => b.onclick = () => { LS.set("ch_days", Number(b.dataset.days)); pageChart(); });
-  main.querySelectorAll("[data-tog]").forEach((c) => c.onchange = () => { LS.set("ch_" + c.dataset.tog, c.checked); buildChart(CH.hasVol); drawChart(CH.data, true); });
+  main.querySelectorAll("[data-tf]").forEach((b) => b.onclick = () => { LS.set("ch2_tf", b.dataset.tf); location.hash = `#/chart?s=${encodeURIComponent(CH.sym)}&tf=${b.dataset.tf}`; });
+  main.querySelectorAll("[data-tog]").forEach((c) => c.onchange = () => { LS.set("ch2_" + c.dataset.tog, c.checked); const r = CH.chart && CH.chart.timeScale().getVisibleLogicalRange(); buildChart(); drawBars(false); if (CH.data) drawChart(CH.data, false); if (r) CH.chart.timeScale().setVisibleLogicalRange(r); });
   const quick = async (side, btn) => {
     btn.disabled = true;
     try { const r = await post("/api/live/paper/open", { sym: CH.sym, side }); toast(`Paper ${side === "buy" ? "BUY" : "SELL"}: bought ${r.label || "the option"} · see Paper trades`); navPnl(); }
@@ -1509,26 +1594,67 @@ async function pageChart() {
     e.target.disabled = false; e.target.textContent = "AI read this chart";
   };
   if ($("#ch-company")) api(`/api/company/${encodeURIComponent(CH.sym)}`).then((c) => { const el = $("#ch-company"); if (el) el.innerHTML = companyCard(c); }).catch((e) => { const el = $("#ch-company"); if (el) el.innerHTML = `<p class="muted small">${esc(e.message)}</p>`; });
-  const tick = async (first) => {
-    if (state.page !== "chart") return;
+  CH.bars = []; CH.vol = []; CH.more = false; CH.loading = false; CH.data = null;
+  buildChart();
+  const loadBars = async () => {
     try {
-      CH.data = await api(`/api/live/chart/${encodeURIComponent(CH.sym)}?tf=${CH.tf}&days=${CH.days}`);
-      if (first || !CH.chart || CH.hasVol !== CH.data.has_volume) { CH.hasVol = CH.data.has_volume; buildChart(CH.hasVol); first = true; }
-      drawChart(CH.data, first);
+      const r = await api(`/api/live/candles/${encodeURIComponent(CH.sym)}?tf=${CH.tf}`);
+      CH.bars = r.candles; CH.vol = r.volume; CH.more = r.more; CH.src = r.source; CH.hasVol = r.has_volume;
+      if (!CH.chart) buildChart();
+      drawBars(true);
+    } catch (err) {
+      $("#ch-chart").innerHTML = `<div class="empty" style="margin:20px"><h2>Loading ${esc(CH.sym)} history…</h2><p class="small muted">${esc(err.message)} Trying again in a few seconds.</p></div>`;
+      CH.chart = null; L.pageTimer = setTimeout(loadBars, 6000); return false;
     }
-    catch (err) {
-      if (first || !CH.chart) $("#ch-chart").innerHTML = `<div class="empty" style="margin:20px"><h2>Loading ${esc(CH.sym)} history…</h2><p class="small muted">${esc(err.message)} Trying again every few seconds.</p></div>`;
-      L.pageTimer = setTimeout(() => tick(!CH.chart), 6000); return;
-    }
-    L.pageTimer = setTimeout(() => tick(false), CH.data && CH.data.offline ? 30000 : 2000);
+    return true;
   };
-  tick(true);
+  const payloadTf = () => Math.min(60, CH_MIN[CH.tf]);
+  const overlay = async () => {                    // levels, prediction, signals, patterns, side panels
+    if (state.page !== "chart") return;
+    try { CH.data = await api(`/api/live/chart/${encodeURIComponent(CH.sym)}?tf=${payloadTf()}&days=${chIntraday() ? 3 : 1}`); drawChart(CH.data, false); }
+    catch (err) { const el = $("#ch-read"); if (el) el.innerHTML = `<p class="muted small">${esc(err.message)}</p>`; }
+  };
+  const live = async () => {                       // while the scanner runs: the last bars every 2 s, the rest every 10 s
+    if (state.page !== "chart") return;
+    const running = L.snap && L.snap.status && L.snap.status.running;
+    if (running && CH.chart && CH.bars.length) {
+      try {
+        const r = await api(`/api/live/candles/${encodeURIComponent(CH.sym)}?tf=${CH.tf}&tail=3`);
+        r.candles.forEach((c, i) => { if (c.time >= CH.bars[CH.bars.length - 1].time) { CH.series.candle.update(c); const v = r.volume[i];
+          if (c.time > CH.bars[CH.bars.length - 1].time) { CH.bars.push(c); CH.vol.push(v); } else { CH.bars[CH.bars.length - 1] = c; CH.vol[CH.vol.length - 1] = v; }
+          if (CH.series.vol && v) CH.series.vol.update(v); } });
+        CH.n = (CH.n || 0) + 1;
+        if (CH.n % 5 === 0) { drawBars(false); overlay(); }
+      } catch (_) {}
+    }
+    L.pageTimer = setTimeout(live, running ? 2000 : 30000);
+  };
+  if (await loadBars()) { overlay(); L.pageTimer = setTimeout(live, 2000); }
   mtfInit();
 }
 
+/* scroll-back: near the left edge, load the bars before the first one and keep the view where it was */
+async function loadOlder() {
+  if (CH.loading || !CH.more || !CH.bars.length) return;
+  CH.loading = true;
+  try {
+    const r = await api(`/api/live/candles/${encodeURIComponent(CH.sym)}?tf=${CH.tf}&before=${CH.bars[0].time - 19800}`);
+    const old = r.candles.filter((c) => c.time < CH.bars[0].time);
+    if (old.length) {
+      const range = CH.chart.timeScale().getVisibleLogicalRange();
+      CH.bars = old.concat(CH.bars); CH.vol = r.volume.filter((v) => v.time < CH.vol[0].time).concat(CH.vol);
+      drawBars(false);
+      if (range) CH.chart.timeScale().setVisibleLogicalRange({ from: range.from + old.length, to: range.to + old.length });
+    }
+    CH.more = r.more && old.length > 0;
+  } catch (_) { CH.more = false; }
+  CH.loading = false;
+}
+
+
 /* ---------------- all timeframes (live/mtf.py): 1D / 75m / 1H / 15m / 5m, markings, higher-timeframe levels,
    confluence, trend strip, and strategy overlays (apply / remove) */
-const MTF_TFS = ["1D", "75m", "1H", "15m", "5m"];
+const MTF_TFS = ["5m", "15m", "1H", "75m", "1D"];       // small to large (2.29)
 const MTF_LAYERS = [["own", "Levels of each timeframe"], ["htf", "Higher-timeframe levels on lower charts"], ["conf", "Confluence zones"],
   ["ind", "Moving averages, VWAP, Supertrend"], ["marks", "Swings and patterns"]];
 const mtfOn = (k) => LS.get("mtf_" + k, k !== "htf" ? true : true);
@@ -1542,7 +1668,10 @@ async function mtfInit() {
   MT.charts = {}; MT.ov = null; CH.overlayMarks = null; clearTimeout(MT.timer);
   const sel = $("#mtf-ov");
   try { const r = await api(`/api/live/mtf/${encodeURIComponent(CH.sym)}/overlays`);
-    sel.innerHTML = `<option value="">Choose…</option>` + r.overlays.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join(""); } catch (_) {}
+    sel.innerHTML = `<option value="">Choose…</option>` + r.overlays.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("");
+    const keep = LS.get("mtf_ov_sel", ""); if (keep && r.overlays.some((o) => o.id === keep)) sel.value = keep; } catch (_) {}
+  sel.onchange = () => LS.set("mtf_ov_sel", sel.value);
+  const dsel = $("#mtf-days"); if (dsel) { dsel.value = String(LS.get("mtf_days", 10)); dsel.onchange = () => LS.set("mtf_days", Number(dsel.value)); }
   main.querySelectorAll("[data-mtf]").forEach((c) => c.onchange = () => { LS.set("mtf_" + c.dataset.mtf, c.checked); drawMTF(MT.data); });
   $("#mtf-apply").onclick = () => applyOverlay();
   $("#mtf-remove").onclick = () => { MT.ov = null; CH.overlayMarks = null; $("#mtf-ovres").innerHTML = ""; $("#mtf-remove").disabled = true; drawMTF(MT.data); if (CH.data) drawChart(CH.data, false); };
@@ -1553,6 +1682,18 @@ async function mtfInit() {
     MT.timer = setTimeout(loop, 60000);                      // higher timeframes: refresh as candles close
   };
   loop();
+}
+
+/* one read of all five timeframes (live/mtf.py report): verdict, each timeframe small to large, what to watch */
+function mtfReport(r) {
+  const el = $("#ch-mtfread"); if (!el) return;
+  if (!r || !r.verdict) { el.innerHTML = `<p class="muted small">${esc((r && r.error) || "Builds when the timeframes have loaded.")}</p>`; return; }
+  const col = r.bias >= 25 ? "up" : r.bias <= -25 ? "down" : "";
+  el.innerHTML = `<p style="margin:0 0 6px"><b class="${col}">${esc(r.verdict)}</b> <span class="pill ${col === "up" ? "p-up" : col === "down" ? "p-down" : ""}" title="Weighted by timeframe: daily counts most">bias ${r.bias > 0 ? "+" : ""}${r.bias}</span></p>
+    <ul class="plain small">${(r.per_tf || []).map((x, i) => `<li><b>${esc(x.tf)}</b> <span class="${x.trend === "up" ? "up" : x.trend === "down" ? "down" : "muted"}">${x.trend === "up" ? "▲ up" : x.trend === "down" ? "▼ down" : "▬ sideways"}</span> · RSI ${Math.round(x.rsi)} <span class="muted">(${esc(x.momentum)})</span>${x.structure ? ` · ${esc(x.structure)}` : ""}
+      ${x.res || x.sup ? `<br><span class="muted">${x.res ? `R ${fx(x.res.price)} ${esc(x.res.name)}` : ""}${x.res && x.sup ? " · " : ""}${x.sup ? `S ${fx(x.sup.price)} ${esc(x.sup.name)}` : ""}</span>` : ""}</li>`).join("")}</ul>
+    ${(r.watch || []).length ? `<p class="small" style="margin:6px 0 0"><b>Watch:</b> ${r.watch.map(esc).join(" ")}</p>` : ""}
+    <p class="muted small" style="margin:4px 0 0">${esc(r.note || "")}</p>`;
 }
 
 function mtfChart(tf) {
@@ -1570,7 +1711,8 @@ function mtfChart(tf) {
 function drawMTF(d) {
   if (!d || !$("#mtf-grid")) return;
   const LW = window.LightweightCharts;
-  $("#mtf-trend").innerHTML = `${(d.trend || []).map((t) => `<span class="pill ${t.trend === "up" ? "p-up" : t.trend === "down" ? "p-down" : ""}" title="${esc(t.structure || "")}">${t.tf} ${t.trend === "up" ? "▲" : t.trend === "down" ? "▼" : "▬"}</span>`).join(" ")}
+  mtfReport(d.report);
+  $("#mtf-trend").innerHTML = `${(d.trend || []).slice().sort((a, b) => MTF_TFS.indexOf(a.tf) - MTF_TFS.indexOf(b.tf)).map((t) => `<span class="pill ${t.trend === "up" ? "p-up" : t.trend === "down" ? "p-down" : ""}" title="${esc(t.structure || "")}">${t.tf} ${t.trend === "up" ? "▲" : t.trend === "down" ? "▼" : "▬"}</span>`).join(" ")}
     ${d.summary ? `<b style="margin-left:6px">${esc(d.summary)}</b>${d.aligned ? ` <span class="pill p-amber">all aligned</span>` : ""}` : ""}`;
   const conf = mtfOn("conf") ? (d.confluence || []) : [];
   MTF_TFS.forEach((tf) => {
@@ -1600,7 +1742,9 @@ function drawMTF(d) {
     if (MT.ov && tf === "5m" && MT.ov.last) { add(MT.ov.last.stop, "#C23B32", 2, 1, "Test stop"); add(MT.ov.last.target, "#1E8A5A", 2, 1, "Test target"); }
     mk.sort((a, b) => a.time - b.time);
     C.markers.setMarkers(mk);
-    if (C.first) { C.chart.timeScale().fitContent(); C.first = false; }
+    if (C.first) {                          // each timeframe opens at its own zoom: small ones close in, big ones wide
+      const n = p.candles.length, want = { "5m": 100, "15m": 90, "1H": 90, "75m": 80, "1D": 120 }[tf] || 100;
+      C.chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, n - want), to: n + 3 }); C.first = false; }
   });
   $("#mtf-conf").innerHTML = (d.confluence || []).length
     ? `<table class="mini"><thead><tr><th>Zone</th><th class="r">From price</th><th>Timeframes</th><th>Levels</th></tr></thead><tbody>${d.confluence.map((z) => `<tr><td><b>${fk(z.lo)}${z.hi !== z.lo ? "–" + fk(z.hi) : ""}</b></td><td class="r">${z.dist_pct > 0 ? "+" : ""}${z.dist_pct}%</td><td>${z.tfs.join(", ")}</td><td class="small muted">${esc(z.names.join(", "))}</td></tr>`).join("")}</tbody></table>`
@@ -1620,8 +1764,7 @@ async function applyOverlay() {
       marks.push({ time: s.exit_time, position: "inBar", color: res(s), shape: "circle", text: `${s.r > 0 ? "+" : ""}${s.r}R` });
     });
     MT.ov = { id, marks, last: sigs[sigs.length - 1] || null };
-    const tf = CH.tf || 5, snap = (t) => Math.floor((t - 19800) / (60 * tf)) * 60 * tf + 19800;
-    CH.overlayMarks = marks.map((m) => ({ ...m, time: snap(m.time) }));
+    CH.overlayMarks = marks;                      // placed on the bar they fall in, on any timeframe (drawChart)
     const st = r.stats || {};
     $("#mtf-ovres").innerHTML = `<div class="panel tight" style="margin-bottom:10px"><h3>${esc($("#mtf-ov").selectedOptions[0].textContent)} <span class="muted small">last ${st.days || 0} sessions on ${esc(CH.sym)}</span></h3>
       ${r.error ? `<p class="small down">${esc(r.error)}</p>` : ""}
@@ -1635,31 +1778,32 @@ async function applyOverlay() {
   b.disabled = false; b.textContent = "Apply";
 }
 
-function buildChart(hasVolume = true) {
+function buildChart() {
   const el = $("#ch-chart"); if (!el || !window.LightweightCharts) return;
   if (CH.chart) { CH.chart.remove(); CH.chart = null; }
+  el.innerHTML = "";
   const LW = window.LightweightCharts;
+  const intra = chIntraday();
   const chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 12, panes: { separatorColor: "#D5DCE3" } },
-    grid: { vertLines: { color: "#F1F4F7" }, horzLines: { color: "#F1F4F7" } }, rightPriceScale: { borderColor: "#D5DCE3" },
-    timeScale: { borderColor: "#D5DCE3", timeVisible: true, secondsVisible: false, rightOffset: 8 }, crosshair: { mode: 0 } });
+    grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" },
+    timeScale: { borderColor: "#D5DCE3", timeVisible: intra, secondsVisible: false, rightOffset: 6 }, crosshair: { mode: 0 } });
   const S = {};
   S.candle = chart.addSeries(LW.CandlestickSeries, { upColor: "#1E8A5A", downColor: "#C23B32", borderVisible: false, wickUpColor: "#1E8A5A", wickDownColor: "#C23B32" });
   const ln = (color, width = 1, style = 0, pane = 0, extra = {}) => chart.addSeries(LW.LineSeries, { color, lineWidth: width, lineStyle: style, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...extra }, pane);
-  if (chOn("vwap")) { S.vwap = ln("#3D2FA8", 2); S.u1 = ln("rgba(61,47,168,.45)", 1, 2); S.d1 = ln("rgba(61,47,168,.45)", 1, 2); S.u2 = ln("rgba(61,47,168,.3)", 1, 1); S.d2 = ln("rgba(61,47,168,.3)", 1, 1); }
+  if (chOn("vwap") && intra) { S.vwap = ln("#3D2FA8", 2); S.u1 = ln("rgba(61,47,168,.45)", 1, 2); S.d1 = ln("rgba(61,47,168,.45)", 1, 2); S.u2 = ln("rgba(61,47,168,.3)", 1, 1); S.d2 = ln("rgba(61,47,168,.3)", 1, 1); }
   if (chOn("ema")) { S.ema9 = ln("#E07B00", 1); S.ema21 = ln("#0A84C1", 1); S.ema50 = ln("#5E6B78", 1, 2); }
   if (chOn("st")) { S.st_up = ln("#1E8A5A", 2, 0, 0, { lineType: 1 }); S.st_dn = ln("#C23B32", 2, 0, 0, { lineType: 1 }); }
-  if (chOn("scen")) {
+  if (chOn("scen") && intra) {
     const sl = (color, style, w = 2) => chart.addSeries(LW.LineSeries, { color, lineWidth: w, lineStyle: style, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false }, 0);
     S.sc_up = sl("rgba(30,138,90,.9)", 2); S.sc_side = sl("rgba(94,107,120,.9)", 2); S.sc_down = sl("rgba(194,59,50,.9)", 2);
     S.sc_lo = sl("rgba(94,107,120,.45)", 1, 1); S.sc_hi = sl("rgba(94,107,120,.45)", 1, 1);
     S.sc_lo.applyOptions({ lastValueVisible: false }); S.sc_hi.applyOptions({ lastValueVisible: false });
   }
   let pane = 1;
-  if (chOn("vol") && hasVolume) { S.vol = chart.addSeries(LW.HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false }, pane); S.volPane = pane++; }
+  if (chOn("vol")) { S.vol = chart.addSeries(LW.HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false }, pane); S.volPane = pane++; }
   if (chOn("rsi")) { S.rsi = ln("#3D2FA8", 1, 0, pane, { lastValueVisible: true }); S.rsi.createPriceLine({ price: 70, color: "#C23B32", lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsi.createPriceLine({ price: 30, color: "#1E8A5A", lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsiPane = pane++; }
   if (chOn("macd")) { S.macd_hist = chart.addSeries(LW.HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, pane); S.macd = ln("#0A84C1", 1, 0, pane); S.macd_sig = ln("#E07B00", 1, 0, pane); S.macdPane = pane++; }
-  const panes = chart.panes();
-  panes.forEach((p, i) => p.setStretchFactor(i === 0 ? 4 : 1));
+  chart.panes().forEach((p, i) => p.setStretchFactor(i === 0 ? 4 : 1));
   S.markers = LW.createSeriesMarkers(S.candle, []);
   const lg = document.createElement("div"); lg.className = "ch-legend"; el.appendChild(lg);
   chart.subscribeCrosshairMove((p) => {
@@ -1668,11 +1812,43 @@ function buildChart(hasVolume = true) {
     const v = (k) => { const x = S[k] && p.seriesData.get(S[k]); return x && x.value != null ? x.value : null; };
     const bits = [["VWAP", v("vwap")], ["EMA9", v("ema9")], ["EMA21", v("ema21")], ["RSI", v("rsi")]].filter((x) => x[1] != null)
       .map(([n, x]) => `<span>${n} <b>${fx(x)}</b></span>`).join("");
-    const t = new Date((p.time - 19800) * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+    const dtm = new Date((p.time - 19800) * 1000);
+    const t = intra ? dtm.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })
+      : dtm.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
     const ev = ((CH.data && CH.data.markers) || []).filter((m) => m.time === p.time && m.title).map((m) => `<div class="lg-ev" style="color:${m.color}">${esc(m.title)}</div>`).join("");
     lg.innerHTML = `<div><span>${t}</span><span>O <b>${fx(c.open)}</b></span><span>H <b>${fx(c.high)}</b></span><span>L <b>${fx(c.low)}</b></span><span>C <b class="${c.close >= c.open ? "up" : "down"}">${fx(c.close)}</b></span>${bits}</div>${ev}`;
   });
+  chart.timeScale().subscribeVisibleLogicalRangeChange((r) => { if (r && r.from < 30) loadOlder(); });
   CH.chart = chart; CH.series = S; CH.lines = []; CH.sig = ""; CH.patSeries = []; CH.psig = null;
+}
+
+/* candles and the indicators computed from them (all loaded history) */
+function drawBars(first) {
+  const S = CH.series; if (!CH.chart || !S.candle) return;
+  const B = CH.bars; S.candle.setData(B);
+  const c = B.map((b) => b.close), h = B.map((b) => b.high), l = B.map((b) => b.low);
+  const put = (ser, arr, from = 0) => ser && ser.setData(B.map((b, i) => (arr[i] == null || i < from ? null : { time: b.time, value: arr[i] })).filter(Boolean));
+  if (S.ema9) { put(S.ema9, IND.ema(c, 9), 8); put(S.ema21, IND.ema(c, 21), 20); put(S.ema50, IND.ema(c, 50), 49); }
+  if (S.st_up) { const st = IND.st(h, l, c); put(S.st_up, st.line.map((x, i) => (st.dir[i] > 0 ? x : null)), 10); put(S.st_dn, st.line.map((x, i) => (st.dir[i] < 0 ? x : null)), 10); }
+  if (S.vwap) { const w = IND.vwap(B, CH.vol); put(S.vwap, w.v); put(S.u1, w.u1); put(S.d1, w.d1); put(S.u2, w.u2); put(S.d2, w.d2); }
+  if (S.rsi) put(S.rsi, IND.rsi(c), 14);
+  if (S.macd) { const m = IND.macd(c); put(S.macd, m.m, 26); put(S.macd_sig, m.s, 34); S.macd_hist.setData(B.map((b, i) => (i < 34 ? null : { time: b.time, value: m.h[i], color: m.h[i] >= 0 ? "rgba(30,138,90,.5)" : "rgba(194,59,50,.5)" })).filter(Boolean)); }
+  if (S.vol) S.vol.setData(CH.vol || []);
+  if (first && B.length) {                       // zoom that suits the timeframe: about one screen of recent bars
+    const n = B.length, want = CH_VIEW[CH.tf] || 130;
+    const ahead = chIntraday() && chOn("scen") && ["NIFTY", "BANKNIFTY"].includes(CH.sym) ? Math.ceil(60 / CH.tfMin) + 3 : 5;
+    CH.chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, n - want), to: n + ahead });
+  }
+  const last = B[B.length - 1];
+  if (last && !CH.data) $("#ch-price").innerHTML = `<b>${fx(last.close)}</b> <span class="muted small">${esc(CH.src || "")}</span>`;
+}
+
+/* the bar a time falls in (alerts and trades happen inside bars of any timeframe) */
+function chBarTime(t) {
+  const B = CH.bars; if (!B.length || t < B[0].time) return null;
+  let lo = 0, hi = B.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (B[mid].time <= t) lo = mid; else hi = mid - 1; }
+  return B[lo].time;
 }
 
 function scenarioCard(sc, sym) {
@@ -1705,12 +1881,10 @@ function drawChartSignals(d) {
 }
 
 function drawChart(d, first) {
-  if (!d || !CH.chart) return;
+  if (!d || !CH.chart || !CH.series.candle) return;
   drawChartSignals(d);
   const S = CH.series;
-  S.candle.setData(d.candles);
-  for (const k of ["vwap", "u1", "d1", "u2", "d2", "ema9", "ema21", "ema50", "st_up", "st_dn", "rsi", "macd", "macd_sig", "macd_hist"]) if (S[k]) S[k].setData(d.series[k] || []);
-  if (S.vol) S.vol.setData(d.has_volume ? d.volume : []);
+  const intra = chIntraday();
   const sc = d.scenario;
   if (S.sc_up) {
     const P = (sc && sc.ready && sc.paths) || {};
@@ -1721,37 +1895,36 @@ function drawChart(d, first) {
   }
   // price lines for levels (rebuild only when they change)
   const groups = { prev: "prev", cpr: "cpr", or: "or", oi: "oi", gamma: "gamma", em: "em" };
-  const want = d.levels.filter((l) => chOn(groups[l.group] || l.group));
+  const want = d.levels.filter((l) => chOn(groups[l.group] || l.group) && (intra || !["or", "em", "gamma"].includes(l.group)));
   const sig = JSON.stringify(want.map((l) => [l.name, l.price]));
   if (sig !== CH.sig) {
     CH.lines.forEach((pl) => S.candle.removePriceLine(pl));
     CH.lines = want.map((l) => S.candle.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: l.style, axisLabelVisible: true, title: l.name }));
     CH.sig = sig;
   }
-  const mk = chOn("marks") ? d.markers.map(({ time, position, color, shape, text }) => ({ time, position, color, shape, text })) : [];
-  if (chOn("pat")) (d.patterns || []).forEach((p) => mk.push({ time: p.time, position: p.direction === "up" ? "belowBar" : "aboveBar",
+  const mk = [];
+  const at = (m) => { const t = chBarTime(m.time); if (t != null) mk.push({ ...m, time: t }); };
+  if (chOn("marks") && intra) d.markers.forEach(({ time, position, color, shape, text }) => at({ time, position, color, shape, text }));
+  if (chOn("pat") && intra) (d.patterns || []).forEach((p) => at({ time: p.time, position: p.direction === "up" ? "belowBar" : "aboveBar",
     color: p.grade === "edge" ? "#1E8A5A" : p.grade === "losing" ? "#9AA5B1" : "#3D2FA8", shape: p.direction === "up" ? "arrowUp" : "arrowDown", text: PAT_SHORT[p.pattern] || "" }));
-  if (chOn("swing")) (d.swings || []).forEach((w) => mk.push({ time: w.time, position: w.type === "H" ? "aboveBar" : "belowBar", color: "#8A94A0", shape: "circle", size: 0.3, text: w.label }));
-  if (CH.overlayMarks) { const t0 = d.candles.length ? d.candles[0].time : 0; CH.overlayMarks.forEach((m) => { if (m.time >= t0) mk.push(m); }); }
-  mk.sort((a, b) => a.time - b.time);
+  if (chOn("swing") && intra) (d.swings || []).forEach((w) => at({ time: w.time, position: w.type === "H" ? "aboveBar" : "belowBar", color: "#8A94A0", shape: "circle", size: 0.3, text: w.label }));
+  if (CH.overlayMarks) CH.overlayMarks.forEach(at);
+  const seen = new Set(); const mk2 = mk.filter((m) => { const k = m.time + "|" + m.text + "|" + m.position; if (seen.has(k)) return false; seen.add(k); return true; });
+  mk2.sort((a, b) => a.time - b.time);
+  mk.length = 0; mk.push(...mk2);
   S.markers.setMarkers(mk);
   // pattern lines (rebuilt only when the patterns change)
   const psig = chOn("pat") ? JSON.stringify((d.patterns || []).map((p) => [p.pattern, p.time])) : "";
   if (psig !== CH.psig) {
     (CH.patSeries || []).forEach((x) => { try { CH.chart.removeSeries(x); } catch (_) {} });
     CH.patSeries = [];
-    if (chOn("pat")) (d.patterns || []).forEach((p) => p.lines.forEach((ln) => {
+    if (chOn("pat") && intra) (d.patterns || []).forEach((p) => p.lines.forEach((ln) => {
       const pts = []; ln.forEach((q) => { if (!pts.length || q.time > pts[pts.length - 1].time) pts.push(q); });
       if (pts.length < 2) return;
       const ser = CH.chart.addSeries(window.LightweightCharts.LineSeries, { color: p.direction === "up" ? "rgba(30,138,90,.85)" : "rgba(194,59,50,.85)", lineWidth: 2, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 0);
       ser.setData(pts); CH.patSeries.push(ser);
     }));
     CH.psig = psig;
-  }
-  if (first) {                       // show the last ~120 bars (at least 40 slots so a young session isn't stretched)
-    const n = d.candles.length;
-    const ahead = d.scenario && d.scenario.ready && chOn("scen") ? Math.ceil((d.scenario.horizon_max || 60) / d.tf) + 3 : 6;
-    if (n) CH.chart.timeScale().setVisibleLogicalRange({ from: n - Math.min(n, 500), to: n + ahead });   // show every bar of the chosen days (like a trading app); scroll or zoom for detail
   }
   $("#ch-price").innerHTML = `<b>${fx(d.spot)}</b> ${fpc(d.chg_pct)} ${d.regime && d.regime.code !== "opening" ? `<span class="pill p-sig">${esc(d.regime.label)}</span>` : ""}${d.offline ? ` <span class="pill p-amber" title="${esc(d.offline.source)}">Last session · ${esc(d.offline.as_of)}</span>` : ""}`;
   const pats = (d.patterns || []).slice().reverse();

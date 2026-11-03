@@ -600,6 +600,8 @@ class LiveEngine:
             if self.trials is not None:
                 self._guard("Trial alerts", self.trials.update, self.state, self.clock.ts())
             self._guard("Flat-by reminder", self._flat_by_reminder, now, lc)
+            if self._every("last_session", 60, clock_time=False):
+                self._guard("Last session save", self.save_last_session)
             if self._every("pulse", 5, clock_time=False):
                 self._guard("Market view", self._market_view)
                 self._guard("Rule pulse", self._rule_pulse)
@@ -624,6 +626,10 @@ class LiveEngine:
 
     def _end_of_day(self, now, mins):
         self.paper.update(self.state, now, force_close=True)
+        try:
+            self.save_last_session()
+        except Exception:
+            pass
         try:
             self.desk.end_of_day(now)
         except Exception as e:
@@ -1273,6 +1279,7 @@ class LiveEngine:
                 live_every = min(600, live_every * 4)          # Yahoo pushing back: slow down
             for k, sec, fn in (("live", live_every, self.world.refresh_live), ("prices", 900, self.world.refresh_prices),
                                ("corr", 6 * 3600, self.world.refresh_correlations),
+                               ("extremes", 6 * 3600, self.world.refresh_extremes),
                                ("calendar", 2 * 3600, self._world_calendar), ("results", 6 * 3600, self._world_results),
                                ("news", 300, self.world.refresh_news)):
                 if (awake or not self.world.updated.get(k) or k == "live") and due(k, sec):
@@ -1714,9 +1721,12 @@ class LiveEngine:
         return {"status": {**self.status, "running": self.running, "logged_in": bool(self.tokens.load()),
                            "feed": feed, "ticks": self.state.tick_count if self.state else 0},
                 "clock": now.isoformat(), "mins": minutes_since_open(now),
-                "indices": [self.index_view(m) for m in self._indices()], "vix": self._vix(),
-                "alerts": new, "pulse": self.pulse, "movers": self._movers() if self.metrics else None,
-                "market": self.market,
+                "indices": self.index_cards(), "vix": self._vix(),
+                "alerts": new, "pulse": self.pulse if self.running or not self._last_session() else
+                {**self.pulse, "lines": self.pulse.get("lines") or self._last_session().get("pulse") or []},
+                "movers": self._movers() if self.metrics else self._last_session().get("movers"),
+                "market": self.market or ({} if self.running else self._last_session().get("market") or {}),
+                "last_session": None if self._indices() else {"asof": self._last_session().get("asof"), "day": self._last_session().get("day")},
                 "context": {"fii_dii": cv["fii_dii"], "global": cv["global"], "ban": cv["ban"],
                             "fii": next((r for r in ((cv["participants"] or {}).get("rows") or []) if r["who"] == "FII"), None)},
                 "paper": {"open": len(ps["open"]), "net": ps["net"], "unreal": ps["unreal"], "n": ps["n"],
@@ -1737,16 +1747,166 @@ class LiveEngine:
         """Sensex (Upstox live, else Yahoo) and GIFT Nifty (NSE IX) next to Nifty and Bank Nifty."""
         out = []
         i = self.state.get(SENSEX_KEY) if self.state else None
+        r = (getattr(self.world, "rows", {}) or {}).get("^BSESN") or {}
         if i and i.ltp:
-            out.append({"name": "Sensex", "spot": i.ltp, "chg_pct": (i.ltp / i.cp - 1) * 100 if i.cp else None,
-                        "day_h": i.day_h, "day_l": i.day_l, "src": "BSE, live (Upstox)"})
-        else:
-            r = (getattr(self.world, "rows", {}) or {}).get("^BSESN") or {}
-            if r.get("last") is not None:
-                out.append({"name": "Sensex", "spot": r["last"], "chg_pct": r.get("chg_pct"), "src": "Yahoo, about 1 min behind"})
-        g = self.gift.get()
+            sx = {"name": "Sensex", "sym": "SENSEX", "spot": i.ltp, "chg_pct": (i.ltp / i.cp - 1) * 100 if i.cp else None,
+                  "chg": i.ltp - i.cp if i.cp else None, "prev": i.cp, "day_h": i.day_h, "day_l": i.day_l, "src": "BSE, live (Upstox)"}
+            out.append(sx)
+        elif r.get("last") is not None:
+            out.append({"name": "Sensex", "sym": "SENSEX", "spot": r["last"], "chg_pct": r.get("chg_pct"), "prev": r.get("prev"),
+                        "chg": r["last"] - r["prev"] if r.get("prev") else None, "day_h": r.get("day_h"), "day_l": r.get("day_l"),
+                        "src": "Yahoo, about 1 min behind"})
+        if out:
+            try:
+                out[0].update(self.card_extras("SENSEX", out[0]["spot"], None, out[0].get("day_h"), out[0].get("day_l")))
+            except Exception:
+                pass
+        g = dict(self.gift.get() or {})
+        if g:
+            nifty = (self.metrics.get("NIFTY") or {}).get("spot")
+            saved = next((c for c in (self._last_session().get("indices") or []) if c.get("sym") == "NIFTY"), {})
+            ref = nifty or saved.get("spot") or ((getattr(self.world, "rows", {}) or {}).get("^NSEI") or {}).get("last")
+            if ref and g.get("spot"):
+                # GIFT minus Nifty: while Nifty trades it is the futures premium; after the close it hints at the next open
+                g["vs_nifty"] = round(g["spot"] - ref, 1)
+                g["nifty_ref"] = round(ref, 2)
+                g["vs_nifty_when"] = "now" if self.running and nifty else "close"
         out.append(g if g else {"name": "GIFT Nifty", "spot": None, "src": "NSE IX: loading…" if not self.gift.err else "NSE IX not reachable now"})
         return out
+
+    # ------------------------------------------------------------ Live page when the scanner is off (2.29)
+    LAST_SESSION = "last_session.json"
+
+    def card_extras(self, sym, spot, opt=None, day_h=None, day_l=None, prev_override=None) -> dict:
+        """All-time / 52-week high and low (Yahoo) and merged support / resistance for an index card."""
+        from .levels import key_levels
+        from .world import YAHOO_INDEX
+        from . import ta
+        ext = (getattr(self.world, "extremes", {}) or {}).get(YAHOO_INDEX.get(sym, ""), {}) if self.world else {}
+        d = self.daily.get(sym) or (self._last_session().get("daily") or {}).get(sym) or {}
+        h = d.get("htf") or {}
+        prev = d.get("prev") or {}
+        ph, pl, pc = prev.get("h") or h.get("prev_h"), prev.get("l") or h.get("prev_l"), prev.get("c") or h.get("prev_c")
+        if prev_override and all(prev_override):         # market closed: the last session is "yesterday" for the next one
+            ph, pl, pc = prev_override
+            day_h = day_l = None
+        cp = ta.cpr(ph, pl, pc)
+        o = opt or {}
+        named = [("Put OI wall", o.get("support")), ("Call OI wall", o.get("resistance")), ("Max pain", o.get("max_pain")),
+                 ("Yesterday's high", ph), ("Yesterday's low", pl), ("Yesterday's close", pc),
+                 ("Pivot", cp.get("P")), ("R1", cp.get("R1")), ("R2", cp.get("R2")), ("S1", cp.get("S1")), ("S2", cp.get("S2")),
+                 ("Last week's high", h.get("pwh")), ("Last week's low", h.get("pwl")), ("20-day high", h.get("hi20")),
+                 ("20-day low", h.get("lo20")), ("52-week high", ext.get("hi52")), ("52-week low", ext.get("lo52")),
+                 ("All-time high", ext.get("ath")), ("Day high", day_h), ("Day low", day_l)]
+        out = {"levels": key_levels(spot, named)}
+        if ext:
+            out["ext"] = {k: ext.get(k) for k in ("ath", "ath_date", "atl", "atl_date", "since", "hi52", "lo52")}
+            if spot and ext.get("ath"):
+                out["ext"]["from_ath_pct"] = round((spot / ext["ath"] - 1) * 100, 2)
+        if h:
+            out["trend"] = {"daily": h.get("trend"), "weekly": h.get("w_trend")}
+        return out
+
+    def index_cards(self) -> list:
+        """Index cards: live while the scanner runs; otherwise the last session's (saved every minute), else Yahoo."""
+        live = self._indices()
+        if live:
+            out = []
+            for m in live:
+                x = self.index_view(m)
+                try:
+                    x.update(self.card_extras(m["sym"], m.get("spot"), m.get("opt"), m.get("day_h"), m.get("day_l")))
+                except Exception:
+                    pass
+                out.append(x)
+            return out
+        return self.closed_cards()
+
+    def closed_cards(self) -> list:
+        saved = self._last_session()
+        cards = saved.get("indices") or []
+        if not cards and self.world is not None:          # first run: Yahoo prices for the main indices
+            from .world import YAHOO_INDEX
+            names = {"NIFTY": "Nifty 50", "BANKNIFTY": "Bank Nifty", "FINNIFTY": "Fin Nifty", "MIDCPNIFTY": "Midcap Select"}
+            for sym, t in YAHOO_INDEX.items():
+                r = (self.world.rows or {}).get(t) or {}
+                if sym in names and r.get("last"):
+                    cards.append({"sym": sym, "name": names[sym], "is_index": True, "spot": r["last"], "chg_pct": r.get("chg_pct"),
+                                  "day_h": r.get("day_h"), "day_l": r.get("day_l"), "opt": {}, "src": "Yahoo"})
+        out = []
+        for c in cards:
+            c = dict(c)
+            try:
+                c.update(self.card_extras(c["sym"], c.get("spot"), c.get("opt"), c.get("day_h"), c.get("day_l"),
+                                          prev_override=(c.get("day_h"), c.get("day_l"), c.get("spot"))))
+            except Exception:
+                pass
+            c["closed"] = True
+            c["asof"] = saved.get("asof")
+            out.append(c)
+        return out
+
+    def _last_session(self) -> dict:
+        f = self.data_dir / self.LAST_SESSION
+        hit = getattr(self, "_ls_cache", None)
+        try:
+            mt = f.stat().st_mtime
+        except OSError:
+            return {}
+        if hit and hit[0] == mt:
+            return hit[1]
+        try:
+            d = __import__("json").loads(f.read_text())
+        except Exception:
+            d = {}
+        self._ls_cache = (mt, d)
+        return d
+
+    def save_last_session(self):
+        """The Live page's index cards, breadth, sectors and movers, kept for when the scanner is off."""
+        import json
+        if not self._indices() or self.source == "sim":
+            return
+        d = {"asof": time.time(), "day": self.clock.now().date().isoformat(),
+             "indices": [self.index_view(m) for m in self._indices()], "market": self.market,
+             "daily": {m["sym"]: {"prev": (self.daily.get(m["sym"]) or {}).get("prev"), "htf": (self.daily.get(m["sym"]) or {}).get("htf")}
+                       for m in self._indices()},
+             "movers": self._movers() if self.metrics else None, "pulse": self.pulse.get("lines") or []}
+        f = self.data_dir / self.LAST_SESSION
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d, default=str))
+        tmp.replace(f)
+
+    def markets_board(self) -> dict:
+        """World markets for the Live page: US, Asia, Europe, money and commodities (Yahoo, about a minute behind)."""
+        from .world import LIVE_BOARD
+        rows = (getattr(self.world, "rows", {}) or {}) if self.world else {}
+        ext = (getattr(self.world, "extremes", {}) or {}) if self.world else {}
+        groups = []
+        for gname, items in LIVE_BOARD:
+            out = []
+            for name, t in items:
+                if t == "_GIFT":
+                    g = self.gift.get() or {}
+                    if g.get("spot"):
+                        out.append({"name": name, "ticker": "GIFT", "last": g["spot"], "chg_pct": g.get("chg_pct"), "day_h": g.get("day_h"),
+                                    "day_l": g.get("day_l"), "ts": g.get("ts")})
+                    continue
+                r = rows.get(t) or {}
+                if r.get("last") is None:
+                    continue
+                e_ = ext.get(t) or {}
+                out.append({"name": name, "ticker": t, "last": r["last"], "chg_pct": r.get("chg_pct"), "prev": r.get("prev"),
+                            "day_h": r.get("day_h"), "day_l": r.get("day_l"), "hi52": r.get("hi52") or e_.get("hi52"),
+                            "lo52": r.get("lo52") or e_.get("lo52"), "ath": e_.get("ath"), "ts": r.get("live_ts"),
+                            "asof": r.get("live_date") or r.get("asof"), "spark": (r.get("spark_day") or r.get("spark") or [])[-60:]})
+            if out:
+                groups.append({"group": gname, "items": out})
+        try:
+            pr = self.world.pressure() if self.world else None
+        except Exception:
+            pr = None
+        return {"groups": groups, "pressure": pr, "updated": (getattr(self.world, "updated", {}) or {}).get("live")}
 
     def _watch(self) -> list:
         """Sensex, Nasdaq, Dow and S&P on the Live page (Yahoo 1-minute prices, about a minute behind)."""

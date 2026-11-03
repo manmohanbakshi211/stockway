@@ -18,7 +18,12 @@ ASSETS = {
     "Global indices": [("S&P 500 futures", "ES=F", "us"), ("Nasdaq 100 futures", "NQ=F", "us"), ("Dow futures", "YM=F", "us"),
                        ("FTSE 100", "^FTSE", "eu"), ("DAX", "^GDAXI", "eu"), ("Nikkei 225", "^N225", "asia"),
                        ("Hang Seng", "^HSI", "asia"), ("Shanghai", "000001.SS", "asia"), ("Kospi", "^KS11", "asia"),
-                       ("Taiwan", "^TWII", "asia")],
+                       ("Taiwan", "^TWII", "asia"),
+                       # 2.29: the cash indices behind the futures, and the rest of Europe / Asia-Pacific that trade
+                       # before or with the Indian session
+                       ("Dow Jones", "^DJI", "us"), ("Nasdaq Composite", "^IXIC", "us"), ("S&P 500", "^GSPC", "us"),
+                       ("CAC 40", "^FCHI", "eu"), ("Euro Stoxx 50", "^STOXX50E", "eu"), ("ASX 200", "^AXJO", "asia"),
+                       ("Straits Times", "^STI", "asia")],
     "Currencies": [("Dollar index", "DX-Y.NYB", "us"), ("USD/INR", "INR=X", "in"), ("EUR/USD", "EURUSD=X", "eu"),
                    ("USD/JPY", "JPY=X", "asia"), ("USD/CNH", "CNH=X", "asia"), ("GBP/USD", "GBPUSD=X", "eu")],
     "Commodities": [("Brent crude", "BZ=F", "us"), ("WTI crude", "CL=F", "us"), ("Gold", "GC=F", "us"), ("Silver", "SI=F", "us"),
@@ -26,7 +31,9 @@ ASSETS = {
     "Rates & fear": [("US 10Y yield", "^TNX", "us"), ("US 5Y yield", "^FVX", "us"), ("US 3M bill", "^IRX", "us"),
                      ("US VIX", "^VIX", "us")],
     "Crypto (risk mood)": [("Bitcoin", "BTC-USD", "us"), ("Ethereum", "ETH-USD", "us")],
-    "Indian indices (other)": [("Sensex", "^BSESN", "local")],
+    "Indian indices (other)": [("Sensex", "^BSESN", "local"), ("Nifty 50", "^NSEI", "local"), ("Bank Nifty", "^NSEBANK", "local"),
+                               ("Fin Nifty", "NIFTY_FIN_SERVICE.NS", "local"), ("Midcap Select", "NIFTY_MID_SELECT.NS", "local"),
+                               ("India VIX", "^INDIAVIX", "local")],
     "Indian ADRs (New York)": [("Infosys ADR", "INFY", "us"), ("HDFC Bank ADR", "HDB", "us"), ("ICICI Bank ADR", "IBN", "us"),
                                ("Wipro ADR", "WIT", "us")],
 }
@@ -54,6 +61,21 @@ NEG = re.compile(r"\b(fall|falls|drop|slump|plunge|crash|tumble|slide|war|sancti
 POS = re.compile(r"\b(rise|rises|gain|jump|surge|rally|record high|cut|stimulus|deal|truce|eases?|strong|beat)\b", re.I)
 
 
+# the app's index symbols on Yahoo (for all-time / 52-week highs and lows, and prices when the scanner is off)
+YAHOO_INDEX = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "FINNIFTY": "NIFTY_FIN_SERVICE.NS",
+               "MIDCPNIFTY": "NIFTY_MID_SELECT.NS", "SENSEX": "^BSESN"}
+# what the Live page shows under "World markets", in this order (name shown, ticker)
+LIVE_BOARD = [
+    ("US", [("Dow Jones", "^DJI"), ("Nasdaq", "^IXIC"), ("S&P 500", "^GSPC"), ("Dow fut", "YM=F"), ("Nasdaq 100 fut", "NQ=F"),
+            ("S&P 500 fut", "ES=F"), ("US VIX", "^VIX")]),
+    ("Asia", [("GIFT Nifty", "_GIFT"), ("Nikkei 225", "^N225"), ("Hang Seng", "^HSI"), ("Shanghai", "000001.SS"),
+              ("Kospi", "^KS11"), ("Taiwan", "^TWII"), ("ASX 200", "^AXJO"), ("Straits Times", "^STI")]),
+    ("Europe", [("FTSE 100", "^FTSE"), ("DAX", "^GDAXI"), ("CAC 40", "^FCHI"), ("Euro Stoxx 50", "^STOXX50E")]),
+    ("Money & commodities", [("USD/INR", "INR=X"), ("Dollar index", "DX-Y.NYB"), ("US 10Y yield", "^TNX"), ("Brent crude", "BZ=F"),
+                             ("Gold", "GC=F"), ("Silver", "SI=F"), ("Bitcoin", "BTC-USD")]),
+]
+
+
 def _pct(a, b):
     return (a / b - 1) * 100 if a and b else None
 
@@ -70,6 +92,7 @@ class World:
         self.results = []
         self.news = News(log, GLOBAL_FEEDS)
         self.tags = {}            # headline -> {"impact","direction","why"}
+        self.extremes = {}        # ticker -> all-time / 52-week high and low
         self.errors = {}
         self.updated = {}
         self.on_macro = None      # callback(alert dict)
@@ -89,13 +112,15 @@ class World:
                 self.rows, self.corr, self.adr = c.get("rows", {}), c.get("corr", {}), c.get("adr", [])
                 self.calendar, self.results = c.get("calendar", []), c.get("results", [])
                 self.updated = c.get("updated", {})
+                self.extremes = c.get("extremes", {})
             except Exception:
                 pass
 
     def _save(self):
         try:
             self._cache().write_text(json.dumps({"rows": self.rows, "corr": self.corr, "adr": self.adr, "calendar": self.calendar,
-                                                 "results": self.results, "updated": self.updated}, default=str))
+                                                 "results": self.results, "updated": self.updated,
+                                                 "extremes": getattr(self, "extremes", {})}, default=str))
         except Exception:
             pass
 
@@ -123,7 +148,8 @@ class World:
                     # a fresher intraday price is already known: keep it, against the right previous close
                     pv = last if old["live_date"] > row["asof"] else prev
                     row.update(last=old["last"], prev=pv, chg_pct=_pct(old["last"], pv), live_ts=old["live_ts"],
-                               live_date=old["live_date"], spark_day=old.get("spark_day"), spark_pc=old.get("spark_pc"))
+                               live_date=old["live_date"], spark_day=old.get("spark_day"), spark_pc=old.get("spark_pc"),
+                               **{k: old[k] for k in ("day_h", "day_l", "hi52", "lo52") if old.get(k) is not None})
                 self.rows[t] = row
             except Exception:
                 continue
@@ -163,8 +189,14 @@ class World:
             return None
         line = [c for _, c in pts]
         step = max(1, len(line) // 120)
+        hi = [x for x in (q.get("high") or []) if x is not None]
+        lo = [x for x in (q.get("low") or []) if x is not None]
+        num = lambda v: float(v) if isinstance(v, (int, float)) else None
         return {"last": float(last), "prev": float(pc), "ts": float(m.get("regularMarketTime") or (pts[-1][0] if pts else time.time())),
-                "line": [float(x) for x in line[::step]] + ([float(last)] if line else [])}
+                "line": [float(x) for x in line[::step]] + ([float(last)] if line else []),
+                "day_h": num(m.get("regularMarketDayHigh")) or (max(hi) if hi else None),
+                "day_l": num(m.get("regularMarketDayLow")) or (min(lo) if lo else None),
+                "hi52": num(m.get("fiftyTwoWeekHigh")), "lo52": num(m.get("fiftyTwoWeekLow"))}
 
     def refresh_live(self):
         """Intraday prices for every market, between the slower daily refreshes: Yahoo's chart endpoint in parallel
@@ -172,14 +204,18 @@ class World:
         if not self.rows:
             self.refresh_prices()
         from concurrent.futures import ThreadPoolExecutor
-        ticks = list(self.rows)
+        ticks = list(dict.fromkeys(list(self.rows) + self._tickers()))     # a ticker the daily download missed too
         got = {}
         with ThreadPoolExecutor(max_workers=8) as ex:
             for t, res in zip(ticks, ex.map(lambda x: self._safe_chart(x), ticks)):
                 if res:
                     got[t] = res
         if len(got) >= max(3, len(ticks) // 2):
+            names = {t: (n, g, reg) for g, items in ASSETS.items() for n, t, reg in items}
             for t, c in got.items():
+                if t not in self.rows:
+                    n, g, reg = names.get(t, (t, None, None))
+                    self.rows[t] = {"ticker": t, "name": n, "group": g, "region": reg, "asof": "", "d_last": None, "d_prev": c["prev"]}
                 r = self.rows[t]
                 bar_date = dt.datetime.fromtimestamp(c["ts"], dt.timezone.utc).date().isoformat()
                 # previous close from the daily table (Yahoo's chart 'previousClose' is sometimes a day stale for
@@ -187,9 +223,38 @@ class World:
                 pv = (r.get("d_last") if bar_date > r.get("asof", "") else r.get("d_prev")) or c["prev"]
                 r.update(last=c["last"], prev=pv, chg_pct=_pct(c["last"], pv), live_ts=c["ts"], live_date=bar_date,
                          spark_day=c["line"] if len(c["line"]) > 2 else r.get("spark_day"), spark_pc=pv)
+                for k in ("day_h", "day_l", "hi52", "lo52"):
+                    if c.get(k) is not None:
+                        r[k] = c[k]
             self._after_live()
             return len(got)
         return self._refresh_live_bulk()
+
+    def refresh_extremes(self):
+        """All-time and 52-week highs and lows for the Indian indices and the main world indices (monthly bars since
+        Yahoo's first data). Once every few hours; each ticker on its own, so one failure skips only that one."""
+        from concurrent.futures import ThreadPoolExecutor
+        ticks = list(dict.fromkeys(list(YAHOO_INDEX.values()) + [t for _, items in LIVE_BOARD for _, t in items if not t.startswith("_")]))
+        ext = dict(getattr(self, "extremes", {}) or {})
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            for t, res in zip(ticks, ex.map(self._safe_extremes, ticks)):
+                if res:
+                    ext[t] = res
+        self.extremes = ext
+        self.updated["extremes"] = time.time()
+        self._save()
+        return len(ext)
+
+    def _safe_extremes(self, t):
+        try:
+            import requests
+            from urllib.parse import quote
+            r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(t)}", params={"range": "max", "interval": "1mo"},
+                             headers={"User-Agent": "Mozilla/5.0 (Macintosh) Stockway"}, timeout=10)
+            r.raise_for_status()
+            return extremes_from_chart(r.json())
+        except Exception:
+            return None
 
     def _safe_chart(self, t):
         try:
@@ -445,3 +510,24 @@ class World:
         return {"groups": groups, "pressure": self.pressure(), "adr": self.adr, "calendar": self.calendar,
                 "upcoming": self.upcoming(120), "results": self.results[:120], "news": news,
                 "nifty": self.rows.get(NIFTY), "errors": self.errors, "updated": self.updated}
+
+
+def extremes_from_chart(js: dict) -> dict | None:
+    """Yahoo monthly chart JSON -> {ath, ath_date, atl, atl_date, since, hi52, lo52} (None if empty)."""
+    res = ((js or {}).get("chart") or {}).get("result") or []
+    if not res:
+        return None
+    ts = res[0].get("timestamp") or []
+    q = ((res[0].get("indicators") or {}).get("quote") or [{}])[0]
+    rows = [(t, h, l) for t, h, l in zip(ts, q.get("high") or [], q.get("low") or []) if h is not None and l is not None and h > 0 and l > 0]
+    if not rows:
+        return None
+    day = lambda t: dt.datetime.fromtimestamp(t, IST).date().isoformat()
+    hi = max(rows, key=lambda r: r[1])
+    lo = min(rows, key=lambda r: r[2])
+    last12 = rows[-12:]
+    m = res[0].get("meta") or {}
+    return {"ath": round(float(hi[1]), 2), "ath_date": day(hi[0])[:7], "atl": round(float(lo[2]), 2), "atl_date": day(lo[0])[:7],
+            "since": day(rows[0][0])[:4],
+            "hi52": float(m["fiftyTwoWeekHigh"]) if isinstance(m.get("fiftyTwoWeekHigh"), (int, float)) else round(max(r[1] for r in last12), 2),
+            "lo52": float(m["fiftyTwoWeekLow"]) if isinstance(m.get("fiftyTwoWeekLow"), (int, float)) else round(min(r[2] for r in last12), 2)}

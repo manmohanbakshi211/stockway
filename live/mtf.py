@@ -67,6 +67,31 @@ def resample(rows: list, minutes: int) -> list:
     return out
 
 
+# main chart timeframes (2.29): base bars fetched, step shown, days loaded at first (more on scroll-back)
+MAIN_TFS = {"1m": {"base": 1, "step": 1, "days": 5}, "3m": {"base": 1, "step": 3, "days": 10},
+            "5m": {"base": 5, "step": 5, "days": 30}, "15m": {"base": 15, "step": 15, "days": 90},
+            "30m": {"base": 15, "step": 30, "days": 180}, "1H": {"base": 60, "step": 60, "days": 365},
+            "1D": {"base": "D", "step": "D", "days": 1500}, "1W": {"base": "D", "step": "W", "days": 3650},
+            "1M": {"base": "D", "step": "M", "days": 7300}}
+
+
+def period_from(rows: list, step: str) -> list:
+    """Daily bars -> weekly ("W", ISO weeks) or monthly ("M") bars, stamped with the period's first day."""
+    out, key, cur = [], None, None
+    for r in rows:
+        d = dt.datetime.fromtimestamp(r[0], IST).date()
+        k = d.isocalendar()[:2] if step == "W" else (d.year, d.month)
+        if k != key:
+            if cur:
+                out.append(cur)
+            key, cur = k, [r[0], r[1], r[2], r[3], r[4], r[5] or 0]
+        else:
+            cur[2], cur[3], cur[4], cur[5] = max(cur[2], r[2]), min(cur[3], r[3]), r[4], cur[5] + (r[5] or 0)
+    if cur:
+        out.append(cur)
+    return out
+
+
 def daily_from(rows: list) -> list:
     out = {}
     for r in rows:
@@ -147,10 +172,7 @@ class MTF:
         except Exception as ex:
             self.errors[k] = str(ex)[:120]
         if rows:
-            self.dir.mkdir(parents=True, exist_ok=True)
-            tmp = f.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"at": time.time(), "rows": rows}))
-            tmp.replace(f)
+            rows = self._merge_save(f, rows)          # 2.29: keep the longer history the main chart loaded
         elif f.exists():
             try:
                 rows = json.loads(f.read_text())["rows"]
@@ -166,10 +188,143 @@ class MTF:
         self.mem[k] = (time.time(), rows)
         return rows
 
+    def _merge_save(self, f, rows) -> list:
+        old = []
+        if f.exists():
+            try:
+                old = json.loads(f.read_text()).get("rows") or []
+            except Exception:
+                old = []
+        allr = sorted({r[0]: r for r in old + rows}.values(), key=lambda r: r[0])
+        self.dir.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"at": time.time(), "rows": allr}))
+        tmp.replace(f)
+        return allr
+
+    # ------------------------------------------------------------ main chart: long history with scroll-back (2.29)
+    def _yahoo(self, sym, base) -> list:
+        """Free fallback without Dhan: Yahoo bars (1m: 7 days, 5m / 15m: 60 days, 60m: 2 years, daily: all)."""
+        import requests
+        from .world import YAHOO_INDEX
+        t = YAHOO_INDEX.get(sym) or f"{sym}.NS"
+        iv, rng = {1: ("1m", "7d"), 5: ("5m", "60d"), 15: ("15m", "60d"), 60: ("60m", "730d"), "D": ("1d", None)}[base]
+        # daily: an explicit 20-year window (Yahoo thins "range=max" out to a few hundred bars)
+        prm = {"range": rng, "interval": iv} if rng else {"period1": int(time.time() - 20 * 365 * 86400), "period2": int(time.time()), "interval": iv}
+        r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{t}", params=prm,
+                         headers={"User-Agent": "Mozilla/5.0 (Macintosh) Stockway"}, timeout=15)
+        r.raise_for_status()
+        res = ((r.json().get("chart") or {}).get("result") or [None])[0] or {}
+        q = ((res.get("indicators") or {}).get("quote") or [{}])[0]
+        rows = []
+        for i, ts in enumerate(res.get("timestamp") or []):
+            try:
+                o, h, l, c = (q[k][i] for k in ("open", "high", "low", "close"))
+            except (KeyError, IndexError, TypeError):
+                continue
+            if None in (o, h, l, c):
+                continue
+            v = (q.get("volume") or [0] * (i + 1))[i] or 0
+            t0 = _session_start(dt.datetime.fromtimestamp(ts, IST).date()) if base == "D" else float(ts)
+            rows.append([t0, float(o), float(h), float(l), float(c), float(v)])
+        return rows
+
+    def long_rows(self, sym, base, days) -> tuple:
+        """(rows, source): cached bars covering at least `days` back; older chunks fetched from Dhan as needed."""
+        f = self.dir / f"{sym}_{base}.json"
+        k = ("long", sym, base)
+        rows, src = None, "Dhan"
+        try:
+            rows = list(self.base_rows(sym, base, 400 if base == "D" else 5))     # refreshes the recent end
+            src = "Dhan" if self._dhan() and not self.errors.get((sym, base)) else "app history"
+        except Exception:
+            rows = []
+        first = rows[0][0] if rows else time.time()
+        want = time.time() - days * 86400
+        d = self._dhan() if first > want + 86400 and not self.errors.get(k) else None
+        if d is not None:
+            try:                                          # older history from Dhan, 90 days per call
+                sec = self._sec(sym)
+                if sec:
+                    sid, seg, inst = sec
+                    end = dt.datetime.fromtimestamp(first, IST).date()
+                    start = dt.datetime.fromtimestamp(want, IST).date()
+                    got = []
+                    if base == "D":
+                        res = d.daily(sym, start.isoformat(), end.isoformat(), security_id=sid, segment=seg, instrument=inst)
+                        got = [[_session_start(dt.datetime.fromtimestamp(r[0], IST).date())] + r[1:] for r in self._rows(res)]
+                    else:
+                        cur = start
+                        while cur < end:
+                            stop = min(end, cur + dt.timedelta(days=89))
+                            res = d.post("/charts/intraday", {"securityId": str(sid), "exchangeSegment": seg, "instrument": inst,
+                                                              "interval": str(base), "oi": False, "fromDate": cur.isoformat(), "toDate": stop.isoformat()})
+                            got += self._rows(res.get("data", res) if isinstance(res, dict) else {})
+                            cur = stop
+                    if got:
+                        rows = self._merge_save(f, got)
+                        self.mem[(sym, base)] = (time.time(), rows)
+                    else:
+                        self.errors[k] = "no older bars"            # Dhan has nothing older: don't ask again
+            except Exception as ex:
+                self.errors[k] = str(ex)[:120]
+        if (not rows or rows[0][0] > want + 86400) and base in (1, 5, 15, 60, "D"):
+            yk = ("yahoo", sym, base)
+            hit = self.mem.get(yk)
+            if not hit or time.time() - hit[0] > REFRESH_S:
+                try:
+                    hit = (time.time(), self._yahoo(sym, base))
+                except Exception as ex:
+                    self.errors[yk] = str(ex)[:120]
+                    hit = (time.time(), [])
+                self.mem[yk] = hit
+            if hit[1]:
+                have = {r[0] for r in rows or []}
+                if not rows or len(hit[1]) > len(rows):
+                    rows = sorted({r[0]: r for r in hit[1] + (rows or [])}.values(), key=lambda r: r[0])
+                    src = "Yahoo" if not have else src + " + Yahoo"
+        return rows or [], src
+
+    def candles(self, sym, tf, before=None, limit=1500, tail=None) -> dict:
+        """The main chart's bars: 1m 3m 5m 15m 30m 1H (intraday) and 1D 1W 1M, newest last, with today's live bars."""
+        spec = MAIN_TFS[tf]
+        base, step, days = spec["base"], spec["step"], spec["days"]
+        need = days
+        if before:
+            need = max(days, (time.time() - float(before)) / 86400 + days)
+        rows, src = self.long_rows(sym, base, need)
+        live = []
+        try:
+            live = self.e.charts.today_bars(sym) if self.e.metrics.get(sym) else []
+        except Exception:
+            live = []
+        if live:
+            day0 = _session_start(dt.datetime.fromtimestamp(live[-1][0], IST).date())
+            live = [r for r in live if day0 <= r[0] < day0 + 6.5 * 3600]
+            if live:
+                rows = [r for r in rows if r[0] < day0] + (daily_from(live) if base == "D" else resample(live, base))
+                src += " + live"
+        if base != "D" and step != base:
+            rows = resample(rows, step)
+        elif base == "D" and step in ("W", "M"):
+            rows = period_from(rows, step)
+        if before:
+            rows = [r for r in rows if r[0] < float(before)]
+        if tail:
+            rows = rows[-int(tail):]
+        more = len(rows) > limit or (not tail and bool(rows) and not self.errors.get(("long", sym, base)) and bool(self._dhan()))
+        rows = rows[-limit:]
+        T = [int(r[0] + IST_SHIFT) for r in rows]
+        return {"sym": sym, "tf": tf, "source": src, "more": more, "intraday": base != "D",
+                "candles": [{"time": t, "open": _f(r[1]), "high": _f(r[2]), "low": _f(r[3]), "close": _f(r[4])} for t, r in zip(T, rows)],
+                "volume": [{"time": t, "value": r[5] or 0, "color": "rgba(30,138,90,.35)" if r[4] >= r[1] else "rgba(194,59,50,.35)"}
+                           for t, r in zip(T, rows)],
+                "has_volume": any((r[5] or 0) > 0 for r in rows[-50:])}
+
     def bars(self, sym, tf) -> list:
         spec = TFS[tf]
         base = spec["base"]
-        rows = list(self.base_rows(sym, base, spec["days"]))
+        rows = list(self.long_rows(sym, base, spec["days"])[0])      # Dhan, else Yahoo, else the app's own history
         live = []
         try:
             live = self.e.charts.today_bars(sym) if self.e.metrics.get(sym) else []
@@ -342,8 +497,84 @@ class MTF:
         dns = sum(t["trend"] == "down" for t in trend)
         n = sum(t["trend"] is not None for t in trend)
         summary = (f"{ups} of {n} timeframes up" if ups > dns else f"{dns} of {n} timeframes down" if dns > ups else "mixed") if n else None
-        return {"sym": sym, "spot": _f(spot), "panels": panels, "confluence": conf, "trend": trend, "summary": summary,
-                "aligned": (ups == n or dns == n) and n >= 3}
+        out = {"sym": sym, "spot": _f(spot), "panels": panels, "confluence": conf, "trend": trend, "summary": summary,
+               "aligned": (ups == n or dns == n) and n >= 3}
+        try:
+            out["report"] = self.report(out)
+        except Exception as ex:
+            out["report"] = {"error": str(ex)[:120]}
+        return out
+
+    @staticmethod
+    def report(v: dict) -> dict:
+        """One read of every timeframe, small to large: trend, momentum, structure, where price sits, then the overall
+        picture (aligned or a pullback), the zones that matter most and what would change the view. Rule-based."""
+        panels, spot = v.get("panels") or {}, v.get("spot")
+        small_to_large = [tf for tf in reversed(ORDER) if tf in panels]
+        rows, score, weight = [], 0.0, {"5m": 1, "15m": 1.5, "1H": 2, "75m": 2, "1D": 3}
+        for tf in small_to_large:
+            p = panels[tf]
+            cs = [c_["close"] for c_ in p.get("candles") or [] if c_.get("close") is not None]
+            if len(cs) < 15:
+                continue
+            arr = np.asarray(cs, float)
+            r = float(ta.rsi(arr, 14)[-1])
+            tr = p.get("trend")
+            sgn = 1 if tr == "up" else -1 if tr == "down" else 0
+            score += sgn * weight.get(tf, 1)
+            mom = "overbought" if r >= 70 else "oversold" if r <= 30 else "strong" if r >= 60 else "weak" if r <= 40 else "neutral"
+            lv = [x for x in p.get("levels") or [] if x.get("price")]
+            above = min((x for x in lv if x["price"] > (spot or arr[-1])), key=lambda x: x["price"], default=None)
+            below = max((x for x in lv if x["price"] < (spot or arr[-1])), key=lambda x: x["price"], default=None)
+            chg = (arr[-1] / arr[-min(len(arr), 20)] - 1) * 100
+            rows.append({"tf": tf, "trend": tr, "rsi": round(r, 1), "momentum": mom, "structure": p.get("structure"),
+                         "chg20_pct": round(float(chg), 2),
+                         "res": {"name": above["name"], "price": above["price"]} if above else None,
+                         "sup": {"name": below["name"], "price": below["price"]} if below else None})
+        if not rows:
+            return {"lines": [], "verdict": None}
+        total = sum(weight.get(r_["tf"], 1) for r_ in rows)
+        bias = round(score / total * 100) if total else 0
+        big = next((r_ for r_ in reversed(rows) if r_["tf"] in ("1D", "75m", "1H")), rows[-1])
+        small = rows[0]
+        if bias >= 60:
+            verdict = "Strong uptrend on every timeframe that matters: buy dips, don't fight it."
+        elif bias <= -60:
+            verdict = "Strong downtrend on every timeframe that matters: sell rises, don't fight it."
+        elif big["trend"] == "up" and small["trend"] == "down":
+            verdict = f"Pullback inside an uptrend: {big['tf']} up, {small['tf']} down. A turn back up on {small['tf']} would rejoin the trend."
+        elif big["trend"] == "down" and small["trend"] == "up":
+            verdict = f"Bounce inside a downtrend: {big['tf']} down, {small['tf']} up. A turn back down on {small['tf']} would rejoin the trend."
+        elif bias >= 25:
+            verdict = "Leaning up, not all timeframes agree yet."
+        elif bias <= -25:
+            verdict = "Leaning down, not all timeframes agree yet."
+        else:
+            verdict = "No clear direction across timeframes: range trading, wait for a break."
+        word = {"up": "up", "down": "down", "sideways": "sideways", None: "?"}
+        lines = []
+        for r_ in rows:
+            bits = [f"{r_['tf']}: {word[r_['trend']]}", f"RSI {r_['rsi']:.0f} ({r_['momentum']})"]
+            if r_["structure"]:
+                bits.append(r_["structure"])
+            if r_["res"]:
+                bits.append(f"resistance {r_['res']['price']:,.1f} ({r_['res']['name']})")
+            if r_["sup"]:
+                bits.append(f"support {r_['sup']['price']:,.1f} ({r_['sup']['name']})")
+            lines.append(", ".join(bits))
+        zones = [z for z in (v.get("confluence") or []) if z.get("mid")][:4]
+        za = min((z for z in zones if spot and z["mid"] > spot), key=lambda z: z["mid"], default=None)
+        zb = max((z for z in zones if spot and z["mid"] < spot), key=lambda z: z["mid"], default=None)
+        watch = []
+        if za:
+            watch.append(f"A close above {za['hi']:,.1f} ({'+'.join(za['tfs'])} zone) opens the way up.")
+        if zb:
+            watch.append(f"A close below {zb['lo']:,.1f} ({'+'.join(zb['tfs'])} zone) turns it down.")
+        hot = [r_["tf"] for r_ in rows if r_["momentum"] in ("overbought", "oversold")]
+        if hot:
+            watch.append(f"Stretched on {', '.join(hot)}: late to chase, a pause or pullback is common from here.")
+        return {"verdict": verdict, "bias": bias, "per_tf": rows, "lines": lines, "watch": watch,
+                "note": "Rule-based read of all five charts (trend = price vs EMA 20 / 50 and Supertrend). Not a prediction."}
 
     @staticmethod
     def confluence(panels: dict, spot, sym) -> list:

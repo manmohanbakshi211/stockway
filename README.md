@@ -114,6 +114,30 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Live page, Alerts and a broker-style chart (2.29)
+
+- **Live page works when the market is closed:** index cards from the last session (saved every minute while the
+  scanner runs), else Yahoo. No alert list on the Live page any more (they live on the Alerts page).
+- **Index cards:** day range, 52-week range, all-time high / low (Yahoo, since 2007 for Nifty), daily and weekly trend,
+  and **merged support / resistance**: OI walls, yesterday's high / low / close, pivots, last week's and the 20-day
+  high / low, 52-week and all-time highs, round numbers; levels that agree are one zone (live/levels.py).
+- **Sensex and GIFT Nifty:** change in points, open, previous close, day range, 52 weeks, all-time high; GIFT's average
+  price, contracts and its gap to Nifty (premium now, or a hint for the next open after the close).
+- **World markets:** US (Dow, Nasdaq, S&P 500 + futures, US VIX), Asia (GIFT, Nikkei, Hang Seng, Shanghai, Kospi,
+  Taiwan, ASX, Singapore), Europe (FTSE, DAX, CAC, Euro Stoxx), money and commodities (USD/INR, dollar index, US 10Y,
+  Brent, gold, silver, Bitcoin), with day range, 52-week range and all-time high; refreshed every 30 seconds.
+- **Alerts page:** Act now → Focus (Focus plus the other important ones that are not demoted) → All, each with its
+  count; the type chips are quick filters; the view, type and symbol are remembered.
+- **Chart:** 1m 3m 5m 15m 30m 1H 1D 1W 1M with years of history (Dhan, cached on the Mac; Yahoo without Dhan); older
+  bars load as you scroll left; each timeframe opens at its own zoom. Clean by default: candles plus the move
+  prediction (scenarios, expected move); every indicator and level is one click away and remembered. Indicators are
+  computed on all loaded bars. Opens at once when the market is closed (side panels follow).
+- **All timeframes:** small to large (5m → daily), each at its own zoom, and an **All timeframes read** at the top of
+  the side panel: one verdict (aligned trend, pullback or bounce, range), each timeframe's trend, RSI, structure and
+  nearest levels, and what would change the view.
+- Checked: 162 tests incl. no-clash; Lab regression 103 of 103; Live, Alerts, Chart, Scorecard and System at desktop and
+  phone width, no errors, no sideways scroll.
+
 ## Everything connected: the bigger picture on every alert (2.28)
 
 An end-to-end check of chart data → strategies → news → fundamentals → score → risk check → paper. What was missing

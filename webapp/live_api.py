@@ -154,13 +154,25 @@ def live_chart(sym: str, tf: int = 5, days: int = 3):
     e = engine()
     if tf not in (1, 3, 5, 15, 30, 60):
         raise HTTPException(400, "Timeframe must be 1, 3, 5, 15, 30 or 60 minutes")
+    key = (sym.upper(), tf, max(1, min(10, days)))
+    hit = _CHART_MEMO.get(key)
+    if hit and not e.running and time.time() - hit[0] < 120:      # market closed: nothing changes, answer at once
+        return hit[1]
     try:
         d = e.charts.payload(sym.upper(), tf, max(1, min(10, days)))
     except PermissionError as ex:
         raise HTTPException(401, str(ex))
     if not d:
         raise HTTPException(404, "No price history found for this symbol yet (Yahoo or Upstox didn't answer).")
-    return clean(d)
+    out = clean(d)
+    if not e.running:
+        if len(_CHART_MEMO) > 40:
+            _CHART_MEMO.clear()
+        _CHART_MEMO[key] = (time.time(), out)
+    return out
+
+
+_CHART_MEMO: dict = {}
 
 
 @router.post("/api/live/chart/{sym}/ai")
@@ -214,6 +226,18 @@ async def live_mtf(sym: str, tfs: str | None = None):
     return clean(await _run_blocking(m.view, sym.upper(), tfs.split(",") if tfs else None))
 
 
+@router.get("/api/live/candles/{sym}")
+async def live_candles(sym: str, tf: str = "5m", before: float | None = None, tail: int | None = None):
+    """Main chart bars (2.29): long history per timeframe; `before` (epoch seconds) loads older bars for scroll-back."""
+    from live.mtf import MAIN_TFS
+    if tf not in MAIN_TFS:
+        raise HTTPException(400, f"Timeframe must be one of {', '.join(MAIN_TFS)}")
+    d = await _run_blocking(_mtf().candles, sym.upper(), tf, before, 1500, tail)
+    if not d["candles"] and not before and not tail:
+        raise HTTPException(404, "No price history for this symbol yet (Dhan, Yahoo and the app's own history had none).")
+    return clean(d)
+
+
 @router.get("/api/live/mtf/{sym}/overlays")
 def live_mtf_overlays(sym: str):
     return {"overlays": _mtf().overlays(sym.upper())}
@@ -249,12 +273,23 @@ async def live_lens_market():
 
 @router.get("/api/live/alerts")
 def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1, source: str | None = None, limit: int = 1000,
-                focus: bool = False):
+                focus: bool = False, view: str | None = None):
+    """view (2.29, the Alerts page): act = act-now alerts; focus = Focus plus the other important ones (severity 2+,
+    not demoted); all = everything. Counts for all three come back with any of them."""
     e = engine()
     day = day or dt.datetime.now(IST).date().isoformat()
     if day == "latest":
         days = e.store.alert_days(1)
         day = days[0]["day"] if days else None
+    if view in ("act", "focus", "all"):
+        from live.dayreport import _focus
+        al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=1, source=source, limit=6000)
+        pick = {"act": lambda a: a["severity"] >= 3,
+                "focus": lambda a: _focus(a) or (a["severity"] >= 2 and not (a.get("data") or {}).get("muted")),
+                "all": lambda a: True}
+        counts = {k: sum(1 for a in al if f(a)) for k, f in pick.items()}
+        out = [a for a in al if pick[view](a)][:max(1, min(int(limit), 2000))]
+        return clean({"day": day, "alerts": out, "total": len(al), "counts": counts, "view": view, "days": e.store.alert_days(60)})
     al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=min_sev, source=source,
                         limit=6000 if focus else max(1, min(int(limit), 6000)))
     total = len(al)
@@ -580,6 +615,12 @@ def live_context_refresh():
 @router.get("/api/live/scorecard")
 def live_scorecard(source: str | None = None):
     return clean(engine().scorecard_view(source))
+
+
+@router.get("/api/live/markets")
+def live_markets():
+    """World markets for the Live page (US, Asia, Europe, money and commodities), with day range and 52-week range."""
+    return clean(engine().markets_board())
 
 
 @router.get("/api/live/trials")

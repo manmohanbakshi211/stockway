@@ -40,8 +40,21 @@ def parse(d: dict) -> dict | None:
         pct = None
     if pct is None and chg is not None and last - chg:
         pct = chg / (last - chg) * 100
+    def num(*keys):
+        for k in keys:
+            try:
+                v = r.get(k)
+                if v not in (None, "", "-"):
+                    return float(v)
+            except (TypeError, ValueError):
+                continue
+        return None
     return {"name": "GIFT Nifty", "spot": last, "chg": chg, "chg_pct": pct, "expiry": r.get("EXPIRYDATE"),
-            "src": "NSE IX, near-month future", "ts": time.time()}
+            "src": "NSE IX, near-month future", "ts": time.time(),
+            # 2.29: the session's details (read defensively: a missing field is just left out)
+            "open": num("OPEN", "OPENPRICE"), "day_h": num("HIGH", "HIGHPRICE"), "day_l": num("LOW", "LOWPRICE"),
+            "prev": num("CLOSE", "PREVCLOSE", "PREVIOUSCLOSE"), "atp": num("ATP"), "contracts": num("CONTRACTSTRADED", "VOLUME"),
+            "bid": num("BIDPRICE"), "ask": num("ASKPRICE"), "at": r.get("TIMESTMP")}
 
 
 class GiftNifty:

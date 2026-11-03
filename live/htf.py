@@ -83,6 +83,16 @@ def daily(candles: list, today: dt.date | None = None) -> dict:
     if len(wc) >= 12:
         w10 = _ema(wc, 10)
         w_trend = 1 if wc[-1] > w10[-1] and w10[-1] >= w10[-2] else -1 if wc[-1] < w10[-1] and w10[-1] <= w10[-2] else 0
+    # last full week's high and low (the week before the current one)
+    wk_hl = {}
+    for d_, hh, ll in zip(days, h, l):
+        k = d_.isocalendar()[:2]
+        a_, b_ = wk_hl.get(k, (-1e18, 1e18))
+        wk_hl[k] = (max(a_, hh), min(b_, ll))
+    wks = sorted(wk_hl)
+    cur_wk = today.isocalendar()[:2]
+    done_w = [k for k in wks if k < cur_wk]
+    pwh, pwl = (wk_hl[done_w[-1]] if done_w else (None, None))
     yr = c[-250:]
     return {"asof": days[-1].isoformat(), "close": round(last, 2), "trend": trend,
             "ema20": round(float(e20[-1]), 2), "ema50": round(float(e50[-1]), 2),
@@ -91,7 +101,9 @@ def daily(candles: list, today: dt.date | None = None) -> dict:
             "rsi": round(_rsi(c), 1) if _rsi(c) is not None else None, "w_trend": w_trend,
             "atr": round(atr, 2), "atr_pct": round(atr / last * 100, 2), "hi20": round(hi20, 2), "lo20": round(lo20, 2),
             "pos20": round((last - lo20) / (hi20 - lo20), 2) if hi20 > lo20 else None,
-            "from_hi52_pct": round((last / float(yr.max()) - 1) * 100, 2), "from_lo52_pct": round((last / float(yr.min()) - 1) * 100, 2)}
+            "from_hi52_pct": round((last / float(yr.max()) - 1) * 100, 2), "from_lo52_pct": round((last / float(yr.min()) - 1) * 100, 2),
+            "pwh": round(float(pwh), 2) if pwh else None, "pwl": round(float(pwl), 2) if pwl else None,
+            "prev_h": round(float(h[-1]), 2), "prev_l": round(float(l[-1]), 2), "prev_c": round(last, 2)}
 
 
 def aligned(f: dict, direction: str, spot: float | None) -> dict:
