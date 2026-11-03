@@ -680,3 +680,11 @@ tr.best td { background: var(--up-soft); }
 /* thin progress bar (stock history download) */
 .bar { height: 6px; border-radius: 3px; background: var(--rule-soft); overflow: hidden; margin-bottom: 4px; }
 .bar > i { display: block; height: 100%; background: var(--signal); transition: width .4s; }
+
+/* all timeframes (chart page) */
+.mtf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+.mtf-cell { background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; }
+.mtf-head { padding: 8px 10px; border-bottom: 1px solid var(--rule-soft); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mtf-chart { height: 280px; }
+.mtf-trend { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+@media (max-width: 700px) { .mtf-grid { grid-template-columns: 1fr; } .mtf-chart { height: 240px; } }

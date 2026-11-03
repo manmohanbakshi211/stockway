@@ -1452,6 +1452,18 @@ async function pageChart() {
         <div class="panel tight" id="ch-scen-wrap"><h3>Scenarios <span class="muted small">next 5 / 15 / 60 min</span></h3><div id="ch-scen"><p class="muted small">Nifty and Bank Nifty.</p></div></div>
         <div class="panel tight"><h3>Setups today</h3><div id="ch-setups"></div></div>
         <div class="panel tight"><h3>Key levels</h3><div id="ch-levels"></div></div></aside></div>
+    <section class="mtf" id="mtf">
+      <div class="toolbar" style="margin:14px 0 8px"><div><h2 style="margin:0">All timeframes</h2><div id="mtf-trend" class="mtf-trend small"></div></div>
+        <div class="btn-row" style="margin:0;align-items:center">
+          <label class="small">Test a strategy on the chart <select id="mtf-ov" aria-label="Strategy to test"><option value="">Choose…</option></select></label>
+          <select id="mtf-days" aria-label="Days">${[5, 10, 20].map((d) => `<option value="${d}" ${d === 10 ? "selected" : ""}>${d} days</option>`).join("")}</select>
+          <button class="btn primary" id="mtf-apply">Apply</button><button class="btn" id="mtf-remove" disabled>Remove</button>
+          <details class="ch-ind"><summary class="btn">Layers</summary><div class="ch-menu">${MTF_LAYERS.map(([k, l]) => `<label class="check"><input type="checkbox" data-mtf="${k}" ${mtfOn(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></details>
+        </div></div>
+      <div id="mtf-ovres"></div>
+      <div class="mtf-grid" id="mtf-grid">${MTF_TFS.map((tf) => `<div class="mtf-cell"><div class="mtf-head" id="mtf-h-${tf}"><b>${tf}</b></div><div class="mtf-chart" id="mtf-${tf}"></div></div>`).join("")}</div>
+      <div class="panel tight" style="margin-top:12px"><h3>Confluence zones <span class="muted small">where levels from 2+ timeframes meet</span></h3><div id="mtf-conf"><p class="muted small">Loading…</p></div></div>
+    </section>
     <p class="note">Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts. ${""}Index VWAP counts each bar equally (indices have no volume).</p>`;
   $("#ch-sym").onchange = (e) => { location.hash = `#/chart?s=${encodeURIComponent(e.target.value)}&tf=${CH.tf}`; };
   main.querySelectorAll("[data-tf]").forEach((b) => b.onclick = () => { LS.set("ch_tf", Number(b.dataset.tf)); location.hash = `#/chart?s=${encodeURIComponent(CH.sym)}&tf=${b.dataset.tf}`; });
@@ -1485,6 +1497,116 @@ async function pageChart() {
     L.pageTimer = setTimeout(() => tick(false), CH.data && CH.data.offline ? 30000 : 2000);
   };
   tick(true);
+  mtfInit();
+}
+
+/* ---------------- all timeframes (live/mtf.py): 1D / 75m / 1H / 15m / 5m, markings, higher-timeframe levels,
+   confluence, trend strip, and strategy overlays (apply / remove) */
+const MTF_TFS = ["1D", "75m", "1H", "15m", "5m"];
+const MTF_LAYERS = [["own", "Levels of each timeframe"], ["htf", "Higher-timeframe levels on lower charts"], ["conf", "Confluence zones"],
+  ["ind", "Moving averages, VWAP, Supertrend"], ["marks", "Swings and patterns"]];
+const mtfOn = (k) => LS.get("mtf_" + k, k !== "htf" ? true : true);
+const MTF_COL = { "1D": "#3D2FA8", "75m": "#9A6A12", "1H": "#B04ACF", "15m": "#0F7C8C", "5m": "#5E6B78" };
+const MTF_SER = { ema20: "#3D2FA8", ema50: "#9A6A12", ema200: "#5E6B78", vwap: "#0F7C8C", u1: "rgba(15,124,140,.35)", d1: "rgba(15,124,140,.35)",
+  ema9: "#1E8A5A", ema21: "#C23B32", st_up: "#1E8A5A", st_dn: "#C23B32" };
+const MT = { charts: {}, data: null, ov: null, timer: null };
+
+async function mtfInit() {
+  Object.values(MT.charts).forEach((c) => { try { c.chart.remove(); } catch (_) {} });
+  MT.charts = {}; MT.ov = null; CH.overlayMarks = null; clearTimeout(MT.timer);
+  const sel = $("#mtf-ov");
+  try { const r = await api(`/api/live/mtf/${encodeURIComponent(CH.sym)}/overlays`);
+    sel.innerHTML = `<option value="">Choose…</option>` + r.overlays.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join(""); } catch (_) {}
+  main.querySelectorAll("[data-mtf]").forEach((c) => c.onchange = () => { LS.set("mtf_" + c.dataset.mtf, c.checked); drawMTF(MT.data); });
+  $("#mtf-apply").onclick = () => applyOverlay();
+  $("#mtf-remove").onclick = () => { MT.ov = null; CH.overlayMarks = null; $("#mtf-ovres").innerHTML = ""; $("#mtf-remove").disabled = true; drawMTF(MT.data); if (CH.data) drawChart(CH.data, false); };
+  const loop = async () => {
+    if (state.page !== "chart" || !$("#mtf-grid")) return;
+    try { MT.data = await api(`/api/live/mtf/${encodeURIComponent(CH.sym)}`); drawMTF(MT.data); }
+    catch (e) { const g = $("#mtf-conf"); if (g) g.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; }
+    MT.timer = setTimeout(loop, 60000);                      // higher timeframes: refresh as candles close
+  };
+  loop();
+}
+
+function mtfChart(tf) {
+  if (MT.charts[tf]) return MT.charts[tf];
+  const el = $("#mtf-" + tf); if (!el || !window.LightweightCharts) return null;
+  const LW = window.LightweightCharts;
+  const chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 11 },
+    grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" },
+    timeScale: { borderColor: "#D5DCE3", timeVisible: tf !== "1D", secondsVisible: false, rightOffset: 4 }, crosshair: { mode: 0 } });
+  const candle = chart.addSeries(LW.CandlestickSeries, { upColor: "#1E8A5A", downColor: "#C23B32", borderVisible: false, wickUpColor: "#1E8A5A", wickDownColor: "#C23B32" });
+  MT.charts[tf] = { chart, candle, lines: {}, plines: [], markers: LW.createSeriesMarkers(candle, []), first: true };
+  return MT.charts[tf];
+}
+
+function drawMTF(d) {
+  if (!d || !$("#mtf-grid")) return;
+  const LW = window.LightweightCharts;
+  $("#mtf-trend").innerHTML = `${(d.trend || []).map((t) => `<span class="pill ${t.trend === "up" ? "p-up" : t.trend === "down" ? "p-down" : ""}" title="${esc(t.structure || "")}">${t.tf} ${t.trend === "up" ? "▲" : t.trend === "down" ? "▼" : "▬"}</span>`).join(" ")}
+    ${d.summary ? `<b style="margin-left:6px">${esc(d.summary)}</b>${d.aligned ? ` <span class="pill p-amber">all aligned</span>` : ""}` : ""}`;
+  const conf = mtfOn("conf") ? (d.confluence || []) : [];
+  MTF_TFS.forEach((tf) => {
+    const p = (d.panels || {})[tf]; const head = $("#mtf-h-" + tf);
+    if (!p) return;
+    if (head) head.innerHTML = `<b>${tf}</b> <span class="small muted">${esc(p.label)}</span> ${p.trend ? `<span class="pill ${p.trend === "up" ? "p-up" : p.trend === "down" ? "p-down" : ""}">${p.trend}</span>` : ""}${p.structure ? ` <span class="small muted">${esc(p.structure)}</span>` : ""}${p.empty ? ` <span class="small down">${esc(p.empty)}</span>` : ""}${(p.failed || []).length ? ` <span class="small muted" title="${esc(p.failed.join("; "))}">· ${p.failed.length} layer(s) skipped</span>` : ""}`;
+    const C = mtfChart(tf); if (!C || !p.candles.length) return;
+    C.candle.setData(p.candles);
+    const want = mtfOn("ind") ? p.series || {} : {};
+    Object.keys(C.lines).forEach((k) => { if (!want[k]) { C.chart.removeSeries(C.lines[k]); delete C.lines[k]; } });
+    Object.entries(want).forEach(([k, pts]) => {
+      if (!C.lines[k]) C.lines[k] = C.chart.addSeries(LW.LineSeries, { color: MTF_SER[k] || "#5E6B78", lineWidth: k.startsWith("u") || k.startsWith("d") ? 1 : 2, lineStyle: k === "u1" || k === "d1" ? 2 : 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+      C.lines[k].setData(pts);
+    });
+    C.plines.forEach((pl) => C.candle.removePriceLine(pl)); C.plines = [];
+    const add = (price, color, style, width, title) => C.plines.push(C.candle.createPriceLine({ price, color, lineWidth: width, lineStyle: style, axisLabelVisible: true, title }));
+    // less clutter: only levels near the price, nearest first; a confluence zone replaces the levels inside it
+    const spot = d.spot || p.last, near = { "1D": 0.08, "75m": 0.04, "1H": 0.04, "15m": 0.025, "5m": 0.015 }[tf] * spot;
+    const zones = conf.filter((z) => Math.abs(z.mid - spot) <= near).slice(0, 3);
+    const inZone = (x) => zones.some((z) => x >= z.lo - spot * 0.0005 && x <= z.hi + spot * 0.0005);
+    const pick = (arr, n) => arr.filter((l) => Math.abs(l.price - spot) <= near && !inZone(l.price)).sort((a, b) => Math.abs(a.price - spot) - Math.abs(b.price - spot)).slice(0, n);
+    if (mtfOn("own")) pick(p.levels || [], 6).forEach((l) => add(l.price, MTF_COL[tf], l.group === "swing" ? 1 : 0, 1, l.name));
+    if (mtfOn("htf")) pick(p.htf_levels || [], 5).forEach((l) => add(l.price, MTF_COL[l.tf] || "#5E6B78", 2, 1, l.name));
+    zones.forEach((z) => add(z.mid, "rgba(224,123,0,.6)", 0, 3, `Zone ×${z.strength}`));
+    let mk = mtfOn("marks") ? (p.markers || []).slice() : [];
+    if (MT.ov && tf === "5m") mk = mk.concat(MT.ov.marks);
+    if (MT.ov && tf === "5m" && MT.ov.last) { add(MT.ov.last.stop, "#C23B32", 2, 1, "Test stop"); add(MT.ov.last.target, "#1E8A5A", 2, 1, "Test target"); }
+    mk.sort((a, b) => a.time - b.time);
+    C.markers.setMarkers(mk);
+    if (C.first) { C.chart.timeScale().fitContent(); C.first = false; }
+  });
+  $("#mtf-conf").innerHTML = (d.confluence || []).length
+    ? `<table class="mini"><thead><tr><th>Zone</th><th class="r">From price</th><th>Timeframes</th><th>Levels</th></tr></thead><tbody>${d.confluence.map((z) => `<tr><td><b>${fk(z.lo)}${z.hi !== z.lo ? "–" + fk(z.hi) : ""}</b></td><td class="r">${z.dist_pct > 0 ? "+" : ""}${z.dist_pct}%</td><td>${z.tfs.join(", ")}</td><td class="small muted">${esc(z.names.join(", "))}</td></tr>`).join("")}</tbody></table>`
+    : `<p class="small muted" style="margin:0">No price where 2+ timeframes agree right now.</p>`;
+}
+
+async function applyOverlay() {
+  const id = $("#mtf-ov").value; if (!id) { toast("Choose a strategy to test"); return; }
+  const b = $("#mtf-apply"); b.disabled = true; b.textContent = "Testing…";
+  try {
+    const r = await api(`/api/live/mtf/${encodeURIComponent(CH.sym)}/overlay?id=${encodeURIComponent(id)}&days=${$("#mtf-days").value}`);
+    const sigs = r.signals || [];
+    const res = (s) => s.result === "target" ? "#1E8A5A" : s.result === "stop" ? "#C23B32" : "#9A6A12";
+    const marks = [];
+    sigs.forEach((s) => {
+      marks.push({ time: s.time, position: s.dir === "up" ? "belowBar" : "aboveBar", color: s.dir === "up" ? "#1E8A5A" : "#C23B32", shape: s.dir === "up" ? "arrowUp" : "arrowDown", text: "TEST" });
+      marks.push({ time: s.exit_time, position: "inBar", color: res(s), shape: "circle", text: `${s.r > 0 ? "+" : ""}${s.r}R` });
+    });
+    MT.ov = { id, marks, last: sigs[sigs.length - 1] || null };
+    const tf = CH.tf || 5, snap = (t) => Math.floor((t - 19800) / (60 * tf)) * 60 * tf + 19800;
+    CH.overlayMarks = marks.map((m) => ({ ...m, time: snap(m.time) }));
+    const st = r.stats || {};
+    $("#mtf-ovres").innerHTML = `<div class="panel tight" style="margin-bottom:10px"><h3>${esc($("#mtf-ov").selectedOptions[0].textContent)} <span class="muted small">last ${st.days || 0} sessions on ${esc(CH.sym)}</span></h3>
+      ${r.error ? `<p class="small down">${esc(r.error)}</p>` : ""}
+      <p style="margin:0">${st.n || 0} signals · <span class="up">${st.wins || 0} won</span> · <span class="down">${st.losses || 0} lost</span>${st.avg_r != null ? ` · average <b>${st.avg_r > 0 ? "+" : ""}${st.avg_r}R</b>` : ""}</p>
+      ${sigs.length ? `<div class="table-wrap" style="margin-top:6px;max-height:220px;overflow:auto"><table class="mini"><thead><tr><th>When</th><th></th><th class="r">Entry</th><th class="r">Stop</th><th class="r">Target</th><th>Result</th><th class="r">R</th></tr></thead><tbody>
+        ${sigs.slice().reverse().map((s) => `<tr><td class="small">${new Date((s.time - 19800) * 1000).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })}</td><td>${arrow(s.dir)}</td><td class="r">${fk(s.entry)}</td><td class="r">${fk(s.stop)}</td><td class="r">${fk(s.target)}</td><td>${s.result}</td><td class="r ${s.r > 0 ? "up" : s.r < 0 ? "down" : ""}">${s.r}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      <p class="small muted" style="margin:6px 0 0">${esc(r.note || "")} Shown on the 5-minute panel and the main chart; <b>Remove</b> clears it.</p></div>`;
+    $("#mtf-remove").disabled = false;
+    drawMTF(MT.data); if (CH.data) drawChart(CH.data, false);
+  } catch (e) { toast(e.message); }
+  b.disabled = false; b.textContent = "Apply";
 }
 
 function buildChart(hasVolume = true) {
@@ -1584,6 +1706,7 @@ function drawChart(d, first) {
   if (chOn("pat")) (d.patterns || []).forEach((p) => mk.push({ time: p.time, position: p.direction === "up" ? "belowBar" : "aboveBar",
     color: p.grade === "edge" ? "#1E8A5A" : p.grade === "losing" ? "#9AA5B1" : "#3D2FA8", shape: p.direction === "up" ? "arrowUp" : "arrowDown", text: PAT_SHORT[p.pattern] || "" }));
   if (chOn("swing")) (d.swings || []).forEach((w) => mk.push({ time: w.time, position: w.type === "H" ? "aboveBar" : "belowBar", color: "#8A94A0", shape: "circle", size: 0.3, text: w.label }));
+  if (CH.overlayMarks) { const t0 = d.candles.length ? d.candles[0].time : 0; CH.overlayMarks.forEach((m) => { if (m.time >= t0) mk.push(m); }); }
   mk.sort((a, b) => a.time - b.time);
   S.markers.setMarkers(mk);
   // pattern lines (rebuilt only when the patterns change)

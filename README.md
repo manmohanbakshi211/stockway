@@ -114,6 +114,25 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## All timeframes on the chart page (2.25)
+
+Chart page → below the main chart, **All timeframes**: 1D, 75m, 1H, 15m and 5m side by side (one column on a phone).
+- **Markings that suit each timeframe** (computed, the same maths as the scanner and the Lab; not drawn by AI):
+  1D: previous day / week / month high-low, EMA 20/50/200, swing highs/lows. 75m and 1H: EMA 20/50, Supertrend, swings
+  (HH/HL/LH/LL) and structure. 15m: VWAP, 30-min opening range, CPR, chart patterns. 5m: VWAP bands, EMA 9/21, 15-min
+  opening range, OI walls.
+- **Higher-timeframe levels** on lower charts (tagged "1D·PDH", "1H·Swing high"), **confluence zones** where 2+
+  timeframes meet (table + orange lines), and a **trend strip** ("4 of 5 timeframes up", "all aligned").
+- Less clutter: each chart shows only the levels near the price; a zone replaces the levels inside it. **Layers**
+  turns each kind on or off.
+- **Test a strategy on the chart:** pick a setup or a live Strategy Lab rule → **Apply**: every signal of the last
+  5/10/20 sessions on the 5-minute panel and the main chart, with stop, target and how it ended (R), plus a score.
+  **Remove** clears it. (Underlying moves only; the Lab tests options, costs and slippage.)
+- 75m = five candles a day from 09:15 (the Indian standard); 1H and 75m are built from 15-minute bars.
+- Data: Dhan candles (daily, 15-min, 5-min), cached in data/charts and refreshed at most every 30 minutes, plus
+  today's live minutes; without Dhan the scanner's own history. Panels refresh as candles close (every minute).
+- **AI read this chart** now also gets every timeframe's trend and the confluence zones.
+
 ## Bullets out of the engine: rules/ folder and the bullet catalogue (2.24)
 
 - **rules/** (dated facts, plain JSON you can read): `events.json` (Budget, RBI policy, election days; now up to date

@@ -182,14 +182,49 @@ def live_chart_ai(sym: str):
              "levels": {l["name"]: l["price"] for l in d["levels"]}, "rule_reading": d["read"], "setups": d["setups"],
              "regime": d.get("regime"), "metrics": _slim_metrics(e.metrics.get(sym)),
              "news": [n["title"] for n in e.news.items if sym in n["syms"]][:5]}
-    prompt = (SYSTEM_STYLE + "You are reading a live 5-minute chart like a senior prop trader. In 5 short bullets: "
-              "1) structure and trend, 2) where price sits vs the key levels, 3) the best trade setup now with entry, stop and "
+    try:                                       # all timeframes: trend per timeframe and where they agree
+        mv = _mtf().view(sym)
+        facts["timeframes"] = {"trend": {t["tf"]: [t["trend"], t["structure"]] for t in mv["trend"]}, "summary": mv["summary"],
+                               "confluence_zones": [{k: z[k] for k in ("lo", "hi", "tfs", "dist_pct")} for z in mv["confluence"][:4]]}
+    except Exception:
+        pass
+    prompt = (SYSTEM_STYLE + "You are reading a live 5-minute chart like a senior prop trader, with the daily, 75-minute, "
+              "1-hour and 15-minute trends and the multi-timeframe confluence zones. In 5 short bullets: "
+              "1) structure and trend across timeframes, 2) where price sits vs the key levels and zones, 3) the best trade setup now with entry, stop and "
               "target levels (or 'no trade' and why), 4) what would change your mind, 5) one risk. Use only the numbers given.\n\n"
               + _compact_json(facts))
     text = e.ai.ask(prompt, 450, auto=False)
     if not text:
         raise HTTPException(502, e.ai.last_error or "AI did not answer.")
     return {"text": text}
+
+
+def _mtf():
+    e = engine()
+    if getattr(e, "mtf", None) is None:
+        from live.mtf import MTF
+        e.mtf = MTF(e)
+    return e.mtf
+
+
+@router.get("/api/live/mtf/{sym}")
+async def live_mtf(sym: str, tfs: str | None = None):
+    """All timeframes of one symbol: candles, markings, higher-timeframe levels, confluence and the trend strip."""
+    m = _mtf()
+    return clean(await _run_blocking(m.view, sym.upper(), tfs.split(",") if tfs else None))
+
+
+@router.get("/api/live/mtf/{sym}/overlays")
+def live_mtf_overlays(sym: str):
+    return {"overlays": _mtf().overlays(sym.upper())}
+
+
+@router.get("/api/live/mtf/{sym}/overlay")
+async def live_mtf_overlay(sym: str, id: str, days: int = 10):
+    """Where a strategy would have fired on the last `days` sessions (apply on the chart; remove = just stop drawing)."""
+    if ":" not in id:
+        raise HTTPException(400, "Unknown strategy")
+    return clean(await _run_blocking(_mtf().overlay, sym.upper(), id, max(1, min(20, days))))
 
 
 @router.get("/api/live/alerts")
