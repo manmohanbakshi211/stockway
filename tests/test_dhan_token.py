@@ -85,3 +85,31 @@ def test_dead_token_still_raises(box, monkeypatch):
     monkeypatch.setattr(d.s, "post", lambda url, json, timeout: Resp(401, {}))
     with pytest.raises(PermissionError):
         d.post("/charts/rollingoption", {})
+
+
+def test_api_key_login_flow(box, monkeypatch, tmp_path):
+    """Log in with Dhan: consent session -> Dhan's login page -> tokenId -> access token saved (no password in the app)."""
+    sent = []
+
+    def fake_post(url, params=None, headers=None, timeout=None):
+        sent.append((url, params, headers))
+        if url.endswith("/app/generate-consent"):
+            return Resp(200, {"consentAppId": "abc123", "consentAppStatus": "GENERATED", "status": "success"})
+        if url.endswith("/app/consumeApp-consent"):
+            assert params == {"tokenId": "tid9"}
+            return Resp(200, {"accessToken": jwt(time.time() + 86400), "dhanClientId": "1100", "expiryTime": "x"})
+        raise AssertionError(url)
+    monkeypatch.setattr(T.requests, "post", fake_post)
+    url = T.consent_url("1100", "KEY", "SECRET")
+    assert url == "https://auth.dhan.co/login/consentApp-login?consentAppId=abc123"
+    assert sent[0][1] == {"client_id": "1100"} and sent[0][2] == {"app_id": "KEY", "app_secret": "SECRET"}
+    res = T.consume("tid9", "KEY", "SECRET")
+    assert T.expiry(res["token"]) > time.time() + 80000 and res["client_id"] == "1100"
+
+
+def test_dead_token_is_quiet_until_a_new_one(box):
+    box["tok"] = jwt(time.time() + 3600)
+    T.mark_dead()
+    assert T.is_dead() and T.status()["dead"]
+    box["tok"] = jwt(time.time() + 7200)                   # a new token pasted / logged in
+    assert not T.is_dead() and not T.status()["dead"]

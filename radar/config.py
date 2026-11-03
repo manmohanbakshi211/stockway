@@ -45,6 +45,8 @@ EDITABLE = {
     "live.mute_hit_rate": float,
     "lab.dhan_client_id": str,
     "lab.dhan_token": str,
+    "lab.dhan_api_key": str,
+    "lab.dhan_api_secret": str,
     "lab.capital": float,
     "lab.risk_pct": float,
     "lab.daily_stop_pct": float,
@@ -62,7 +64,7 @@ EDITABLE = {
     "ai.daily_limit": int,
     "ai.language": str,
 }
-SECRET_KEYS = {"telegram.bot_token", "live.upstox_api_secret", "ai.api_key", "lab.dhan_token"}
+SECRET_KEYS = {"telegram.bot_token", "live.upstox_api_secret", "ai.api_key", "lab.dhan_token", "lab.dhan_api_secret"}
 
 
 def _set(d: dict, dotted: str, value):

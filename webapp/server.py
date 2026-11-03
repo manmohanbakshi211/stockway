@@ -226,6 +226,9 @@ def _startup():
 
     def _dead_note(msg):
         from webapp.live_api import engine as _eng
+        if _lab_cfg().get("dhan_api_key"):
+            msg = ("Stockway: the Dhan token has expired. On the Mac open http://127.0.0.1:8765/dhan/login (or Strategy desk → "
+                   "Log in with Dhan) and log in on Dhan's page. The download, news and movers resume by themselves.")
         _eng().telegram.send("🔑 " + msg)
     dhan_token.on_dead = _dead_note
     threading.Thread(target=scheduler_loop, daemon=True).start()
@@ -1051,6 +1054,62 @@ def lab_dhan_test():
         raise HTTPException(502, f"Dhan did not answer: {e}")
     return {"ok": True, "profile": {k: p.get(k) for k in ("dhanClientId", "tokenValidity", "activeSegment", "dataPlan", "dataValidity")},
             "token": _dhan_token_status()}
+
+
+@app.post("/api/lab/dhan/renew")
+def lab_dhan_renew():
+    """Renew now (to check that auto-renew works with this token)."""
+    from lab import dhan_token
+    r = dhan_token.maybe_renew(force=True, log=lambda m: None)
+    st = dhan_token.status()
+    if r != "renewed":
+        raise HTTPException(400, st.get("error") or "Dhan did not renew the token.")
+    return {"ok": True, "token": st}
+
+
+@app.get("/dhan/login")
+def dhan_login():
+    """Log in with Dhan: API key + secret (12 months) -> Dhan's own login page -> back to /dhan/callback."""
+    from fastapi.responses import HTMLResponse, RedirectResponse
+    from lab import dhan_token
+    c = _lab_cfg()
+    if not (c.get("dhan_client_id") and c.get("dhan_api_key") and c.get("dhan_api_secret")):
+        return HTMLResponse(_dhan_page("Add your Dhan API key first", "Strategy desk → Dhan keys: client ID, API key and API secret "
+                                       "(web.dhan.co → Profile → DhanHQ Trading APIs → API Key, redirect URL "
+                                       f"<code>{dhan_token.CALLBACK}</code>).", ok=False))
+    try:
+        return RedirectResponse(dhan_token.consent_url(c["dhan_client_id"], c["dhan_api_key"], c["dhan_api_secret"]))
+    except Exception as e:
+        return HTMLResponse(_dhan_page("Dhan login could not start", str(e), ok=False))
+
+
+@app.get("/dhan/callback")
+def dhan_callback(tokenId: str | None = None, tokenid: str | None = None):
+    from fastapi.responses import HTMLResponse
+    from lab import dhan_token
+    tid = tokenId or tokenid
+    if not tid:
+        return HTMLResponse(_dhan_page("Dhan login was cancelled", "No tokenId came back from Dhan.", ok=False))
+    c = _lab_cfg()
+    try:
+        res = dhan_token.consume(tid, c["dhan_api_key"], c["dhan_api_secret"])
+    except Exception as e:
+        return HTMLResponse(_dhan_page("Dhan login failed", str(e), ok=False))
+    ch = {"lab.dhan_token": res["token"]}
+    if res.get("client_id") and not c.get("dhan_client_id"):
+        ch["lab.dhan_client_id"] = str(res["client_id"])
+    save_user_settings(ch)
+    exp = dhan_token.status().get("expires")
+    return HTMLResponse(_dhan_page("Logged in to Dhan", f"Token saved{f' (valid till {exp})' if exp else ''}. "
+                                   "The 5-year download, news and movers resume by themselves. You can close this tab.", ok=True))
+
+
+def _dhan_page(title, body, ok=True):
+    import html as _h
+    color = "#1E8A5A" if ok else "#C23B32"
+    return (f"<!doctype html><meta charset=utf-8><title>{_h.escape(title)}</title><body style='font-family:system-ui;max-width:640px;"
+            f"margin:60px auto;padding:0 16px'><h2 style='color:{color}'>{_h.escape(title)}</h2><p>{body}</p>"
+            f"<p><a href='/#/desk'>Back to Stockway</a></p></body>")
 
 
 def _dhan_token_status():

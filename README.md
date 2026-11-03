@@ -114,6 +114,19 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Log in with Dhan (2.21.1)
+
+Dhan tokens last 24 hours and an expired one can't be renewed (the Mac was off). For a lasting setup, use Dhan's
+API key + secret (valid 12 months):
+1. web.dhan.co → Profile → DhanHQ Trading APIs → switch to **API Key** → name `Stockway`, Redirect URL
+   `http://127.0.0.1:8765/dhan/callback` → Generate. Copy the key and the secret.
+2. Strategy desk → Dhan keys → paste client ID, API key, API secret → Save.
+3. **Log in with Dhan**: Dhan's own login page opens (password / OTP / PIN go to Dhan only); the app gets the token
+   and saves it. While the app is open it renews the token by itself; if the Mac was off for a day, one click on
+   Log in with Dhan (the Telegram note and the 5-year panel link to it).
+- **Renew now** checks that renewing works with your token.
+- The app never stores your Dhan password, PIN or TOTP. Market data only.
+
 ## 5-year download that completes itself, and a sturdier engine (2.21)
 
 **Download (Strategy Lab → 5-year Lab)**

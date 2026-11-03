@@ -1138,10 +1138,13 @@ async function pageDesk() {
         <details style="margin-top:12px" ${st.dhan ? "" : "open"}><summary><b>Dhan keys</b> <span class="muted small">for the 5-year Lab and the 200-level order book ${st.dhan ? "· saved" : ""}</span></summary>
         <div class="form-grid" style="margin-top:10px">
           <label class="field">Dhan client ID<input type="text" id="l-cid" value="${q(settings["lab.dhan_client_id"])}" autocomplete="off"></label>
-          <label class="field">Access token<input type="password" id="l-tok" value="${q(settings["lab.dhan_token"])}" autocomplete="off"><small>web.dhan.co → Profile → DhanHQ Trading APIs → generate an access token (Data APIs plan). Only market data is read: no orders, no holdings.</small></label>
+          <label class="field">Access token<input type="password" id="l-tok" value="${q(settings["lab.dhan_token"])}" autocomplete="off"><small>Either paste a token from web.dhan.co → Profile → DhanHQ Trading APIs → Access Token (24 h), or use <b>Log in with Dhan</b> below. Only market data is read: no orders, no holdings.</small></label>
+          <label class="field">API key <span class="muted">(optional, for Log in with Dhan)</span><input type="text" id="l-akey" value="${q(settings["lab.dhan_api_key"])}" autocomplete="off"><small>web.dhan.co → DhanHQ Trading APIs → switch to <b>API Key</b> → name <code>Stockway</code>, Redirect URL <code>http://127.0.0.1:8765/dhan/callback</code> → Generate. Valid 12 months.</small></label>
+          <label class="field">API secret<input type="password" id="l-asec" value="${q(settings["lab.dhan_api_secret"])}" autocomplete="off"><small>Shown once by Dhan with the API key. Stays on your Mac.</small></label>
         </div>
         ${st.dhan_token && st.dhan_token.expires ? `<p class="small" style="margin:10px 0 0;${st.dhan_token.error ? "color:#C23B32" : ""}">Token valid till <b>${st.dhan_token.expires}</b> (${st.dhan_token.hours_left} h left). It renews by itself about 3 hours before it expires, while the app is open${st.dhan_token.renewed ? ` · last renewed ${st.dhan_token.renewed}` : ""}.${st.dhan_token.error ? ` ${q(st.dhan_token.error)}` : ""}</p>` : ""}
         <div class="btn-row" style="margin-top:10px"><button class="btn" id="l-save">Save</button><button class="btn" id="l-test">Test Dhan</button>
+          <button class="btn primary" id="l-dlogin">Log in with Dhan</button><button class="btn" id="l-renew">Renew now</button>
           <a class="btn" href="#/lab">Go to 5-year Lab →</a></div>
         <p class="small muted">The 5-year download is on Strategy Lab → 5-year Lab: it keeps Dhan's data in its own folder, so the current Lab is not changed.</p></details>
         <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Index</th><th class="r">Months</th><th>Range</th><th class="r">Size</th></tr></thead><tbody>${dataRows}</tbody></table></div>
@@ -1159,6 +1162,7 @@ async function pageDesk() {
   const save = async () => {
     try {
       await post("/api/settings", { "lab.dhan_client_id": $("#l-cid").value.trim(), "lab.dhan_token": $("#l-tok").value.trim(),
+        "lab.dhan_api_key": $("#l-akey").value.trim(), "lab.dhan_api_secret": $("#l-asec").value.trim(),
         "lab.years": Number($("#l-years").value), "lab.capital": Number(String($("#l-cap").value).replace(/[^0-9.]/g, "")) || 500000,
         "lab.risk_pct": Number($("#l-risk").value), "lab.daily_stop_pct": Number($("#l-stop").value), "lab.auto_trade": $("#l-auto").checked });
       toast("Saved"); return true;
@@ -1167,6 +1171,8 @@ async function pageDesk() {
   const job = async (path, body = {}) => { try { await post(path, body); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
   $("#l-save").onclick = async () => { if (await save()) pageDesk(); };
   $("#l-save2").onclick = save;
+  $("#l-dlogin").onclick = async () => { if (!(await save())) return; window.open("/dhan/login", "_blank"); };
+  $("#l-renew").onclick = async () => { if (!(await save())) return; try { const r = await post("/api/lab/dhan/renew", {}); toast(`Token renewed: valid till ${r.token.expires}`); pageDesk(); } catch (e) { toast(e.message); } };
   $("#l-test").onclick = async () => { if (!(await save())) return; try { const r = await post("/api/lab/dhan/test", {}); toast(`Dhan connected (${r.profile.dhanClientId || "ok"}${r.profile.dataPlan ? ", data plan: " + r.profile.dataPlan : ""}${r.token && r.token.expires ? ", token valid till " + r.token.expires + ", auto-renews" : ""})`); pageDesk(); } catch (e) { toast(e.message); } };
   $("#l-dl").onclick = async () => { if (await save()) job("/api/lab/download", { source: "upstox" }); };
   $("#l-uptest").onclick = async () => {
@@ -2126,7 +2132,7 @@ async function pageLab() {
     const c = x.compare || {}, A = c.current || {}, B = c.five_year || {};
     const row = (k, l) => `<tr><td>${l}</td><td class="r">${A[k] ?? "–"}</td><td class="r">${B[k] ?? "–"}</td></tr>`;
     const n = (v) => (v ?? 0).toLocaleString("en-IN");
-    const why = tk.dead ? `<span class="down"><b>Dhan token expired${tk.expires ? " (" + esc(tk.expires) + ")" : ""}.</b> Make a new one on web.dhan.co → paste it in Strategy desk → Dhan keys. The download resumes by itself.</span>`
+    const why = tk.dead ? `<span class="down"><b>Dhan token expired${tk.expires ? " (" + esc(tk.expires) + ")" : ""}.</b> <a href="/dhan/login" target="_blank">Log in with Dhan</a> (if your API key is saved), or paste a new token in Strategy desk → Dhan keys. The download resumes by itself.</span>`
       : x.running ? `Downloading · ${esc((x.log || []).slice(-1)[0] || "starting…")}`
       : x.user_stop ? `Stopped by you. Press <b>Update</b> to continue (it also resumes by itself tomorrow).`
       : x.status === "budget" ? `Today's Dhan budget is used. It continues by itself after midnight.`

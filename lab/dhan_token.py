@@ -1,6 +1,12 @@
 """Keeps the Dhan access token alive: renews it before it expires (Dhan's RenewToken API), saves the new one, and lets
 every running Dhan connection pick it up.
 
+Two ways to get a token:
+  1. Paste one made on web.dhan.co (24 hours), or
+  2. "Log in with Dhan" (API key + secret, valid 12 months, made once on web.dhan.co): the app asks Dhan for a consent
+     session, you log in on Dhan's own page (your password / OTP / PIN go to Dhan only, the app never sees them),
+     Dhan sends the app a one-time tokenId, and the app swaps it for an access token. One click a day at most.
+
 Dhan Web tokens last 24 hours. GET /v2/RenewToken with the current, still-active token returns a NEW token with
 another 24 hours (Dhan docs: Authentication -> Access Token -> Renew Token). An expired token can't be renewed: then
 a new one has to be made on web.dhan.co once, and from there it renews by itself again.
@@ -37,9 +43,9 @@ def mark_dead(token: str | None = None):
     if not tok:
         return
     st = state()
-    if st.get("dead") == tok[-12:]:
+    if st.get("dead") == _id(tok):
         return
-    st.update({"dead": tok[-12:], "for": tok[-12:], "dead_at": dt.datetime.now().strftime("%d %b %H:%M"),
+    st.update({"dead": _id(tok), "for": _id(tok), "dead_at": dt.datetime.now().strftime("%d %b %H:%M"),
                "error": "Dhan rejected the token (expired). Make a new one on web.dhan.co and paste it in Strategy desk -> Dhan keys: everything resumes by itself."})
     _write(st)
     if on_dead:
@@ -52,7 +58,13 @@ def mark_dead(token: str | None = None):
 
 def is_dead(token: str | None = None) -> bool:
     tok = token or latest()
-    return bool(tok) and state().get("dead") == tok[-12:]
+    return bool(tok) and state().get("dead") == _id(tok)
+
+
+def _id(token: str | None) -> str:
+    """A short fingerprint of a token (the token itself is never written to the state file)."""
+    import hashlib
+    return hashlib.sha256((token or "").encode()).hexdigest()[:16] if token else ""
 
 
 def latest() -> str | None:
@@ -111,8 +123,8 @@ def status() -> dict:
     left = (exp - time.time()) / 3600 if exp else None
     return {"expires": dt.datetime.fromtimestamp(exp).strftime("%d %b %H:%M") if exp else None,
             "hours_left": round(left, 1) if left is not None else None, "renewed": st.get("renewed"),
-            "error": st.get("error") if st.get("for") == (tok or "")[-12:] else None,
-            "dead": bool(tok) and st.get("dead") == tok[-12:]}
+            "error": st.get("error") if st.get("for") == _id(tok) else None,
+            "dead": bool(tok) and st.get("dead") == _id(tok)}
 
 
 def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str | None:
@@ -130,10 +142,10 @@ def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str
     st = state()
     exp = expiry(tok)
     if exp is None:                                   # not a readable token: renew once a day
-        last = st.get("renewed_ts") if st.get("for") == tok[-12:] or st.get("new") == tok[-12:] else None
+        last = st.get("renewed_ts") if st.get("for") == _id(tok) or st.get("new") == _id(tok) else None
         exp = (last or now) + 24 * 3600 if last else None
         if exp is None:
-            st.update({"for": tok[-12:], "renewed_ts": now})
+            st.update({"for": _id(tok), "renewed_ts": now})
             _write(st)
             return None
     if not force and exp - now > RENEW_BEFORE_H * 3600:
@@ -148,14 +160,14 @@ def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str
         log(str(e))
         return "expired"
     except Exception as e:
-        st.update({"for": tok[-12:], "error": str(e)[:200]})
+        st.update({"for": _id(tok), "error": str(e)[:200]})
         _write(st)
         log(str(e))
         return "failed"
     if saver:
         saver(res["token"])
     new_exp = expiry(res["token"])
-    _write({"for": res["token"][-12:], "new": res["token"][-12:], "renewed": dt.datetime.fromtimestamp(now).strftime("%d %b %H:%M"),
+    _write({"for": _id(res["token"]), "new": _id(res["token"]), "renewed": dt.datetime.fromtimestamp(now).strftime("%d %b %H:%M"),
             "renewed_ts": now, "exp": new_exp, "dhan_expiry": res.get("expiry"), "error": None})
     log(f"Dhan token renewed (valid till {dt.datetime.fromtimestamp(new_exp).strftime('%d %b %H:%M') if new_exp else res.get('expiry')})")
     return "renewed"
@@ -166,3 +178,35 @@ def setup(data_dir, get_saved, save_token):
     global provider, saver, _state_file
     provider, saver = get_saved, save_token
     _state_file = Path(data_dir) / "dhan_token_state.json"
+
+
+AUTH = "https://auth.dhan.co"
+CALLBACK = "http://127.0.0.1:8765/dhan/callback"
+
+
+def consent_url(client_id: str, api_key: str, api_secret: str, timeout: int = 30) -> str:
+    """Step 1 of the API-key login: a consent session at Dhan; returns the Dhan login page to open in the browser."""
+    r = requests.post(f"{AUTH}/app/generate-consent", params={"client_id": str(client_id)},
+                      headers={"app_id": api_key, "app_secret": api_secret}, timeout=timeout)
+    try:
+        j = r.json()
+    except ValueError:
+        j = {}
+    cid = j.get("consentAppId")
+    if r.status_code >= 400 or not cid:
+        raise RuntimeError(f"Dhan did not accept the API key / secret: {j.get('errorMessage') or j.get('message') or r.text[:200]}")
+    return f"{AUTH}/login/consentApp-login?consentAppId={cid}"
+
+
+def consume(token_id: str, api_key: str, api_secret: str, timeout: int = 30) -> dict:
+    """Step 3: swap the one-time tokenId (from Dhan's redirect) for an access token."""
+    r = requests.post(f"{AUTH}/app/consumeApp-consent", params={"tokenId": token_id},
+                      headers={"app_id": api_key, "app_secret": api_secret}, timeout=timeout)
+    try:
+        j = r.json()
+    except ValueError:
+        j = {}
+    if r.status_code >= 400 or not j.get("accessToken"):
+        raise RuntimeError(f"Dhan login failed: {j.get('errorMessage') or j.get('message') or r.text[:200]}")
+    return {"token": j["accessToken"], "client_id": j.get("dhanClientId"), "name": j.get("dhanClientName"),
+            "expiry": j.get("expiryTime")}
