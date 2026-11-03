@@ -1143,8 +1143,17 @@ async function pageDesk() {
           <label class="field">API secret<input type="password" id="l-asec" value="${q(settings["lab.dhan_api_secret"])}" autocomplete="off"><small>Shown once by Dhan with the API key. Stays on your Mac.</small></label>
         </div>
         ${st.dhan_token && st.dhan_token.expires ? `<p class="small" style="margin:10px 0 0;${st.dhan_token.error ? "color:#C23B32" : ""}">Token valid till <b>${st.dhan_token.expires}</b> (${st.dhan_token.hours_left} h left). It renews by itself about 3 hours before it expires, while the app is open${st.dhan_token.renewed ? ` · last renewed ${st.dhan_token.renewed}` : ""}.${st.dhan_token.error ? ` ${q(st.dhan_token.error)}` : ""}</p>` : ""}
+        <div style="margin-top:12px;padding:10px 12px;border:1px solid #D5DCE3;border-radius:8px">
+          <b>Automatic login (TOTP)</b> ${st.dhan_token && st.dhan_token.auto && st.dhan_token.auto.on
+            ? `<span class="pill p-up">on</span> <span class="small muted">PIN and TOTP key kept in ${esc(st.dhan_token.auto.where || "the macOS Keychain")}${st.dhan_token.auto.last_login ? " · last automatic login " + esc(st.dhan_token.auto.last_login) : ""}</span>${st.dhan_token.auto.blocked ? `<div class="small down">Stopped ${esc(st.dhan_token.auto.blocked)}: ${esc(st.dhan_token.auto.last_error || "Dhan refused the PIN / key")}. Enter them again below.</div>` : ""}`
+            : `<span class="small muted">off</span>`}
+          <p class="small muted" style="margin:6px 0">The app makes a new Dhan token by itself whenever the old one is gone (Mac was off, token expired). One-time setup on web.dhan.co → Profile → DhanHQ Trading APIs → <b>Set-up TOTP</b> → Add TOTP: scan the QR in Google Authenticator <i>and</i> copy the text key under it; confirm with the first 6-digit code on Dhan. Then enter your Dhan PIN and that key here. They are checked with Dhan, then kept in the macOS Keychain (not in settings, logs or git). A wrong PIN stops it at once, so your Dhan account is never locked by retries.</p>
+          <div class="form-grid"><label class="field">Dhan PIN<input type="password" id="l-pin" inputmode="numeric" autocomplete="off"></label>
+            <label class="field">TOTP key (text under the QR)<input type="password" id="l-totp" autocomplete="off"></label></div>
+          <div class="btn-row" style="margin-top:8px"><button class="btn primary" id="l-auto-on">Turn on automatic login</button>${st.dhan_token && st.dhan_token.auto && st.dhan_token.auto.on ? `<button class="btn" id="l-auto-off">Turn off</button>` : ""}</div>
+        </div>
         <div class="btn-row" style="margin-top:10px"><button class="btn" id="l-save">Save</button><button class="btn" id="l-test">Test Dhan</button>
-          <button class="btn primary" id="l-dlogin">Log in with Dhan</button><button class="btn" id="l-renew">Renew now</button>
+          <button class="btn" id="l-dlogin">Log in with Dhan</button><button class="btn" id="l-renew">Renew now</button>
           <a class="btn" href="#/lab">Go to 5-year Lab →</a></div>
         <p class="small muted">The 5-year download is on Strategy Lab → 5-year Lab: it keeps Dhan's data in its own folder, so the current Lab is not changed.</p></details>
         <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Index</th><th class="r">Months</th><th>Range</th><th class="r">Size</th></tr></thead><tbody>${dataRows}</tbody></table></div>
@@ -1171,6 +1180,15 @@ async function pageDesk() {
   const job = async (path, body = {}) => { try { await post(path, body); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
   $("#l-save").onclick = async () => { if (await save()) pageDesk(); };
   $("#l-save2").onclick = save;
+  $("#l-auto-on").onclick = async (e) => {
+    if (!(await save())) return;
+    const pin = $("#l-pin").value.trim(), secret = $("#l-totp").value.trim();
+    if (!pin || !secret) { toast("Enter your Dhan PIN and the TOTP key"); return; }
+    e.target.disabled = true; e.target.textContent = "Checking with Dhan…";
+    try { const r = await post("/api/lab/dhan/auto", { pin, secret }); $("#l-pin").value = ""; $("#l-totp").value = "";
+      toast(`Automatic login on: new token valid till ${(r.token && r.token.expires) || "tomorrow"}`); pageDesk(); }
+    catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = "Turn on automatic login"; } };
+  if ($("#l-auto-off")) $("#l-auto-off").onclick = async () => { await fetch("/api/lab/dhan/auto", { method: "DELETE" }); toast("Automatic login off: PIN and key removed"); pageDesk(); };
   $("#l-dlogin").onclick = async () => { if (!(await save())) return; window.open("/dhan/login", "_blank"); };
   $("#l-renew").onclick = async () => { if (!(await save())) return; try { const r = await post("/api/lab/dhan/renew", {}); toast(`Token renewed: valid till ${r.token.expires}`); pageDesk(); } catch (e) { toast(e.message); } };
   $("#l-test").onclick = async () => { if (!(await save())) return; try { const r = await post("/api/lab/dhan/test", {}); toast(`Dhan connected (${r.profile.dhanClientId || "ok"}${r.profile.dataPlan ? ", data plan: " + r.profile.dataPlan : ""}${r.token && r.token.expires ? ", token valid till " + r.token.expires + ", auto-renews" : ""})`); pageDesk(); } catch (e) { toast(e.message); } };

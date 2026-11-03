@@ -114,6 +114,26 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Dhan automatic login with TOTP (2.22)
+
+The app makes a new Dhan token by itself whenever the old one is gone (Mac was off, token expired, Dhan refused it),
+using Dhan's documented Generate Token API (client ID + PIN + TOTP code). No daily step at all.
+
+One-time setup:
+1. web.dhan.co → Profile → DhanHQ Trading APIs → **Set-up TOTP** → Add TOTP. Scan the QR in Google Authenticator
+   (or any authenticator) **and** copy the text key shown under the QR. Confirm with the first 6-digit code on Dhan.
+2. Strategy desk → Dhan keys → Automatic login (TOTP): enter the Dhan PIN and the text key → **Turn on automatic
+   login**. The app checks them with Dhan first (and makes today's token); only then are they kept.
+
+Safety:
+- PIN and key are kept in the **macOS Keychain** (encrypted, tied to your Mac login), never in user_settings.json,
+  the logs, the browser or git. They go only to auth.dhan.co over HTTPS; error messages never contain them.
+- A wrong PIN / key stops automatic login at once and says so (app + Telegram): no retry loop that could lock your
+  Dhan account. It restarts when you save them again. At most one automatic login every 5 minutes.
+- The token is used for market data only: the app has no order / position / funds / holdings calls (enforced by
+  tests/test_safety.py). **Turn off** removes the PIN and key from the Keychain.
+- Keep the Mac's own login password on, and FileVault on (System Settings → Privacy & Security).
+
 ## Log in with Dhan (2.21.1)
 
 Dhan tokens last 24 hours and an expired one can't be renewed (the Mac was off). For a lasting setup, use Dhan's

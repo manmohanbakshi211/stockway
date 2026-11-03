@@ -1067,6 +1067,41 @@ def lab_dhan_renew():
     return {"ok": True, "token": st}
 
 
+@app.post("/api/lab/dhan/auto")
+async def lab_dhan_auto_on(req: Request):
+    """Turn on TOTP automatic login: checks the PIN + key with Dhan first, then keeps them in the macOS Keychain."""
+    from lab import dhan_auto, dhan_token
+    b = await req.json()
+    pin = str(b.get("pin") or "").strip()
+    try:
+        secret = dhan_auto.clean_secret(str(b.get("secret") or ""))
+    except Exception:
+        raise HTTPException(400, "That TOTP key doesn't look right: copy the text key shown under Dhan's QR code (letters A-Z and digits 2-7).")
+    if not pin.isdigit() or not 4 <= len(pin) <= 8:
+        raise HTTPException(400, "The Dhan PIN is the 4-6 digit number you use to log in to Dhan.")
+    cid = _lab_cfg().get("dhan_client_id")
+    if not cid:
+        raise HTTPException(400, "Save your Dhan client ID first.")
+    try:
+        res = dhan_auto.generate(cid, pin, secret)
+    except dhan_auto.AuthRefused as e:
+        raise HTTPException(400, f"Dhan refused this PIN / TOTP key ({e}). Nothing was saved. Is TOTP set up and confirmed on web.dhan.co?")
+    except Exception as e:
+        raise HTTPException(502, str(e))
+    where = dhan_auto.store(pin, secret)
+    save_user_settings({"lab.dhan_token": res["token"]})
+    dhan_auto._set_state({"blocked": None, "last_error": None, "where": where,
+                          "last_login": dt.datetime.now().strftime("%d %b %H:%M")})
+    return {"ok": True, "where": where, "token": dhan_token.status()}
+
+
+@app.delete("/api/lab/dhan/auto")
+def lab_dhan_auto_off():
+    from lab import dhan_auto
+    dhan_auto.clear()
+    return {"ok": True}
+
+
 @app.get("/dhan/login")
 def dhan_login():
     """Log in with Dhan: API key + secret (12 months) -> Dhan's own login page -> back to /dhan/callback."""

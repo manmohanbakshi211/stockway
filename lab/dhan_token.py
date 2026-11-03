@@ -48,6 +48,9 @@ def mark_dead(token: str | None = None):
     st.update({"dead": _id(tok), "for": _id(tok), "dead_at": dt.datetime.now().strftime("%d %b %H:%M"),
                "error": "Dhan rejected the token (expired). Make a new one on web.dhan.co and paste it in Strategy desk -> Dhan keys: everything resumes by itself."})
     _write(st)
+    from . import dhan_auto
+    if dhan_auto.load() and not dhan_auto.state().get("blocked"):
+        return                                        # TOTP auto-login will replace it in a moment: no alarm
     if on_dead:
         try:
             on_dead("Stockway: the Dhan token has expired. Make a new one on web.dhan.co (Profile -> DhanHQ Trading APIs) "
@@ -117,6 +120,7 @@ def _write(st: dict):
 
 def status() -> dict:
     """For the app: when the token expires, when it was last renewed, and any problem."""
+    from . import dhan_auto
     st = state()
     tok = latest()
     exp = expiry(tok) or st.get("exp")
@@ -124,20 +128,38 @@ def status() -> dict:
     return {"expires": dt.datetime.fromtimestamp(exp).strftime("%d %b %H:%M") if exp else None,
             "hours_left": round(left, 1) if left is not None else None, "renewed": st.get("renewed"),
             "error": st.get("error") if st.get("for") == _id(tok) else None,
-            "dead": bool(tok) and st.get("dead") == _id(tok)}
+            "dead": bool(tok) and st.get("dead") == _id(tok), "auto": dhan_auto.status()}
+
+
+def _auto(cid, log) -> str | None:
+    """TOTP automatic login, if it is set up (lab/dhan_auto.py). 'auto' when a new token was made."""
+    from . import dhan_auto
+    if not saver:
+        return None
+    r = dhan_auto.login(cid, saver, log=log, notify=on_dead)
+    return "auto" if r == "ok" else None
 
 
 def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str | None:
-    """Renew if the saved token has less than RENEW_BEFORE_H hours left. Returns 'renewed', 'expired', 'failed' or None."""
+    """Renew if the saved token has less than RENEW_BEFORE_H hours left; if it is gone (expired / refused / missing) and
+    TOTP auto-login is on, make a new one. Returns 'renewed', 'auto', 'expired', 'failed' or None."""
     global _last_check
     now = now or time.time()
-    if not force and now - _last_check < CHECK_EVERY_S:
-        return None
-    _last_check = now
     if not provider:
         return None
     cid, tok = provider()
-    if not (cid and tok) or is_dead(tok):
+    gone = cid and (not tok or is_dead(tok) or ((expiry(tok) or now + 1) <= now))
+    if gone:                                          # no throttle here: dhan_auto keeps its own 5-minute gap
+        r = _auto(cid, log)
+        if r:
+            return r
+        if tok and not is_dead(tok):
+            mark_dead(tok)
+        return "expired"
+    if not force and now - _last_check < CHECK_EVERY_S:
+        return None
+    _last_check = now
+    if not (cid and tok):
         return None
     st = state()
     exp = expiry(tok)
@@ -156,6 +178,9 @@ def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str
     try:
         res = renew(cid, tok)
     except PermissionError as e:
+        r = _auto(cid, log)
+        if r:
+            return r
         mark_dead(tok)
         log(str(e))
         return "expired"
@@ -163,6 +188,10 @@ def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str
         st.update({"for": _id(tok), "error": str(e)[:200]})
         _write(st)
         log(str(e))
+        if exp - now < 3600:                          # renew keeps failing and the token is nearly gone
+            r = _auto(cid, log)
+            if r:
+                return r
         return "failed"
     if saver:
         saver(res["token"])
@@ -178,6 +207,8 @@ def setup(data_dir, get_saved, save_token):
     global provider, saver, _state_file
     provider, saver = get_saved, save_token
     _state_file = Path(data_dir) / "dhan_token_state.json"
+    from . import dhan_auto
+    dhan_auto.setup(data_dir)
 
 
 AUTH = "https://auth.dhan.co"
