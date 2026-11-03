@@ -1,0 +1,19 @@
+{
+ "about": "Health monitor (bullets). It watches that the app is really collecting data during market hours and tells you on Telegram (and on the System page) when something stops: the Mac slept or the app froze (gap_alert_s), the live scanner isn't running when it should (scanner_down_min), the day's recording stopped growing (recording_stall_min), errors pile up (errors_10min), the disk is getting full (disk_warn_gb) or the Mac runs on battery (battery_warn). keep_awake: while the market is open (keep_awake_from - keep_awake_to on trading days) the app asks macOS not to sleep when idle (the built-in 'caffeinate' command, ended after the close; closing the lid still sleeps a MacBook). daily_summary_at: one message after the close with what was recorded. holidays: NSE trading holidays (dated; add next year's list when NSE publishes it), so nothing nags you on a holiday.",
+ "gap_alert_s": 150,
+ "scanner_down_min": 3,
+ "recording_stall_min": 4,
+ "errors_10min": 12,
+ "disk_warn_gb": 10,
+ "battery_warn": true,
+ "keep_awake": true,
+ "keep_awake_from": "08:50",
+ "keep_awake_to": "15:45",
+ "daily_summary_at": "15:40",
+ "repeat_min": 30,
+ "holidays": {
+  "2026": ["2026-01-26", "2026-03-03", "2026-03-26", "2026-03-31", "2026-04-03", "2026-04-14", "2026-05-01", "2026-05-28",
+           "2026-06-26", "2026-09-14", "2026-10-02", "2026-10-20", "2026-11-10", "2026-11-24", "2026-12-25"]
+ },
+ "since": "2026-11-04"
+}

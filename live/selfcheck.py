@@ -6,6 +6,7 @@ Each check: {"id", "name", "ok": True / False / None (not applicable now), "deta
 from __future__ import annotations
 
 import inspect
+import time
 import shutil
 from pathlib import Path
 
@@ -109,6 +110,11 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
         out.append(_c("daily_trend", "Daily / weekly trend known for the scanned symbols", (n_htf > 0) if engine.running else None,
                       f"{n_htf} symbols" if n_htf else "loads with the daily candles at start"))
     if engine is not None:
+        hm = getattr(engine, "health", None)
+        age = (time.time() - hm.last_check) if hm is not None and hm.last_check else None
+        out.append(_c("health_monitor", "Health monitor watching (gaps, scanner, recording, disk, power)",
+                      (age < 120) if age is not None else None,
+                      f"last check {int(age)} s ago" if age is not None else "first check within a minute of starting"))
         rec = getattr(engine, "recorder", None)
         h = None
         if rec is not None and engine.running:

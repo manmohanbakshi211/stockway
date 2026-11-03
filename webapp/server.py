@@ -1422,7 +1422,8 @@ def system_view():
     return clean({"version": RUNNING_VERSION, "up_since": _ago(APP_STARTED), "free_gb": round(free, 1),
                   "overall": "bad" if bad else "warn" if warn else "ok", "services": svcs, "jobs": job_rows,
                   "checks": checks, "problems": sorted(probs.values(), key=lambda p: p["last"], reverse=True)[:12],
-                  "bullets": _registry_list(), "rules": _rules_check(), "vault": _vault_view(e)})
+                  "bullets": _registry_list(), "rules": _rules_check(), "vault": _vault_view(e),
+                  "health": e.health.view() if getattr(e, "health", None) is not None else None})
 
 
 def _vault_view(e):

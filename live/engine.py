@@ -89,6 +89,12 @@ class LiveEngine:
         self.desk = StrategyDesk(self)
         from lab.expiry_desk import ExpiryDesk
         self.expiry = ExpiryDesk(self)
+        try:                                         # 2.33: is the app really collecting data? (live/health.py)
+            from .health import Health
+            self.health = Health(self)
+        except Exception as e:
+            self.health = None
+            self.log(f"Health monitor off: {e}")
         threading.Thread(target=self._watch, daemon=True, name="live-watch").start()
         threading.Thread(target=self._news_loop, daemon=True, name="live-news").start()
         threading.Thread(target=self.context.run_forever, args=(self._filings_wanted,), daemon=True,
@@ -1789,6 +1795,11 @@ class LiveEngine:
         """Auto-start at 9:00 on market days when logged in; remind to log in; briefs at 8:45 and 15:40."""
         while True:
             time.sleep(20)
+            if getattr(self, "health", None) is not None:
+                try:
+                    self.health.tick()
+                except Exception as e:
+                    self.log(f"Health monitor error: {e}")
             try:
                 c = self.cfg()["live"]
                 now = dt.datetime.now(IST)

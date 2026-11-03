@@ -114,6 +114,23 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Health monitor and keeping the Mac awake (2.33)
+
+- **Health monitor (live/health.py, rules/health.json):** every ~20 s, whether or not the scanner runs, it checks that
+  the app is really collecting data and tells you on Telegram and on the System page when it isn't:
+  - the Mac slept, the app froze or was closed during market hours ("not running from 10:12 to 10:40, 28 market
+    minutes"); every gap is saved per day so backtests know which minutes are missing;
+  - the live scanner isn't running when it should (with the reason, e.g. Upstox login needed);
+  - today's recording stopped growing; problems piling up (12+ in 10 minutes, the top 3 named);
+  - disk under 10 GB; the Mac on battery during market hours;
+  - one summary after the close (MB recorded, chains, headlines, candle patterns, test trades, gaps).
+- **Keep the Mac awake:** on trading days 08:50-15:45 the app runs macOS's built-in `caffeinate -i -w <app>` (a
+  temporary "don't sleep while idle"; it ends at the close or when the app quits; no setting is changed). Closing a
+  MacBook's lid still sleeps it: keep it open and on the charger. Switch: rules/health.json keep_awake.
+- **NSE holidays 2026** (dated, rules/health.json): nothing nags on a holiday or weekend.
+- System page: "Health monitor" card (scanner, recording, keep-awake, power, disk, problems, gaps today, latest
+  notices); selfcheck health_monitor. Checked: 188 tests, Lab regression 103/103, System page at desktop and phone.
+
 ## Candle patterns on every timeframe (2.32)
 
 - **Multi-timeframe candle scanner (live/mtfcandles.py, rules/candle_tfs.json):** every candle pattern (engulfing,

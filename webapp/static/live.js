@@ -2665,6 +2665,7 @@ async function pageSystem() {
         ${card(S.nse)}
       </div>
 
+      ${healthPanel(x.health)}
       ${vaultPanel(x.vault)}
 
       <div class="panel tight" style="margin-top:12px"><h3>Which source does what (and its limits)</h3>
@@ -2712,6 +2713,29 @@ async function pageSystem() {
   main.innerHTML = `<p class="muted">Checking every connection…</p>`;
   await draw();
 }
+/* 2.33 health monitor: is the app really collecting data right now? */
+function healthPanel(h) {
+  if (!h) return "";
+  const st = h.state || {};
+  const row = (k, v) => v == null || v === "" ? "" : `<tr><td>${k}</td><td class="r">${esc(String(v))}</td></tr>`;
+  const gaps = (h.gaps_today || []).filter((g) => g.market_mins >= 1);
+  return `<div class="panel tight" style="margin-top:12px"><h3>Health monitor <span class="muted small">${h.last_check_s != null ? `checked ${h.last_check_s} s ago` : "starting"}</span></h3>
+    <div class="vault-grid">
+      <div><table class="mini"><tbody>
+        ${row("Trading day", st.trading_day === false ? "no (weekend / holiday)" : st.trading_day ? "yes" : null)}
+        ${row("Market", st.market_open ? "open" : "closed")}
+        ${row("Live scanner", st.scanner)}
+        ${row("Today's recording", st.recording)}
+        ${row("Keep the Mac awake (market hours)", st.keep_awake || (h.keep_awake ? `on ${h.window}` : "off"))}
+        ${row("Power", st.power)}
+        ${row("Disk free", st.disk_free_gb != null ? st.disk_free_gb + " GB" : null)}
+        ${row("Problems in the last 10 min", st.errors_10min)}</tbody></table>
+        <p class="small muted" style="margin:6px 0 0">Telegram tells you if the Mac sleeps, the scanner or the recording stops, the disk fills up or the Mac runs on battery during the market, plus one summary after the close. Closing a MacBook's lid still puts it to sleep: keep it open and charging.</p></div>
+      <div><b class="small">Gaps today</b>${gaps.length ? `<table class="mini"><tbody>${gaps.map((g) => `<tr><td>${esc(g.from_hm)}–${esc(g.to_hm)}</td><td class="r down">${g.market_mins} market min</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:4px 0">None: every market minute so far was recorded.</p>`}
+        <b class="small" style="display:block;margin-top:8px">Latest notices</b>${(h.notices || []).length ? `<table class="mini"><tbody>${h.notices.slice(0, 6).map((n) => `<tr><td class="small">${esc(n.at)}</td><td class="small">${esc(n.text)}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:4px 0">None.</p>`}</div>
+    </div></div>`;
+}
+
 /* 2.31 data vault: what is recorded for backtests, the bench styles and the mover sweep */
 function vaultPanel(v) {
   if (!v || v.error) return v && v.error ? `<div class="panel tight" style="margin-top:12px"><h3>Data vault</h3><p class="small down">${esc(v.error)}</p></div>` : "";
