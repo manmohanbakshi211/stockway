@@ -617,6 +617,84 @@ def live_scorecard(source: str | None = None):
     return clean(engine().scorecard_view(source))
 
 
+@router.get("/api/live/board")
+def live_board(regime: str = "auto", days: int = 60, source: str | None = None):
+    """Strategy board (2.30): every strategy paper-tested on the test bench, ranked for today's day type and your capital."""
+    from live import bench
+    e = engine()
+    src = source or e.source or e.cfg()["live"].get("source") or "upstox"
+    pc = (e.paper.cfg if e.paper else {**(e.cfg()["live"].get("paper") or {})})
+    from live.paper import DEFAULTS
+    cap = float(pc.get("capital") or DEFAULTS["capital"])
+    risk = float(pc.get("risk_pct") or DEFAULTS["risk_pct"])
+    now_reg = (e.regimes.get("NIFTY") or {}) if e.running else {}
+    reg = now_reg.get("code") if regime == "auto" else (None if regime in ("all", "") else regime)
+    if reg == "opening":
+        reg = None
+    out = bench.board(e.store, src, cap, risk, reg, max(1, min(365, days)), today=e.clock.now().date().isoformat())
+    out.update(day_type=now_reg.get("label") if e.running else None, day_code=now_reg.get("code") if e.running else None, source=src)
+    return clean(out)
+
+
+@router.get("/api/live/capital")
+def live_capital(amount: str | None = None):
+    """Read an amount ("40k", "1.5 lakh", "2,00,000") and show the account rules that fit it. Nothing is saved."""
+    from live import capital
+    e = engine()
+    cur = float(((e.paper.cfg if e.paper else (e.cfg()["live"].get("paper") or {})) or {}).get("capital") or 500000)
+    if amount is None:
+        return {"capital": cur, "tier": capital.tier(cur)}
+    try:
+        v = capital.parse_amount(amount)
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    return {"capital": v, "tier": capital.tier(v), "settings": capital.paper_settings(v), "current": cur}
+
+
+@router.post("/api/live/capital")
+async def live_capital_set(request: Request):
+    """Set the one capital the whole app uses (paper account, risk check, Strategy Lab, Strategy board) and, unless
+    told not to, the account rules of its tier (rules/capital.json). Paper only."""
+    from live import capital
+    from radar.config import save_user_settings
+    b = await request.json()
+    try:
+        v = capital.parse_amount(b.get("amount"))
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    p = capital.paper_settings(v) if b.get("apply_rules", True) else {"capital": v}
+    upd = {f"live.paper.{k}": val for k, val in p.items()}
+    upd["lab.capital"] = v
+    save_user_settings(upd)
+    e = engine()
+    if e.paper:
+        e.paper.cfg.update(p)
+    return clean({"ok": True, "capital": v, "applied": p, "tier": capital.tier(v)})
+
+
+@router.get("/api/live/coach")
+def live_coach(source: str | None = None):
+    """Prop-firm challenge status and your trading patterns, from the paper account's trades."""
+    from live import coach
+    e = engine()
+    src = source or e.source or e.cfg()["live"].get("source") or "upstox"
+    trades = e.store.trades(source=src, limit=5000)
+    pc = (e.paper.cfg if e.paper else (e.cfg()["live"].get("paper") or {})) or {}
+    start = (e.cfg().get("live") or {}).get("challenge_start")
+    return clean({"challenge": coach.challenge(trades, float(pc.get("capital") or 500000), start),
+                  "patterns": coach.patterns(trades), "source": src})
+
+
+@router.post("/api/live/coach/challenge")
+async def live_coach_start(request: Request):
+    """Start a new challenge today (earlier trades no longer count)."""
+    from radar.config import save_user_settings
+    e = engine()
+    day = e.clock.now().date().isoformat()
+    save_user_settings({"live.challenge_start": day})
+    return {"ok": True, "start": day}
+
+
 @router.get("/api/live/markets")
 def live_markets():
     """World markets for the Live page (US, Asia, Europe, money and commodities), with day range and 52-week range."""

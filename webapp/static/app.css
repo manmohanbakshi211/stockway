@@ -710,3 +710,6 @@ tr.best td { background: var(--up-soft); }
 @media (max-width: 600px) { .ic-sr { grid-template-columns: 1fr; } .wb-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .xcard .xc-grid { width: 100%; }
 .al-kinds { margin: 8px 0 12px; }
+/* 2.30 capital box, Strategy board */
+.capbox input { font-variant-numeric: tabular-nums; }
+.capbox #cap-prev { max-width: 640px; }

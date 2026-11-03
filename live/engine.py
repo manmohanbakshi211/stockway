@@ -122,6 +122,7 @@ class LiveEngine:
         self.tracker = None
         self.shadow = None                           # exit styles graded in shadow on every alert (live/shadow.py)
         self.trials = None                           # bullets on trial: recorded and graded only (live/trials.py)
+        self.bench = None                            # an honest paper trade for every signal (live/bench.py)
         self.depth = None                            # Dhan 200-level order book for index futures (live/dhandepth.py)
         self.dhan_intel = None                       # Dhan news headlines + market movers (live/dhanintel.py)
         self.ranker = None
@@ -278,6 +279,11 @@ class LiveEngine:
             self.trials = Trials(self.store, self.source, self.log)
         except Exception as e:
             self.log(f"Trial alerts off: {e}")
+        try:
+            from .bench import Bench
+            self.bench = Bench(self.store, self.source, self.log)
+        except Exception as e:
+            self.log(f"Test bench off: {e}")
         self.ranker = Ranker(self.data_dir, self.source, self.log)
         if self.source != "sim":
             self.context.fo_symbols = set(self.uni.underlyings)
@@ -599,6 +605,8 @@ class LiveEngine:
             self._guard("Paper trades", self.paper.update, self.state, now)
             if self.trials is not None:
                 self._guard("Trial alerts", self.trials.update, self.state, self.clock.ts())
+            if self.bench is not None:
+                self._guard("Test bench", self.bench.update, self.state, self.clock.ts(), (self.paper.cfg if self.paper else {}).get("exit_time") or "15:15")
             self._guard("Flat-by reminder", self._flat_by_reminder, now, lc)
             if self._every("last_session", 60, clock_time=False):
                 self._guard("Last session save", self.save_last_session)
@@ -644,6 +652,11 @@ class LiveEngine:
         try:
             if self.trials is not None:
                 self.trials.update(self.state, self.clock.ts(), force=True)
+        except Exception:
+            pass
+        try:
+            if self.bench is not None:
+                self.bench.update(self.state, self.clock.ts(), force=True)
         except Exception:
             pass
         try:
@@ -871,6 +884,13 @@ class LiveEngine:
             self._fact_rules5 = (time.time(), rules)
         return rules
 
+    def bench_signal(self, sym, direction, now, kind, variant, name):
+        """A signal that is only paper-tested on the bench (Lab library / book rules live): no alert, no paper account."""
+        if self.bench is None:
+            return 0
+        a = {"sym": sym, "kind": kind, "direction": direction, "option": self._suggest(sym, direction), "data": {}}
+        return self.bench.add(a, self, now, self.paper.cfg if self.paper else {}, name=name, variant=variant)
+
     def factory_live_record(self) -> list:
         """Paper results of Strategy Lab rules, for demotion: [{'rule', 'net'}]."""
         out = []
@@ -1025,6 +1045,13 @@ class LiveEngine:
         a.update(day=now.date().isoformat(), source=self.source)
         cool = registry.get(a["kind"]).get("cooldown") or float(lc["cooldown_min"])
         self.trials.add(a, und, self.clock.ts(), float(cool))
+        if self.bench is not None and a.get("direction") in ("up", "down"):     # ideas on trial get an honest paper trade too
+            try:
+                self.bench.add({**a, "option": self._suggest(a["sym"], a["direction"])}, self, now,
+                               self.paper.cfg if self.paper else {})
+            except Exception as e:
+                if self._every("bench_err", 600, clock_time=False):
+                    self.log(f"Test bench skipped a trial: {e}")
 
     def _emit(self, a, now, lc):
         if registry.is_shadow(a.get("kind")):
@@ -1137,6 +1164,12 @@ class LiveEngine:
                 self.paper.try_open(a, self.state, now)
             except Exception as e:
                 self.log(f"Paper trade failed: {e}")
+        if self.bench is not None:                   # every directional alert, Focus or not, demoted or not
+            try:
+                self.bench.add(a, self, now, self.paper.cfg if self.paper else {})
+            except Exception as e:
+                if self._every("bench_err", 600, clock_time=False):
+                    self.log(f"Test bench skipped an alert: {e}")
 
     @staticmethod
     def open_files() -> dict:
@@ -1198,9 +1231,27 @@ class LiveEngine:
                 opt["ltp"] = inst.ltp or opt.get("ltp")
         ban = (self.context.view().get("ban") or []) if self.context else []
         lc = self.cfg().get("live") or {}
-        return riskgate.check(a, opt, now=now, paper_cfg=self.paper.cfg, guard=self.paper.guard(now),
-                              open_syms={t["sym"] for t in self.paper.open_trades()}, ban=ban, cfg=(lc.get("risk") or {}),
-                              sim=self.source == "sim", bigger=(a.get("data") or {}).get("bigger"))
+        out = riskgate.check(a, opt, now=now, paper_cfg=self.paper.cfg, guard=self.paper.guard(now),
+                             open_syms={t["sym"] for t in self.paper.open_trades()}, ban=ban, cfg=(lc.get("risk") or {}),
+                             sim=self.source == "sim", bigger=(a.get("data") or {}).get("bigger"))
+        try:                                         # tilt coach: a warning (never a block) after two losses in a row
+            from .coach import streak_warning
+            day = now.date().isoformat()
+            hist = self._coach_hist()
+            w = streak_warning([t for t in hist if t.get("day") == day], hist)
+            if w:
+                out["warnings"] = (out.get("warnings") or []) + [w]
+        except Exception:
+            pass
+        return out
+
+    def _coach_hist(self) -> list:
+        hit = getattr(self, "_coach_cache", None)
+        if hit and time.time() - hit[0] < 60:
+            return hit[1]
+        rows = self.store.trades(source=self.source, limit=3000) if self.store else []
+        self._coach_cache = (time.time(), rows)
+        return rows
 
     BRAIN_RESERVE = 8          # automatic AI calls kept for the hourly market notes on the Pro plan
 
@@ -1983,7 +2034,19 @@ class LiveEngine:
             r.pop("features", None)
         graded = [r for r in recent if r["result"]]
         ranker = self.ranker or Ranker(self.data_dir, src, self.log)
-        return {"source": src, "rows": rows, "recent": recent[:120], "graded": len(graded),
+        honest = {}
+        try:                                         # 2.30: the same alert types paper-traded honestly (live/bench.py)
+            with self.store.lock:
+                for k, idx, n, net, w in self.store.db.execute(
+                        "SELECT kind, is_index, COUNT(*), SUM(net), SUM(net > 0) FROM bench_trades WHERE source=? AND style='buy' "
+                        "AND net IS NOT NULL GROUP BY kind, is_index", (src,)).fetchall():
+                    honest[f"{k}|{int(idx or 0)}"] = {"n": n, "net": round(net or 0), "avg": round((net or 0) / n) if n else None,
+                                                     "win_pct": round((w or 0) / n * 100) if n else None}
+        except Exception:
+            honest = {}
+        for r_ in rows:
+            r_["honest"] = honest.get(f"{r_['kind']}|{int(r_['is_index'])}")
+        return {"source": src, "rows": rows, "recent": recent[:120], "graded": len(graded), "honest": bool(honest),
                 "overall": round(sum(r["result"] == "hit" for r in graded) / len(graded) * 100) if graded else None,
                 "model": ranker.info, "recordings_mb": size_mb(self.data_dir), "exits": self._shadow_board(src),
                 "rule": "With an option idea: hit = option +20% before −20% within 60 minutes. Without: price moves "

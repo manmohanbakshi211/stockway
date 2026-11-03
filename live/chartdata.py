@@ -113,7 +113,8 @@ class ChartData:
             day_rec = rec.setdefault((sym, now.date()), {})
             st = o.get("straddle")
             day_rec[slot - 1] = (o.get("atm_iv"), st / m["spot"] * 100 if st and m.get("spot") else None)
-            if not rules:
+            lib = self._bench_rules() if sym in factory.INDEX_SYMS else []
+            if not rules and not lib:
                 continue
             b = self.five_min(sym, now.date())
             if not b or len(b["c"]) < slot:
@@ -187,6 +188,53 @@ class ChartData:
                       "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%."
                                 + (f" Note: tested on other F&O stocks, not on {sym} itself." if untested else ""),
                       "price": m.get("spot"), "data": {"factory": fac}})
+            for r in lib:                                  # test bench only: every library / book setup, live
+                try:
+                    if not factory.signal_now(r, f, sym):
+                        continue
+                    fired = self.e.fact_fired.setdefault((r["_variant"], sym, now.date()), [])
+                    if len(fired) >= int(r.get("max_day") or 1):
+                        continue
+                    fired.append(now.timestamp())
+                    self.e.bench_signal(sym, "up" if r["dir"] > 0 else "down", now, "library", r["_variant"], r["_name"])
+                except Exception as ex:
+                    if self._rate(f"bench_rule:{r.get('_variant')}", 3600):
+                        self.e.log(f"Test bench rule {r.get('_name')} skipped: {ex}")
+
+    def _bench_rules(self) -> list:
+        """Every Strategy Lab library / book setup (one per entry rule, exits aside), for the test bench on the indices."""
+        hit = getattr(self, "_lib_cache", None)
+        if hit and time.time() - hit[0] < 3600:
+            return hit[1]
+        out = []
+        try:
+            import hashlib
+            import json as _json
+            from lab import factory, library
+            seen = set()
+            for r in library.rules():
+                if not r.get("dir"):
+                    continue                                   # option selling: not part of the option-buying bench
+                sig = _json.dumps([r["conds"], r["dir"], r.get("win")], sort_keys=True)
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                v = factory.validate(dict(r))
+                if not v:
+                    continue
+                src = str(r.get("source", ""))
+                v["_variant"] = "L" + hashlib.sha1(sig.encode()).hexdigest()[:7]
+                when = ", ".join(f"{c[0]} {c[1]} {c[2]:g}" if isinstance(c[2], (int, float)) else f"{c[0]} {c[1]} {c[2]}" for c in r["conds"])
+                win = r.get("win") or []
+                tw = f", {9 + (15 + int(win[0])) // 60:02d}:{(15 + int(win[0])) % 60:02d}-{9 + (15 + int(win[1])) // 60:02d}:{(15 + int(win[1])) % 60:02d}" if len(win) == 2 else ""
+                v["_name"] = (f"{src.split(':', 1)[-1]} ({'long' if r['dir'] > 0 else 'short'}){' · book' if src.startswith('book:') else ''}"
+                              f" — {when}{tw}")[:160]
+                out.append(v)
+        except Exception as ex:
+            if self._rate("bench_rules", 3600):
+                self.e.log(f"Test bench: library rules not loaded: {ex}")
+        self._lib_cache = (time.time(), out)
+        return out
 
     def _trial_rule(self, sym, m, r, d, h5, l5, c5, emit):
         """A 5-year Lab rule on trial: chart-level exits use the rule's own stop; % exits are graded with a 1 ATR stop

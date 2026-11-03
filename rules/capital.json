@@ -1,0 +1,10 @@
+{
+ "about": "Account rules by capital. When you set a capital on the Paper page the app applies the tier it falls in (you can still change any rule in Data & settings). The first tier is the original small-account preset (₹40K: 1 lot, 1 position, 2 trades a day, 4% daily loss, lock the day at +3%). Amounts are in rupees; 'upto' null = no upper limit.",
+ "tiers": [
+  {"upto": 60000, "name": "Small account", "risk_pct": 5.0, "max_lots": 1, "max_open": 1, "max_trades_day": 2, "max_daily_loss_pct": 4.0, "profit_lock_pct": 3.0},
+  {"upto": 150000, "name": "Growing account", "risk_pct": 3.0, "max_lots": 2, "max_open": 2, "max_trades_day": 4, "max_daily_loss_pct": 4.0, "profit_lock_pct": 3.0},
+  {"upto": 500000, "name": "Medium account", "risk_pct": 1.5, "max_lots": 3, "max_open": 3, "max_trades_day": 6, "max_daily_loss_pct": 3.0, "profit_lock_pct": 0},
+  {"upto": null, "name": "Large account", "risk_pct": 1.0, "max_lots": 5, "max_open": 6, "max_trades_day": 12, "max_daily_loss_pct": 3.0, "profit_lock_pct": 0}
+ ],
+ "limits": {"min": 10000, "max": 100000000}
+}

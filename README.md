@@ -114,6 +114,31 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Test bench, Strategy board, capital for any amount (2.30)
+
+The goal: find what makes money for a ₹40K option buyer, from live markets, as fast and as honestly as possible.
+- **Test bench (live/bench.py):** every directional alert (Focus or not, demoted or not), every idea on trial and every
+  Strategy Lab library / book setup on the indices (84 entry rules) gets a 1-lot paper trade, filled like the paper
+  account: buy at the ask, sell at the bid, STT 0.15% and every charge, the paper account's target / stop / time limit,
+  closed by 15:15. Two styles each: **option buy** and **debit spread** (the same option bought, the one 2 strikes out
+  sold). No daily cap: the record grows with every signal. Day type, days to expiry, time and money per lot are kept.
+- **Strategy board (Test & research → Strategy board):** every strategy × style ranked by money per trade after costs
+  minus its uncertainty, for today's day type (trend / range / quiet / volatile) or all days, with today's live
+  results, filtered to what fits your capital. "Best for you right now" needs 5+ closed trades and a positive rank.
+  The Live page shows the top 3 for today's day type.
+- **Honest grade on the Scorecard:** next to the old "worked %", each alert type's real ₹ a trade from the bench.
+  Demotion, Focus and the conviction model keep the old grade until you switch.
+- **Capital:** type any amount ("40k", "1.5 lakh", "2,00,000", "1 cr") on the Paper page or the Strategy board; you see
+  what it means before saving; wrong input gets a clear message (the old field read "40k" as ₹40). One capital for
+  paper, the risk check, the Lab and the board; saving applies the account rules for that amount (rules/capital.json;
+  ₹40K = the small-account preset, unchanged).
+- **Prop-firm challenge (Paper page):** +10% without a 4% losing day or a 10% drop, over 20+ trading days (rules in
+  rules/challenge.json). Start a new one any day.
+- **Tilt coach (Paper page):** your patterns in numbers (after two losses, by who took the trade, by hour, busy days);
+  after two losses in a row the risk check shows a reminder (a warning, never a block).
+- Checked: 168 tests incl. no-clash; Lab regression 103 of 103; Strategy board, Live, Paper, Scorecard and settings at
+  desktop and phone width, no errors; typing in the capital box survives the Paper page's 3-second refresh.
+
 ## Live page, Alerts and a broker-style chart (2.29)
 
 - **Live page works when the market is closed:** index cards from the last session (saved every minute while the

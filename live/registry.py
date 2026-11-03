@@ -40,6 +40,7 @@ KINDS = {
     "news": {"family": "info", "label": "News", "cooldown": 60},
     "factory": {"family": "lab", "label": "Strategy Lab rule", "paper": True},
     "lab5y": {"family": "lab", "label": "5-year Lab rule", "cooldown": 30, "shadow": True},
+    "library": {"family": "lab", "label": "Library / book rule (test bench only)"},
     "manual": {"family": "manual", "label": "By hand"},
     "paper": {"family": "manual", "label": "Paper"},
     "pattern_breakout_retest": {"family": "pattern", "label": "Pattern: breakout + retest", "name": "Breakout + retest", "cooldown": 45, "noisy_for_stocks": True},

@@ -1,0 +1,8 @@
+{
+ "about": "Prop-firm style challenge on the paper account: pass it before thinking about real money. Percentages of the starting capital. Change any number here; the Paper page shows the status.",
+ "profit_target_pct": 10.0,
+ "max_drawdown_pct": 10.0,
+ "daily_loss_pct": 4.0,
+ "min_days": 20,
+ "max_days": 60
+}
