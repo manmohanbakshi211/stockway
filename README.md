@@ -114,6 +114,26 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Candle patterns on every timeframe (2.32)
+
+- **Multi-timeframe candle scanner (live/mtfcandles.py, rules/candle_tfs.json):** every candle pattern (engulfing,
+  harami, hammer / shooting star, pin bar, morning / evening star, tweezer, dojis, inside / outside bar, NR7, inside-bar
+  breakout and fakey, rectangle breakout and failure) is checked on **5m, 15m, 30m, 1H, 75m, daily and weekly** candles
+  of every index and F&O stock, the moment each candle closes. Intraday candles come from the live 1-minute candles,
+  joined to yesterday's recorded ones; daily / weekly from finished days only. A candle still forming is never a pattern.
+- **Recorded:** every pattern on every timeframe (data/recordings, part "candles"), and the day's 1-minute candles of
+  every symbol (part "bars": backtest data, and tomorrow's scanner continues from them).
+- **Facts on every test signal:** which way the latest candle on each timeframe points (cdl_15m_al ... cdl_1w_al,
+  cdl_al_sum), so the honest-label model can learn which multi-timeframe combinations work.
+- **On trial on the test bench:** alertable patterns (with their key-level rule) on 15m / 30m / 1H / 75m / daily /
+  weekly get a paper trade in every style (kind candle_<pattern>, version = timeframe; weekly ones on the week's first
+  session). The older 5-minute candle trials keep running as they were. No alert, no paper account until the record
+  earns it.
+- **Chart page:** "Candles on every timeframe": the last closed candle's patterns and how each forming candle looks so
+  far (information only). System page: patterns recorded today and the scanner's last run per timeframe.
+- One timeframe per loop and a one-pass pattern scan (same results as the Lab functions, tested): 218 symbols in
+  about 0.4 s per closing candle. Checked: 182 tests, Lab regression 103/103 on all baselines, pages at desktop and phone.
+
 ## Every signal 3 ways, 4 capital accounts, the mover sweep and the data vault (2.31)
 
 Testing at full width: every signal paper-traded in 8 styles, at 4 capitals, with everything around it recorded, so in

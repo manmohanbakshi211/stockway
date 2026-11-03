@@ -310,6 +310,44 @@ def on_last_bar(o, h, l, c) -> list:
     return out
 
 
+def last_bar_scan(o, h, l, c, levels: list, spec: dict, near_atr: float = 0.6) -> tuple[dict, list]:
+    """on_last_bar() and trade_ideas(last_only=True) in one pass (each pattern computed once), for scanning many
+    symbols and timeframes live (live/mtfcandles.py). Same rules, same results: ({pattern: value}, [idea, ...])."""
+    o, h, l, c = _arr(o, h, l, c)
+    n = len(c)
+    if n < 3:
+        return {}, []
+    s = shape(o, h, l, c)
+    vals = {}
+    for name, (fn, _, _) in PATTERNS.items():
+        try:
+            vals[name] = np.nan_to_num(fn(s), nan=0.0)
+        except Exception:
+            continue
+    i = n - 1
+    pats = {k: float(v[i]) for k, v in vals.items() if v[i]}
+    ideas = []
+    if spec and any(k in pats for k in spec):
+        dist = levels_dist(c, h, l, levels)[0] if levels else np.full(n, np.nan)
+        touch = level_touch(c, h, l, levels, near_atr) if levels else np.zeros(n)
+        for name, sp in spec.items():
+            if name not in pats:
+                continue
+            d = 1 if pats[name] > 0 else -1
+            if sp.get("at_level") and touch[i] != d:
+                continue
+            k = max(1, int(sp.get("bars") or 1))
+            lo = max(0, i - k + 1)
+            e = float(c[i])
+            stop = float(l[lo:i + 1].min()) if d > 0 else float(h[lo:i + 1].max())
+            R = abs(e - stop)
+            if not R > 0:
+                continue
+            ideas.append({"i": int(i), "name": name, "d": d, "entry": e, "stop": stop, "target": e + 2 * R * d,
+                          "lvl_atr": float(dist[i]) if np.isfinite(dist[i]) else None})
+    return pats, ideas
+
+
 def trade_ideas(o, h, l, c, levels: list, spec: dict, last_only: bool = False, near_atr: float = 0.6) -> list:
     """Candle patterns as trade ideas, the same way live (trial alerts) and on the chart (overlays).
 

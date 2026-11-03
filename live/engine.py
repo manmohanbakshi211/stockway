@@ -127,6 +127,7 @@ class LiveEngine:
         self._facts_cache: dict = {}                 # (sym, direction, minute) -> facts for test-bench trades
         self.mover_last = None                       # the last mover sweep (live/movers.py)
         self.vault_last = None                       # the last stock option-chain sweep (data vault)
+        self.cdl = None                              # 2.31: candle patterns on every timeframe (live/mtfcandles.py)
         self._run_token = None
         self.depth = None                            # Dhan 200-level order book for index futures (live/dhandepth.py)
         self.dhan_intel = None                       # Dhan news headlines + market movers (live/dhanintel.py)
@@ -290,6 +291,12 @@ class LiveEngine:
         except Exception as e:
             self.log(f"Test bench off: {e}")
         self.in_play, self._facts_cache, self.mover_last = set(), {}, None
+        try:
+            from .mtfcandles import CandleScanner
+            self.cdl = CandleScanner(self)
+        except Exception as e:
+            self.cdl = None
+            self.log(f"Candle scanner off: {e}")
         self.ranker = Ranker(self.data_dir, self.source, self.log)
         if self.source != "sim":
             self.context.fo_symbols = set(self.uni.underlyings)
@@ -314,7 +321,8 @@ class LiveEngine:
                 self.log(f"Sensex live price not available ({e}); using Yahoo")
         self.daily = self.store.get(f"daily:{self.source}:{day}", {}) or {}
         self.avg_vol = {s: d.get("avg_vol") for s, d in self.daily.items() if d.get("avg_vol")}
-        if len(self.daily) < len(self.uni.underlyings) * 0.8:
+        if len(self.daily) < len(self.uni.underlyings) * 0.8 or \
+                sum(1 for d in self.daily.values() if isinstance(d, dict) and d.get("d_ohlc")) < len(self.uni.underlyings) * 0.8:
             threading.Thread(target=self._load_daily, daemon=True, name="daily-history").start()
         self._attach_iv_history()
         self.desk.load_plan()
@@ -345,11 +353,13 @@ class LiveEngine:
         for u in list(self.uni.indices) + self._rank_stocks():
             if self.stop_evt.is_set():
                 return
-            if u.symbol in out:
+            if u.symbol in out and out[u.symbol].get("d_ohlc"):
                 continue
             try:
                 cs = self.rest.daily_candles(u.key, 400)
                 out[u.symbol] = daily_stats(cs)
+                # 2.31: the last 80 daily candles, for daily / weekly candle patterns (live/mtfcandles.py)
+                out[u.symbol]["d_ohlc"] = [[str(c[0])[:10], c[1], c[2], c[3], c[4], c[5]] for c in sorted(cs, key=lambda c: str(c[0]))[-80:]]
                 try:                                     # the bigger picture (daily / weekly trend), finished days only
                     out[u.symbol]["htf"] = htf.daily(cs, self.clock.now().date())
                 except Exception:
@@ -594,6 +604,10 @@ class LiveEngine:
             except Exception as e:
                 if self._every("setup_err", 300, clock_time=False):
                     self.log(f"Setup scan error: {e}")
+            if self.cdl is not None:
+                self._guard("Candle scanner", self.cdl.tick, now)
+            if self._every("vault_bars", 1800):
+                self._guard("Saving 1-minute candles", self._save_bars)
             try:
                 self.desk.tick(now)
             except Exception as e:
@@ -683,6 +697,10 @@ class LiveEngine:
             pass
         self._save_iv_history()
         self._refresh_stats()
+        try:
+            self._save_bars()
+        except Exception:
+            pass
         self.recorder.finalize(int(self.cfg()["live"].get("keep_recordings_days") or 365), self.log)
         try:
             self.ranker.train(outcomes(self.store, self.source, limit=200000))
@@ -930,6 +948,11 @@ class LiveEngine:
         dly = (self.daily.get(sym) or {}).get("htf") or {}
         f.update(vix=v.get("ltp"), atr_pct=dly.get("atr_pct"), spot=(m or {}).get("spot"), dow=now.weekday(),
                  in_play=int(sym in self.in_play))
+        if self.cdl is not None:                     # which way the latest candle on each timeframe points
+            try:
+                f.update(self.cdl.facts(sym, direction))
+            except Exception:
+                pass
         out = {x: y for x, y in f.items() if x not in ("kind", "severity", "direction") and y is not None}
         self._facts_cache[k] = out
         return out
@@ -1027,7 +1050,23 @@ class LiveEngine:
         out = vault.view(self)
         out["bench"] = self.bench.status() if self.bench is not None else None
         out["movers"] = self.mover_last
+        out["candles"] = self.cdl.status() if self.cdl is not None else None
         return out
+
+    def _save_bars(self):
+        """2.31: today's 1-minute candles of every index and stock into the day's recording (the candle scanner joins
+        them to the next day's, and they are backtest data)."""
+        if self.recorder is None or self.state is None:
+            return
+        with self.state.lock:
+            snap = {s: [list(x) for x in b.bars] for s, b in self.state.bars.items() if b.bars}
+        if snap:
+            self.recorder.bars(snap)
+
+    def candles_now(self, sym) -> dict:
+        if self.cdl is None or not self.running:
+            return {"sym": sym, "rows": [], "note": "Starts with the live scanner."}
+        return self.cdl.now_view(sym)
 
     def bench_signal(self, sym, direction, now, kind, variant, name):
         """A signal that is only paper-tested on the bench (Lab library / book rules live): no alert, no paper account."""

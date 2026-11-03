@@ -55,6 +55,12 @@ def static_checks(cfg: dict | None = None) -> list:
     movers.cfg()
     out.append(_c("mover_sweep", "Mover sweep settings load (rules/bench_movers.json)", not movers._C.get("error"),
                   movers._C.get("error") or f"every {movers.cfg()['every_min']} min, top {movers.cfg()['top_n']} stocks, both ways"))
+    from live import mtfcandles
+    cc = mtfcandles.cfg()
+    out.append(_c("candle_scanner", "Candle scanner settings load (rules/candle_tfs.json)", not mtfcandles._C.get("error"),
+                  mtfcandles._C.get("error") or ("timeframes " + ", ".join(mtfcandles.TF_NAME.get(int(x), f"{x}m") for x in cc["intraday_min"])
+                                                 + (", 1D" if cc.get("daily") else "") + (", 1W" if cc.get("weekly") else "")
+                                                 + f"; on the test bench: {', '.join(cc.get('bench') or []) or 'none'}")))
     vsrc = inspect.getsource(_eng.LiveEngine._vault_loop)
     vc = vault.cfg()
     out.append(_c("vault_spare_calls", "Data vault: stock option chains only with spare Upstox calls, never changing the scanner",

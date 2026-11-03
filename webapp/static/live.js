@@ -1576,6 +1576,7 @@ async function pageChart() {
     <div class="ch-wrap"><div id="ch-chart" class="ch-chart"></div>
       <aside class="ch-side"><div class="panel tight"><h3>Trade signals <span class="muted small">BUY / SELL marks on the chart</span></h3><div id="ch-sigs"><p class="muted small">Focus alerts on this symbol show here.</p></div></div>
         <div class="panel tight"><h3>All timeframes read <span class="muted small">5m → daily</span></h3><div id="ch-mtfread"><p class="muted small">Loading…</p></div></div>
+        <div class="panel tight"><h3>Candles on every timeframe <span class="muted small">on trial</span></h3><div id="ch-cdl"><p class="muted small">Loading…</p></div></div>
         <div class="panel tight"><h3>Chart read <span class="muted small">this chart</span></h3><div id="ch-read"><p class="muted">Loading…</p></div>
         <button class="link-btn" id="ch-ai">AI read this chart</button><div id="ch-ai-out"></div></div>
         <div class="panel tight"><h3>Patterns <span class="muted small">on this chart</span></h3><div id="ch-pats"></div></div>
@@ -1698,12 +1699,24 @@ async function mtfInit() {
     if (state.page !== "chart" || !$("#mtf-grid")) return;
     try { MT.data = await api(`/api/live/mtf/${encodeURIComponent(CH.sym)}`); drawMTF(MT.data); }
     catch (e) { const g = $("#mtf-conf"); if (g) g.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; }
+    candlesNow(CH.sym);
     MT.timer = setTimeout(loop, 60000);                      // higher timeframes: refresh as candles close
   };
   loop();
 }
 
 /* one read of all five timeframes (live/mtf.py report): verdict, each timeframe small to large, what to watch */
+/* 2.31: the latest closed candle's patterns on every timeframe, and how the forming one looks so far (not a signal) */
+async function candlesNow(sym) {
+  const el = $("#ch-cdl"); if (!el) return;
+  let v; try { v = await api(`/api/live/candles_now/${encodeURIComponent(sym)}`); } catch (e) { el.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; return; }
+  if (!$("#ch-cdl")) return;
+  const pat = (xs) => (xs || []).length ? xs.map((x) => `<span class="${x.d > 0 && !["doji", "inside_bar", "nr7"].includes(x.pattern) ? "up" : x.d < 0 ? "down" : "muted"}">${esc(x.name)}${x.d > 0 && !["doji", "inside_bar", "nr7"].includes(x.pattern) ? " ▲" : x.d < 0 ? " ▼" : ""}</span>`).join(", ") : `<span class="muted">none</span>`;
+  el.innerHTML = (v.rows || []).length ? `<table class="mini"><tbody>${v.rows.map((r) => `<tr><td><b>${esc(r.tf)}</b></td><td class="small">Last: ${pat(r.last)}${r.forming ? `<br><span class="muted">Forming (${r.mins_left} min left): </span>${pat(r.forming)}` : ""}</td></tr>`).join("")}</tbody></table>
+    <p class="small muted" style="margin:6px 0 0">${esc(v.note || "")} Every pattern is recorded and paper-tested on the test bench; none is an alert until its record earns it.</p>`
+    : `<p class="small muted">${esc(v.note || "Starts with the live scanner.")}</p>`;
+}
+
 function mtfReport(r) {
   const el = $("#ch-mtfread"); if (!el) return;
   if (!r || !r.verdict) { el.innerHTML = `<p class="muted small">${esc((r && r.error) || "Builds when the timeframes have loaded.")}</p>`; return; }
@@ -2715,7 +2728,9 @@ function vaultPanel(v) {
         <tr><td>Instruments (prices each minute)</td><td class="r">${n(t.instruments)}</td></tr>
         <tr><td>Full option chains</td><td class="r">${n(t.chain_snaps)} <small class="muted">(${n(t.chain_syms)} symbols)</small></td></tr>
         <tr><td>Headlines</td><td class="r">${n(t.news)}</td></tr>
-        <tr><td>Market context snapshots</td><td class="r">${n(t.context)}</td></tr></tbody></table>` : `<p class="small muted">Starts with the scanner.</p>`}
+        <tr><td>Market context snapshots</td><td class="r">${n(t.context)}</td></tr>
+        <tr><td>Candle patterns (every timeframe)</td><td class="r">${n(t.candles)} <small class="muted">(${n(t.candle_tfs)} timeframes)</small></td></tr></tbody></table>` : `<p class="small muted">Starts with the scanner.</p>`}
+        ${v.candles && v.candles.last && Object.keys(v.candles.last).length ? `<p class="small muted" style="margin:6px 0 0">Candle scanner: ${Object.entries(v.candles.last).map(([tf, x]) => `${esc(tf)} ${esc(x.at)} · ${x.patterns} patterns, ${x.bench} tested`).join(" · ")}</p>` : ""}
         <p class="small muted" style="margin:6px 0 0">Stock chains: every ${v.cfg.stock_chains_every_min} min with spare Upstox calls${sw ? ` · last sweep ${esc(sw.at)}: ${sw.stocks} of ${sw.of} stocks in ${sw.secs} s${sw.waits ? `, waited ${sw.waits}× for spare calls` : ""}` : ""}.</p></div>
       <div><b class="small">Test bench styles (this session)</b>${styles ? `<table class="mini"><thead><tr><th>Style</th><th></th><th class="r">Trades</th><th class="r" title="Signals where a leg had no live price">No price</th></tr></thead><tbody>${styles}</tbody></table>` : `<p class="small muted">Starts with the scanner.</p>`}
         ${(bn.errors || []).length ? `<p class="small down">Skipped: ${bn.errors.map(esc).join("; ")}</p>` : ""}</div>

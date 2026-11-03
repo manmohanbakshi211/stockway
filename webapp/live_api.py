@@ -648,6 +648,13 @@ def live_accounts(days: int | None = None, source: str | None = None):
     return clean(accounts.grid(e.store, src, days=max(1, min(365, days)) if days else None, wait=False))
 
 
+@router.get("/api/live/candles_now/{sym}")
+def live_candles_now(sym: str):
+    """2.31: the latest closed candle's patterns on every timeframe for a symbol, and how each forming candle looks so far
+    (information only: a candle is a pattern only once it closes)."""
+    return clean(engine().candles_now(sym.upper()))
+
+
 @router.get("/api/live/vault")
 def live_vault():
     """2.31 data vault: what is being recorded today and on past days, the test bench styles and the mover sweep."""
