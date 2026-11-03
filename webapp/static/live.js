@@ -2254,3 +2254,99 @@ async function navPnl() {
   } catch (_) {}
 }
 navPnl(); setInterval(navPnl, 5000);
+
+/* ---------------- System & logins: every connection, its job, its health, all logins, and the no-clash checks */
+async function pageSystem() {
+  stopPageTimer();
+  const pill = (s) => s === "ok" ? `<span class="pill p-up">OK</span>` : s === "warn" ? `<span class="pill p-amber">Check</span>`
+    : s === "bad" ? `<span class="pill p-down">Fix</span>` : `<span class="pill">Off</span>`;
+  const mark = (ok) => ok === true ? `<span class="up">✓</span>` : ok === false ? `<span class="down">✗</span>` : `<span class="muted">–</span>`;
+  let live = {};
+  const draw = async () => {
+    let x;
+    try { x = await api("/api/system"); } catch (e) { main.innerHTML = `<div class="empty"><h2>System status unavailable</h2><p>${esc(e.message)}</p></div>`; return; }
+    if (state.page !== "system") return;
+    const S = Object.fromEntries(x.services.map((s) => [s.id, s]));
+    const up = S.upstox, dh = S.dhan, cl = S.claude, tg = S.telegram, tk = dh.token || {}, au = dh.auto || {};
+    const clash = x.checks.filter((c) => c.ok === false);
+    const ready = [
+      ["Upstox logged in (live prices)", up.logged_in ? true : false],
+      ["Dhan token valid (history, order book, news)", tk.dead ? (au.on && !au.blocked ? null : false) : dh.status === "ok" ? true : false],
+      ["Dhan automatic login (TOTP)", au.on ? !au.blocked : null],
+      ["Claude ready (notes, Ask, Lab ideas)", cl.status === "ok" ? true : cl.status === "off" ? null : false],
+      ["Telegram set (alerts on your phone)", tg.status === "ok" ? true : null],
+      [`Disk free ${x.free_gb} GB (10 GB+)`, x.free_gb >= 10],
+      [`No clashes (${x.checks.filter((c) => c.ok === true).length} checks pass)`, clash.length ? false : true],
+    ];
+    const lv = (id) => live[id] ? `<div class="small" style="margin-top:6px">Live check: ${mark(live[id].ok)} ${esc(live[id].detail || "")}</div>` : "";
+    const roles = (s) => `<ul class="small" style="margin:6px 0 0;padding-left:18px">${s.roles.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`;
+    const card = (s, body = "", actions = "") => `<div class="panel tight"><h3 style="display:flex;gap:8px;align-items:center;justify-content:space-between">${esc(s.name)} ${pill(s.status)}</h3>
+      <div class="small">${esc(s.detail || "")}</div>${body}${lv(s.id)}<div class="small muted" style="margin-top:8px"><b>Used for</b></div>${roles(s)}
+      ${actions ? `<div class="btn-row" style="margin-top:10px">${actions}</div>` : ""}</div>`;
+    const depth = Object.entries(dh.depth || {}).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(" · ") || "off";
+    main.innerHTML = `<div class="toolbar"><div><h1 class="page-title" style="margin:0">System &amp; logins ${pill(x.overall)}</h1>
+        <p class="lede" style="margin:4px 0 0">Every connection, what it is for and whether it works, all logins in one place, and the checks that nothing collides. Version ${esc((x.version || {}).name || "")} · running ${esc(x.up_since || "")}.</p></div>
+        <div class="btn-row" style="margin:0"><button class="btn primary" id="sy-check">Run live check</button><button class="btn" id="sy-refresh">Refresh</button></div></div>
+
+      <div class="panel tight" style="margin-top:12px"><h3>Before the market opens</h3>
+        <table class="mini"><tbody>${ready.map(([t, ok]) => `<tr><td style="width:28px">${mark(ok)}</td><td>${t}</td></tr>`).join("")}</tbody></table>
+        ${clash.length ? `<p class="small down" style="margin:8px 0 0">Clash: ${clash.map((c) => esc(c.name + " — " + c.detail)).join("; ")}</p>` : ""}</div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:12px">
+        ${card(up, `<div class="small muted" style="margin-top:6px">Scanner: ${esc(up.scanner || "")}${up.last_tick ? " · last price " + esc(up.last_tick) : ""}${up.streaming ? " · " + up.streaming + " options streaming" : ""}</div>`,
+          `<a class="btn primary" href="/upstox/login">Log in with Upstox</a><button class="btn" id="sy-uplogout">Log out</button><a class="btn" href="#/connect">API key &amp; secret</a>`)}
+        ${card(dh, `<div class="small muted" style="margin-top:6px">Automatic login: ${au.on ? (au.blocked ? `<span class="down">stopped</span> (${esc(au.last_error || "")})` : `on${au.last_login ? " · last " + esc(au.last_login) : ""}`) : "off"} · calls today ${(dh.calls_today || 0).toLocaleString("en-IN")} / ${(dh.cap || 0).toLocaleString("en-IN")}<br>Order book: ${depth} · news &amp; movers: ${esc(dh.news_movers || "off")}${dh.movers_at ? " (movers " + esc(dh.movers_at) + ")" : ""}</div>
+          <div class="form-grid" style="margin-top:10px"><label class="field">Client ID<input id="sy-cid" value="${esc(dh.client_id || "")}" autocomplete="off"></label>
+            <label class="field">Paste a token (optional)<input id="sy-tok" type="password" placeholder="only if not using TOTP" autocomplete="off"></label>
+            <label class="field">Dhan PIN (for TOTP)<input id="sy-pin" type="password" inputmode="numeric" autocomplete="off"></label>
+            <label class="field">TOTP key (text under Dhan's QR)<input id="sy-totp" type="password" autocomplete="off"></label></div>`,
+          `<button class="btn" id="sy-dsave">Save</button><button class="btn primary" id="sy-auto">${au.on ? "Save new PIN / key" : "Turn on automatic login"}</button>${au.on ? `<button class="btn" id="sy-auto-off">Turn off TOTP</button>` : ""}<button class="btn" id="sy-dtest">Test Dhan</button><button class="btn" id="sy-renew">Renew now</button>`)}
+        ${card(cl, `<div class="small muted" style="margin-top:6px">Used today: ${cl.used || 0}. If it says "not logged in": open Terminal, type <code>claude</code>, log in.</div>`,
+          `<button class="btn" id="sy-ai">Test Claude (uses 1 message)</button><a class="btn" href="#/data">AI settings</a>`)}
+        ${card(tg, "", `<button class="btn" id="sy-tg">Send test message</button><a class="btn" href="#/data">Telegram settings</a>`)}
+        ${card(S.yahoo)}
+        ${card(S.nse)}
+      </div>
+
+      <div class="panel tight" style="margin-top:12px"><h3>Which source does what (and its limits)</h3>
+        <div class="table-wrap"><table class="mini"><thead><tr><th>Source</th><th>Used for</th><th>Limits</th><th>Login</th></tr></thead><tbody>
+          <tr><td>Upstox</td><td>Live prices of indices, stocks and options; option chains; instrument list</td><td>2,000 live options (app uses ≤1,900)</td><td>Daily (Upstox ends it at 3:30 AM)</td></tr>
+          <tr><td>Dhan Pro</td><td>5-year history, 200-level order book, news, market movers</td><td>5 calls/s and 100,000/day shared by all parts (download ≤92,000)</td><td>Automatic (TOTP), token 24 h</td></tr>
+          <tr><td>Claude</td><td>Notes, Ask Stockway, Lab ideas, ebook / transcript reading</td><td>Your Claude plan's usage</td><td>Claude Code on this Mac</td></tr>
+          <tr><td>Telegram</td><td>Alerts and notices on your phone</td><td>–</td><td>Bot token (once)</td></tr>
+          <tr><td>Yahoo Finance</td><td>World markets, VIX history</td><td>Free, unofficial</td><td>None</td></tr>
+          <tr><td>NSE</td><td>Filings, insider trades, ban list, end-of-day files</td><td>Free</td><td>None</td></tr>
+        </tbody></table></div>
+        <p class="small muted" style="margin:6px 0 0">Live prices come only from Upstox; Dhan is never a second price feed, so the two can't disagree in the scanner. Market data only: no orders anywhere.</p></div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:12px">
+        <div class="panel tight"><h3>Background jobs</h3><table class="mini"><tbody>${x.jobs.map((j) => `<tr><td>${esc(j.name)}</td><td>${esc(j.state || "")}</td><td class="small muted">${esc(j.detail || "")}</td></tr>`).join("")}</tbody></table></div>
+        <div class="panel tight"><h3>No-clash checks</h3><table class="mini"><tbody>${x.checks.map((c) => `<tr><td style="width:24px">${mark(c.ok)}</td><td>${esc(c.name)}<div class="small muted">${esc(c.detail || "")}</div></td></tr>`).join("")}</tbody></table></div>
+      </div>
+      <div class="panel tight" style="margin-top:12px"><h3>Problems in the last hour</h3>${x.problems.length ? `<table class="mini"><tbody>${x.problems.map((p) => `<tr><td class="small">${esc(p.last)}</td><td class="r small">${p.n}×</td><td class="small">${esc(p.text)}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:0">None.</p>`}</div>`;
+    const act = (id, fn) => { const b = $(id); if (b) b.onclick = async () => { try { await fn(b); } catch (e) { toast(e.message); } }; };
+    act("#sy-refresh", () => draw());
+    act("#sy-check", async (b) => { b.disabled = true; b.textContent = "Checking…"; const r = await post("/api/system/check", {}); live = Object.fromEntries(r.checks.map((c) => [c.id, c])); toast(`Live check done at ${r.at}`); draw(); });
+    act("#sy-uplogout", async () => { await post("/api/live/logout", {}); toast("Logged out of Upstox"); draw(); });
+    const saveDhan = async () => { const body = { "lab.dhan_client_id": $("#sy-cid").value.trim() }; const t = $("#sy-tok").value.trim(); if (t) body["lab.dhan_token"] = t; await post("/api/settings", body); };
+    act("#sy-dsave", async () => { await saveDhan(); toast("Saved"); draw(); });
+    act("#sy-auto", async (b) => { await saveDhan(); const pin = $("#sy-pin").value.trim(), secret = $("#sy-totp").value.trim(); if (!pin || !secret) { toast("Enter the Dhan PIN and the TOTP key"); return; }
+      b.disabled = true; b.textContent = "Checking with Dhan…"; try { const r = await post("/api/lab/dhan/auto", { pin, secret }); toast(`Automatic login on: token valid till ${(r.token && r.token.expires) || "tomorrow"}`); } finally { draw(); } });
+    act("#sy-auto-off", async () => { await fetch("/api/lab/dhan/auto", { method: "DELETE" }); toast("Automatic login off: PIN and key removed"); draw(); });
+    act("#sy-dtest", async () => { await saveDhan(); const r = await post("/api/lab/dhan/test", {}); toast(`Dhan connected (${r.profile.dhanClientId || "ok"}${r.profile.dataPlan ? ", plan " + r.profile.dataPlan : ""})`); draw(); });
+    act("#sy-renew", async () => { const r = await post("/api/lab/dhan/renew", {}); toast(`Token renewed: valid till ${r.token.expires}`); draw(); });
+    act("#sy-ai", async () => { const r = await post("/api/ai/test", {}); toast(`${r.by} answered: ${r.text}`); draw(); });
+    act("#sy-tg", async () => { await post("/api/telegram/test", {}); toast("Test message sent"); });
+    stopPageTimer();
+    const tick = () => {                   // refresh every 15 s, but never while you are typing a PIN / key / token
+      if (state.page !== "system") return;
+      const typing = ["#sy-pin", "#sy-totp", "#sy-tok", "#sy-cid"].some((id) => { const el = $(id); return el && (el.value && id !== "#sy-cid" || document.activeElement === el); });
+      if (typing) { L.pageTimer = setTimeout(tick, 15000); return; }
+      draw();
+    };
+    L.pageTimer = setTimeout(tick, 15000);
+  };
+  main.innerHTML = `<p class="muted">Checking every connection…</p>`;
+  await draw();
+}
+Object.assign(PAGES, { system: pageSystem });

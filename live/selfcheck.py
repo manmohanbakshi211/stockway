@@ -1,0 +1,81 @@
+"""No-clash checks: the things that must never collide, checked the same way in the tests and on the System page.
+
+Static checks look at the code and settings (no network, no engine). Runtime checks look at the running app.
+Each check: {"id", "name", "ok": True / False / None (not applicable now), "detail"}.
+"""
+from __future__ import annotations
+
+import inspect
+import shutil
+from pathlib import Path
+
+
+def _c(id_, name, ok, detail=""):
+    return {"id": id_, "name": name, "ok": ok, "detail": detail}
+
+
+def static_checks(cfg: dict | None = None) -> list:
+    from lab import dhan, dhan_budget, dhan_hist, dhan_token
+    out = []
+    src = inspect.getsource(dhan.Dhan._wait)
+    out.append(_c("dhan_shared_pace", "All Dhan calls share one speed limit and one daily counter",
+                  "dhan_budget.wait" in src and "dhan_budget.spend" in src and dhan_budget.RATE <= 5.0,
+                  f"{dhan_budget.RATE} calls/s for everything together (Dhan allows 5)"))
+    reserve = dhan_budget.DAY_LIMIT - dhan_hist.DAILY_CAP
+    out.append(_c("dhan_day_split", "The 5-year download leaves room for live news and movers",
+                  0 < dhan_hist.DAILY_CAP <= dhan_budget.DAY_LIMIT and reserve >= 5000,
+                  f"download up to {dhan_hist.DAILY_CAP:,} a day, {reserve:,} kept for live (Dhan limit {dhan_budget.DAY_LIMIT:,})"))
+    out.append(_c("dhan_one_keeper", "One token keeper: token changes happen one at a time",
+                  hasattr(dhan_token, "LOCK") and "with LOCK" in inspect.getsource(dhan_token.maybe_renew),
+                  "renew, TOTP, paste and Log in with Dhan all go through the same lock"))
+    c = (cfg or {}).get("live") or {}
+    budget = int(c.get("option_budget") or 1900)
+    out.append(_c("upstox_budget", "Upstox live options stay under Upstox's 2,000 limit", budget <= 2000,
+                  f"option budget {budget:,}"))
+    from live import dhandepth
+    out.append(_c("dhan_depth_sockets", "Dhan 200-level order book uses at most 5 sockets",
+                  "full-depth-api" in dhandepth.URL, "one socket per index future (Nifty, Bank Nifty)"))
+    from lab import factory
+    out.append(_c("lab_one_run", "Strategy Lab: one research round per Lab folder at a time",
+                  hasattr(factory, "_RUN_LOCKS"), "a second run waits for the first instead of overwriting it"))
+    return out
+
+
+def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None = None) -> list:
+    from lab import dhan_auto, dhan_budget, dhan_token
+    out = []
+    jobs = jobs or {}
+    free = shutil.disk_usage(Path(data_dir)).free / 1e9
+    out.append(_c("disk", "Enough free disk (10 GB+)", free >= 10, f"{free:.1f} GB free"))
+    used = dhan_budget.used()
+    out.append(_c("dhan_calls", "Dhan calls today under Dhan's daily limit", used < dhan_budget.DAY_LIMIT,
+                  f"{used:,} of {dhan_budget.DAY_LIMIT:,}"))
+    tok = dhan_token.status()
+    has_tok = bool(dhan_token.latest())
+    out.append(_c("dhan_token", "Dhan token valid", (not tok.get("dead")) if has_tok else None,
+                  "expired: TOTP will replace it" if tok.get("dead") and dhan_auto.load() else
+                  "expired" if tok.get("dead") else f"valid till {tok.get('expires')}" if tok.get("expires") else
+                  "no token saved" if not has_tok else "valid"))
+    au = dhan_auto.status()
+    out.append(_c("dhan_totp", "Dhan automatic login (TOTP) not stopped", (not au.get("blocked")) if au.get("on") else None,
+                  "off" if not au.get("on") else f"stopped: {au.get('last_error')}" if au.get("blocked") else "on"))
+    if engine is not None:
+        subs = len(getattr(engine, "opt_subs", None) or [])
+        budget = int((engine.cfg().get("live") or {}).get("option_budget") or 1900)
+        out.append(_c("upstox_subs", "Upstox options streamed within the budget", subs <= budget if subs else None,
+                      f"{subs:,} of {budget:,}" if subs else "scanner not running"))
+        dp = getattr(engine, "depth", None)
+        n = len(getattr(dp, "ids", {}) or {}) if dp else 0
+        out.append(_c("dhan_depth", "Dhan order-book sockets ≤ 5", n <= 5 if dp else None, f"{n} socket(s)" if dp else "off"))
+        out.append(_c("one_price_feed", "One live price feed (Upstox, or the simulator)",
+                      (engine.source in ("upstox", "sim")) if engine.running else None,
+                      f"{engine.source}" if engine.running else "scanner not running"))
+    d5, research5 = jobs.get("dhan5y_running"), jobs.get("research5y_running")
+    out.append(_c("download_vs_research", "5-year download and 5-year research not on the same data at once",
+                  not (d5 and research5) if (d5 or research5) else None,
+                  "both running: research would use half-downloaded data" if d5 and research5 else "fine"))
+    sched = jobs.get("scheduler_age_s")
+    out.append(_c("scheduler", "Background scheduler alive (auto-renew, auto-resume)",
+                  (sched is not None and sched < 180) if sched is not None else None,
+                  f"last tick {int(sched)} s ago" if sched is not None else "starting"))
+    return out

@@ -36,3 +36,14 @@
 - **Facts that change over time (lot size, expiry day, STT, events) are dated data, not code.** Old dates keep their old
   values so past backtests stay identical (Lab regression check: 594/594).
 - Every change keeps the stability rules above: add don't replace, shadow first, full tests + tools/lab_regression.py.
+
+## Test after every step (Mandeep, 3 Nov 2026)
+
+"Har step mein jab bhi kuch karo toh har bar ek test karna hai ki ensure nothing is clashing."
+
+- After every change, however small: run the full tests, including **tests/test_no_clash.py** (shared Dhan speed
+  limit and daily count, one token keeper, Upstox option budget, order-book sockets, one Lab run per folder, one live
+  price feed, every Dhan data call through lab/dhan.py). A new connection, job or data source adds its check to
+  live/selfcheck.py, which the System & logins page shows too.
+- Open the page you changed in a headless browser (no console errors, no sideways scroll at phone width) before release.
+- New connections are listed on the System & logins page with what they are used for, their limits and their login.

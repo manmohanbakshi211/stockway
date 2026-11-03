@@ -114,6 +114,17 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## System & logins page (2.23)
+
+Setup → **System & logins**: open it before the market opens.
+- **Before the market opens:** Upstox logged in, Dhan token, TOTP, Claude, Telegram, disk, no clashes: ✓ / ✗ / –.
+- **Every connection** (Upstox, Dhan, Claude, Telegram, Yahoo, NSE): status, what it is used for, and its logins and
+  buttons in one place (Log in with Upstox / Log out; Dhan client ID, token, TOTP on/off, Test, Renew; Test Claude;
+  Telegram test message).
+- **Run live check:** one small call to Upstox and Dhan (no AI message, no Telegram message).
+- **Which source does what**, with each one's limits; **background jobs**; **no-clash checks** (the same checks the
+  tests run, live/selfcheck.py); **problems in the last hour** grouped from the app log.
+
 ## One Dhan token, one keeper (2.22.1)
 
 All ways of getting a Dhan token (pasted token, Log in with Dhan, Renew, TOTP) go through one keeper, one at a time;

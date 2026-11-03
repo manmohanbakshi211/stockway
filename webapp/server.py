@@ -5,6 +5,7 @@ import contextlib
 import datetime as dt
 import io
 import json
+import shutil
 import threading
 import time
 import traceback
@@ -164,6 +165,7 @@ _sched = {}
 
 def scheduler_loop():
     while True:
+        _sched["tick"] = time.time()
         try:
             c = cfg()
             s = c.get("schedule", {})
@@ -1267,6 +1269,173 @@ def _start_live():
 
 # ----------------------------------------------------------------- UI
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+# ---- System page: every connection, what it is for, its health, all logins, and the no-clash checks
+APP_STARTED = time.time()
+ROLES = {
+    "upstox": ["Live prices of indices, 218 F&O stocks and ~1,900 options (the live scanner, alerts, paper trades)",
+               "Option chains, today's instrument list, 1-year daily candles", "Login: once a day (Upstox rule)"],
+    "dhan": ["5-year options history for the 5-year Lab (expired options, 1-minute)",
+             "200-level order book of Nifty / Bank Nifty futures (live)", "News headlines and market movers (live)",
+             "Trading-day calendar and stock turnover (for the download)", "Login: automatic with TOTP"],
+    "claude": ["Why-notes on alerts, hourly market notes, Ask Stockway", "Strategy ideas and ebook / transcript reading for the Lab",
+               "Login: Claude Code on this Mac (Terminal: claude)"],
+    "telegram": ["Alerts and important notices on your phone (token expired, live data stopped)"],
+    "yahoo": ["World markets, India VIX history, global context (free, no login)"],
+    "nse": ["Insider trades and company filings, F&O ban list, end-of-day files (free, no login)"],
+}
+
+
+def _ago(ts):
+    if not ts:
+        return None
+    s = time.time() - float(ts)
+    return f"{int(s)} s ago" if s < 120 else f"{int(s // 60)} min ago" if s < 7200 else f"{s / 3600:.1f} h ago" if s < 172800 else f"{s / 86400:.0f} days ago"
+
+
+def _svc(id_, name, status, detail, **kw):
+    return {"id": id_, "name": name, "status": status, "detail": detail, "roles": ROLES.get(id_, []), **kw}
+
+
+@app.get("/api/system")
+def system_view():
+    from lab import dhan_auto, dhan_budget, dhan_token
+    from live import selfcheck
+    from webapp.live_api import engine as _eng
+    e = _eng()
+    c = cfg()
+    lc = e.cfg()["live"]
+    svcs = []
+    # Upstox
+    rec = e.tokens.load() if e.tokens else None
+    feed = getattr(e, "feed", None)
+    tick = getattr(e.state, "last_tick", 0) if getattr(e, "state", None) else 0
+    if not (lc.get("upstox_api_key") and lc.get("upstox_api_secret")):
+        st, msg = "bad", "API key and secret not set (Live setup)"
+    elif not rec:
+        st, msg = "warn", "Not logged in today: Log in with Upstox (needed before 9:15)"
+    elif e.running and feed is not None and not getattr(feed, "connected", True):
+        st, msg = "bad", "Logged in, but the live feed is disconnected (reconnecting)"
+    else:
+        st, msg = "ok", (f"Logged in{' as ' + rec.get('user_name') if rec.get('user_name') else ''}, valid till "
+                         f"{str(rec.get('expires_at', ''))[11:16]} tomorrow" if rec else "")
+    svcs.append(_svc("upstox", "Upstox", st, msg, logged_in=bool(rec), scanner=e.status.get("state"),
+                     scanner_msg=e.status.get("message"), last_tick=_ago(tick), streaming=len(getattr(e, "opt_subs", None) or [])))
+    # Dhan
+    tk, au = dhan_token.status(), dhan_auto.status()
+    lab = c.get("lab") or {}
+    if not lab.get("dhan_client_id"):
+        st, msg = "bad", "Client ID not set"
+    elif tk.get("dead") and not (au.get("on") and not au.get("blocked")):
+        st, msg = "bad", "Token expired: turn on automatic login (TOTP) or paste a new token"
+    elif au.get("blocked"):
+        st, msg = "bad", f"Automatic login stopped: {au.get('last_error')}"
+    elif tk.get("dead"):
+        st, msg = "warn", "Token expired: automatic login is making a new one"
+    elif tk.get("expires"):
+        st, msg = "ok", f"Token valid till {tk['expires']} ({tk.get('hours_left')} h); renews by itself"
+    else:
+        st, msg = ("warn", "No token yet") if not dhan_token.latest() else ("ok", "Token saved")
+    dp = getattr(e, "depth", None)
+    intel = getattr(e, "dhan_intel", None)
+    svcs.append(_svc("dhan", "Dhan (Data API Pro)", st, msg, token=tk, auto=au, client_id=lab.get("dhan_client_id"),
+                     calls_today=dhan_budget.used(), cap=dhan_budget.DAY_LIMIT,
+                     depth={k: v for k, v in (dp.status.items() if dp else [])},
+                     news_movers=("on" if intel else "off"), movers_at=_ago(getattr(intel, "movers_at", 0)) if intel else None,
+                     intel_errors=dict(getattr(intel, "errors", {}) or {}) if intel else {}))
+    # Claude
+    ai = e.ai
+    on = ai.enabled()
+    err = ai.last_error
+    svcs.append(_svc("claude", "Claude (AI)", "ok" if on and not err else "warn" if on else "off",
+                     (err if err else f"{ai.label()} ready") if on else "Not set: Data & settings → AI",
+                     used=ai.used, provider=ai.provider()))
+    # Telegram
+    svcs.append(_svc("telegram", "Telegram", "ok" if e.telegram.enabled() else "off",
+                     "Messages go to your phone" if e.telegram.enabled() else "Not set: Data & settings → Telegram"))
+    # Yahoo / world
+    wu = getattr(e.world, "updated", {}) or {}
+    last = max([v for v in wu.values() if v] or [0])
+    svcs.append(_svc("yahoo", "Yahoo Finance", "ok" if last and time.time() - last < 3 * 3600 else "warn",
+                     f"World data updated {_ago(last)}" if last else "Not fetched yet", updated=_ago(last)))
+    ins = getattr(getattr(e, "insiders", None), "updated", None)
+    svcs.append(_svc("nse", "NSE (free files)", "ok" if ins and time.time() - ins < 2 * 86400 else "warn",
+                     f"Filings read {_ago(ins)}" if ins else "Not read yet", updated=_ago(ins)))
+    # jobs
+    d5 = DHAN5Y.view()
+    cur = JOBS.current or {}
+    from lab import factory
+    try:
+        fst = factory.load(ROOT / "data")
+        lab_last = fst.get("updated")
+    except Exception:
+        lab_last = None
+    jobs = {"dhan5y_running": d5.get("running"), "research5y_running": cur.get("kind") == "factory5y" and cur.get("status") == "running",
+            "scheduler_age_s": time.time() - _sched["tick"] if _sched.get("tick") else None}
+    job_rows = [
+        {"name": "Live scanner", "state": e.status.get("state"), "detail": e.status.get("message")},
+        {"name": "5-year download (Dhan)", "state": "running" if d5.get("running") else d5.get("status"),
+         "detail": f"{(d5.get('overview') or {}).get('pct', 0)}% complete · {dhan_budget.used():,} Dhan calls today"},
+        {"name": "Strategy Lab research", "state": cur.get("status") if cur.get("kind", "").startswith("factory") else "idle",
+         "detail": f"last result {lab_last[:16].replace('T', ' ')}" if lab_last else "no run yet"},
+        {"name": "Other job", "state": cur.get("status") if cur and not cur.get("kind", "").startswith("factory") else "idle",
+         "detail": cur.get("label") if cur and not cur.get("kind", "").startswith("factory") else ""},
+    ]
+    # recent problems from the app log (last hour)
+    import re as _re
+    now = dt.datetime.now()
+    probs = {}
+    for line in list(e.logs)[-400:]:
+        m = _re.match(r"(\d\d):(\d\d):(\d\d)\s+(.*)", line)
+        if not m or not _re.search(r"fail|error|rejected|refused|stopped|disconnected", m.group(4), _re.I):
+            continue
+        t = now.replace(hour=int(m.group(1)), minute=int(m.group(2)), second=int(m.group(3)))
+        if (now - t).total_seconds() > 3600 or (now - t).total_seconds() < -60:
+            continue
+        key = _re.sub(r"\d+", "#", m.group(4))[:70]
+        p = probs.setdefault(key, {"text": m.group(4)[:180], "n": 0, "last": line[:8]})
+        p["n"] += 1
+        p["last"], p["text"] = line[:8], m.group(4)[:180]
+    checks = selfcheck.static_checks(e.cfg()) + selfcheck.runtime_checks(e, ROOT / "data", jobs)
+    bad = [x for x in svcs if x["status"] == "bad"] + [x for x in checks if x["ok"] is False]
+    warn = [x for x in svcs if x["status"] == "warn"]
+    free = shutil.disk_usage(ROOT / "data").free / 1e9
+    return clean({"version": RUNNING_VERSION, "up_since": _ago(APP_STARTED), "free_gb": round(free, 1),
+                  "overall": "bad" if bad else "warn" if warn else "ok", "services": svcs, "jobs": job_rows,
+                  "checks": checks, "problems": sorted(probs.values(), key=lambda p: p["last"], reverse=True)[:12]})
+
+
+@app.post("/api/system/check")
+def system_check():
+    """Live checks against each service (one small call each; no AI call, no Telegram message)."""
+    from lab import dhan_token
+    from lab.dhan import Dhan
+    from webapp.live_api import engine as _eng
+    e = _eng()
+    out = []
+    t0 = time.time()
+    try:
+        if not e.tokens.load():
+            out.append({"id": "upstox", "ok": None, "detail": "not logged in today"})
+        else:
+            from live.upstox import UpstoxREST
+            rest = getattr(e, "rest", None) or UpstoxREST(e.tokens.load()["access_token"])   # the scanner's own client if running
+            p = rest.profile()
+            out.append({"id": "upstox", "ok": True, "detail": f"answered as {p.get('user_name') or p.get('user_id') or 'you'} ({time.time() - t0:.1f} s)"})
+    except Exception as ex:
+        out.append({"id": "upstox", "ok": False, "detail": str(ex)[:160]})
+    t0 = time.time()
+    c = _lab_cfg()
+    try:
+        if not (c.get("dhan_client_id") and dhan_token.latest()):
+            out.append({"id": "dhan", "ok": None, "detail": "no token"})
+        else:
+            p = Dhan(c["dhan_client_id"], dhan_token.latest()).profile()
+            out.append({"id": "dhan", "ok": True, "detail": f"answered ({time.time() - t0:.1f} s), data plan: {p.get('dataPlan') or '–'}"})
+    except Exception as ex:
+        out.append({"id": "dhan", "ok": False, "detail": str(ex)[:160]})
+    return {"checks": out, "at": dt.datetime.now().strftime("%H:%M:%S")}
 
 
 @app.middleware("http")
