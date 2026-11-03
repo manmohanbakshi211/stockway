@@ -80,6 +80,9 @@ FEATURES.update({
     "vs_ema21": ("price vs EMA 21 (5-min)", "%"),
     "lvl_atr": ("distance to the nearest key level (yesterday's high / low / close, opening range, day's average), in ATRs", "ATR"),
     "lvl_below": ("+1 the nearest key level is below (support), -1 above (resistance)", ""),
+    "d_trend": ("daily trend before today: +1 above the 20- and 50-day averages (rising), -1 below (falling), 0 mixed", ""),
+    "d_vs_ema20": ("yesterday's close vs its 20-day average", "%"),
+    "d_pos20": ("yesterday's close in its 20-day range (0 = at the low, 1 = at the high)", ""),
     "lvl_touch": ("+1 the bar came down to a key level and closed above it (support), -1 went up to one and closed below (resistance)", ""),
 })
 INDEX_SYMS = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX")
@@ -238,6 +241,9 @@ def bar_features(o, h, l, c, ctx: dict, iv=None, prem=None) -> dict:
     f["prem_pct"] = np.asarray(prem, float) if prem is not None else np.full(n, np.nan)
     f["dte"] = np.full(n, ctx.get("dte") if ctx.get("dte") is not None else np.nan)
     f["dow"] = np.full(n, ctx.get("dow", np.nan))
+    for k in ("d_trend", "d_vs_ema20", "d_pos20"):             # the bigger picture (daily), known before the open
+        v = ctx.get(k)
+        f[k] = np.full(n, float(v) if v is not None and v == v else np.nan)
     # opening candles
     f["fc_pos"] = _box_pos(c, h[0], l[0]) if n else np.full(n, np.nan)
     f["fc_pos"][:1] = np.nan
@@ -463,7 +469,8 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                 prem.append((ce + pe) / sp[m] * 100 if not (math.isnan(ce) or math.isnan(pe)) else math.nan)
             ctx = {"prev_close": None if r is None else r["prev_close"], "prev_high": None if r is None else r["prev_high"],
                    "prev_low": None if r is None else r["prev_low"], "gap": None if r is None else r["gap_pct"],
-                   "vix": vmap.get(day.date), "dte": None if r is None or pd.isna(r["dte"]) else r["dte"], "dow": day.date.weekday()}
+                   "vix": vmap.get(day.date), "dte": None if r is None or pd.isna(r["dte"]) else r["dte"], "dow": day.date.weekday(),
+                   **{k: (None if r is None or k not in r or pd.isna(r[k]) else float(r[k])) for k in ("d_trend", "d_vs_ema20", "d_pos20")}}
             for key in ("prev_close", "prev_high", "prev_low", "gap"):
                 if ctx[key] is not None and (isinstance(ctx[key], float) and math.isnan(ctx[key])):
                     ctx[key] = None
@@ -1059,6 +1066,18 @@ def add_ideas(data_dir, ideas: list, source: str) -> dict:
     st["ideas"] = (st.get("ideas", []) + ok)[-IDEA_QUEUE:]
     save(data_dir, st)
     return {"queued": len(ok), "rejected": bad, "already_queued": same}
+
+
+def queue_untested(data_dir, ideas: list, source: str) -> dict:
+    """Queue only the ideas this Lab has never tested (same rule id = same rule), e.g. the library and book setups
+    before every run, so new library entries are tested in every Lab (1-year and 5-year) without a button press."""
+    known = set(load(data_dir).get("rules", {}))
+    fresh = []
+    for x in ideas:
+        v = validate({**x, "source": x.get("source") or source})
+        if v and v["id"] not in known:
+            fresh.append(x)
+    return {**add_ideas(data_dir, fresh, source), "already_tested": len(ideas) - len(fresh)}
 
 
 def is_live(r: dict) -> bool:

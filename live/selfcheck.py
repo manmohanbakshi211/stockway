@@ -77,6 +77,15 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
         out.append(_c("one_price_feed", "One live price feed (Upstox, or the simulator)",
                       (engine.source in ("upstox", "sim")) if engine.running else None,
                       f"{engine.source}" if engine.running else "scanner not running"))
+    if engine is not None and getattr(engine, "context", None) is not None and getattr(engine, "source", None) != "sim":
+        cal = getattr(engine.context, "events_cal", None) or []
+        out.append(_c("results_calendar", "Results calendar loaded (NSE board meetings)", bool(cal) if engine.running else None,
+                      f"{len(cal):,} upcoming board meetings" if cal else
+                      (f"not loaded: {engine.context.errors.get('events')}" if engine.context.errors.get("events") else "loads with the market context")))
+        dl = getattr(engine, "daily", None) or {}
+        n_htf = sum(1 for k, v in dl.items() if isinstance(v, dict) and v.get("htf"))
+        out.append(_c("daily_trend", "Daily / weekly trend known for the scanned symbols", (n_htf > 0) if engine.running else None,
+                      f"{n_htf} symbols" if n_htf else "loads with the daily candles at start"))
     d5, research5 = jobs.get("dhan5y_running"), jobs.get("research5y_running")
     out.append(_c("download_vs_research", "5-year download and 5-year research not on the same data at once",
                   not (d5 and research5) if (d5 or research5) else None,

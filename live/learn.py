@@ -134,6 +134,10 @@ NUM = ["severity", "is_index", "agree", "against", "rel_vol", "z5", "minute_buck
        "cost_lot", "opt_px", "spread_pct", "delta", "nifty_al", "nifty15_al", "nifty_vwap_al", "breadth_al", "sector_al",
        "global_al", "vix_chg", "news_n", "news_al", "depth_al", "depth_all_al", "mover_rank", "mover_lists", "mover_al"]
 CAT = ["kind", "direction", "regime"]
+# 2.28: the bigger picture (live/htf.py) and events ahead. Recorded with every alert; used only by the challenger model
+# "hgb_plus", which replaces the champion only if it beats it by CHALLENGE_MARGIN on the same unseen days.
+NEW = ["htf_d_al", "htf_w_al", "htf_st_al", "htf_ema20_al", "htf_rsi", "htf_pos20", "htf_hi52", "htf_room_atr",
+       "res_days", "event_days", "index_event"]
 TRUST_AUC = 0.60
 MIN_DAYS = 5
 
@@ -142,11 +146,11 @@ def _frame(feats: list):
     import numpy as np
     import pandas as pd
     df = pd.DataFrame(feats)
-    for c in NUM:
+    for c in NUM + NEW:
         df[c] = pd.to_numeric(df[c], errors="coerce") if c in df else np.nan
     for c in CAT:
         df[c] = df[c].astype(str) if c in df else "na"
-    return df[NUM + CAT]
+    return df[NUM + NEW + CAT]
 
 
 def _prep(X, cols, cats):
@@ -184,7 +188,8 @@ def make_model(kind: str, cols: list):
                                                      n_jobs=-1, random_state=0))
 
 
-MODEL_NAMES = {"hgb": "gradient-boosted trees", "logit": "logistic regression", "forest": "random forest"}
+MODEL_NAMES = {"hgb": "gradient-boosted trees", "logit": "logistic regression", "forest": "random forest",
+               "hgb_plus": "gradient-boosted trees + bigger picture (daily / weekly trend, results ahead)"}
 
 
 class Ranker:
@@ -216,10 +221,13 @@ class Ranker:
             import joblib
             from sklearn.ensemble import HistGradientBoostingClassifier
             from sklearn.metrics import roc_auc_score
-            X = _frame([json.loads(r["features"]) for r in rows])
-            cols = [c for c in NUM if X[c].notna().any()] + CAT    # facts never seen yet (e.g. no news so far) are left out
-            cats = {c: sorted(X[c].unique().tolist()) for c in CAT}
-            X = _prep(X, cols, cats)
+            X0 = _frame([json.loads(r["features"]) for r in rows])
+            cols = [c for c in NUM if X0[c].notna().any()] + CAT    # facts never seen yet (e.g. no news so far) are left out
+            cats = {c: sorted(X0[c].unique().tolist()) for c in CAT}
+            X = _prep(X0, cols, cats)
+            new_cols = [c for c in NEW if X0[c].notna().any()]
+            cols_plus = cols[:-len(CAT)] + new_cols + CAT if new_cols else None
+            Xp = _prep(X0, cols_plus, cats) if cols_plus else None
             y = np.array([1 if r["result"] == "hit" else 0 for r in rows])
             o60 = np.array([r.get("o60") if r.get("o60") is not None else np.nan for r in rows], float)
             # holdout = the most recent 20% of days (at least one day), never used to fit
@@ -227,10 +235,11 @@ class Ranker:
             te = np.array([r["day"] in hold_days for r in rows]) if hold_days else np.arange(len(rows)) >= int(len(rows) * 0.8)
             # champion vs challengers, all judged on the same unseen days
             board = {}
-            for kind in ("hgb", "logit", "forest"):
+            for kind in ("hgb", "logit", "forest") + (("hgb_plus",) if Xp is not None else ()):
                 try:
-                    mk_ = make_model(kind, cols).fit(X[~te], y[~te])
-                    pk = mk_.predict_proba(X[te])[:, 1]
+                    Xk, ck = (Xp, cols_plus) if kind == "hgb_plus" else (X, cols)
+                    mk_ = make_model("hgb" if kind == "hgb_plus" else kind, ck).fit(Xk[~te], y[~te])
+                    pk = mk_.predict_proba(Xk[te])[:, 1]
                     board[kind] = (float(roc_auc_score(y[te], pk)) if len(set(y[te])) > 1 else 0.5, mk_, pk)
                 except Exception as ex_:
                     self.log(f"Conviction model {kind} failed: {ex_}")
@@ -239,6 +248,8 @@ class Ranker:
                 if kind != "hgb" and a_ >= board.get("hgb", (0,))[0] + CHALLENGE_MARGIN and a_ > board.get(best, (0,))[0]:
                     best = kind
             auc, m, p = board[best]
+            if best == "hgb_plus":                                 # the challenger with the new facts won
+                X, cols = Xp, cols_plus
             q = np.quantile(p, 0.9)
             top = p >= q
             info = {"n": len(rows), "days": len(days), "hold_n": int(te.sum()), "base_rate": round(float(y[te].mean()) * 100, 1),
@@ -251,7 +262,7 @@ class Ranker:
             info["trained"] = bool(auc >= TRUST_AUC and len(days) >= MIN_DAYS)
             info["why"] = ("trusted" if info["trained"] else
                            f"needs {MIN_DAYS}+ days (has {len(days)})" if len(days) < MIN_DAYS else f"holdout AUC {auc:.2f} < {TRUST_AUC}")
-            final = make_model(best, cols).fit(X, y)  # use every day for live predictions
+            final = make_model("hgb" if best == "hgb_plus" else best, cols).fit(X, y)  # every day, for live predictions
             self.cuts = np.quantile(final.predict_proba(X)[:, 1], np.linspace(0, 1, 101))
             self.model, self.info = final, info
             try:

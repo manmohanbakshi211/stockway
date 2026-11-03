@@ -114,6 +114,31 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Everything connected: the bigger picture on every alert (2.28)
+
+An end-to-end check of chart data → strategies → news → fundamentals → score → risk check → paper. What was missing
+or not joined up, and what changed (nothing that decides a trade changed: score, Focus, risk verdict and paper are the same):
+- **Daily / weekly trend was on the chart only, not in alerts.** Now every alert records the bigger picture (daily and
+  weekly trend, supertrend, RSI, where price sits in its 20-day range, room to the 20-day high / low) from the daily
+  candles already loaded, finished days only. Shown on the alert as "🔭 Bigger picture".
+- **No results calendar.** NSE's upcoming board meetings (results, dividends, fund raising) are read every 6 hours.
+  Alerts on a stock with results today / tomorrow say so; index alerts on RBI / Budget days say so.
+- **Risk check warnings (not blocks):** results today / tomorrow (IV crush, gap), index event today, against the daily
+  trend, right at the 20-day high / low. PASS / BLOCK is unchanged; these become rules only on your say-so, once the
+  record shows they help.
+- **Conviction model:** a challenger that also uses the bigger-picture facts competes with the current model on the
+  same unseen days and replaces it only if it is 0.02 AUC better. The current model is unchanged (tested).
+- **Strategy Lab:** the same daily-trend facts (d_trend, d_vs_ema20, d_pos20) in the bar table and in live Lab rules;
+  5 more book setups that follow the daily trend; untested library / book setups are queued automatically before every
+  Lab run (1-year and 5-year, including the nightly run), so nothing new waits for a button.
+- **5-year Lab rules never reached live.** Rules it promotes now run live **on trial** (recorded and graded per rule,
+  Scorecard → On trial), until you switch one on.
+- Chart overlays say when a Lab rule needs facts the chart can't rebuild for past days (VIX, expiry, IV, daily trend).
+- The AI "Why?" note now reads the bigger picture too.
+- Checked: 154 tests incl. no-clash; Lab regression 103 of 103 identical on old and rebuilt bar tables; alerts,
+  Scorecard, System, Lab and Chart pages at desktop and phone width, no errors. System page lists the NSE results
+  calendar and two new checks (results calendar loaded, daily trend known).
+
 ## The basics, trained in: candles, price action and chart patterns (2.27)
 
 From your three basics books (The Candlestick Trading Bible, Fidelity / Kirkpatrick "Identifying Chart Patterns", A to Z

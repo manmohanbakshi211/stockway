@@ -255,9 +255,17 @@ function alertItem(a, full = false, extra = "") {
     <div class="al-time">${hms(a.ts)}<span class="sevtag s${a.severity}">${SEV[a.severity]}</span>${score}</div>
     <div class="al-body"><div class="al-title">${arrow(a.direction)} <a href="${a.sym === "GLOBAL" ? "#/world" : `#/chart?s=${encodeURIComponent(a.sym)}`}">${esc(a.title)}</a></div>
       <p>${esc(a.detail)}${link} <span class="muted small">${esc(KIND[a.kind] || a.kind)}</span> ${track}</p>${live ? `<p class="small" style="margin:2px 0 6px">${live}</p>` : ""}
-      ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}
+      ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}${bigLine(d.bigger)}
       ${ev || ctxChips || conv || fits ? `<div class="evs">${conv}${fits}${ev}${ctxChips}</div>` : ""}${plan}${pro}${trade}${riskLine(d.risk)}
       ${a.ai ? `<div class="ai-text">${fmtAI(a.ai)}</div>` : ""}${extra}</div></li>`;
+}
+
+/* The bigger picture (live/htf.py + results calendar): information only, not in the score until it proves itself */
+function bigLine(b) {
+  if (!b || !(b.line || b.event || b.index_event)) return "";
+  const ev = b.event ? `${b.event.results ? "Results" : esc(b.event.purpose || "Board meeting")} ${b.event.days === 0 ? "today" : b.event.days === 1 ? "tomorrow" : `in ${b.event.days} trading days`} (${esc(b.event.date.slice(5))})` : "";
+  const parts = [b.line ? esc(b.line) : "", ev ? `<span class="${b.event.days <= 1 ? "amber" : ""}">${ev}</span>` : "", b.index_event ? `<span class="amber">${esc(b.index_event)} today</span>` : ""].filter(Boolean);
+  return `<p class="small muted" style="margin:2px 0 6px" title="Information only: recorded with every alert and tested by a challenger model before it can change scores or Focus">🔭 ${parts.join(" · ")}</p>`;
 }
 
 function exitBoardLive(x) {

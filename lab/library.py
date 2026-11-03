@@ -162,6 +162,27 @@ BOOKS = {
     "Failed breakout: stop and reverse": (
         f"{FID}: when a breakout falls back inside the pattern, reverse.",
         [{"dir": 1, "conds": [["rect_fail", ">", 0.5]], "win": [75, 300]}, {"dir": -1, "conds": [["rect_fail", "<", -0.5]], "win": [75, 300]}]),
+    "Pin bar at a key level with the daily trend": (
+        f"{CTB}: trade with the trend of the bigger timeframe; here the daily trend (20- / 50-day averages).",
+        [{"dir": 1, "conds": [["cdl_pin", ">", 0.5], ["lvl_touch", ">", 0.5], ["d_trend", ">", 0.5]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_pin", "<", -0.5], ["lvl_touch", "<", -0.5], ["d_trend", "<", -0.5]], "win": [15, 300]}]),
+    "Engulfing bar at the 21 EMA with the daily trend": (
+        f"{CTB}: engulfing bar after a pullback, in the direction of the daily trend.",
+        [{"dir": 1, "conds": [["cdl_engulf", ">", 0.5], ["d_trend", ">", 0.5], ["vs_ema21", "<", 0.2], ["vs_ema21", ">", -0.2]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_engulf", "<", -0.5], ["d_trend", "<", -0.5], ["vs_ema21", "<", 0.2], ["vs_ema21", ">", -0.2]], "win": [15, 300]}]),
+    "Inside bar breakout with the daily trend": (
+        f"{CTB}: inside-bar breakouts in the direction of the daily trend.",
+        [{"dir": 1, "conds": [["ib_break", ">", 0.5], ["d_trend", ">", 0.5]], "win": [15, 300]},
+         {"dir": -1, "conds": [["ib_break", "<", -0.5], ["d_trend", "<", -0.5]], "win": [15, 300]}]),
+    "Hammer / shooting star at a level with the daily trend": (
+        f"{CTB} and {FID}: reversal candles at support in a daily uptrend (buy the dip), at resistance in a downtrend.",
+        [{"dir": 1, "conds": [["cdl_hammer", ">", 0.5], ["lvl_touch", ">", 0.5], ["d_trend", ">", 0.5]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_hammer", "<", -0.5], ["lvl_touch", "<", -0.5], ["d_trend", "<", -0.5]], "win": [15, 300]}]),
+    "Rectangle breakout near the 20-day high / low": (
+        f"{FID}: breakouts that also clear the bigger range tend to run; here the day's box breaks with price already "
+        "near its 20-day extreme.",
+        [{"dir": 1, "conds": [["rect_break", ">", 0.5], ["d_pos20", ">", 0.8]], "win": [75, 300]},
+         {"dir": -1, "conds": [["rect_break", "<", -0.5], ["d_pos20", "<", 0.2]], "win": [75, 300]}]),
     "Outside bar with the trend": (
         f"{FID} (engulfing / outside bars): a bar that takes out both sides of the previous one and closes with the trend.",
         [{"dir": 1, "conds": [["cdl_outside", ">", 0.5], ["st_10_3", ">", 0]], "win": [15, 300]},

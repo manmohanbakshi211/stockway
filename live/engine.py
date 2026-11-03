@@ -10,7 +10,7 @@ import traceback
 import numpy as np
 from pathlib import Path
 
-from . import briefs, dayreport, detectors, registry
+from . import briefs, dayreport, detectors, htf, registry
 from .giftnifty import GiftNifty
 from .analytics import compute, norm_iv, pct
 from .clock import IST, Clock, SimClock, is_market_hours, minutes_since_open
@@ -334,7 +334,12 @@ class LiveEngine:
             if u.symbol in out:
                 continue
             try:
-                out[u.symbol] = daily_stats(self.rest.daily_candles(u.key, 400))
+                cs = self.rest.daily_candles(u.key, 400)
+                out[u.symbol] = daily_stats(cs)
+                try:                                     # the bigger picture (daily / weekly trend), finished days only
+                    out[u.symbol]["htf"] = htf.daily(cs, self.clock.now().date())
+                except Exception:
+                    pass
             except PermissionError:
                 raise
             except Exception as e:
@@ -846,6 +851,20 @@ class LiveEngine:
             self._fact_rules = (time.time(), rules)
         return rules
 
+    def factory_rules_5y(self) -> list:
+        """Rules promoted by the 5-year Lab (data/lab5y) that are not already live from the 1-year Lab. They run live as
+        ideas on trial (registry "lab5y", shadow): recorded and graded only, until you switch one on."""
+        at, rules = getattr(self, "_fact_rules5", (0.0, []))
+        if time.time() - at > 600:
+            try:
+                from lab import dhan_hist, factory
+                live_ids = {r["id"] for r in self.factory_rules()}
+                rules = [r for r in factory.promoted(dhan_hist.root(self.data_dir)) if r["id"] not in live_ids]
+            except Exception:
+                rules = []
+            self._fact_rules5 = (time.time(), rules)
+        return rules
+
     def factory_live_record(self) -> list:
         """Paper results of Strategy Lab rules, for demotion: [{'rule', 'net'}]."""
         out = []
@@ -1027,6 +1046,13 @@ class LiveEngine:
         except Exception:
             ctx["mkt"] = {}
         feats = features(a, m, ev, reg, mins, ctx)
+        big = {}
+        try:                                  # recorded with the alert; only a challenger model may use them (learn.py)
+            big = self.bigger_picture(a["sym"], a["direction"], m, now)
+            feats.update(big.pop("facts", {}))
+        except Exception as e:
+            if self._every("bigpic_err", 600, clock_time=False):
+                self.log(f"Bigger-picture facts skipped: {e}")
         p = self.ranker.predict(feats) if self.ranker else None
         sc = signal_score(a["severity"], ev, st, regime_adjust((reg or {}).get("code"), a["kind"], a["direction"]), p)
         muted = None
@@ -1062,6 +1088,7 @@ class LiveEngine:
                      "track": st, "score": sc, "model_p": round(p * 100) if p is not None else None, "muted": muted, "focus": focus,
                      "conviction": conv, "regime": (reg or {}).get("label"),
                      "plan": tp_plan,
+                     "bigger": big or None,
                      "fits_small": bool(a.get("option") and (a["option"].get("cost_per_lot") or 1e9) <= float(lc.get("small_lot_max") or 10000)),
                      "context": {k: feats.get(k) for k in ("nifty_al", "sector_al", "global_al", "breadth_al", "news_n", "news_al")}}
         # risk gate: PASS / BLOCK with reasons and lots, before anything can become a paper trade
@@ -1128,6 +1155,33 @@ class LiveEngine:
         except Exception:
             pass
 
+    def bigger_picture(self, sym, direction, m, now) -> dict:
+        """Daily / weekly trend, room to the 20-day high / low, the stock's next board meeting (results) and index
+        events today. {"line", "daily", "event", "index_event", "facts"}; facts are signed with the alert."""
+        d = (self.daily.get(sym) or {}).get("htf") or {}
+        out = {"line": htf.words(d, direction), "daily": {k: d.get(k) for k in ("trend", "w_trend", "st", "rsi", "pos20",
+                                                                                 "hi20", "lo20", "ema20", "ema50", "asof")} if d else None}
+        facts = htf.aligned(d, direction, (m or {}).get("spot"))
+        u = self.uni.underlyings.get(sym) if self.uni else None
+        today = now.date()
+        if u and not u.is_index and self.context is not None:
+            ev = self.context.next_event(sym, today)
+            if ev and ev["days"] <= 10:
+                out["event"] = ev
+                facts["res_days"] = ev["days"] if ev.get("results") else None
+                facts["event_days"] = ev["days"]
+        if u and u.is_index:
+            try:
+                from lab.rules import events_named
+                names = [n for dd, n in events_named() if dd == today.isoformat()]
+                if names:
+                    out["index_event"] = ", ".join(names)
+                    facts["index_event"] = 1
+            except Exception:
+                pass
+        out["facts"] = facts
+        return out
+
     def risk_for(self, a: dict, now) -> dict:
         """The risk gate on an idea with live option prices, today's paper book and the ban list, right now."""
         opt = dict(a.get("option") or {}) or None
@@ -1140,7 +1194,7 @@ class LiveEngine:
         lc = self.cfg().get("live") or {}
         return riskgate.check(a, opt, now=now, paper_cfg=self.paper.cfg, guard=self.paper.guard(now),
                               open_syms={t["sym"] for t in self.paper.open_trades()}, ban=ban, cfg=(lc.get("risk") or {}),
-                              sim=self.source == "sim")
+                              sim=self.source == "sim", bigger=(a.get("data") or {}).get("bigger"))
 
     BRAIN_RESERVE = 8          # automatic AI calls kept for the hourly market notes on the Pro plan
 
@@ -1549,6 +1603,13 @@ class LiveEngine:
                     log(f"Claude proposed {q['queued']} new rules")
                 except Exception as e:
                     log(f"no Claude ideas tonight ({e})")
+            try:                                          # library / book setups this Lab has not tested yet
+                from lab import library
+                q = factory.queue_untested(self.data_dir, library.rules(), source="library")
+                if q["queued"]:
+                    log(f"{q['queued']} untested library / book rules queued")
+            except Exception as e:
+                log(f"library not queued ({e})")
             factory.run(self.data_dir, n_random=6000, n_mutate=3000, log=log)
             try:
                 from lab import mlstrat
@@ -1559,6 +1620,8 @@ class LiveEngine:
                 from lab import dhan_hist
                 r5 = dhan_hist.root(self.data_dir)
                 if any(r5.glob("history/*/raw_*.parquet")):
+                    from lab import library
+                    factory.queue_untested(r5, library.rules(), source="library")
                     factory.run(r5, n_random=3000, n_mutate=1500, log=lambda m: log("[5y] " + m))
             except Exception as e:
                 log(f"5-year Lab failed: {e}")

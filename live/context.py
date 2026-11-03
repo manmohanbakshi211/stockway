@@ -233,6 +233,46 @@ class NSE:
     def announcements(self):
         return self.api("/api/corporate-announcements?index=equities") or []
 
+    def events(self) -> list:
+        """Upcoming board meetings (results, dividends, splits, fund raising) from NSE's event calendar, with the
+        board-meetings list as a fallback: [{sym, date, purpose}]."""
+        rows = []
+        for path in ("/api/event-calendar?index=equities", "/api/corporate-board-meetings?index=equities"):
+            try:
+                rows = parse_events(self.api(path))
+            except Exception:
+                rows = []
+            if rows:
+                break
+        return rows
+
+
+def _event_date(v):
+    for fmt in ("%d-%b-%Y", "%d-%m-%Y", "%Y-%m-%d", "%d %b %Y"):
+        try:
+            return dt.datetime.strptime(str(v).strip()[:11], fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def parse_events(data) -> list:
+    """NSE event calendar / board meetings JSON -> [{sym, date (ISO), purpose, results}] (unknown shapes -> [])."""
+    if isinstance(data, dict):
+        data = data.get("data") or data.get("rows") or []
+    out = []
+    for r in data or []:
+        if not isinstance(r, dict):
+            continue
+        sym = r.get("symbol") or r.get("bm_symbol")
+        d = _event_date(r.get("date") or r.get("bm_date") or "")
+        purpose = str(r.get("purpose") or r.get("bm_purpose") or r.get("bm_desc") or "").strip()
+        if sym and d:
+            blob = f"{purpose} {r.get('bm_desc') or ''}".lower()
+            out.append({"sym": str(sym).strip(), "date": d.isoformat(), "purpose": purpose[:80],
+                        "results": bool(re.search(r"financial result|results", blob))})
+    return out
+
 
 def classify_filing(desc: str, text: str):
     blob = f"{desc} {text}".lower()
@@ -288,6 +328,7 @@ class Context:
         self.all_filings = []
         self.seen_seq = set()
         self.sector_map = {}
+        self.events_cal = []        # upcoming board meetings: results, dividends, splits [{sym, date, purpose, results}]
         self.errors = {}
         self.updated = {}
         self.on_filing = None       # callback(filing) for alerts
@@ -313,6 +354,7 @@ class Context:
                 self.deals, self.fii_dii = c.get("deals") or [], c.get("fii_dii")
                 self.global_ = c.get("global") or []
                 self.sector_map = c.get("sectors") or {}
+                self.events_cal = c.get("events") or []
                 self.updated = c.get("updated") or {}
             except Exception:
                 pass
@@ -321,7 +363,8 @@ class Context:
         try:
             (self.data_dir / "context_cache.json").write_text(json.dumps({
                 "participants": self.participants, "mwpl": self.mwpl, "deals": self.deals[:200], "fii_dii": self.fii_dii,
-                "global": self.global_, "sectors": self.sector_map, "updated": self.updated}, default=str))
+                "global": self.global_, "sectors": self.sector_map, "events": self.events_cal[:3000],
+                "updated": self.updated}, default=str))
         except Exception:
             pass
 
@@ -352,6 +395,10 @@ class Context:
         f = self._do("fii_dii", self.nse.fii_dii)
         if f:
             self.fii_dii = f
+        if not self.events_cal or time.time() - self.updated.get("events", 0) > 6 * 3600:
+            ev = self._do("events", self.nse.events)
+            if ev:
+                self.events_cal = ev
         self._save_cache()
 
     def refresh_global(self):
@@ -402,6 +449,17 @@ class Context:
             except Exception as e:
                 self.log(f"Context refresh failed: {e}")
             time.sleep(10)
+
+    def next_event(self, sym, today: dt.date | None = None) -> dict | None:
+        """The stock's next board meeting from today on: {date, purpose, results, days (trading days away)}."""
+        today = today or dt.datetime.now(IST).date()
+        ahead = sorted((e for e in self.events_cal if e.get("sym") == sym and e.get("date", "") >= today.isoformat()),
+                       key=lambda e: e["date"])
+        if not ahead:
+            return None
+        e = ahead[0]
+        import numpy as np
+        return {**e, "days": int(np.busday_count(today, dt.date.fromisoformat(e["date"])))}
 
     def sector_of(self, sym):
         return self.sector_map.get(sym) or SIM_SECTORS.get(sym) or "Other"

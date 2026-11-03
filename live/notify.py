@@ -235,7 +235,8 @@ def alert_prompt(alert: dict, metrics: dict | None, news: list) -> str:
            "metrics": _slim_metrics(metrics) if metrics else None,
            "related_news": [n["title"] for n in news[:5]]}
     return (SYSTEM_STYLE + "Explain this live alert in 3 short bullet points: what happened, what is likely driving it "
-            "(use the metrics and news), and what would confirm or cancel the move (exact levels). Under 80 words total.\n\n"
+            "(use the metrics, news and data.bigger: daily / weekly trend and results ahead, if given), and what would confirm "
+            "or cancel the move (exact levels). Under 80 words total.\n\n"
             + _compact_json(ctx))
 
 

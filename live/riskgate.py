@@ -16,6 +16,9 @@ you set? Checks, in order:
 
 The first four are hard rules: a paper trade cannot be taken against them, even by hand. The rest can be
 overridden by hand with a confirmation; such trades are tagged "override" so their record is kept apart.
+
+Warnings (never change PASS / BLOCK): results or an index event today / tomorrow, trading against the daily trend,
+little room to the 20-day high / low. They become rules only if the graded record shows they help, on your say-so.
 """
 from __future__ import annotations
 
@@ -34,7 +37,7 @@ DEFAULTS = {
 
 
 def check(alert: dict, opt: dict | None, *, now: dt.datetime, paper_cfg: dict, guard: dict, open_syms: set,
-          ban: list | None = None, cfg: dict | None = None, sim: bool = False) -> dict:
+          ban: list | None = None, cfg: dict | None = None, sim: bool = False, bigger: dict | None = None) -> dict:
     c = {**DEFAULTS, **(cfg or {})}
     reasons, warns, hard = [], [], []
 
@@ -88,9 +91,32 @@ def check(alert: dict, opt: dict | None, *, now: dt.datetime, paper_cfg: dict, g
             capital_used = round(ask * lot * max(lots, 1), 0)
             if capital_used > float(paper_cfg.get("capital", 500000)) * 0.25:
                 warns.append(f"Uses ₹{capital_used:,.0f}, over a quarter of the capital.")
+    warns += bigger_warnings(alert, bigger)
     verdict = "BLOCK" if reasons else "PASS"
     return {"verdict": verdict, "reasons": reasons, "hard": hard, "can_override": bool(reasons) and not hard, "warnings": warns, "lots": lots if verdict == "PASS" else 0,
             "max_loss": max_loss, "capital_used": capital_used, "per_lot_loss": round(per_lot, 0) if per_lot else None,
             "rules": {"max_loss_per_trade": round(float(paper_cfg.get("capital", 500000)) * float(paper_cfg.get("risk_pct", 1.0)) / 100, 0),
                       "daily_loss_limit": guard.get("loss_limit"), "trades_today": guard.get("trades_today"),
                       "max_trades": paper_cfg.get("max_trades_day"), "min_rr": c["min_rr"]}}
+
+
+def bigger_warnings(alert: dict, big: dict | None) -> list:
+    """Warnings from the bigger picture (live/htf.py and the results calendar). Information only."""
+    if not big:
+        return []
+    out = []
+    d = {"up": 1, "down": -1}.get(alert.get("direction"))
+    ev = big.get("event") or {}
+    if ev.get("results") and ev.get("days") is not None and ev["days"] <= 1:
+        out.append(f"Results {'today' if ev['days'] == 0 else 'tomorrow'} ({ev['date']}): option prices usually drop "
+                   "sharply after results (IV crush) and the stock can gap either way.")
+    elif ev and ev.get("days") is not None and ev["days"] <= 1:
+        out.append(f"Board meeting {'today' if ev['days'] == 0 else 'tomorrow'}: {ev.get('purpose') or 'corporate event'}.")
+    if big.get("index_event"):
+        out.append(f"{big['index_event']} today: big swings around the announcement.")
+    dl = big.get("daily") or {}
+    if d and dl.get("trend") == -d:
+        out.append(f"Against the daily trend (price {'below' if d > 0 else 'above'} its 20- and 50-day averages).")
+    if d and dl.get("pos20") is not None and ((d > 0 and dl["pos20"] >= 0.95) or (d < 0 and dl["pos20"] <= 0.05)):
+        out.append(f"Right at the 20-day {'high' if d > 0 else 'low'}: needs a clean breakout, else it often turns there.")
+    return out

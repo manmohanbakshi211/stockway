@@ -94,7 +94,11 @@ class ChartData:
     def _factory(self, now, slot, emit):
         """Promoted Strategy Lab rules on the bar that just closed (Nifty, Bank Nifty): same facts as the backtest."""
         from lab import factory
-        rules = self.e.factory_rules()
+        rules = [dict(r, _kind="factory") for r in self.e.factory_rules()]
+        try:                                   # 5-year Lab rules: on trial (recorded and graded only)
+            rules += [dict(r, _kind="lab5y") for r in self.e.factory_rules_5y()]
+        except Exception:
+            pass
         rec = self.e.fact_bars
         syms = ["NIFTY", "BANKNIFTY"]
         if any(factory.STOCKS in r["syms"] for r in rules) and self.e.uni:   # stock rules: scan every F&O stock
@@ -121,9 +125,11 @@ class ChartData:
             u = self.e.uni.underlyings.get(sym) if self.e.uni else None
             exp = u.near_expiry(now.date()) if u else None
             dte = int(np.busday_count(now.date(), exp)) if exp else None
+            dly = (self.e.daily.get(sym) or {}).get("htf") or {}
             ctx = {"prev_close": pdc, "prev_high": ctx0.get("pdh"), "prev_low": ctx0.get("pdl"),
                    "gap": (o5[0] / pdc - 1) * 100 if pdc else None, "vix": getattr(vix, "cp", None) if vix else None,
-                   "dte": dte, "dow": now.weekday()}
+                   "dte": dte, "dow": now.weekday(),
+                   "d_trend": dly.get("trend"), "d_vs_ema20": dly.get("vs_ema20_pct"), "d_pos20": dly.get("pos20")}
             ivs = [day_rec.get(i, (None, None))[0] for i in range(slot)]
             prem = [day_rec.get(i, (None, None))[1] for i in range(slot)]
             f = factory.bar_features(o5, h5, l5, c5, ctx, [np.nan if x is None else x for x in ivs],
@@ -148,6 +154,11 @@ class ChartData:
                 d = r["dir"]
                 h = r["hold"]
                 if d == 0 and is_stock:
+                    continue
+                if r.get("_kind") == "lab5y":
+                    if d == 0:
+                        continue                             # option selling on trial: nothing to grade on the price yet
+                    self._trial_rule(sym, m, r, d, h5, l5, c5, emit)
                     continue
                 if d == 0:                                   # straddle selling: alert + paper-sell both legs (when margin allows)
                     took = self._paper_straddle(sym, m, r, now)
@@ -176,6 +187,25 @@ class ChartData:
                       "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%."
                                 + (f" Note: tested on other F&O stocks, not on {sym} itself." if untested else ""),
                       "price": m.get("spot"), "data": {"factory": fac}})
+
+    def _trial_rule(self, sym, m, r, d, h5, l5, c5, emit):
+        """A 5-year Lab rule on trial: chart-level exits use the rule's own stop; % exits are graded with a 1 ATR stop
+        and a 2R target on the price (the same way the chart overlays show them)."""
+        from lab import exits as X, factory
+        atr = float(X.atr14(h5, l5, c5)[-1])
+        if r["exit"] in factory.STYLES:
+            R = float(X.risk_pts(r["exit"], m["spot"], d, atr, l5[-1], h5[-1]))
+            tr = X.STYLES[r["exit"]].get("target_r") or 2.0
+        else:
+            R, tr = atr, 2.0
+        if not np.isfinite(R) or R <= 0 or not m.get("spot"):
+            return
+        e, h = float(m["spot"]), r.get("hold") or {}
+        emit({"sym": sym, "kind": "lab5y", "direction": "up" if d > 0 else "down", "severity": 2,
+              "title": f"{sym} 5-year Lab rule {r['id']}: {'BUY call' if d > 0 else 'BUY put'} (on trial)",
+              "detail": f"{r['rule']} 5-year holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}. On trial: recorded and graded only.",
+              "price": e, "data": {"factory": {"id": r["id"], "lab": "5y"}, "trial_key": r["id"],
+                                   "setup_levels": {"entry": round(e, 2), "stop": round(e - d * R, 2), "target": round(e + d * tr * R, 2), "rr": tr}}})
 
     def _tested_stocks(self) -> set:
         """Stocks with option history in the current Lab (the ones its 'any F&O stock' rules were tested on)."""

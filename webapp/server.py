@@ -721,6 +721,13 @@ async def factory_run(req: Request):
     n = max(500, min(int(b.get("n") or 6000), 30000))
 
     def job(log, stop):
+        try:
+            from lab import library
+            q = factory.queue_untested(ROOT / "data", library.rules(), source="library")
+            if q["queued"]:
+                log(f"{q['queued']} untested library / book rules queued")
+        except Exception as e:
+            log(f"Library not queued: {e}")
         factory.run(ROOT / "data", n_random=n, n_mutate=n // 2, log=log, should_stop=stop)
         if not stop():
             try:
@@ -993,8 +1000,9 @@ async def factory_lab5y_run(req: Request):
     def job(log, stop):
         dhan_hist.link_upstox(ROOT / "data", ["NIFTY", "BANKNIFTY"] + [p.parent.name for p in (ROOT / "data" / "history").glob("*/meta.json")])
         from lab import library
-        if not factory.load(root).get("rules"):
-            factory.add_ideas(root, library.rules(), source="library")
+        q = factory.queue_untested(root, library.rules(), source="library")   # new library / book setups too
+        if q["queued"]:
+            log(f"{q['queued']} untested library / book rules queued")
         factory.run(root, n_random=n, n_mutate=n // 2, log=log, should_stop=stop)
         if not stop():
             from lab import mlstrat
@@ -1284,7 +1292,8 @@ ROLES = {
                "Login: Claude Code on this Mac (Terminal: claude)"],
     "telegram": ["Alerts and important notices on your phone (token expired, live data stopped)"],
     "yahoo": ["World markets, India VIX history, global context (free, no login)"],
-    "nse": ["Insider trades and company filings, F&O ban list, end-of-day files (free, no login)"],
+    "nse": ["Insider trades and company filings, F&O ban list, end-of-day files (free, no login)",
+            "Upcoming results / board meetings (event calendar, every 6 hours): warnings on alerts"],
 }
 
 

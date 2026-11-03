@@ -423,9 +423,15 @@ class MTF:
         stats = {"n": len(sigs), "wins": wins, "losses": len(done) - wins,
                  "avg_r": round(float(sum(s["r"] for s in done)) / len(done), 2) if done else None,
                  "days": len(dates[-days:])}
-        return {"id": oid, "signals": sigs, "stats": stats,
-                "note": "On the underlying's 5-minute chart, stop and target first touched within the day; options, costs "
-                        "and slippage are not included here (the Strategy Lab tests those)."}
+        note = ("On the underlying's 5-minute chart, stop and target first touched within the day; options, costs "
+                "and slippage are not included here (the Strategy Lab tests those).")
+        if rule:                       # facts the chart can't rebuild for past days: say so instead of drawing too few
+            missing = sorted({c[0] for c in rule.get("conds", []) if c[0] in ("vix", "dte", "iv", "iv_chg3", "prem_pct",
+                                                                                 "d_trend", "d_vs_ema20", "d_pos20")})
+            if missing:
+                note += (f" This rule also uses {', '.join(missing)}, which the chart does not have for past days, "
+                         "so it shows fewer signals here than the Lab and the live scanner see.")
+        return {"id": oid, "signals": sigs, "stats": stats, "note": note}
 
     def _overlay_day(self, sym, kind, key, rule, bars, prev) -> list:
         from . import registry

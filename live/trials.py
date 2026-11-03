@@ -31,6 +31,10 @@ class Trials:
         self.cool: dict = {}
         with store.lock:
             store.db.executescript(SQL)
+            try:                                       # 2.28: which version of an idea (e.g. the 5-year Lab rule id)
+                store.db.execute("ALTER TABLE trial_alerts ADD COLUMN variant TEXT")
+            except Exception:
+                pass
             if source == "sim":
                 store.db.execute("DELETE FROM trial_alerts WHERE source='sim'")
             store.db.commit()
@@ -57,7 +61,8 @@ class Trials:
         d = {"up": 1, "down": -1}.get(a.get("direction"))
         lv = (a.get("data") or {}).get("setup_levels") or {}
         entry, stop, target = lv.get("entry") or a.get("price"), lv.get("stop"), lv.get("target")
-        key = (a["sym"], a["kind"], a.get("direction"))
+        variant = (a.get("data") or {}).get("trial_key")
+        key = (a["sym"], a["kind"], a.get("direction"), variant)
         last = self.cool.get(key)
         if last and now_ts - last < cooldown_min * 60:
             return None
@@ -65,10 +70,11 @@ class Trials:
         gradable = bool(d and entry and stop and und_key and abs(entry - stop) > 0)
         with self.store.lock:
             cur = self.store.db.execute(
-                "INSERT INTO trial_alerts(ts, day, source, sym, kind, direction, und, entry, stop, target, title, detail, data, result) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO trial_alerts(ts, day, source, sym, kind, direction, und, entry, stop, target, title, detail, data, result, variant) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (now_ts, a.get("day"), self.source, a["sym"], a["kind"], a.get("direction"), und_key, entry, stop, target,
-                 a.get("title"), a.get("detail"), json.dumps(a.get("data") or {}, default=str), None if gradable else "ungraded"))
+                 a.get("title"), a.get("detail"), json.dumps(a.get("data") or {}, default=str), None if gradable else "ungraded",
+                 variant))
             self.store.db.commit()
             tid = cur.lastrowid
         if gradable:
@@ -124,7 +130,7 @@ def board(store, source, days: int = 90, recent: int = 40) -> dict:
     try:
         with store.lock:
             rows = [dict(r) for r in store.db.execute(
-                "SELECT kind, sym, result, r_exit, r15, day FROM trial_alerts WHERE source=? AND day >= date('now', ?)",
+                "SELECT kind, variant, sym, result, r_exit, r15, day FROM trial_alerts WHERE source=? AND day >= date('now', ?)",
                 (source, f"-{days} day")).fetchall()]
             last = [dict(r) for r in store.db.execute(
                 "SELECT id, ts, day, sym, kind, direction, entry, stop, target, title, result, reason, r_exit FROM trial_alerts "
@@ -133,7 +139,7 @@ def board(store, source, days: int = 90, recent: int = 40) -> dict:
         rows, last = [], []
     by = {}
     for r in rows:
-        b = by.setdefault(r["kind"], {"n": 0, "hits": 0, "misses": 0, "timed": 0, "open": 0, "rs": [], "days": set(), "idx": 0})
+        b = by.setdefault((r["kind"], r.get("variant")), {"n": 0, "hits": 0, "misses": 0, "timed": 0, "open": 0, "rs": [], "days": set(), "idx": 0})
         b["n"] += 1
         b["days"].add(r["day"])
         b["idx"] += r["sym"] in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX")
@@ -148,9 +154,9 @@ def board(store, source, days: int = 90, recent: int = 40) -> dict:
         if r["r_exit"] is not None:
             b["rs"].append(r["r_exit"])
     kinds = []
-    for k, b in by.items():
+    for (k, var), b in by.items():
         dec = b["hits"] + b["misses"]
-        kinds.append({"kind": k, "label": registry.label(k), "n": b["n"], "days": len(b["days"]), "on_indices": b["idx"],
+        kinds.append({"kind": k, "variant": var, "label": registry.label(k) + (f" {var}" if var else ""), "n": b["n"], "days": len(b["days"]), "on_indices": b["idx"],
                       "hits": b["hits"], "misses": b["misses"], "timed": b["timed"], "open": b["open"],
                       "hit_rate": round(b["hits"] / dec * 100) if dec else None,
                       "avg_r": round(sum(b["rs"]) / len(b["rs"]), 2) if b["rs"] else None,

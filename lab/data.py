@@ -268,6 +268,16 @@ def day_table(data_dir, sym: str, days: list[Day] | None = None) -> pd.DataFrame
     t["rv20"] = t["rv20"].shift(0)            # uses closes up to yesterday at entry (shifted below)
     t["rv20_prev"] = t["rv20"].shift(1)
     t["range_pct"] = (t["high"] - t["low"]) / t["open"] * 100
+    # 2.28: the daily trend known before the day starts (closes up to yesterday), same rule as live/htf.py:
+    # +1 close > 20-day EMA > 50-day EMA, -1 the reverse, 0 otherwise; NaN for the first 50 days (averages warming up)
+    c = t["close"].astype(float)
+    e20, e50 = c.ewm(span=20, adjust=False).mean(), c.ewm(span=50, adjust=False).mean()
+    tr = np.where((c > e20) & (e20 > e50), 1.0, np.where((c < e20) & (e20 < e50), -1.0, 0.0))
+    hi20, lo20 = t["high"].rolling(20).max(), t["low"].rolling(20).min()
+    warm = np.arange(len(t)) < 50
+    t["d_trend"] = pd.Series(np.where(warm, np.nan, tr)).shift(1).values
+    t["d_vs_ema20"] = pd.Series(np.where(warm, np.nan, (c / e20 - 1) * 100)).shift(1).values
+    t["d_pos20"] = ((c - lo20) / (hi20 - lo20)).where(hi20 > lo20).shift(1).values
     return t
 
 
