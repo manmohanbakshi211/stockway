@@ -31,9 +31,15 @@ class Recorder:
               bid REAL, ask REAL, tbq REAL, tsq REAL, cvd REAL);
             CREATE INDEX IF NOT EXISTS minutes_key ON minutes(key, ts);
             CREATE TABLE IF NOT EXISTS metrics (ts INTEGER, sym TEXT, data TEXT);
-            CREATE INDEX IF NOT EXISTS metrics_sym ON metrics(sym, ts);""")
+            CREATE INDEX IF NOT EXISTS metrics_sym ON metrics(sym, ts);
+            -- 2.31 data vault: full option chains (every strike), every headline, the market around it
+            CREATE TABLE IF NOT EXISTS chains (ts INTEGER, sym TEXT, expiry TEXT, spot REAL, strike REAL, side TEXT, key TEXT,
+              ltp REAL, bid REAL, ask REAL, oi REAL, oi_chg REAL, vol REAL, iv REAL, delta REAL);
+            CREATE TABLE IF NOT EXISTS news (ts REAL, seen INTEGER, source TEXT, title TEXT, link TEXT, syms TEXT, tone INTEGER);
+            CREATE TABLE IF NOT EXISTS context (ts INTEGER, kind TEXT, data TEXT);""")
             self.db.commit()
         self.rows = 0
+        self.counts = {"chains": 0, "chain_rows": 0, "news": 0, "context": 0}
 
     def snapshot(self, ts: int, state, metrics: dict, slim):
         with state.lock:
@@ -46,6 +52,57 @@ class Recorder:
             self.db.commit()
         self.rows += len(rows)
 
+    def chain(self, ts: int, res: dict):
+        """One full option chain snapshot (every strike, both sides) as the app fetched it."""
+        rows = []
+        for r in res.get("rows") or []:
+            for side in ("CE", "PE"):
+                o = r.get(side) or {}
+                if o.get("ltp") is None and o.get("oi") is None:
+                    continue
+                rows.append((ts, res.get("sym"), res.get("expiry"), res.get("spot"), r.get("strike"), side, o.get("key"),
+                             o.get("ltp"), o.get("bid"), o.get("ask"), o.get("oi"), o.get("oi_chg"), o.get("vol"), o.get("iv"),
+                             o.get("delta")))
+        if not rows:
+            return 0
+        with self.lock:
+            self.db.executemany("INSERT INTO chains VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            self.db.commit()
+        self.counts["chains"] += 1
+        self.counts["chain_rows"] += len(rows)
+        return len(rows)
+
+    def news(self, items: list, seen_ts: float):
+        rows = [(float(n.get("ts") or seen_ts), int(seen_ts), n.get("source"), n.get("title"), n.get("link"),
+                 ",".join(n.get("syms") or []), n.get("tone")) for n in items if n.get("title")]
+        if rows:
+            with self.lock:
+                self.db.executemany("INSERT INTO news VALUES (?,?,?,?,?,?,?)", rows)
+                self.db.commit()
+            self.counts["news"] += len(rows)
+        return len(rows)
+
+    def context(self, ts: int, kind: str, data: dict):
+        with self.lock:
+            self.db.execute("INSERT INTO context VALUES (?,?,?)", (ts, kind, json.dumps(data, default=str)))
+            self.db.commit()
+        self.counts["context"] += 1
+
+    def health(self) -> dict:
+        """What today's recording holds so far (the System page's Data vault card)."""
+        out = {}
+        with self.lock:
+            for t, q in (("minute_rows", "SELECT COUNT(*) FROM minutes"), ("minutes", "SELECT COUNT(DISTINCT ts) FROM minutes"),
+                         ("instruments", "SELECT COUNT(DISTINCT key) FROM minutes"), ("chain_snaps", "SELECT COUNT(DISTINCT ts || sym) FROM chains"),
+                         ("chain_syms", "SELECT COUNT(DISTINCT sym) FROM chains"), ("chain_rows", "SELECT COUNT(*) FROM chains"),
+                         ("news", "SELECT COUNT(*) FROM news"), ("context", "SELECT COUNT(*) FROM context"),
+                         ("first", "SELECT MIN(ts) FROM minutes"), ("last", "SELECT MAX(ts) FROM minutes")):
+                try:
+                    out[t] = self.db.execute(q).fetchone()[0]
+                except Exception:
+                    out[t] = None
+        return out
+
     def finalize(self, keep_days: int = 365, log=print):
         """End of day: squeeze the day into compressed Parquet files (about 10x smaller) and drop old days."""
         try:
@@ -57,6 +114,11 @@ class Recorder:
                 base = self.path.with_suffix("")
                 mins.to_parquet(f"{base}_minutes.parquet", compression="zstd", index=False)
                 mets.to_parquet(f"{base}_metrics.parquet", compression="zstd", index=False)
+                for t in ("chains", "news", "context"):           # 2.31 data vault
+                    with self.lock:
+                        df = pd.read_sql(f"SELECT * FROM {t}", self.db)
+                    if len(df):
+                        df.to_parquet(f"{base}_{t}.parquet", compression="zstd", index=False)
                 self.close()
                 self.path.unlink(missing_ok=True)
                 log(f"Saved today's recording ({len(mins):,} rows)")

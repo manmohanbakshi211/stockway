@@ -1,0 +1,9 @@
+{
+ "about": "Estimated margin for sold options (bullets, dated: add a new entry with its start date when the exchange or your broker changes margins; old dates keep their old values). Used only to say how much money a test-bench trade would block per lot, so each capital level only takes what it could really afford. It is an estimate: your broker's margin calculator is the real number. naked_pct = margin for one sold option without a hedge, as % of the contract value (strike x lot); hedged_exposure_pct = what is still blocked on a sold option covered by a bought one, as % of its contract value, on top of the most the pair can lose; expiry_day_extra_pct = extra margin on sold index options on their expiry day.",
+ "rates": [
+  {"from": "2024-11-20",
+   "index": {"naked_pct": 7.0, "hedged_exposure_pct": 2.0, "expiry_day_extra_pct": 2.0},
+   "stock": {"naked_pct": 18.5, "hedged_exposure_pct": 3.5, "expiry_day_extra_pct": 0.0},
+   "source": "SPAN + exposure margin as brokers showed them in 2025-26 (index short ATM about 7% of contract value; hedged spreads about 75% less)"}
+ ]
+}

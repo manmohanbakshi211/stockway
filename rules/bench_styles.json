@@ -1,0 +1,16 @@
+{
+ "about": "Test bench styles (bullets). Every directional signal is paper-traded once per style, 1 lot, with honest fills (buy at the ask, sell at the bid, every charge). A style is a list of legs: side 'with' = the option that gains if the signal is right (CE for up, PE for down), 'against' = the other side (PE for up, CE for down); offset = strikes from the at-the-money strike (+ = out of the money, - = in the money); q = +1 bought, -1 sold. Family is worked out from the legs: only bought = buying, only sold = selling, both = buying + selling. exit: target_pct / stop_pct are % of the premium paid (or received, for credit trades) as profit / loss; null = the paper account's setting. hold_min null = the paper account's time limit; to_close true = held to the 15:15 close unless the target or stop comes first. A style whose legs have no live price (most stocks stream only the at-the-money strike) is skipped for that signal. Add a style here; no code change. A broken entry is skipped and shown on the System page; the rest keep running.",
+ "styles": {
+  "buy": {"label": "Buy ATM", "legs": [{"side": "with", "offset": 0, "q": 1}], "exit": {}},
+  "spread": {"label": "Debit spread", "legs": [{"side": "with", "offset": 0, "q": 1}, {"side": "with", "offset": 2, "q": -1}], "exit": {}},
+  "buy_otm": {"label": "Buy 1 OTM", "legs": [{"side": "with", "offset": 1, "q": 1}], "exit": {}, "since": "2026-11-04"},
+  "buy_itm": {"label": "Buy 1 ITM", "legs": [{"side": "with", "offset": -1, "q": 1}], "exit": {}, "since": "2026-11-04"},
+  "buy_day": {"label": "Buy ATM, hold the day", "legs": [{"side": "with", "offset": 0, "q": 1}],
+              "exit": {"target_pct": 60, "stop_pct": 30, "to_close": true}, "since": "2026-11-04"},
+  "credit": {"label": "Credit spread", "legs": [{"side": "against", "offset": 0, "q": -1}, {"side": "against", "offset": 2, "q": 1}],
+             "exit": {}, "since": "2026-11-04"},
+  "sell": {"label": "Sell ATM", "legs": [{"side": "against", "offset": 0, "q": -1}], "exit": {}, "since": "2026-11-04"},
+  "sell_day": {"label": "Sell 1 OTM, hold the day", "legs": [{"side": "against", "offset": 1, "q": -1}],
+               "exit": {"target_pct": 50, "stop_pct": 50, "to_close": true}, "since": "2026-11-04"}
+ }
+}

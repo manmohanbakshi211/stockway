@@ -2652,9 +2652,11 @@ async function pageSystem() {
         ${card(S.nse)}
       </div>
 
+      ${vaultPanel(x.vault)}
+
       <div class="panel tight" style="margin-top:12px"><h3>Which source does what (and its limits)</h3>
         <div class="table-wrap"><table class="mini"><thead><tr><th>Source</th><th>Used for</th><th>Limits</th><th>Login</th></tr></thead><tbody>
-          <tr><td>Upstox</td><td>Live prices of indices, stocks and options; option chains; instrument list</td><td>2,000 live options (app uses ≤1,900)</td><td>Daily (Upstox ends it at 3:30 AM)</td></tr>
+          <tr><td>Upstox</td><td>Live prices of indices, stocks and options; option chains (and the data vault's stock chains every 30 min, spare calls only); instrument list</td><td>2,000 live options (app uses ≤1,900); REST calls paced under its 30-minute limit</td><td>Daily (Upstox ends it at 3:30 AM)</td></tr>
           <tr><td>Dhan Pro</td><td>5-year history, 200-level order book, news, market movers</td><td>5 calls/s and 100,000/day shared by all parts (download ≤92,000)</td><td>Automatic (TOTP), token 24 h</td></tr>
           <tr><td>Claude</td><td>Notes, Ask Stockway, Lab ideas, ebook / transcript reading</td><td>Your Claude plan's usage</td><td>Claude Code on this Mac</td></tr>
           <tr><td>Telegram</td><td>Alerts and notices on your phone</td><td>–</td><td>Bot token (once)</td></tr>
@@ -2696,6 +2698,31 @@ async function pageSystem() {
   };
   main.innerHTML = `<p class="muted">Checking every connection…</p>`;
   await draw();
+}
+/* 2.31 data vault: what is recorded for backtests, the bench styles and the mover sweep */
+function vaultPanel(v) {
+  if (!v || v.error) return v && v.error ? `<div class="panel tight" style="margin-top:12px"><h3>Data vault</h3><p class="small down">${esc(v.error)}</p></div>` : "";
+  const t = v.today, n = (x) => (x || 0).toLocaleString("en-IN");
+  const sw = v.chain_sweep, mv = v.movers, bn = v.bench || {};
+  const famL = { buy: "Only buying", mixed: "Buying + selling", sell: "Only selling" };
+  const styles = Object.entries(bn.styles || {}).map(([k, s]) => `<tr><td>${esc(s.label)}</td><td class="small muted">${famL[s.family] || s.family}</td><td class="r">${n(s.opened)}</td><td class="r small muted">${n(s.skipped)}</td></tr>`).join("");
+  const days = (v.days || []).slice(0, 8).map((d) => `<tr><td>${esc(d.day)}</td><td class="r">${d.mb} MB</td><td class="small muted">${Object.keys(d.parts).join(", ")}</td></tr>`).join("");
+  return `<div class="panel tight" style="margin-top:12px"><h3>Data vault <span class="muted small">recorded on this Mac for backtests: ${n(v.n_days)} day${v.n_days === 1 ? "" : "s"}, ${v.total_mb} MB</span></h3>
+    <p class="small muted" style="margin:0 0 8px">${esc(v.note)}</p>
+    <div class="vault-grid">
+      <div><b class="small">Today</b>${t ? `<table class="mini"><tbody>
+        <tr><td>Minutes recorded</td><td class="r">${n(t.minutes)}</td></tr>
+        <tr><td>Instruments (prices each minute)</td><td class="r">${n(t.instruments)}</td></tr>
+        <tr><td>Full option chains</td><td class="r">${n(t.chain_snaps)} <small class="muted">(${n(t.chain_syms)} symbols)</small></td></tr>
+        <tr><td>Headlines</td><td class="r">${n(t.news)}</td></tr>
+        <tr><td>Market context snapshots</td><td class="r">${n(t.context)}</td></tr></tbody></table>` : `<p class="small muted">Starts with the scanner.</p>`}
+        <p class="small muted" style="margin:6px 0 0">Stock chains: every ${v.cfg.stock_chains_every_min} min with spare Upstox calls${sw ? ` · last sweep ${esc(sw.at)}: ${sw.stocks} of ${sw.of} stocks in ${sw.secs} s${sw.waits ? `, waited ${sw.waits}× for spare calls` : ""}` : ""}.</p></div>
+      <div><b class="small">Test bench styles (this session)</b>${styles ? `<table class="mini"><thead><tr><th>Style</th><th></th><th class="r">Trades</th><th class="r" title="Signals where a leg had no live price">No price</th></tr></thead><tbody>${styles}</tbody></table>` : `<p class="small muted">Starts with the scanner.</p>`}
+        ${(bn.errors || []).length ? `<p class="small down">Skipped: ${bn.errors.map(esc).join("; ")}</p>` : ""}</div>
+      <div><b class="small">Mover sweep</b>${mv ? `<p class="small" style="margin:4px 0">${esc(mv.at)}: ${(mv.picks || []).slice(0, 10).map((p) => `${esc(p.sym)} ${p.direction === "up" ? "▲" : "▼"}`).join(" · ") || "nothing moving enough"} · ${n(mv.opened)} test trades</p>
+        <p class="small muted" style="margin:0">In play today (library rules run on them too): ${(mv.in_play || []).map(esc).join(", ") || "none yet"}</p>` : `<p class="small muted">Every 15 minutes from 9:30 while the scanner runs.</p>`}
+        ${days ? `<b class="small" style="display:block;margin-top:8px">Past days</b><table class="mini"><tbody>${days}</tbody></table>` : ""}</div>
+    </div></div>`;
 }
 Object.assign(PAGES, { system: pageSystem });
 
@@ -2840,36 +2867,63 @@ async function pageBoard() {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   const reg = params.get("regime") || LS.get("board_reg", "auto");
   const fitOnly = params.has("fit") ? params.get("fit") === "1" : LS.get("board_fit", true);
-  const style = params.get("style") || LS.get("board_style", "all");
-  LS.set("board_reg", reg); LS.set("board_fit", fitOnly); LS.set("board_style", style);
-  const [b, cap] = await Promise.all([api(`/api/live/board?regime=${reg}`), api("/api/live/capital")]);
-  const go = (p) => { const q = new URLSearchParams({ regime: reg, fit: fitOnly ? "1" : "0", style, ...p }); location.hash = `#/board?${q}`; };
+  const fam = params.get("fam") || LS.get("board_fam", "all");
+  let style = params.get("style") || LS.get("board_style", "all");
+  LS.set("board_reg", reg); LS.set("board_fit", fitOnly); LS.set("board_fam", fam); LS.set("board_style", style);
+  const [b, cap, acc] = await Promise.all([api(`/api/live/board?regime=${reg}${fam !== "all" ? `&family=${fam}` : ""}`), api("/api/live/capital"),
+    api("/api/live/accounts").catch(() => null)]);
+  if (state.page !== "board") return;
+  const styles = (b.styles || []).filter((x) => fam === "all" || x.family === fam);
+  if (style !== "all" && !styles.some((x) => x.style === style)) style = "all";
+  const go = (p) => { const q = new URLSearchParams({ regime: reg, fit: fitOnly ? "1" : "0", fam, style, ...p }); location.hash = `#/board?${q}`; };
   const S = (x) => x && x.n ? `<b class="${x.avg >= 0 ? "up" : "down"}">${rupees(x.avg)}</b> <small class="muted">× ${x.n}</small><br><small class="muted">${x.win_pct}% won${x.pf != null ? ` · PF ${x.pf}` : ""}</small>` : `<span class="muted small">–</span>`;
   const rows = b.rows.filter((r) => (!fitOnly || r.fits) && (style === "all" || r.style === style));
   const keyed = reg !== "all" && b.regime;
-  const tr = rows.slice(0, 150).map((r) => `<tr><td><b>${esc(r.label)}</b><br><small class="muted">${esc(r.style_label)} · ${r.days} day${r.days === 1 ? "" : "s"}${r.fits ? "" : ` · <span class="down">needs more capital</span>`}</small></td>
+  const needs = (r) => r.family === "buy" || r.need_lot == null ? `${rupees(r.cost_lot)}` : `${rupees(r.need_lot)} <span class="muted">blocked</span>`;
+  const tr = rows.slice(0, 150).map((r) => `<tr><td><b>${esc(r.label)}</b><br><small class="muted">${esc(r.style_label)} · ${esc((b.family_labels || {})[r.family] || "")} · ${r.days} day${r.days === 1 ? "" : "s"}${r.fits ? "" : ` · <span class="down">needs more capital</span>`}</small></td>
       <td class="r">${S(r.all)}</td>${keyed ? `<td class="r">${S(r.regime)}</td>` : ""}<td class="r">${S(r.today)}</td>
-      <td class="r small">${rupees(r.cost_lot)}<br><span class="muted">risk ${rupees(r.risk_lot)}</span></td>
+      <td class="r small">${needs(r)}<br><span class="muted">risk ${rupees(r.risk_lot)}</span></td>
       <td class="r">${(keyed ? r.regime.rank : r.all.rank) != null ? `<b class="${(keyed ? r.regime.rank : r.all.rank) > 0 ? "up" : "down"}">${rupees(keyed ? r.regime.rank : r.all.rank)}</b>` : `<span class="muted small">collecting</span>`}</td></tr>`).join("");
   const best = (b.best || []).map((r) => `<li><b>${esc(r.label)}</b> <span class="muted small">${esc(r.style_label)}</span> · <b class="up">${rupees((keyed ? r.regime : r.all).avg)}</b> a trade over ${(keyed ? r.regime : r.all).n} trades, ${(keyed ? r.regime : r.all).win_pct}% won</li>`).join("");
+  const famChips = [["all", "All ways"], ["buy", "Only buying"], ["mixed", "Buying + selling"], ["sell", "Only selling"]]
+    .map(([v, l]) => `<button class="chip" data-fam="${v}" aria-pressed="${fam === v}">${l}</button>`).join("");
   main.innerHTML = `<h1 class="page-title">Strategy board</h1>
-    <p class="lede">Every strategy paper-traded on every signal, 1 lot, like the real paper account (ask in, bid out, all charges), ranked for ${keyed ? `<b>${esc((REGIMES.find((x) => x[0] === b.regime) || [0, b.regime])[1])}</b> days` : "all days"} and your capital ${rupees(b.capital)}.
+    <p class="lede">Every strategy paper-traded on every signal in ${(b.styles || []).length} styles (only buying, buying + selling, only selling), 1 lot each, like the real paper account (ask in, bid out, all charges), ranked for ${keyed ? `<b>${esc((REGIMES.find((x) => x[0] === b.regime) || [0, b.regime])[1])}</b> days` : "all days"} and your capital ${rupees(b.capital)}.
       ${b.day_type ? `Today so far: <b>${esc(b.day_type)}</b>.` : ""}</p>
     ${capitalBox(cap.capital)}
+    ${accountsPanel(acc)}
     <div class="panel tight"><h3>Best for you right now <span class="muted small">fits ${rupees(b.capital)}, positive after costs, enough trades</span></h3>
       ${best ? `<ol class="small">${best}</ol>` : `<p class="small muted">Nothing has earned it yet: ${b.n_closed.toLocaleString("en-IN")} bench trades closed so far${b.n_open ? `, ${b.n_open} open` : ""}. A strategy needs at least ${b.min_n} closed trades and a positive average after its uncertainty. The record grows every market day.</p>`}</div>
+    <div class="toolbar"><div class="chips" role="group" aria-label="Way of trading">${famChips}</div></div>
     <div class="toolbar"><div class="btn-row">
       <label class="field inline">Day type <select id="bd-reg">${REGIMES.map(([v, l]) => `<option value="${v}" ${v === reg ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-      <div class="seg">${[["all", "Both styles"], ["buy", "Option buy"], ["spread", "Debit spread"]].map(([v, l]) => `<button data-st="${v}" aria-pressed="${style === v}">${l}</button>`).join("")}</div>
+      <label class="field inline">Style <select id="bd-style"><option value="all">All styles</option>${styles.map((x) => `<option value="${esc(x.style)}" ${x.style === style ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select></label>
       <label class="check small"><input type="checkbox" id="bd-fit" ${fitOnly ? "checked" : ""}><span>Only what fits my capital</span></label></div></div>
     <div class="table-wrap"><table><thead><tr><th>Strategy</th><th class="r">All days<br><small class="muted">₹ a trade × trades</small></th>${keyed ? `<th class="r">This day type</th>` : ""}<th class="r">Today</th><th class="r">1 lot needs</th><th class="r" title="Average minus its uncertainty: what you can count on">Rank</th></tr></thead>
-      <tbody>${tr || `<tr><td colspan="6" class="muted">No bench trades yet: they start with the next scanner session (every directional alert, every idea on trial and every Lab library / book setup on the indices).</td></tr>`}</tbody></table></div>
+      <tbody>${tr || `<tr><td colspan="6" class="muted">No bench trades ${fam !== "all" ? "in this way of trading " : ""}yet: they start with the next scanner session (every directional alert, every idea on trial, every Lab library / book setup and every mover test).</td></tr>`}</tbody></table></div>
     <p class="note">${esc(b.note)} Last ${b.days} days.</p>`;
   bindCapitalBox(() => pageBoard());
   $("#bd-reg").onchange = (e) => go({ regime: e.target.value });
+  $("#bd-style").onchange = (e) => go({ style: e.target.value });
   $("#bd-fit").onchange = (e) => go({ fit: e.target.checked ? "1" : "0" });
-  main.querySelectorAll("[data-st]").forEach((x) => x.onclick = () => go({ style: x.dataset.st }));
-  L.pageTimer = setTimeout(() => { if (state.page === "board") pageBoard(); }, 60000);
+  main.querySelectorAll("[data-fam]").forEach((x) => x.onclick = () => go({ fam: x.dataset.fam, style: "all" }));
+  L.pageTimer = setTimeout(() => { if (state.page === "board") pageBoard(); }, acc && acc.refreshing && !(acc.cells || []).length ? 6000 : 60000);
+}
+
+/* 2.31 capital test: virtual accounts at 4 capitals x 3 ways of trading x 2 choosing rules */
+function accountsPanel(g) {
+  if (!g) return "";
+  if (!g.cells || !g.cells.length) return g.refreshing ? `<div class="panel tight"><h3>Capital test</h3><p class="small muted" style="margin:0">Working out the ${(g.levels || []).length || 4} capital accounts from the test bench… (refreshes by itself)</p></div>` : "";
+  const find = (lv, f, p) => g.cells.find((c) => c.capital === lv && c.family === f && c.policy === p);
+  const line = (c) => !c ? "" : c.n ? `<b class="${c.net >= 0 ? "up" : "down"}">${c.net >= 0 ? "+" : ""}${rupees(c.net)}</b> <small class="muted">(${c.return_pct >= 0 ? "+" : ""}${c.return_pct}%) · ${c.n} trade${c.n === 1 ? "" : "s"} · ${c.win_pct}% won · deepest fall ${c.max_dd_pct}%</small>`
+    : `<small class="muted">no trade yet${c.candidates ? ` (${c.candidates.toLocaleString("en-IN")} signals, none fitted)` : ""}</small>`;
+  const cards = g.levels.map((lv) => { const t = find(lv, "buy", "all");
+    return `<div class="capcard"><h4>${rupees(lv)} <small class="muted">${esc((t && t.tier) || "")}</small></h4>
+      <table class="mini"><tbody>${g.families.map((f) => `<tr><td><b>${esc(f.label)}</b><div>All signals: ${line(find(lv, f.family, "all"))}</div><div>Proven only: ${line(find(lv, f.family, "proven"))}</div></td></tr>`).join("")}</tbody></table></div>`; }).join("");
+  return `<div class="panel tight"><h3>Capital test <span class="muted small">${g.levels.length} capitals × 3 ways of trading, paper, last ${g.days} days</span></h3>
+    <p class="small muted" style="margin:0 0 8px">Each account replays the test bench with its own rules (lots, risk a trade, trades a day, daily loss stop, money for premium and margin) and grows or shrinks with its profit. <b>All signals</b> = every signal that fits, first come. <b>Proven only</b> = only strategies already positive after costs on earlier days (${g.proven_min_n}+ trades)${g.proven_today ? `: ${g.proven_today} qualify today` : ": none qualify yet"}.</p>
+    <div class="capgrid">${cards}</div>
+    <p class="small muted" style="margin:6px 0 0">${g.n_trades.toLocaleString("en-IN")} closed bench trades. ${esc(g.note)}</p></div>`;
 }
 
 /* Live page: what works today (top of the Strategy board) */

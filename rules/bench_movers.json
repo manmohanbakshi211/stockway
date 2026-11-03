@@ -1,0 +1,14 @@
+{
+ "about": "Mover sweep (bullets): every every_min minutes between start and end, the F&O stocks moving most today (up or down) are paper-tested on the test bench in every style, both with the move and against it (fade), as a yardstick every strategy has to beat. A stock counts as moving when its change from yesterday's close is at least min_move_atr daily ATRs, or its last 15 minutes moved at least min_ret15_atr daily ATRs. The top_n by that move are tested each sweep. Stocks tested today stay 'in play' (up to in_play_max) and every Strategy Lab library / book rule is run on them too (test bench only). Indices whose last 15 minutes moved at least min_ret15_atr ATRs are tested as well when indices is true.",
+ "every_min": 15,
+ "start": "09:30",
+ "end": "14:30",
+ "top_n": 10,
+ "min_move_atr": 0.6,
+ "min_ret15_atr": 0.25,
+ "min_rel_vol": 0,
+ "indices": true,
+ "both_ways": true,
+ "in_play_max": 25,
+ "since": "2026-11-04"
+}

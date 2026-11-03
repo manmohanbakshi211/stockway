@@ -1283,7 +1283,9 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 APP_STARTED = time.time()
 ROLES = {
     "upstox": ["Live prices of indices, 218 F&O stocks and ~1,900 options (the live scanner, alerts, paper trades)",
-               "Option chains, today's instrument list, 1-year daily candles", "Login: once a day (Upstox rule)"],
+               "Option chains, today's instrument list, 1-year daily candles",
+               "Data vault (2.31): a full option chain of every F&O stock every 30 minutes, only with spare calls",
+               "Login: once a day (Upstox rule)"],
     "dhan": ["5-year options history for the 5-year Lab (expired options, 1-minute)",
              "200-level order book of Nifty / Bank Nifty futures (live)", "News headlines and market movers (live)",
              "Trading-day calendar and stock turnover (for the download)",
@@ -1420,7 +1422,14 @@ def system_view():
     return clean({"version": RUNNING_VERSION, "up_since": _ago(APP_STARTED), "free_gb": round(free, 1),
                   "overall": "bad" if bad else "warn" if warn else "ok", "services": svcs, "jobs": job_rows,
                   "checks": checks, "problems": sorted(probs.values(), key=lambda p: p["last"], reverse=True)[:12],
-                  "bullets": _registry_list(), "rules": _rules_check()})
+                  "bullets": _registry_list(), "rules": _rules_check(), "vault": _vault_view(e)})
+
+
+def _vault_view(e):
+    try:
+        return e.vault_view()
+    except Exception as ex:
+        return {"error": str(ex)[:160]}
 
 
 def _registry_list():

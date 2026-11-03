@@ -45,6 +45,22 @@ def static_checks(cfg: dict | None = None) -> list:
     from lab import factory
     out.append(_c("lab_one_run", "Strategy Lab: one research round per Lab folder at a time",
                   hasattr(factory, "_RUN_LOCKS"), "a second run waits for the first instead of overwriting it"))
+    # 2.31: test bench styles, mover sweep and data vault
+    from live import bench, movers, vault
+    styles, errs = bench.load_styles()
+    fam = {f: sum(1 for v in styles.values() if v["family"] == f) for f in bench.FAMILIES}
+    out.append(_c("bench_styles", "Test bench styles load (rules/bench_styles.json); a broken one is skipped",
+                  not errs, (f"{len(styles)} styles: {fam['buy']} only buying, {fam['mixed']} buying + selling, "
+                             f"{fam['sell']} only selling") + (f"; skipped: {'; '.join(errs)}" if errs else "")))
+    movers.cfg()
+    out.append(_c("mover_sweep", "Mover sweep settings load (rules/bench_movers.json)", not movers._C.get("error"),
+                  movers._C.get("error") or f"every {movers.cfg()['every_min']} min, top {movers.cfg()['top_n']} stocks, both ways"))
+    vsrc = inspect.getsource(_eng.LiveEngine._vault_loop)
+    vc = vault.cfg()
+    out.append(_c("vault_spare_calls", "Data vault: stock option chains only with spare Upstox calls, never changing the scanner",
+                  "lim.used(1800)" in vsrc and "keep=False" in vsrc and 0 < float(vc["max_upstox_share"]) < 1,
+                  f"waits while more than {int(float(vc['max_upstox_share']) * 100)}% of the 30-minute Upstox budget is busy; "
+                  f"every {vc['stock_chains_every_min']} min"))
     return out
 
 
@@ -86,6 +102,18 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
         n_htf = sum(1 for k, v in dl.items() if isinstance(v, dict) and v.get("htf"))
         out.append(_c("daily_trend", "Daily / weekly trend known for the scanned symbols", (n_htf > 0) if engine.running else None,
                       f"{n_htf} symbols" if n_htf else "loads with the daily candles at start"))
+    if engine is not None:
+        rec = getattr(engine, "recorder", None)
+        h = None
+        if rec is not None and engine.running:
+            try:
+                h = rec.health()
+            except Exception:
+                h = None
+        out.append(_c("vault_recording", "Today's market data is being recorded (prices, option chains, news)",
+                      (bool(h.get("minutes")) if h else None),
+                      (f"{h.get('minutes') or 0} minutes, {h.get('instruments') or 0} instruments, {h.get('chain_snaps') or 0} chain "
+                       f"snapshots, {h.get('news') or 0} headlines" if h else "scanner not running")))
     d5, research5 = jobs.get("dhan5y_running"), jobs.get("research5y_running")
     out.append(_c("download_vs_research", "5-year download and 5-year research not on the same data at once",
                   not (d5 and research5) if (d5 or research5) else None,

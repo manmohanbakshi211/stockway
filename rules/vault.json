@@ -1,0 +1,9 @@
+{
+ "about": "Data vault (bullets): what the app records besides the minute-by-minute prices of every streamed instrument. stock_chains_every_min: a full option chain (every strike, both sides: price, bid, ask, OI, volume, IV, delta) for every F&O stock, spread over each interval; index chains are recorded every time the app fetches them (every 3-6 minutes). The sweep only uses spare Upstox calls: it waits whenever more than max_upstox_share of the app's 30-minute Upstox budget is in use, so live prices and your own option-chain views always come first. context_every_min: breadth, sectors, day types, VIX, GIFT Nifty, world markets and the index option facts, saved together. Every headline the app sees is saved as it arrives. All of it lands in data/recordings (one set of files per day, compressed at the close) for backtests.",
+ "stock_chains_every_min": 30,
+ "start": "09:20",
+ "end": "15:20",
+ "max_upstox_share": 0.7,
+ "context_every_min": 5,
+ "since": "2026-11-04"
+}

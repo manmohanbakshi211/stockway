@@ -16,6 +16,7 @@ user_settings.json
 # Generated at startup
 webapp/static/vendor/
 data/live.db*
+data/bench.db*
 data/upstox_token.json
 data/instruments/
 data/recordings/

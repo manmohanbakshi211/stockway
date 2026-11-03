@@ -123,6 +123,11 @@ class LiveEngine:
         self.shadow = None                           # exit styles graded in shadow on every alert (live/shadow.py)
         self.trials = None                           # bullets on trial: recorded and graded only (live/trials.py)
         self.bench = None                            # an honest paper trade for every signal (live/bench.py)
+        self.in_play: set = set()                    # 2.31: stocks the mover sweep tested today (library rules run on them)
+        self._facts_cache: dict = {}                 # (sym, direction, minute) -> facts for test-bench trades
+        self.mover_last = None                       # the last mover sweep (live/movers.py)
+        self.vault_last = None                       # the last stock option-chain sweep (data vault)
+        self._run_token = None
         self.depth = None                            # Dhan 200-level order book for index futures (live/dhandepth.py)
         self.dhan_intel = None                       # Dhan news headlines + market movers (live/dhanintel.py)
         self.ranker = None
@@ -284,6 +289,7 @@ class LiveEngine:
             self.bench = Bench(self.store, self.source, self.log)
         except Exception as e:
             self.log(f"Test bench off: {e}")
+        self.in_play, self._facts_cache, self.mover_last = set(), {}, None
         self.ranker = Ranker(self.data_dir, self.source, self.log)
         if self.source != "sim":
             self.context.fo_symbols = set(self.uni.underlyings)
@@ -315,6 +321,8 @@ class LiveEngine:
         self._recenter()
         self.set_status("running", f"Live: {len(self.uni.indices)} indices, {len(self.uni.stocks)} stocks, "
                                    f"{len(self.opt_subs)} options streaming")
+        token = self._run_token = object()
+        threading.Thread(target=self._vault_loop, args=(token,), daemon=True, name="data-vault").start()
         self._loop()
 
     def _seed(self, quotes: dict):
@@ -465,7 +473,7 @@ class LiveEngine:
         return sorted(stocks, key=lambda u: rank.get(u.symbol, 999))
 
     # ------------------------------------------------------------ full chains (REST)
-    def chain(self, sym: str, max_age=20.0, expiry=None) -> dict | None:
+    def chain(self, sym: str, max_age=20.0, expiry=None, keep=True) -> dict | None:
         u = self.uni.underlyings.get(sym) if self.uni else None
         if not u:
             return None
@@ -498,6 +506,13 @@ class LiveEngine:
         res = {"sym": sym, "expiry": exp.isoformat(), "oi": oi, "pcr": (pe_t / ce_t) if ce_t else None,
                "rows": out_rows, "fetched": time.time(), "expiries": [e.isoformat() for e in u.expiries],
                "spot": rows[0].get("underlying_spot_price") if rows else None}
+        if self.recorder is not None:                    # 2.31 data vault: every full chain the app fetches
+            try:
+                self.recorder.chain(int(self.clock.ts()), res)
+            except Exception:
+                pass
+        if not keep:                                     # the vault's sweep: recorded only, nothing the scanner uses changes
+            return res
         self.chain_cache[ck] = res
         near = u.near_expiry(self.clock.now().date())
         if exp == near:
@@ -607,6 +622,8 @@ class LiveEngine:
                 self._guard("Trial alerts", self.trials.update, self.state, self.clock.ts())
             if self.bench is not None:
                 self._guard("Test bench", self.bench.update, self.state, self.clock.ts(), (self.paper.cfg if self.paper else {}).get("exit_time") or "15:15")
+                self._guard("Mover sweep", self._mover_sweep, now)
+            self._guard("Data vault", self._vault_context, now)
             self._guard("Flat-by reminder", self._flat_by_reminder, now, lc)
             if self._every("last_session", 60, clock_time=False):
                 self._guard("Last session save", self.save_last_session)
@@ -633,6 +650,7 @@ class LiveEngine:
             self.stop_evt.wait(max(0.2, 1.0 - (time.time() - t0)))
 
     def _end_of_day(self, now, mins):
+        self._run_token = None                       # stops the data-vault chain sweep before the recording is closed
         self.paper.update(self.state, now, force_close=True)
         try:
             self.save_last_session()
@@ -883,6 +901,133 @@ class LiveEngine:
                 rules = []
             self._fact_rules5 = (time.time(), rules)
         return rules
+
+    def signal_facts(self, sym, direction, now) -> dict:
+        """2.31: the facts at this moment for a test-bench trade, the same ones an alert records (live/learn.py
+        features: the stock, its options, the index, breadth, sector, world, VIX, news, order book, movers; plus the
+        bigger picture: daily / weekly trend, results and events ahead). Cached per symbol, direction and minute."""
+        k = (sym, direction, int(now.timestamp() // 60))
+        hit = self._facts_cache.get(k)
+        if hit is not None:
+            return hit
+        if len(self._facts_cache) > 4000:
+            self._facts_cache.clear()
+        m = self.metrics.get(sym)
+        reg = self.regimes.get(sym) or self.regimes.get("NIFTY")
+        ev = evidence(m, direction, self.metrics.get("NIFTY")) if m else []
+        ctx = self._ctx_for(sym, m)
+        try:
+            ctx["mkt"] = self.market_ctx(sym)
+        except Exception:
+            ctx["mkt"] = {}
+        a = {"sym": sym, "kind": "mover", "direction": direction, "severity": 0, "option": self._suggest(sym, direction)}
+        f = features(a, m, ev, reg, minutes_since_open(now), ctx)
+        try:
+            f.update(self.bigger_picture(sym, direction, m, now).get("facts") or {})
+        except Exception:
+            pass
+        v = self._vix() or {}
+        dly = (self.daily.get(sym) or {}).get("htf") or {}
+        f.update(vix=v.get("ltp"), atr_pct=dly.get("atr_pct"), spot=(m or {}).get("spot"), dow=now.weekday(),
+                 in_play=int(sym in self.in_play))
+        out = {x: y for x, y in f.items() if x not in ("kind", "severity", "direction") and y is not None}
+        self._facts_cache[k] = out
+        return out
+
+    def _mover_sweep(self, now):
+        """2.31: every few minutes the F&O stocks (and indices) moving most get an honest paper test on the bench in
+        every style, with the move and against it (live/movers.py, rules/bench_movers.json): the yardstick every
+        strategy has to beat. Test bench only: no alert, no paper account, no broker."""
+        from . import movers
+        c = movers.cfg()
+        if self.bench is None or not self.metrics or not self._every("mover_sweep", float(c["every_min"]) * 60):
+            return
+        if not (str(c["start"]) <= now.strftime("%H:%M") <= str(c["end"])):
+            return
+        picks = movers.pick(self.metrics, self.daily, c)
+        n = 0
+        for p in picks:
+            tag = "idx_" if p["is_index"] else ""
+            what = "index" if p["is_index"] else "stock"
+            n += self.bench_signal(p["sym"], p["direction"], now, "mover", tag + "with", f"Mover ({what}): with the move")
+            if c.get("both_ways"):
+                n += self.bench_signal(p["sym"], "down" if p["direction"] == "up" else "up", now, "mover", tag + "fade",
+                                       f"Mover ({what}): against the move")
+            if not p["is_index"] and len(self.in_play) < int(c["in_play_max"]):
+                self.in_play.add(p["sym"])
+        self.mover_last = {"ts": now.timestamp(), "at": now.strftime("%H:%M"), "picks": picks[:20], "opened": n,
+                           "in_play": sorted(self.in_play)}
+
+    def _vault_context(self, now):
+        """2.31 data vault: the market around everything, every few minutes (breadth, sectors, day types, VIX, GIFT
+        Nifty, world markets, index option facts), saved with the day's recording for backtests."""
+        from . import vault
+        if self.recorder is None or not self.metrics or not self._every("vault_ctx", float(vault.cfg()["context_every_min"]) * 60):
+            return
+        mk = self.market or {}
+        idx = {}
+        for s, m in self.metrics.items():
+            if m.get("is_index"):
+                o = m.get("opt") or {}
+                idx[s] = {"spot": m.get("spot"), "chg_pct": m.get("chg_pct"), "vwap": m.get("vwap"), "pcr": o.get("pcr"),
+                          "atm_iv": o.get("atm_iv"), "max_pain": o.get("max_pain"), "straddle": o.get("straddle"),
+                          "regime": (self.regimes.get(s) or {}).get("code"), "gex": (self.gex.get(s) or {}).get("net_cr")}
+        try:
+            world = {t: {k: r.get(k) for k in ("last", "chg_pct", "name") if r.get(k) is not None}
+                     for t, r in (getattr(self.world, "rows", None) or {}).items()}
+            pressure = self.world.pressure()
+        except Exception:
+            world, pressure = {}, None
+        self.recorder.context(int(now.timestamp()), "market", {
+            "breadth": mk.get("breadth"), "sectors": [{"sector": x.get("sector"), "chg": x.get("chg")} for x in mk.get("sectors") or []],
+            "indices": idx, "vix": self._vix(), "gift": self.gift.row if self.gift else None, "world": world,
+            "pressure": pressure, "regimes": {s: r.get("code") for s, r in self.regimes.items() if r},
+            "in_play": sorted(self.in_play), "movers": (self.mover_last or {}).get("picks")})
+
+    def _vault_loop(self, token):
+        """2.31 data vault: a full option chain for every F&O stock every few minutes (rules/vault.json), spread over the
+        interval and only with spare Upstox calls (it waits while the app's 30-minute budget is busy). Index chains are
+        recorded by chain() whenever the scanner fetches them."""
+        from . import vault
+        from .upstox import RateLimiter
+        time.sleep(30)
+        while self._run_token is token and not self.stop_evt.is_set():
+            c = vault.cfg()
+            every = max(5.0, float(c["stock_chains_every_min"])) * 60
+            t0 = time.time()
+            now = self.clock.now()
+            hm = now.strftime("%H:%M")
+            if self.source != "sim" and str(c["start"]) <= hm <= str(c["end"]) and self.uni:
+                stocks = [u.symbol for u in self._rank_stocks()]
+                gap = every * 0.6 / max(1, len(stocks))
+                done = waited = 0
+                cap = RateLimiter.WINDOWS[-1][1] * float(c["max_upstox_share"])
+                lim = getattr(self.rest, "limiter", None)
+                for sym in stocks:
+                    if self._run_token is not token or self.stop_evt.is_set():
+                        return
+                    while lim is not None and lim.used(1800) >= cap and self._run_token is token:
+                        waited += 1
+                        self.stop_evt.wait(5)
+                    try:
+                        self.chain(sym, max_age=60, keep=False)
+                        done += 1
+                    except PermissionError:
+                        return
+                    except Exception as e:
+                        if self._every("vault_err", 600, clock_time=False):
+                            self.log(f"Data vault: chain {sym} failed: {e}")
+                    self.stop_evt.wait(gap)
+                self.vault_last = {"at": now.strftime("%H:%M"), "stocks": done, "of": len(stocks), "waits": waited,
+                                   "secs": round(time.time() - t0)}
+            self.stop_evt.wait(max(10.0, every - (time.time() - t0)))
+
+    def vault_view(self) -> dict:
+        from . import vault
+        out = vault.view(self)
+        out["bench"] = self.bench.status() if self.bench is not None else None
+        out["movers"] = self.mover_last
+        return out
 
     def bench_signal(self, sym, direction, now, kind, variant, name):
         """A signal that is only paper-tested on the bench (Lab library / book rules live): no alert, no paper account."""
@@ -1694,6 +1839,11 @@ class LiveEngine:
                 if self.cfg()["live"].get("news"):
                     new = self.news.fetch(self.words or {})
                     new += self._dhan_news()
+                    if new and self.running and self.recorder is not None:      # 2.31 data vault: every headline
+                        try:
+                            self.recorder.news(new, time.time())
+                        except Exception:
+                            pass
                     for n in new:
                         if n["syms"] and self.running and n["ts"] > time.time() - 1800:
                             self._news_alert(n)
@@ -2036,12 +2186,16 @@ class LiveEngine:
         ranker = self.ranker or Ranker(self.data_dir, src, self.log)
         honest = {}
         try:                                         # 2.30: the same alert types paper-traded honestly (live/bench.py)
-            with self.store.lock:
-                for k, idx, n, net, w in self.store.db.execute(
-                        "SELECT kind, is_index, COUNT(*), SUM(net), SUM(net > 0) FROM bench_trades WHERE source=? AND style='buy' "
-                        "AND net IS NOT NULL GROUP BY kind, is_index", (src,)).fetchall():
-                    honest[f"{k}|{int(idx or 0)}"] = {"n": n, "net": round(net or 0), "avg": round((net or 0) / n) if n else None,
-                                                     "win_pct": round((w or 0) / n * 100) if n else None}
+            from .bench import day_groups, db_for     # 2.31: from data/bench.db, finished days cached (never blocks)
+            for g in day_groups(db_for(self.store), src, 365, self.clock.now().date().isoformat() if self.clock else None):
+                if g["style"] != "buy":
+                    continue
+                h = honest.setdefault(f"{g['kind']}|{int(g['is_index'] or 0)}", {"n": 0, "net": 0.0, "w": 0})
+                h["n"] += g["n"]
+                h["net"] += g["s"] or 0
+                h["w"] += g["wins"] or 0
+            honest = {k: {"n": h["n"], "net": round(h["net"]), "avg": round(h["net"] / h["n"]) if h["n"] else None,
+                          "win_pct": round(h["w"] / h["n"] * 100) if h["n"] else None} for k, h in honest.items()}
         except Exception:
             honest = {}
         for r_ in rows:

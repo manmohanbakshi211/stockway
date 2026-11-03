@@ -114,6 +114,41 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Every signal 3 ways, 4 capital accounts, the mover sweep and the data vault (2.31)
+
+Testing at full width: every signal paper-traded in 8 styles, at 4 capitals, with everything around it recorded, so in
+a few months the app has its own backtest data no broker app gives (intraday full option chains, every headline, every
+signal and its honest result). Paper only: nothing is ever sent to a broker.
+- **3 ways of trading, 8 styles (rules/bench_styles.json, bullets):** only buying (ATM, 1 OTM, 1 ITM, ATM held to the
+  close), buying + selling (debit spread, credit spread) and only selling (sell ATM, sell 1 OTM held to the close).
+  Fills like the paper account (buy at the ask, sell at the bid, every charge on every leg); target / stop are % of the
+  premium paid or received. 2.30's option buy and debit spread fill exactly as before. A style is a list of legs: add
+  one in the file, no code change; a broken one is skipped and shown on the System page.
+- **Money blocked per lot (live/margin.py, rules/margin.json, dated):** premium for buys, an estimate of SPAN + exposure
+  for sold options (hedged ones about 75% less). So each capital only takes what it could really afford: with ₹40K that
+  is buying and some spreads; naked selling needs about ₹1.2L a lot of Nifty.
+- **Capital test (Strategy board):** 12 virtual paper accounts, ₹40K / ₹1.5L / ₹3L / ₹5L × only buying / buying +
+  selling / only selling, each following its tier's rules (lots, risk a trade, trades a day, daily loss stop, profit
+  lock, money for margin) and growing with its profit. Each is run two ways: every signal that fits (first come), and
+  **proven only** (strategies already positive after costs on earlier days: a walk-forward test of following the board).
+- **Mover sweep (live/movers.py, rules/bench_movers.json):** every 15 minutes the F&O stocks moving most today (measured
+  in their own daily range) and fast-moving indices are tested both ways, with the move and against it: the yardstick
+  every strategy has to beat. They stay "in play" for the day and every Lab library / book rule runs on them too.
+- **Facts on every test trade:** one row per signal (bench_signals) with what the app knew then (trend, day type, VIX,
+  IV, PCR, OI, order flow, news, results and events ahead, daily / weekly trend, world, movers) and how it rated it
+  (severity, score, conviction, Focus), for the honest-label model next.
+- **Data vault (rules/vault.json):** besides every streamed price each minute, today's recording now keeps every full
+  option chain the app fetches (indices every 3-6 min) plus a full chain of every F&O stock every 30 minutes (only with
+  spare Upstox calls; it never changes what the scanner uses), every headline, and the market around it every 5 minutes.
+  Compressed at the close into data/recordings. The System page shows what was recorded today and on past days.
+- **The bench has its own database (data/bench.db):** tens of thousands of test trades a day, and the board / accounts
+  reading them on their own connection, can never slow or lock the live engine (tested: a write during a full
+  recompute takes 2 ms; the board on 1 million trades: 3 s once, then 0.1 s). The 2.30 trades are copied over once and
+  the originals are kept.
+- Checked: 177 tests incl. no-clash (new: bench styles, mover settings, the vault only with spare calls, today's
+  recording); Lab regression 103 of 103 on all four baselines; Strategy board and System page at desktop and phone
+  width, no errors, no sideways scroll; a simulator session ran all 8 styles, the mover sweep and the vault.
+
 ## Test bench, Strategy board, capital for any amount (2.30)
 
 The goal: find what makes money for a ₹40K option buyer, from live markets, as fast and as honestly as possible.

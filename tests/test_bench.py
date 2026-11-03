@@ -37,15 +37,17 @@ def test_bench_fills_like_the_paper_account(tmp_path):
     b = B.Bench(Store(tmp_path / "live.db"), "upstox")
     now = dt.datetime(2026, 11, 4, 10, 0, tzinfo=IST)
     n = b.add({"sym": "NIFTY", "kind": "orb", "direction": "up", "option": OPT, "id": 7}, e, now, CFG)
-    assert n == 2                                                       # option buy + debit spread
+    # 2.30's option buy + debit spread, and (2.31) the styles whose strikes are there: 1 OTM, hold-the-day. No puts in
+    # this chain, so the credit spread and the sales are skipped; no strike below 23800, so the 1-ITM buy is skipped.
+    assert n == 4 and {r["style"] for r in b.open} == {"buy", "spread", "buy_otm", "buy_day"}
     assert b.add({"sym": "NIFTY", "kind": "orb", "direction": "up", "option": OPT}, e, now, CFG) == 0   # cooldown
     buy = next(r for r in b.open if r["style"] == "buy")
     spr = next(r for r in b.open if r["style"] == "spread")
     assert buy["entry"] == 100 and spr["entry"] == 100 - 54          # pay the ask, receive the bid on the sold leg
     st["CE800"], st["CE900"] = I(131, 132), I(60, 61)                  # the bought option's bid passes +30%
     b.update(st, now.timestamp() + 600)
-    with b.store.lock:
-        rows = {r["style"]: dict(r) for r in b.store.db.execute("SELECT * FROM bench_trades").fetchall()}
+    with b.bdb.lock:
+        rows = {r["style"]: dict(r) for r in b.bdb.db.execute("SELECT * FROM bench_trades").fetchall()}
     assert rows["buy"]["reason"] == "target" and rows["buy"]["exit"] == 131
     assert rows["buy"]["net"] == round((131 - 100) * 65 - rows["buy"]["charges"], 2) and rows["buy"]["charges"] > 0
     assert rows["spread"]["exit"] is None or rows["spread"]["exit"] == 131 - 61
@@ -61,16 +63,17 @@ def test_bench_respects_the_entry_window(tmp_path):
 def test_board_ranks_by_money_after_costs_and_capital(tmp_path):
     st = Store(tmp_path / "live.db")
     B.Bench(st, "upstox")
+    bdb = B.db_for(st)                                   # 2.31: the bench's own database file
     day = dt.date.today().isoformat()
     rows = []
     for i in range(8):
         rows.append(("good", "buy", "trend_up", 900 if i % 4 else -300, 6000, 1300))
         rows.append(("bad", "buy", "range", -400 if i % 3 else 200, 6000, 1300))
         rows.append(("pricey", "buy", "trend_up", 5000, 60000, 12000))
-    with st.lock:
-        st.db.executemany("INSERT INTO bench_trades(ts, day, source, sym, kind, style, regime, net, cost_lot, risk_lot, is_index) "
-                          "VALUES (0, ?, 'upstox', 'NIFTY', ?, ?, ?, ?, ?, ?, 1)", [(day, *r) for r in rows])
-        st.db.commit()
+    with bdb.lock:
+        bdb.db.executemany("INSERT INTO bench_trades(ts, day, source, sym, kind, style, regime, net, cost_lot, risk_lot, is_index) "
+                           "VALUES (0, ?, 'upstox', 'NIFTY', ?, ?, ?, ?, ?, ?, 1)", [(day, *r) for r in rows])
+        bdb.db.commit()
     bd = B.board(st, "upstox", capital=40000, risk_pct=5.0, regime="trend_up", today=day)
     labels = [r["kind"] for r in bd["rows"]]
     assert labels[0] in ("good", "pricey")

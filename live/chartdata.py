@@ -103,6 +103,8 @@ class ChartData:
         syms = ["NIFTY", "BANKNIFTY"]
         if any(factory.STOCKS in r["syms"] for r in rules) and self.e.uni:   # stock rules: scan every F&O stock
             syms += [u.symbol for u in self.e.uni.stocks]
+        in_play = set(getattr(self.e, "in_play", None) or ())    # 2.31: library rules also on the stocks moving today
+        syms += sorted(in_play - set(syms))
         for sym in syms:
             m = self.e.metrics.get(sym)
             if not m:
@@ -113,7 +115,7 @@ class ChartData:
             day_rec = rec.setdefault((sym, now.date()), {})
             st = o.get("straddle")
             day_rec[slot - 1] = (o.get("atm_iv"), st / m["spot"] * 100 if st and m.get("spot") else None)
-            lib = self._bench_rules() if sym in factory.INDEX_SYMS else []
+            lib = self._bench_rules() if sym in factory.INDEX_SYMS else self._bench_rules_stocks() if sym in in_play else []
             if not rules and not lib:
                 continue
             b = self.five_min(sym, now.date())
@@ -234,6 +236,18 @@ class ChartData:
             if self._rate("bench_rules", 3600):
                 self.e.log(f"Test bench: library rules not loaded: {ex}")
         self._lib_cache = (time.time(), out)
+        return out
+
+    def _bench_rules_stocks(self) -> list:
+        """2.31: the same library / book setups on the stocks in play today (test bench only), kept apart on the board
+        (their own version id and name) because a stock may behave differently from an index."""
+        from lab import factory
+        base = self._bench_rules()
+        hit = getattr(self, "_lib_stock_cache", None)
+        if hit and hit[0] is base:
+            return hit[1]
+        out = [dict(r, syms=[factory.STOCKS], _variant=r["_variant"] + "s", _name=(r["_name"] + " · stocks in play")[:180]) for r in base]
+        self._lib_stock_cache = (base, out)
         return out
 
     def _trial_rule(self, sym, m, r, d, h5, l5, c5, emit):

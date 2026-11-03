@@ -618,7 +618,7 @@ def live_scorecard(source: str | None = None):
 
 
 @router.get("/api/live/board")
-def live_board(regime: str = "auto", days: int = 60, source: str | None = None):
+def live_board(regime: str = "auto", days: int = 60, source: str | None = None, family: str | None = None):
     """Strategy board (2.30): every strategy paper-tested on the test bench, ranked for today's day type and your capital."""
     from live import bench
     e = engine()
@@ -631,9 +631,27 @@ def live_board(regime: str = "auto", days: int = 60, source: str | None = None):
     reg = now_reg.get("code") if regime == "auto" else (None if regime in ("all", "") else regime)
     if reg == "opening":
         reg = None
-    out = bench.board(e.store, src, cap, risk, reg, max(1, min(365, days)), today=e.clock.now().date().isoformat())
-    out.update(day_type=now_reg.get("label") if e.running else None, day_code=now_reg.get("code") if e.running else None, source=src)
+    fam = family if family in bench.FAMILIES else None
+    out = bench.board(e.store, src, cap, risk, reg, max(1, min(365, days)), today=e.clock.now().date().isoformat(), family=fam)
+    out.update(day_type=now_reg.get("label") if e.running else None, day_code=now_reg.get("code") if e.running else None, source=src,
+               styles=[{"style": k, "label": v["label"], "family": v["family"]} for k, v in bench.load_styles()[0].items()])
     return clean(out)
+
+
+@router.get("/api/live/accounts")
+def live_accounts(days: int | None = None, source: str | None = None):
+    """2.31 capital test: virtual paper accounts at ₹40K / ₹1.5L / ₹3L / ₹5L (rules/capital.json), one per way of
+    trading (only buying, buying + selling, only selling), replaying the test bench with each tier's rules."""
+    from live import accounts
+    e = engine()
+    src = source or e.source or e.cfg()["live"].get("source") or "upstox"
+    return clean(accounts.grid(e.store, src, days=max(1, min(365, days)) if days else None, wait=False))
+
+
+@router.get("/api/live/vault")
+def live_vault():
+    """2.31 data vault: what is being recorded today and on past days, the test bench styles and the mover sweep."""
+    return clean(engine().vault_view())
 
 
 @router.get("/api/live/capital")
