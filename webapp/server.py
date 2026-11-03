@@ -1370,8 +1370,12 @@ def system_view():
     svcs.append(_svc("yahoo", "Yahoo Finance", "ok" if last and time.time() - last < 3 * 3600 else "warn",
                      f"World data updated {_ago(last)}" if last else "Not fetched yet", updated=_ago(last)))
     ins = getattr(getattr(e, "insiders", None), "updated", None)
+    cal = getattr(getattr(e, "context", None), "events_cal", None) or []
+    cal_at = ((getattr(getattr(e, "context", None), "updated", None) or {}).get("events"))
+    cal_txt = (f" · results calendar: {len(cal):,} board meetings ({sum(1 for x in cal if x.get('results')):,} results), "
+               f"updated {_ago(cal_at)}" if cal else " · results calendar: not loaded yet")
     svcs.append(_svc("nse", "NSE (free files)", "ok" if ins and time.time() - ins < 2 * 86400 else "warn",
-                     f"Filings read {_ago(ins)}" if ins else "Not read yet", updated=_ago(ins)))
+                     (f"Filings read {_ago(ins)}" if ins else "Not read yet") + cal_txt, updated=_ago(ins)))
     # jobs
     d5 = DHAN5Y.view()
     cur = JOBS.current or {}

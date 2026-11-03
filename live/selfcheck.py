@@ -79,7 +79,7 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
                       f"{engine.source}" if engine.running else "scanner not running"))
     if engine is not None and getattr(engine, "context", None) is not None and getattr(engine, "source", None) != "sim":
         cal = getattr(engine.context, "events_cal", None) or []
-        out.append(_c("results_calendar", "Results calendar loaded (NSE board meetings)", bool(cal) if engine.running else None,
+        out.append(_c("results_calendar", "Results calendar loaded (NSE board meetings)", bool(cal) or None,
                       f"{len(cal):,} upcoming board meetings" if cal else
                       (f"not loaded: {engine.context.errors.get('events')}" if engine.context.errors.get("events") else "loads with the market context")))
         dl = getattr(engine, "daily", None) or {}
