@@ -55,8 +55,10 @@ def test_search_counts_and_outside_ideas(tmp_path):
     assert n >= 200 and all(F.passes(F.quick_train(b, s), F.PASS["train"]) for s in passed)
     q = F.add_ideas(tmp_path, [{"dir": 1, "conds": [["rsi", "<", 30]], "win": [15, 200], "exit": "std"},
                                {"dir": 1, "conds": [["volume_profile", ">", 1]]}], source="ebook:test.pdf")
-    assert q == {"queued": 1, "rejected": 1}
+    assert q == {"queued": 1, "rejected": 1, "already_queued": 0}
     assert F.load(tmp_path)["ideas"][0]["source"] == "ebook:test.pdf"
+    q = F.add_ideas(tmp_path, [{"dir": 1, "conds": [["rsi", "<", 30]], "win": [15, 200], "exit": "std"}], source="ebook:test.pdf")
+    assert q["queued"] == 0 and q["already_queued"] == 1 and len(F.load(tmp_path)["ideas"]) == 1   # pressed twice: queued once
 
 
 def test_signal_now_matches_backtest_features():

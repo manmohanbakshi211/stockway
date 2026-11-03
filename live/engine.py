@@ -10,7 +10,7 @@ import traceback
 import numpy as np
 from pathlib import Path
 
-from . import briefs, dayreport, detectors
+from . import briefs, dayreport, detectors, registry
 from .giftnifty import GiftNifty
 from .analytics import compute, norm_iv, pct
 from .clock import IST, Clock, SimClock, is_market_hours, minutes_since_open
@@ -121,6 +121,7 @@ class LiveEngine:
         self.recorder = None
         self.tracker = None
         self.shadow = None                           # exit styles graded in shadow on every alert (live/shadow.py)
+        self.trials = None                           # bullets on trial: recorded and graded only (live/trials.py)
         self.depth = None                            # Dhan 200-level order book for index futures (live/dhandepth.py)
         self.dhan_intel = None                       # Dhan news headlines + market movers (live/dhanintel.py)
         self.ranker = None
@@ -226,6 +227,8 @@ class LiveEngine:
                     self.tracker.update(self.state, self.clock.ts(), force=True)
                     if self.shadow:
                         self.shadow.update(self.state, self.clock.ts(), force=True)
+                    if self.trials is not None:
+                        self.trials.update(self.state, self.clock.ts(), force=True)
                 except Exception:
                     pass
 
@@ -270,6 +273,11 @@ class LiveEngine:
         self.tracker = Tracker(self.store, self.source)
         from .shadow import ShadowExits
         self.shadow = ShadowExits(self.store, self.source, self.log)
+        try:
+            from .trials import Trials
+            self.trials = Trials(self.store, self.source, self.log)
+        except Exception as e:
+            self.log(f"Trial alerts off: {e}")
         self.ranker = Ranker(self.data_dir, self.source, self.log)
         if self.source != "sim":
             self.context.fo_symbols = set(self.uni.underlyings)
@@ -584,6 +592,8 @@ class LiveEngine:
                 if self._every("shadow_err", 300, clock_time=False):
                     self.log(f"Shadow exits error: {e}")
             self._guard("Paper trades", self.paper.update, self.state, now)
+            if self.trials is not None:
+                self._guard("Trial alerts", self.trials.update, self.state, self.clock.ts())
             self._guard("Flat-by reminder", self._flat_by_reminder, now, lc)
             if self._every("pulse", 5, clock_time=False):
                 self._guard("Market view", self._market_view)
@@ -618,6 +628,11 @@ class LiveEngine:
         self.tracker.update(self.state, self.clock.ts(), force=True)
         try:
             self.shadow.update(self.state, self.clock.ts(), force=True)
+        except Exception:
+            pass
+        try:
+            if self.trials is not None:
+                self.trials.update(self.state, self.clock.ts(), force=True)
         except Exception:
             pass
         try:
@@ -974,7 +989,21 @@ class LiveEngine:
         c["news_tone"] = sum(n.get("tone") or 0 for n in news) / len(news) if news else 0.0
         return c
 
+    def _trial(self, a, now, lc):
+        """A bullet on trial ("shadow" in live/registry.py): recorded and graded only (live/trials.py). It never reaches
+        the feed, Telegram, Focus, AI notes, stories, the scorecard, the conviction model or the paper account."""
+        if self.trials is None:
+            return
+        u = self.uni.underlyings.get(a["sym"]) if self.uni else None
+        i = self.state.get(u.key) if u and self.state is not None else None
+        und = (u.key if i and i.ltp else u.fut_key) if u else None
+        a.update(day=now.date().isoformat(), source=self.source)
+        cool = registry.get(a["kind"]).get("cooldown") or float(lc["cooldown_min"])
+        self.trials.add(a, und, self.clock.ts(), float(cool))
+
     def _emit(self, a, now, lc):
+        if registry.is_shadow(a.get("kind")):
+            return self._trial(a, now, lc)
         ts = now.timestamp()
         key = (a["sym"], a["kind"], None if a["kind"] in detectors.NO_DIRECTION_COOLDOWN else a["direction"])
         last = self.cool.get(key)

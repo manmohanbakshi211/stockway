@@ -114,6 +114,31 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## The basics, trained in: candles, price action and chart patterns (2.27)
+
+From your three basics books (The Candlestick Trading Bible, Fidelity / Kirkpatrick "Identifying Chart Patterns", A to Z
+of Stock Market), split into gun and bullets:
+- **Gun (built once, shared live and in the Lab):** a candle-shape engine (live/candles.py) that reads 15 patterns on
+  any bars; "formed at a key level" (the bar came to yesterday's high / low / close, the opening range or VWAP and
+  closed on the right side); and a **trial recorder** (live/trials.py) that follows each idea's stop and 2R target live.
+- **Bullets (on trial, nothing you see changes):** engulfing, harami, dragonfly / gravestone doji, hammer / shooting
+  star, pin bar, morning / evening star, tweezer, outside bar, inside-bar breakout and fakey, rectangle breakout and
+  failed breakout. Each is one line in the bullet catalogue marked "shadow": the engine records and grades it, but it
+  never reaches your alerts, Telegram, Focus, AI notes, scorecard, conviction model or paper account. Live on the
+  indices and the Lab's first 30 stocks. Results: **Scorecard → On trial**.
+- **Strategy Lab:** 15 book setups (306 versions with every exit), e.g. pin bar with the trend at a level, engulfing at
+  the 21 EMA or at a 50-61.8% pullback, inside-bar breakout / fakey, stars at the day's extreme, tweezers at
+  yesterday's high / low, rectangle breakout with confirmation, failed breakout = stop and reverse. Tested on both
+  indices and every F&O stock with history. Press **Test the strategy library** after updating (book setups show 📗).
+  New Lab facts: 15 candle patterns, distance to the 21 EMA, distance to the nearest key level, level touch.
+- **Chart page → All timeframes → strategy overlays:** every candle idea can be applied / removed on the chart (where it
+  fired in the last 10 days, stop / target, how each ended).
+- On synthetic data every book setup fails, as it should (random data has no edge); the real test is your 5-year data.
+- Checked: 148 tests incl. no-clash and a new self-check (ideas on trial stay out of alerts / Telegram / paper); Lab
+  regression 103 of 103 identical on old and rebuilt bar tables. Your next Lab run rebuilds the bar table once (new
+  facts), which takes a few extra minutes.
+- Later from the books: wedges, triple tops, gaps, and option structures (spreads, strangles) for the strategy desk.
+
 ## Options lens (2.26)
 
 Trade today → **Options lens**: StockMojo-style tools built from the app's own minute-by-minute recording (no scraping,

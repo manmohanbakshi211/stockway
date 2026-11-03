@@ -582,6 +582,14 @@ def live_scorecard(source: str | None = None):
     return clean(engine().scorecard_view(source))
 
 
+@router.get("/api/live/trials")
+def live_trials(source: str | None = None):
+    """Bullets on trial (shadow in live/registry.py): recorded and graded only, never in alerts or paper trades."""
+    from live import trials
+    e = engine()
+    return clean(trials.board(e.store, source or e.source or "upstox"))
+
+
 @router.get("/api/live/briefs")
 def live_briefs(day: str | None = None):
     return clean(engine().briefs_view(day))

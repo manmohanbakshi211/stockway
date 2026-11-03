@@ -37,6 +37,11 @@ def static_checks(cfg: dict | None = None) -> list:
                   "full-depth-api" in dhandepth.URL, "one socket per index future (Nifty, Bank Nifty)"))
     from lab import rules
     out += rules.check()
+    from live import engine as _eng, registry
+    first = [ln.strip() for ln in inspect.getsource(_eng.LiveEngine._emit).splitlines()[1:] if ln.strip()][:2]
+    out.append(_c("trials_isolated", "Ideas on trial never reach your alerts, Telegram or paper trades",
+                  bool(first) and "is_shadow" in first[0] and "_trial" in first[1],
+                  f"{len(registry.shadow_kinds())} idea(s) on trial: recorded and graded only (Scorecard, On trial)"))
     from lab import factory
     out.append(_c("lab_one_run", "Strategy Lab: one research round per Lab folder at a time",
                   hasattr(factory, "_RUN_LOCKS"), "a second run waits for the first instead of overwriting it"))

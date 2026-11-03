@@ -375,6 +375,8 @@ class MTF:
     def overlays(self, sym) -> list:
         from . import registry
         out = [{"id": f"setup:{k}", "name": f"Setup: {v}", "type": "setup"} for k, v in registry.names("setup").items() if k != "wall_fade"]
+        out += [{"id": f"candle:{k}", "name": f"Candle{' (on trial)' if registry.is_shadow('candle_' + k) else ''}: {v}", "type": "candle"}
+                for k, v in registry.names("candle").items()]
         try:
             from lab import factory
             for r in self.e.factory_rules():
@@ -434,7 +436,24 @@ class MTF:
             ph, pl, pc = max(r[2] for r in prev), min(r[3] for r in prev), prev[-1][4]
             ctx.update(pdh=ph, pdl=pl, pdc=pc, cpr=ta.cpr(ph, pl, pc))
         out, last_fire = [], {}
-        cool = (registry.get(f"setup_{key}").get("cooldown") or 45) * 60
+        cool = (registry.get(f"{kind}_{key}").get("cooldown") or 45) * 60
+        if kind == "candle":
+            from . import candles as CDL
+            spec = registry.candle_spec()
+            if key not in spec:
+                return out
+            lv = [x for x in (ctx.get("pdh"), ctx.get("pdl"), ctx.get("pdc")) if x]
+            n = len(c)
+            orh = np.where(np.arange(n) >= 3, h[:3].max(), np.nan) if n > 3 else np.full(n, np.nan)
+            orl = np.where(np.arange(n) >= 3, l[:3].min(), np.nan) if n > 3 else np.full(n, np.nan)
+            for x in CDL.trade_ideas(o, h, l, c, lv + [orh, orl], {key: spec[key]}):
+                i = x["i"]
+                if i < 3 or i >= n - 1 or t[i] - last_fire.get(x["d"], -1e18) < cool:
+                    continue
+                last_fire[x["d"]] = t[i]
+                why = registry.names("candle").get(key, key) + (f", {x['lvl_atr']:.1f} ATR from a key level" if x["lvl_atr"] is not None else "")
+                out.append(self._resolve(t, h, l, c, i, x["d"], x["entry"], x["stop"], x["target"], why))
+            return out
         if kind == "lab":
             from lab import exits as X
             from lab import factory

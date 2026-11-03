@@ -8,10 +8,22 @@ BEFORE = {'COOLDOWN': {'orb': 999, 'day_high': 30, 'day_low': 30, 'vwap_cross': 
 
 
 def test_tables_identical_to_before():
-    from live import chartdata, detectors, paper, patterns, setups
+    """Every entry the app had before the registry is unchanged. New bullets may add entries (that is what the registry
+    is for), but only kinds listed in it, and a new kind is never auto-paper-traded while it is on trial."""
+    from live import chartdata, detectors, paper, patterns, registry, setups
     now = {"COOLDOWN": detectors.COOLDOWN, "NO_DIR": sorted(detectors.NO_DIRECTION_COOLDOWN), "PAPER": sorted(paper.DEFAULTS["kinds"]),
            "SETUPS": setups.NAMES, "PATTERNS": patterns.NAMES, "SHORT": chartdata.SHORT, "NOISY": sorted(chartdata.NOISY_FOR_STOCKS)}
-    assert now == BEFORE
+    for name, old in BEFORE.items():
+        cur = now[name]
+        if isinstance(old, dict):
+            assert {k: cur.get(k) for k in old} == old, name
+            assert all(k in registry.KINDS or f"setup_{k}" in registry.KINDS or f"pattern_{k}" in registry.KINDS
+                       for k in set(cur) - set(old)), name
+        else:
+            assert set(old) <= set(cur), name
+    assert sorted(now["PAPER"]) == BEFORE["PAPER"]                   # nothing new trades on paper by itself
+    assert now["SETUPS"] == BEFORE["SETUPS"] and now["PATTERNS"] == BEFORE["PATTERNS"]
+    assert set(now["COOLDOWN"]) - set(BEFORE["COOLDOWN"]) <= set(registry.shadow_kinds())   # 2.27: candle ideas on trial
 
 
 def test_every_produced_kind_is_registered():
@@ -21,9 +33,9 @@ def test_every_produced_kind_is_registered():
         s = p.read_text()
         kinds |= set(re.findall(r'_a\(\s*m\s*,\s*"([a-z_]+)"', s))
         kinds |= set(re.findall(r'"kind"\s*:\s*"([a-z_]+)"', s))
-    for fam in ("setup", "pattern"):
+    for fam in ("setup", "pattern", "candle"):
         kinds |= {fam + "_" + k for k in registry.names(fam)}
-    kinds -= {"c", "setup_", "pattern_"}                  # a field name in a fixture; prefixes joined with a name in code
+    kinds -= {"c", "setup_", "pattern_", "candle_"}       # a field name in a fixture; prefixes joined with a name in code
     missing = sorted(k for k in kinds if k not in registry.KINDS)
     assert not missing, missing
 

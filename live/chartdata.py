@@ -270,6 +270,11 @@ class ChartData:
                 self._pattern_alerts(sym, m, closed, ctx, emit)
             except Exception as ex:
                 self.e.log(f"Pattern check {sym} failed: {ex}")
+        try:
+            self._candle_trials(sym, m, closed, ctx, emit)
+        except Exception as ex:
+            if self._rate(f"candle_err:{sym}", 600):
+                self.e.log(f"Candle trial check {sym} skipped: {ex}")
         for s in setups.evaluate(closed, ind, ctx):
             d = 1 if s["direction"] == "up" else -1
             s["ts"] = now.timestamp()
@@ -320,6 +325,35 @@ class ChartData:
                   "data": {"pattern": p["pattern"], "history_grade": grade, "setup_levels": {
                       "stop": round(p["stop"], 2), "target": round(p["target"], 2), "rr": float(p["rr"]),
                       "stop_pct": round(abs(e - p["stop"]) / e * 100, 2), "target_pct": round(abs(p["target"] - e) / e * 100, 2)}}})
+
+    def _candle_trials(self, sym, m, closed, ctx, emit):
+        """Candle bullets (live/candles.py, listed in the registry) on the 5-minute bar that just closed. While a kind is
+        on trial the engine only records and grades it; nothing you see changes. Indices and the Lab's first stocks."""
+        from . import candles as CDL, registry
+        if not m.get("is_index"):
+            from lab import rules
+            if sym not in rules.stock_list("lab_first"):
+                return
+        o, h, l, c = (np.asarray(closed[k], dtype=float) for k in "ohlc")
+        if len(c) < 8:
+            return
+        # the same levels the Lab uses for these ideas (lab/factory.py lvl_touch), so live and backtest agree
+        named = [(n, float(v)) for n, v in (("yesterday's high", ctx.get("pdh")), ("yesterday's low", ctx.get("pdl")),
+                                             ("yesterday's close", ctx.get("pdc")), ("opening-range high", ctx.get("or_high")),
+                                             ("opening-range low", ctx.get("or_low")), ("VWAP", m.get("vwap"))) if _num(v)]
+        ideas = CDL.trade_ideas(o, h, l, c, [v for _, v in named], registry.candle_spec(), last_only=True)
+        names = registry.names("candle")
+        for x in ideas:
+            at_lv = registry.get("candle_" + x["name"]).get("at_level")
+            lv_name = min(named, key=lambda nv: abs(nv[1] - x["entry"]))[0] if named and at_lv else None
+            d, e = x["d"], x["entry"]
+            emit({"sym": sym, "kind": "candle_" + x["name"], "direction": "up" if d > 0 else "down", "severity": 1,
+                  "title": f"{sym} {names.get(x['name'], x['name'])} {'(bullish)' if d > 0 else '(bearish)'}"
+                           f"{' at ' + lv_name if lv_name else ''} at {e:,.1f}",
+                  "detail": f"Stop {x['stop']:,.1f} beyond the pattern, target {x['target']:,.1f} (2R). On trial: recorded and graded only.",
+                  "price": m.get("spot"),
+                  "data": {"candle": x["name"], "level": lv_name, "level_atr": round(x["lvl_atr"], 2) if x["lvl_atr"] is not None else None,
+                           "setup_levels": {"entry": round(e, 2), "stop": round(x["stop"], 2), "target": round(x["target"], 2), "rr": 2.0}}})
 
     def _chart_patterns(self, sym, T, o, h, l, c, ctx):
         """Patterns found anywhere on the shown bars (for drawing), plus swing labels and market structure."""

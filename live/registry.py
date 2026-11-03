@@ -6,6 +6,8 @@ paper account and the screens read these tables instead of keeping their own cop
 
 Adding a new alert / setup / pattern: write its detection code (a bullet) and add one line here. No engine (gun) edit.
 A kind that isn't listed still works (default cooldown, not auto-paper-traded, its raw name as the label).
+A kind with "shadow": True is on trial: the engine records and grades it (live/trials.py) and nothing you see or trade
+changes. Promote it by removing the flag once it beats the current alerts on graded live data.
 
 This module imports nothing from the app, so any part can read it.
 """
@@ -52,7 +54,23 @@ KINDS = {
     "setup_ema_pullback": {"family": "setup", "label": "Setup: EMA pullback", "name": "EMA pullback", "cooldown": 45, "short": "EMA"},
     "setup_pdh_break": {"family": "setup", "label": "Setup: prev-day break", "name": "Previous-day high/low break", "cooldown": 999, "short": "PDH/L"},
     "setup_vwap_reclaim": {"family": "setup", "label": "Setup: VWAP reclaim", "name": "VWAP reclaim", "cooldown": 45, "short": "VWAP"},
-    "setup_wall_fade": {"family": "setup", "label": "Setup: OI wall rejection", "name": "OI wall rejection", "cooldown": 45, "short": "Wall"},}
+    "setup_wall_fade": {"family": "setup", "label": "Setup: OI wall rejection", "name": "OI wall rejection", "cooldown": 45, "short": "Wall"},
+    # Candle and price-action bullets from the basics books (3 Nov 2026), on 5-minute bars (live/candles.py). On trial:
+    # recorded and graded only (live/trials.py) until they beat the current alerts. at_level: only at a key level, on
+    # the right side of it. bars: candles in the pattern (the stop goes beyond all of them).
+    "candle_engulfing": {"family": "candle", "label": "Candle: engulfing", "name": "Engulfing bar", "cooldown": 30, "shadow": True, "at_level": True, "bars": 2},
+    "candle_harami": {"family": "candle", "label": "Candle: harami", "name": "Harami", "cooldown": 30, "shadow": True, "at_level": True, "bars": 2},
+    "candle_doji_dir": {"family": "candle", "label": "Candle: dragonfly / gravestone doji", "name": "Dragonfly / gravestone doji", "cooldown": 30, "shadow": True, "at_level": True, "bars": 1},
+    "candle_hammer": {"family": "candle", "label": "Candle: hammer / shooting star", "name": "Hammer / shooting star", "cooldown": 30, "shadow": True, "at_level": True, "bars": 1},
+    "candle_pin_bar": {"family": "candle", "label": "Candle: pin bar", "name": "Pin bar", "cooldown": 30, "shadow": True, "at_level": True, "bars": 1},
+    "candle_star": {"family": "candle", "label": "Candle: morning / evening star", "name": "Morning / evening star", "cooldown": 45, "shadow": True, "at_level": True, "bars": 3},
+    "candle_tweezer": {"family": "candle", "label": "Candle: tweezer", "name": "Tweezer bottom / top", "cooldown": 30, "shadow": True, "at_level": True, "bars": 2},
+    "candle_outside_bar": {"family": "candle", "label": "Candle: outside bar", "name": "Outside bar", "cooldown": 30, "shadow": True, "at_level": False, "bars": 1},
+    "candle_ib_break": {"family": "candle", "label": "Candle: inside-bar breakout", "name": "Inside-bar breakout", "cooldown": 30, "shadow": True, "at_level": False, "bars": 2},
+    "candle_ib_fakey": {"family": "candle", "label": "Candle: inside-bar fakey", "name": "Inside-bar false breakout", "cooldown": 30, "shadow": True, "at_level": True, "bars": 3},
+    "candle_rect_break": {"family": "candle", "label": "Candle: rectangle breakout", "name": "Rectangle breakout", "cooldown": 60, "shadow": True, "at_level": False, "bars": 1},
+    "candle_rect_fail": {"family": "candle", "label": "Candle: failed breakout", "name": "Failed breakout (stop and reverse)", "cooldown": 60, "shadow": True, "at_level": False, "bars": 2},
+}
 
 
 def get(kind: str) -> dict:
@@ -88,6 +106,20 @@ def shorts() -> dict:
 
 def noisy_for_stocks() -> set:
     return {k[len("pattern_"):] for k, v in KINDS.items() if v.get("noisy_for_stocks")}
+
+
+def is_shadow(kind: str) -> bool:
+    return bool(get(kind).get("shadow"))
+
+
+def shadow_kinds() -> list:
+    return [k for k, v in KINDS.items() if v.get("shadow")]
+
+
+def candle_spec() -> dict:
+    """{pattern name: {"at_level", "bars"}} for the alertable candle bullets (live/candles.py trade_ideas)."""
+    return {k[len("candle_"):]: {"at_level": bool(v.get("at_level")), "bars": int(v.get("bars") or 1)}
+            for k, v in KINDS.items() if v["family"] == "candle" and k.startswith("candle_")}
 
 
 def view() -> list:

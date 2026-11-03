@@ -94,14 +94,91 @@ LIBRARY = {
 }
 
 
+# ------------------------------------------------------------------ the basics books (3 Nov 2026)
+# Setups from "The Candlestick Trading Bible", the Fidelity / Kirkpatrick webinar "Identifying Chart Patterns" and "A to Z
+# of Stock Market", written as Lab rules in our own words. The candle facts are in live/candles.py. "With the trend" =
+# Supertrend 10,3 or EMA 9 vs 21; "at a key level" = within about half an ATR of yesterday's high / low / close, the
+# opening range or the day's average: the bar came down to (or up to) that level and closed on the right side of it
+# (lvl_touch, the same test the live trial alerts use). Tested on the indices and on any F&O stock with history.
+BOOK_SYMS = B + ["STOCKS"]
+CTB = "The Candlestick Trading Bible"
+FID = "Fidelity / Kirkpatrick, Identifying Chart Patterns"
+BOOKS = {
+    "Pin bar with the trend at a key level": (
+        f"{CTB}: trade pin bars in the trend's direction, from support / resistance; stop beyond the tail (bar2r exit).",
+        [{"dir": 1, "conds": [["cdl_pin", ">", 0.5], ["lvl_touch", ">", 0.5], ["st_10_3", ">", 0]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_pin", "<", -0.5], ["lvl_touch", "<", -0.5], ["st_10_3", "<", 0]], "win": [15, 300]},
+         {"dir": 1, "conds": [["cdl_pin", ">", 0.5], ["lvl_touch", ">", 0.5]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_pin", "<", -0.5], ["lvl_touch", "<", -0.5]], "win": [15, 300]}]),
+    "Pin bar rejecting the 21 EMA in a trend": (
+        f"{CTB}: pin bar off the 21-period moving average, with the trend (confluence).",
+        [{"dir": 1, "conds": [["cdl_pin", ">", 0.5], ["ema_gap", ">", 0], ["vs_ema21", "<", 0.15], ["vs_ema21", ">", -0.15]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_pin", "<", -0.5], ["ema_gap", "<", 0], ["vs_ema21", "<", 0.15], ["vs_ema21", ">", -0.15]], "win": [15, 300]}]),
+    "Engulfing bar with the trend at the 21 EMA": (
+        f"{CTB}: engulfing bar after a pullback to the moving average, in the trend's direction.",
+        [{"dir": 1, "conds": [["cdl_engulf", ">", 0.5], ["ema_gap", ">", 0], ["vs_ema21", "<", 0.2], ["vs_ema21", ">", -0.2]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_engulf", "<", -0.5], ["ema_gap", "<", 0], ["vs_ema21", "<", 0.2], ["vs_ema21", ">", -0.2]], "win": [15, 300]}]),
+    "Engulfing bar at the 50-61.8% retracement": (
+        f"{CTB} / A to Z of Stock Market (Fibonacci): engulfing bar after the day's move retraced 50-61.8%.",
+        [{"dir": 1, "conds": [["cdl_engulf", ">", 0.5], ["day_ret", ">", 0.3], ["pos_in_range", ">", 0.38], ["pos_in_range", "<", 0.5]], "win": [30, 300]},
+         {"dir": -1, "conds": [["cdl_engulf", "<", -0.5], ["day_ret", "<", -0.3], ["pos_in_range", ">", 0.5], ["pos_in_range", "<", 0.62]], "win": [30, 300]}]),
+    "Engulfing bar at the edge of a range": (
+        f"{CTB}: in a sideways market buy engulfing bars at the bottom of the range, sell them at the top.",
+        [{"dir": 1, "conds": [["cdl_engulf", ">", 0.5], ["adx", "<", 20], ["pos_in_range", "<", 0.2]], "win": [45, 300]},
+         {"dir": -1, "conds": [["cdl_engulf", "<", -0.5], ["adx", "<", 20], ["pos_in_range", ">", 0.8]], "win": [45, 300]}]),
+    "Inside bar breakout with the trend": (
+        f"{CTB}: the break of an inside bar's mother bar, in the trend's direction.",
+        [{"dir": 1, "conds": [["ib_break", ">", 0.5], ["st_10_3", ">", 0]], "win": [15, 300]},
+         {"dir": -1, "conds": [["ib_break", "<", -0.5], ["st_10_3", "<", 0]], "win": [15, 300]}]),
+    "Inside bar false breakout (fakey) at a level": (
+        f"{CTB}: when an inside bar breaks out and closes back inside near a key level, trade the other way.",
+        [{"dir": 1, "conds": [["ib_fakey", ">", 0.5], ["lvl_touch", ">", 0.5]], "win": [15, 300]},
+         {"dir": -1, "conds": [["ib_fakey", "<", -0.5], ["lvl_touch", "<", -0.5]], "win": [15, 300]}]),
+    "Morning / evening star at the day's extreme": (
+        f"{CTB}: three-candle reversal at the bottom (morning star) or top (evening star) of the day's range.",
+        [{"dir": 1, "conds": [["cdl_star", ">", 0.5], ["pos_in_range", "<", 0.3]], "win": [30, 300]},
+         {"dir": -1, "conds": [["cdl_star", "<", -0.5], ["pos_in_range", ">", 0.7]], "win": [30, 300]}]),
+    "Hammer / shooting star at support / resistance": (
+        f"{CTB} and {FID}: hammer at support, shooting star at resistance.",
+        [{"dir": 1, "conds": [["cdl_hammer", ">", 0.5], ["lvl_touch", ">", 0.5]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_hammer", "<", -0.5], ["lvl_touch", "<", -0.5]], "win": [15, 300]}]),
+    "Dragonfly / gravestone doji at a level": (
+        f"{CTB}: dragonfly doji at support, gravestone doji at resistance.",
+        [{"dir": 1, "conds": [["cdl_doji_dir", ">", 0.5], ["lvl_touch", ">", 0.5]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_doji_dir", "<", -0.5], ["lvl_touch", "<", -0.5]], "win": [15, 300]}]),
+    "Tweezer bottom / top at yesterday's low / high": (
+        f"{CTB}: two equal lows (tops) at a key level mark a turn.",
+        [{"dir": 1, "conds": [["cdl_tweezer", ">", 0.5], ["pdl_dist", "<", 0.2], ["pdl_dist", ">", -0.2]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_tweezer", "<", -0.5], ["pdh_dist", "<", 0.2], ["pdh_dist", ">", -0.2]], "win": [15, 300]}]),
+    "Harami after a stretched move": (
+        f"{CTB} and {FID}: a harami when RSI is stretched warns the move is tiring.",
+        [{"dir": 1, "conds": [["cdl_harami", ">", 0.5], ["rsi", "<", 35]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_harami", "<", -0.5], ["rsi", ">", 65]], "win": [15, 300]}]),
+    "Rectangle breakout (confirmed close)": (
+        f"{FID}: a pattern counts only after the breakout; enter on a close beyond the rectangle, stop beyond the breakout bar.",
+        [{"dir": 1, "conds": [["rect_break", ">", 0.5]], "win": [75, 300]}, {"dir": -1, "conds": [["rect_break", "<", -0.5]], "win": [75, 300]},
+         {"dir": 1, "conds": [["rect_break", ">", 0.5], ["range_x", ">", 1.2]], "win": [75, 300]},
+         {"dir": -1, "conds": [["rect_break", "<", -0.5], ["range_x", ">", 1.2]], "win": [75, 300]}]),
+    "Failed breakout: stop and reverse": (
+        f"{FID}: when a breakout falls back inside the pattern, reverse.",
+        [{"dir": 1, "conds": [["rect_fail", ">", 0.5]], "win": [75, 300]}, {"dir": -1, "conds": [["rect_fail", "<", -0.5]], "win": [75, 300]}]),
+    "Outside bar with the trend": (
+        f"{FID} (engulfing / outside bars): a bar that takes out both sides of the previous one and closes with the trend.",
+        [{"dir": 1, "conds": [["cdl_outside", ">", 0.5], ["st_10_3", ">", 0]], "win": [15, 300]},
+         {"dir": -1, "conds": [["cdl_outside", "<", -0.5], ["st_10_3", "<", 0]], "win": [15, 300]}]),
+}
+
+
 def rules() -> list:
-    """Every library rule with every exit that fits it (buys: 5 premium exits + 4 chart-level exits; selling: 5), both indices."""
+    """Every library rule with every exit that fits it (buys: 5 premium exits + 4 chart-level exits; selling: 5).
+    Classic library: both indices. Book setups: both indices and any F&O stock with history."""
     out = []
-    for name, (note, rs) in LIBRARY.items():
-        for r in rs:
-            for ex in (SELL_EXITS if r["dir"] == 0 else BUY_EXITS):
-                out.append({**r, "exit": ex, "max_day": 1, "syms": B, "note": f"{name}. {note}"[:300],
-                            "source": f"library:{name}"[:80]})
+    for group, syms, src in ((LIBRARY, B, "library"), (BOOKS, BOOK_SYMS, "book")):
+        for name, (note, rs) in group.items():
+            for r in rs:
+                for ex in (SELL_EXITS if r["dir"] == 0 else BUY_EXITS):
+                    out.append({**r, "exit": ex, "max_day": 1, "syms": syms, "note": f"{name}. {note}"[:300],
+                                "source": f"{src}:{name}"[:80]})
     return out
 
 

@@ -71,6 +71,17 @@ FEATURES.update({
     "vs_sma20": ("price vs SMA 20 (5-min)", "%"), "cpr_width": ("CPR width (today's pivot band)", "%"),
     "cpr_pos": ("price vs the CPR (+ above top, - below bottom, 0 inside)", ""),
 })
+# candlestick / price-action facts (bullets in live/candles.py: the same code live and in the backtest) and
+# confluence with key levels, from the basics books (Candlestick Trading Bible, Fidelity chart patterns)
+from live.candles import PATTERNS as _CANDLES  # noqa: E402
+
+FEATURES.update({fact: (words, "") for _, (_fn, fact, words) in _CANDLES.items()})
+FEATURES.update({
+    "vs_ema21": ("price vs EMA 21 (5-min)", "%"),
+    "lvl_atr": ("distance to the nearest key level (yesterday's high / low / close, opening range, day's average), in ATRs", "ATR"),
+    "lvl_below": ("+1 the nearest key level is below (support), -1 above (resistance)", ""),
+    "lvl_touch": ("+1 the bar came down to a key level and closed above it (support), -1 went up to one and closed below (resistance)", ""),
+})
 INDEX_SYMS = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX")
 STOCKS = "STOCKS"             # in a rule's syms: any F&O stock (tested on every stock with downloaded history)
 
@@ -272,6 +283,23 @@ def bar_features(o, h, l, c, ctx: dict, iv=None, prem=None) -> dict:
         f["cpr_pos"] = np.where(c > top, (c - top) / piv * 100, np.where(c < bot, (c - bot) / piv * 100, 0.0))
     else:
         f["cpr_width"], f["cpr_pos"] = np.full(n, np.nan), np.full(n, np.nan)
+    # candlestick / price-action patterns and how close price is to a key level (each isolated: one failing fact
+    # never stops the others)
+    from live import candles as _C
+    try:
+        f.update(_C.all_patterns(o, h, l, c))
+    except Exception:
+        for _, (_fn, fact, _w) in _C.PATTERNS.items():
+            f.setdefault(fact, np.zeros(n))
+    f["vs_ema21"] = (c / _ema(c, 21) - 1) * 100
+    try:
+        orh_a = np.where(np.arange(n) >= 3, orh, np.nan)
+        orl_a = np.where(np.arange(n) >= 3, orl, np.nan)
+        lv = [x for x in (ph, pl, pcl) if x] + [orh_a, orl_a, tw]
+        f["lvl_atr"], f["lvl_below"] = _C.levels_dist(c, h, l, lv)
+        f["lvl_touch"] = _C.level_touch(c, h, l, lv)
+    except Exception:
+        f["lvl_atr"], f["lvl_below"], f["lvl_touch"] = np.full(n, np.nan), np.full(n, np.nan), np.zeros(n)
     return f
 
 
@@ -510,9 +538,11 @@ def load_or_build(data_dir, log=print, should_stop=lambda: False, rebuild=False)
     newest = max((p.stat().st_mtime for p in hist.glob("*/raw_*.parquet")), default=0)
     if f.exists() and not rebuild and f.stat().st_mtime >= newest:
         df = pd.read_parquet(f)
-        if all("pnl_" + s in df.columns for s in STYLES):
+        missing = [k for k in FEATURES if k not in df.columns]
+        if all("pnl_" + s in df.columns for s in STYLES) and not missing:
             return df
-        log("New exit styles to test: rebuilding the bar table once…")
+        log(f"New facts to test ({', '.join(missing[:6])}{'…' if len(missing) > 6 else ''}): rebuilding the bar table once…"
+            if missing else "New exit styles to test: rebuilding the bar table once…")
     log("Building the bar table from the option history (once; later runs reuse it)…")
     df = build(data_dir, log=log, should_stop=should_stop)
     if not df.empty:
@@ -584,7 +614,8 @@ class Book:
         di = {d: i for i, d in enumerate(dates)}
         self.dix = df["date"].map(di).to_numpy()
         self.part = np.where(self.dix < a, 0, np.where(self.dix < b, 1, 2))
-        self.cols = {c: df[c].to_numpy() for c in list(FEATURES) + ["dir", "sym"]}
+        # a bar table from before a fact existed: that fact is unknown (NaN), so rules using it simply can't fire there
+        self.cols = {c: (df[c].to_numpy() if c in df else np.full(len(df), np.nan)) for c in list(FEATURES) + ["dir", "sym"]}
         self.pnl = {r: df["pnl_" + r].to_numpy(dtype=float) for r in ALL_EXITS if "pnl_" + r in df}
         self.symcode = df["sym"].to_numpy()
         self.prem = df["premium"].to_numpy(dtype=float) if "premium" in df else np.zeros(len(df))
@@ -989,9 +1020,10 @@ def view(data_dir) -> dict:
     order = {"promoted": 0, "failed holdout": 1, "failed validation": 2, "failed train": 3, "duplicate": 4}
     lib = {}
     for r in st.get("rules", {}).values():
-        if not str(r.get("source", "")).startswith("library:"):
+        src = str(r.get("source", ""))
+        if not src.startswith(("library:", "book:")):
             continue
-        name = r["source"][8:]
+        name = src.split(":", 1)[1] + (" (book)" if src.startswith("book:") else "")
         cur = lib.get(name)
         key = (order.get(r["stage"], 9), -(r["hold"].get("avg") or -1e9) if r["stage"] == "promoted" else -(r["train"].get("t") or -9))
         if cur is None or key < cur["_k"]:
@@ -1007,19 +1039,26 @@ def view(data_dir) -> dict:
             "pending_ideas": len(st.get("ideas", [])), "exit_board": st.get("exit_board"), "plan40": st.get("plan40")}
 
 
+IDEA_QUEUE = 2000          # ideas waiting for the next research run (the library + books are about 700)
+
+
 def add_ideas(data_dir, ideas: list, source: str) -> dict:
     """Queue strategies from an ebook or Claude; they are tested on the next run (train/validation/holdout as usual)."""
     st = load(data_dir)
-    ok, bad = [], 0
+    ok, bad, same = [], 0, 0
+    queued = {x.get("id") for x in st.get("ideas", [])}
     for x in ideas:
         v = validate({**x, "source": x.get("source") or source})
-        if v:
-            ok.append(v)
-        else:
+        if not v:
             bad += 1
-    st["ideas"] = (st.get("ideas", []) + ok)[-500:]
+        elif v["id"] in queued:
+            same += 1                                    # already waiting for the next run
+        else:
+            queued.add(v["id"])
+            ok.append(v)
+    st["ideas"] = (st.get("ideas", []) + ok)[-IDEA_QUEUE:]
     save(data_dir, st)
-    return {"queued": len(ok), "rejected": bad}
+    return {"queued": len(ok), "rejected": bad, "already_queued": same}
 
 
 def is_live(r: dict) -> bool:

@@ -36,6 +36,11 @@
 - **Facts that change over time (lot size, expiry day, STT, events) are dated data, not code.** Old dates keep their old
   values so past backtests stay identical (Lab regression check: 594/594).
 - Every change keeps the stability rules above: add don't replace, shadow first, full tests + tools/lab_regression.py.
+- **Every new input gets a gun-vs-bullet split first (Mandeep, 3 Nov 2026):** a book, video, idea or screenshot is
+  read and sorted before anything is built: what is gun (shared engine pieces it needs, e.g. a shape detector, a level
+  test, a grader) and what is bullet (the setups, patterns, thresholds and claims to test). Say the split to Mandeep,
+  build the gun piece once, then add the bullets to registries / the Lab library, on trial (live/registry.py
+  "shadow": True, graded in live/trials.py) and tested in the Lab on data they never saw.
 
 ## Test after every step (Mandeep, 3 Nov 2026)
 

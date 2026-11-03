@@ -1038,6 +1038,7 @@ async function pageScorecard() {
       ${(m.drivers || []).length ? `<p class="small muted">What matters most so far: ${m.drivers.map((d) => esc(d.feature)).join(", ")}.</p>` : ""}
       ${(m.models || []).length ? `<p class="small">Models compared on the same unseen days: ${m.models.map((x) => `${esc(x.name)} <b>${x.auc}</b>${x.chosen ? " ✓ in use" : ""}${x.champion ? " (champion)" : ""}`).join(" · ")}. A challenger replaces the champion only if it is 0.02 AUC better.</p>` : ""}</div>
     ${exitBoardLive(sc.exits)}
+    <div id="trials-box"></div>
     <p class="note">${esc(sc.rule)} Alert types under 45% of decided cases (20+) are demoted automatically: out of Focus, no Telegram, no auto paper trade.</p>
     <h2>By alert type</h2>
     <div class="table-wrap"><table><thead><tr><th>Alert</th><th class="r">Graded</th><th class="r">Worked</th><th class="r">Recently</th><th class="r">Option 15 min</th><th class="r">Option 60 min</th><th class="r" title="Price move in the alert's favour">Price 15 min</th><th></th></tr></thead>
@@ -1045,6 +1046,23 @@ async function pageScorecard() {
     <h2>Latest graded alerts</h2>
     <div class="table-wrap"><table><thead><tr><th>When</th><th>Alert</th><th>Result</th><th class="r" title="Price move in the alert's favour">In favour 5m</th><th class="r">15m</th><th class="r">60m</th><th class="r">Option best / worst</th></tr></thead><tbody>${recent || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>`;
   bindAIReview(main);
+  api(`/api/live/trials${sc.source ? `?source=${sc.source}` : ""}`).then((t) => { const el = $("#trials-box"); if (el) el.innerHTML = trialsBox(t); }).catch(() => {});
+}
+
+/* Bullets on trial (live/trials.py): recorded and graded only */
+function trialsBox(t) {
+  if (!t || !(t.on_trial || []).length) return "";
+  const res = (x) => x.result === "hit" ? `<span class="pill p-up">Target</span>` : x.result === "miss" ? `<span class="pill p-down">Stop</span>`
+    : x.result === "time" ? `<span class="pill">${fpc(x.r_exit, 2)}R at ${t.hold_min} min</span>` : x.result === "ungraded" ? `<span class="muted small">no stop</span>` : `<span class="muted small">following…</span>`;
+  const rows = (t.kinds || []).map((k) => `<tr><td><b>${esc(k.label.replace(/^Candle: /, ""))}</b></td><td class="r">${k.n} <small class="muted">${k.days} day${k.days === 1 ? "" : "s"}</small></td>
+    <td class="r">${k.hits} / ${k.misses} / ${k.timed}</td><td class="r"><b class="${k.hit_rate >= 40 ? "up" : k.hit_rate != null && k.hit_rate < 30 ? "down" : ""}">${k.hit_rate != null ? k.hit_rate + "%" : "–"}</b></td>
+    <td class="r"><b class="${(k.avg_r ?? 0) > 0 ? "up" : (k.avg_r ?? 0) < 0 ? "down" : ""}">${k.avg_r != null ? (k.avg_r >= 0 ? "+" : "") + k.avg_r + "R" : "–"}</b></td></tr>`).join("");
+  const last = (t.recent || []).slice(0, 15).map((x) => `<tr><td>${esc((x.day || "").slice(5))} ${hm(x.ts)}</td><td>${arrow(x.direction)} ${esc(x.title || x.sym)}</td><td>${res(x)}</td></tr>`).join("");
+  return `<div class="panel tight" style="margin-top:14px"><h3>On trial <span class="pill">shadow</span></h3>
+    <p class="small">New ideas being tested live before you ever see them: ${t.on_trial.map((k) => esc(k.label.replace(/^Candle: /, ""))).join(", ")}. ${esc(t.note)}</p>
+    <div class="table-wrap"><table class="mini"><thead><tr><th>Idea</th><th class="r">Fired</th><th class="r">Target / stop / time</th><th class="r">Target first</th><th class="r">Average</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="5" class="muted">Nothing recorded yet. They start with the next scanner session.</td></tr>`}</tbody></table></div>
+    ${last ? `<details><summary class="small muted">Latest trials</summary><div class="table-wrap"><table class="mini"><tbody>${last}</tbody></table></div></details>` : ""}</div>`;
 }
 
 /* ---------------- page: Briefs */
@@ -2206,7 +2224,7 @@ async function pageLab() {
     const rs = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
     const st = (x) => x && x.n ? `${x.n} · ${rs(x.avg)} · t ${x.t} · ${x.green_pct}% green` : `<span class="muted">–</span>`;
     const stage = { promoted: ["p-up", "Promoted: passed all 3"], duplicate: ["", "Same trades as another rule"], "failed holdout": ["p-down", "Failed holdout"], "failed validation": ["", "Failed validation"], "failed train": ["", "Failed train"] };
-    const src = (s) => s === "generated" || s === "mutation" ? "search" : s.startsWith("ebook:") ? "📕 " + esc(s.slice(6)) : s.startsWith("library:") ? "📚 " + esc(s.slice(8)) : s === "claude" ? "Claude" : esc(s);
+    const src = (s) => s === "generated" || s === "mutation" ? "search" : s.startsWith("ebook:") ? "📕 " + esc(s.slice(6)) : s.startsWith("library:") ? "📚 " + esc(s.slice(8)) : s.startsWith("book:") ? "📗 " + esc(s.slice(5)) : s === "claude" ? "Claude" : esc(s);
     const fits = (r) => r.dir !== 0 || String(r.exit || "").startsWith("fly");
     const only40 = LS.get("lab40", false);
     const rows = (f.rules || []).filter((r) => r.stage !== "failed train" && r.stage !== "duplicate" && (!only40 || fits(r))).slice(0, 60).map((r) => `<tr>
@@ -2235,7 +2253,7 @@ async function pageLab() {
         <li>Each trade buys 1 lot of the at-the-money call or put, after real charges and slippage. A day stops after a losing trade (the small-account way), so "green" = % of trading days that ended in profit.</li>
         <li>If promoted ≈ the luck number, nothing real was found yet. ${prom > f.luck_expected ? "" : `<b>That is the case right now</b>: ${prom} promoted vs up to ${f.luck_expected} by luck, so even the promoted rules may be luck. They trade on paper only to build a live record, and switch off by themselves if they lose over 15 trades. The search keeps going every evening, with your ebooks and Claude's ideas.`}</li></ul></div>
       ${lab40(f)}${labExits(f)}${labML(f)}
-      ${(f.library || []).length ? `<h2>Strategy library <span class="muted small">famous setups from top traders and books, every exit and indicator setting tested</span></h2>
+      ${(f.library || []).length ? `<h2>Strategy library <span class="muted small">famous setups from top traders and books (incl. your basics books, marked "book"), every exit and indicator setting tested</span></h2>
       <div class="table-wrap"><table class="lab"><thead><tr><th>Setup</th><th>Best version</th><th>Train</th><th>Validation</th><th>Holdout</th></tr></thead><tbody>
         ${f.library.map((x) => { const r = x.best; return `<tr><td><b>${esc(x.name)}</b><br><span class="pill ${stage[r.stage] ? stage[r.stage][0] : ""}">${stage[r.stage] ? stage[r.stage][1] : esc(r.stage)}</span> <small class="muted">${x.n_rules} versions</small></td>
           <td class="small">${esc(r.rule)}<br><span class="muted">${esc((r.note || "").split(". ").slice(1).join(". "))}</span></td><td class="small">${st(r.train)}</td><td class="small">${st(r.valid)}</td><td class="small"><b>${st(r.hold)}</b></td></tr>`; }).join("")}</tbody></table></div>` : ""}
