@@ -227,6 +227,26 @@ async def live_mtf_overlay(sym: str, id: str, days: int = 10):
     return clean(await _run_blocking(_mtf().overlay, sym.upper(), id, max(1, min(20, days))))
 
 
+def _lens():
+    e = engine()
+    if getattr(e, "lens", None) is None:
+        from live.lens import Lens
+        e.lens = Lens(e)
+    return e.lens
+
+
+@router.get("/api/live/lens/{sym}")
+async def live_lens(sym: str):
+    """Options lens for one symbol: straddle, call vs put premium, IV, PCR, PE-CE OI change, OI by strike."""
+    return clean(await _run_blocking(_lens().symbol, sym.upper()))
+
+
+@router.get("/api/live/lens_market")
+async def live_lens_market():
+    """Market lens: breadth through the day, futures buildup heatmap, IV grid, sectors, contributors, FII / DII."""
+    return clean(await _run_blocking(_lens().market))
+
+
 @router.get("/api/live/alerts")
 def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1, source: str | None = None, limit: int = 1000,
                 focus: bool = False):

@@ -2480,3 +2480,87 @@ async function pageSystem() {
   await draw();
 }
 Object.assign(PAGES, { system: pageSystem });
+
+/* ---------------- Options lens (live/lens.py): straddle, premium decay, IV, PCR, OI flow, OI by strike, market breadth,
+   buildup heatmap, IV grid, sectors, contributors, FII / DII. All from the app's own minute recording. */
+const LZ = { charts: {}, sym: null };
+async function pageLens() {
+  stopPageTimer();
+  Object.values(LZ.charts).forEach((c) => { try { c.remove(); } catch (_) {} }); LZ.charts = {};
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  LZ.sym = (params.get("s") || LS.get("lensSym", "NIFTY")).toUpperCase(); LS.set("lensSym", LZ.sym);
+  const IDX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"];
+  let stocks = []; try { stocks = (await symbolList()).stocks.filter((x) => !IDX.includes(x)); } catch (_) {}
+  main.innerHTML = `<div class="toolbar"><div><h1 class="page-title" style="margin:0">Options lens</h1>
+      <p class="lede" style="margin:4px 0 0">Straddle, premium decay, IV, PCR and who is adding positions, through the day, plus the whole market's breadth. Built from the app's own minute-by-minute recording; every value here is recorded, so the Lab can test it later.</p></div>
+      <select id="lz-sym" aria-label="Symbol"><optgroup label="Indices">${IDX.map((x) => `<option ${x === LZ.sym ? "selected" : ""}>${x}</option>`).join("")}</optgroup><optgroup label="F&amp;O stocks">${stocks.map((x) => `<option ${x === LZ.sym ? "selected" : ""}>${esc(x)}</option>`).join("")}</optgroup></select></div>
+    <div id="lz-kpis" class="kpis kpi6" style="margin-top:10px"></div>
+    <div class="mtf-grid" style="margin-top:12px">
+      <div class="mtf-cell"><div class="mtf-head"><b>ATM straddle</b> <span class="small muted">call + put at the strike nearest the price, and its average</span></div><div class="mtf-chart" id="lz-strad"></div></div>
+      <div class="mtf-cell"><div class="mtf-head"><b>Call vs put premium</b> <span class="small muted">ATM; which side is decaying</span></div><div class="mtf-chart" id="lz-cepe"></div></div>
+      <div class="mtf-cell"><div class="mtf-head"><b>Put OI − call OI</b> <span class="small muted">change since the open, lakh; above 0 = puts being written (support)</span></div><div class="mtf-chart" id="lz-oi"></div></div>
+      <div class="mtf-cell"><div class="mtf-head"><b>ATM IV and PCR</b> <span class="small muted">IV (left), put-call ratio (right)</span></div><div class="mtf-chart" id="lz-iv"></div></div>
+    </div>
+    <div class="panel tight" style="margin-top:12px"><h3>OI by strike <span class="muted small">now, and change since the open (lakh), near the price</span></h3><div id="lz-strikes"></div></div>
+    <h2 style="margin:20px 0 8px">Whole market</h2>
+    <div class="mtf-grid"><div class="mtf-cell"><div class="mtf-head"><b>Breadth through the day</b> <span class="small muted">F&amp;O stocks up / down, % above VWAP</span></div><div class="mtf-chart" id="lz-breadth"></div></div>
+      <div class="panel tight"><h3>Futures buildup</h3><div id="lz-build"></div></div></div>
+    <div class="mtf-grid" style="margin-top:12px"><div class="panel tight"><h3>Sectors</h3><div id="lz-sec"></div></div>
+      <div class="panel tight"><h3>Who is moving the index</h3><div id="lz-contrib"></div></div>
+      <div class="panel tight"><h3>FII / DII and participants</h3><div id="lz-flows"></div></div></div>
+    <div class="panel tight" style="margin-top:12px"><h3>IV grid <span class="muted small">every F&amp;O stock, highest IV first</span></h3><div id="lz-iv-grid"></div></div>`;
+  $("#lz-sym").onchange = (e) => { location.hash = `#/lens?s=${encodeURIComponent(e.target.value)}`; };
+  const LW = window.LightweightCharts;
+  const mk = (id, opts = {}) => {
+    if (LZ.charts[id]) return LZ.charts[id];
+    const el = $("#" + id); if (!el || !LW) return null;
+    const c = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 11 },
+      grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" }, leftPriceScale: { visible: !!opts.left, borderColor: "#D5DCE3" },
+      timeScale: { borderColor: "#D5DCE3", timeVisible: true, secondsVisible: false }, crosshair: { mode: 0 } });
+    c._s = {}; LZ.charts[id] = c; return c;
+  };
+  const put = (c, name, type, data, o = {}) => { if (!c) return; if (!c._s[name]) c._s[name] = c.addSeries(LW[type], { priceLineVisible: false, lastValueVisible: true, ...o }); c._s[name].setData(data || []); };
+  const n2 = (v) => (v == null ? "–" : fk(v));
+  const draw = async () => {
+    if (state.page !== "lens") return;
+    let x, m;
+    try { [x, m] = await Promise.all([api(`/api/live/lens/${encodeURIComponent(LZ.sym)}`), api("/api/live/lens_market")]); }
+    catch (e) { $("#lz-kpis").innerHTML = `<p class="muted">${esc(e.message)}</p>`; LZ.timer = setTimeout(draw, 30000); return; }
+    const nw = x.now || {}, S = x.series || {};
+    $("#lz-kpis").innerHTML = x.empty ? `<div class="kpi" style="grid-column:1/-1"><span>${esc(x.empty)}</span></div>` : [
+      ["Straddle", n2(nw.straddle), nw.straddle_decay_pct != null ? `${nw.straddle_decay_pct > 0 ? "+" : ""}${nw.straddle_decay_pct}% since the first minute` : "ATM call + put"],
+      ["ATM IV", n2(nw.atm_iv), nw.iv_chg_15m != null ? `${nw.iv_chg_15m > 0 ? "+" : ""}${nw.iv_chg_15m} in 15 min` : ""],
+      ["PCR", n2(nw.pcr), "puts ÷ calls (OI)"], ["Max pain", n2(nw.max_pain), x.expiry ? "expiry " + esc(x.expiry) : ""],
+      ["Call wall", n2(nw.resistance), "biggest call OI"], ["Put wall", n2(nw.support), "biggest put OI"],
+    ].map(([a, b, c]) => `<div class="kpi"><b>${b}</b><span>${a}${c ? ` · <small>${c}</small>` : ""}</span></div>`).join("") + (x.session && x.session !== "today" ? `<p class="small muted" style="grid-column:1/-1;margin:6px 12px">Showing the last recorded session (${esc(x.session)}).</p>` : "");
+    const a = mk("lz-strad"); put(a, "s", "LineSeries", S.straddle, { color: "#3D2FA8", lineWidth: 2, title: "Straddle" }); put(a, "v", "LineSeries", S.straddle_vwap, { color: "#9A6A12", lineWidth: 1, lineStyle: 2, title: "Average" });
+    const b = mk("lz-cepe"); put(b, "c", "LineSeries", S.ce, { color: "#C23B32", lineWidth: 2, title: "Call" }); put(b, "p", "LineSeries", S.pe, { color: "#1E8A5A", lineWidth: 2, title: "Put" });
+    const c = mk("lz-oi"); put(c, "d", "HistogramSeries", (S.pe_minus_ce_oi_lakh || []).map((p) => ({ time: p.time, value: p.value, color: p.value >= 0 ? "rgba(30,138,90,.6)" : "rgba(194,59,50,.6)" })), { title: "PE − CE" });
+    const d = mk("lz-iv", { left: true }); put(d, "iv", "LineSeries", S.atm_iv, { color: "#B04ACF", lineWidth: 2, priceScaleId: "left", title: "IV" }); put(d, "pcr", "LineSeries", S.pcr, { color: "#0F7C8C", lineWidth: 2, title: "PCR" });
+    const st = x.strikes || [], mx = Math.max(1, ...st.map((r) => Math.max(r.ce_oi || 0, r.pe_oi || 0)));
+    const bar = (v, col) => `<span style="display:inline-block;height:9px;width:${Math.round((v || 0) / mx * 100)}%;max-width:100%;background:${col};border-radius:2px"></span>`;
+    $("#lz-strikes").innerHTML = st.length ? `<div class="table-wrap"><table class="mini"><thead><tr><th class="r">Call OI chg</th><th>Call OI</th><th class="r">Strike</th><th>Put OI</th><th>Put OI chg</th></tr></thead><tbody>
+      ${st.map((r) => `<tr${nw.spot && Math.abs(r.strike - nw.spot) === Math.min(...st.map((q) => Math.abs(q.strike - nw.spot))) ? ` style="background:#FFF8E6"` : ""}><td class="r ${(r.ce_chg || 0) > 0 ? "down" : "up"}">${n2(r.ce_chg)}</td><td style="width:30%;text-align:right">${bar(r.ce_oi, "rgba(194,59,50,.55)")} <small>${n2(r.ce_oi)}</small></td><td class="r"><b>${fk(r.strike)}</b></td><td style="width:30%"><small>${n2(r.pe_oi)}</small> ${bar(r.pe_oi, "rgba(30,138,90,.55)")}</td><td class="${(r.pe_chg || 0) > 0 ? "up" : "down"}">${n2(r.pe_chg)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="small muted" style="margin:0">Strike OI shows while the scanner runs (options streaming).</p>`;
+    const br = mk("lz-breadth", { left: true });
+    put(br, "a", "LineSeries", (m.breadth || []).map((p) => ({ time: p.time, value: p.adv })), { color: "#1E8A5A", lineWidth: 2, title: "Up" });
+    put(br, "d", "LineSeries", (m.breadth || []).map((p) => ({ time: p.time, value: p.dec })), { color: "#C23B32", lineWidth: 2, title: "Down" });
+    put(br, "v", "LineSeries", (m.breadth || []).filter((p) => p.above_vwap_pct != null).map((p) => ({ time: p.time, value: p.above_vwap_pct })), { color: "#5E6B78", lineWidth: 1, lineStyle: 2, priceScaleId: "left", title: "% > VWAP" });
+    const BL = { long_buildup: ["Long buildup", "price ↑ OI ↑", "up"], short_covering: ["Short covering", "price ↑ OI ↓", "up"], short_buildup: ["Short buildup", "price ↓ OI ↑", "down"], long_unwinding: ["Long unwinding", "price ↓ OI ↓", "down"] };
+    const bkey = (k) => Object.keys(BL).find((b) => (k || "").toLowerCase().replace(/ /g, "_").includes(b)) || k;
+    const bu = {}; Object.entries(m.buildup || {}).forEach(([k, v]) => { const kk = bkey(k); (bu[kk] = bu[kk] || []).push(...v); });
+    $("#lz-build").innerHTML = `<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${Object.entries(BL).map(([k, [t, h, cls]]) => `<div><b class="${cls}">${t}</b> <span class="small muted">${h} · ${(bu[k] || []).length}</span><div class="small" style="margin-top:4px;line-height:1.7">${(bu[k] || []).slice(0, 8).map((r) => `<a href="#/lens?s=${encodeURIComponent(r.sym)}">${esc(r.sym)}</a> <span class="${(r.chg_pct || 0) >= 0 ? "up" : "down"}">${r.chg_pct ?? "–"}%</span>`).join(" · ") || "–"}</div></div>`).join("")}</div>`;
+    $("#lz-sec").innerHTML = (m.sectors || []).length ? `<table class="mini"><tbody>${m.sectors.slice(0, 12).map((s) => `<tr><td>${esc(s.sector)}</td><td class="r ${s.chg >= 0 ? "up" : "down"}">${s.chg > 0 ? "+" : ""}${s.chg}%</td><td class="small muted">${s.up}/${s.n} up</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:0">While the scanner runs.</p>`;
+    const cb = m.contributors || {};
+    $("#lz-contrib").innerHTML = Object.keys(cb).length ? Object.entries(cb).slice(0, 2).map(([idx, v]) => `<div class="small"><b>${esc(idx)}</b> ${v.actual > 0 ? "+" : ""}${v.actual} pts (explained ${v.explained})</div><table class="mini" style="margin-bottom:6px"><tbody>${(v.rows || []).slice(0, 6).map((r) => `<tr><td>${esc(r.sym)}</td><td class="r ${r.points >= 0 ? "up" : "down"}">${r.points > 0 ? "+" : ""}${r.points}</td></tr>`).join("")}</tbody></table>`).join("") : `<p class="small muted" style="margin:0">While the scanner runs.</p>`;
+    const fl = m.flows || {}, fd = fl.fii_dii || {}, pr = fl.participants || [];
+    const cash = (w) => fd[w] && fd[w].net != null ? `${fd[w].net > 0 ? "+" : ""}${fk(fd[w].net)} cr` : "–";
+    $("#lz-flows").innerHTML = `${fd.FII || fd.DII ? `<p class="small" style="margin:0 0 6px">${esc((fd.FII || fd.DII).date || "")}: FII cash <b>${cash("FII")}</b> · DII cash <b>${cash("DII")}</b></p>` : ""}
+      ${pr.length ? `<table class="mini"><thead><tr><th>Who</th><th class="r">Index fut long %</th><th class="r">Calls net</th><th class="r">Puts net</th></tr></thead><tbody>${pr.map((r) => `<tr><td>${esc(r.who)}</td><td class="r">${r.fut_long_pct ?? "–"}</td><td class="r">${fk(r.call_net)}</td><td class="r">${fk(r.put_net)}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:0">From NSE after the close (Market context).</p>`}`;
+    const ig = m.iv_grid || [];
+    $("#lz-iv-grid").innerHTML = ig.length ? `<div class="table-wrap" style="max-height:360px;overflow:auto"><table class="mini"><thead><tr><th>Stock</th><th class="r">ATM IV</th><th class="r">IV 15-min chg</th><th class="r">IV ÷ HV</th><th class="r">Price chg</th><th class="r">PCR</th></tr></thead><tbody>${ig.slice(0, 60).map((r) => `<tr><td><a href="#/lens?s=${encodeURIComponent(r.sym)}">${esc(r.sym)}</a></td><td class="r">${n2(r.atm_iv)}</td><td class="r ${(r.iv_chg_15m || 0) > 0 ? "up" : (r.iv_chg_15m || 0) < 0 ? "down" : ""}">${n2(r.iv_chg_15m)}</td><td class="r">${n2(r.iv_hv)}</td><td class="r ${(r.chg_pct || 0) >= 0 ? "up" : "down"}">${n2(r.chg_pct)}%</td><td class="r">${n2(r.pcr)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="small muted" style="margin:0">While the scanner runs.</p>`;
+    Object.values(LZ.charts).forEach((ch) => { if (!ch._fit) { ch.timeScale().fitContent(); ch._fit = true; } });
+    stopPageTimer(); L.pageTimer = setTimeout(draw, 60000);
+  };
+  draw();
+}
+Object.assign(PAGES, { lens: pageLens });

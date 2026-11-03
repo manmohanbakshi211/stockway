@@ -114,6 +114,18 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Options lens (2.26)
+
+Trade today → **Options lens**: StockMojo-style tools built from the app's own minute-by-minute recording (no scraping,
+no extra data plan), so every value is recorded and the Lab can test it later.
+- Per symbol: **ATM straddle** through the day with its average, **call vs put premium** (which side is decaying),
+  **put OI − call OI** change since the open (who is writing), **ATM IV and PCR** through the day, **OI by strike** now
+  and since the open; straddle decay, max pain and the call / put walls.
+- Whole market: **breadth** through the day (F&O stocks up / down, % above VWAP), **futures buildup** heatmap (long
+  buildup, short covering, short buildup, long unwinding), **sectors**, **who is moving the index**, **FII / DII cash
+  and participant positions**, and an **IV grid** of every F&O stock (IV, 15-min change, IV ÷ HV, PCR).
+- While the scanner runs it shows today; otherwise the last recorded session. Refreshes every minute.
+
 ## All timeframes on the chart page (2.25)
 
 Chart page → below the main chart, **All timeframes**: 1D, 75m, 1H, 15m and 5m side by side (one column on a phone).
