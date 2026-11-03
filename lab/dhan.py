@@ -23,7 +23,7 @@ class DhanError(RuntimeError):
 
 
 class Dhan:
-    def __init__(self, client_id: str, token: str, per_sec: float = 4.0):
+    def __init__(self, client_id: str, token: str, per_sec: float = 5.0):
         self.s = requests.Session()
         self.s.headers.update({"access-token": token, "client-id": str(client_id), "Content-Type": "application/json",
                                "Accept": "application/json"})
@@ -35,10 +35,14 @@ class Dhan:
         self.calls = collections.deque(maxlen=1000)
 
     def _wait(self):
+        """Own pace (per_sec) and the app-wide Dhan pace (all clients together stay under Dhan's 5 calls a second)."""
+        from . import dhan_budget
         with self.lock:
             d = self.gap - (time.time() - self.last)
             if d > 0:
                 time.sleep(d)
+            dhan_budget.wait()
+            dhan_budget.spend(1)
             self.last = time.time()
 
     def _fresh_token(self) -> bool:
@@ -74,6 +78,8 @@ class Dhan:
                 if not swapped and self._fresh_token():
                     swapped = True
                     continue
+                from .dhan_token import mark_dead
+                mark_dead(self.token)
                 raise PermissionError("Dhan rejected the access token. Create a new token on web.dhan.co and paste it in Strategy lab settings.")
             if r.status_code >= 400 or body_json.get("status") == "failure" or body_json.get("errorType"):
                 msg = body_json.get("errorMessage") or body_json.get("remarks") or r.text[:200]
@@ -107,8 +113,10 @@ class Dhan:
         out = data.get(key) or data.get(key.upper()) or {}
         return out if isinstance(out, dict) else {}
 
-    def daily(self, sym: str, frm: str, to: str) -> dict:
-        body = {"securityId": str(INDEX_IDS[sym]), "exchangeSegment": "IDX_I", "instrument": "INDEX",
+    def daily(self, sym: str, frm: str, to: str, security_id: int | None = None, segment: str = "IDX_I",
+              instrument: str = "INDEX") -> dict:
+        """Daily candles: an index by name, or any equity with security_id, segment NSE_EQ, instrument EQUITY."""
+        body = {"securityId": str(security_id or INDEX_IDS[sym]), "exchangeSegment": segment, "instrument": instrument,
                 "expiryCode": 0, "oi": False, "fromDate": frm, "toDate": to}
         res = self.post("/charts/historical", body)
         return res.get("data", res) or {}

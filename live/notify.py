@@ -176,8 +176,12 @@ class AI:
             self.last_error = None
             return text.strip()
         except Exception as e:
-            self.last_error = str(e)[:300]
-            self.log(f"AI request failed: {self.last_error}")
+            err = str(e)[:300]
+            now = time.time()
+            if err != self.last_error or now - getattr(self, "_err_logged", 0) > 1800:   # same problem: once per 30 min
+                self.log(f"AI request failed: {err}")
+                self._err_logged = now
+            self.last_error = err
             return None
 
     def _ask_claude_code(self, prompt: str, c: dict) -> str:

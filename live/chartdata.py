@@ -127,11 +127,17 @@ class ChartData:
             f = factory.bar_features(o5, h5, l5, c5, ctx, [np.nan if x is None else x for x in ivs],
                                      [np.nan if x is None else x for x in prem])
             for r in rules:
-                if r.get("ml"):
-                    from lab import mlstrat
-                    if not factory.sym_ok(r["syms"], sym) or not mlstrat.fires(self.e.data_dir, r, f):
-                        continue
-                elif not factory.signal_now(r, f, sym):
+                try:                               # one broken rule or model file is skipped, the rest still run
+                    if r.get("ml"):
+                        from lab import mlstrat
+                        ok = factory.sym_ok(r["syms"], sym) and mlstrat.fires(self.e.data_dir, r, f)
+                    else:
+                        ok = factory.signal_now(r, f, sym)
+                except Exception as ex:
+                    if self._rate(f"rule_err:{r.get('id')}", 1800):
+                        self.e.log(f"Strategy Lab rule {r.get('id')} skipped: {ex}")
+                    ok = False
+                if not ok:
                     continue
                 fired = self.e.fact_fired.setdefault((r["id"], sym, now.date()), [])
                 if len(fired) >= r["max_day"]:
@@ -204,6 +210,16 @@ class ChartData:
         return {"t": t, "o": o, "h": h, "l": l, "c": c, "v": v}
 
     # ------------------------------------------------------------ live setup scanner (every closed 5-min bar)
+    def _rate(self, key, seconds) -> bool:
+        """True at most once per `seconds` for a key (keeps repeated errors out of the log)."""
+        t = getattr(self, "_rate_t", None)
+        if t is None:
+            t = self._rate_t = {}
+        if time.time() - t.get(key, 0) >= seconds:
+            t[key] = time.time()
+            return True
+        return False
+
     def scan(self, now, emit):
         t0 = self._session_start(now.date())
         slot = int((now.timestamp() - t0) // 300)
@@ -215,45 +231,52 @@ class ChartData:
         except Exception as ex:
             self.e.log(f"Strategy Lab rules check failed: {ex}")
         for sym, m in list(self.e.metrics.items()):
-            b = self.five_min(sym, now.date())
-            if not b or len(b["c"]) < 4:
-                continue
-            closed = {k: v[:slot] for k, v in b.items()} if len(b["c"]) > slot else b
-            if len(closed["c"]) < 4:
-                continue
-            ind = setups.indicators(closed)
-            ctx = self.context(sym, m)
-            v = closed["v"]
-            ctx["rel_vol"] = float(v[-1] / v[:-1].mean()) if len(v) > 1 and v[:-1].mean() > 0 else None
-            if len(closed["c"]) >= 8:
+            try:                                   # one stock's bad data or a setup bug never stops the others
+                self._scan_one(sym, m, now, slot, emit)
+            except Exception as ex:
+                if self._rate(f"scan_err:{sym}", 600):
+                    self.e.log(f"Setup scan {sym} skipped: {ex}")
+
+    def _scan_one(self, sym, m, now, slot, emit):
+        b = self.five_min(sym, now.date())
+        if not b or len(b["c"]) < 4:
+            return
+        closed = {k: v[:slot] for k, v in b.items()} if len(b["c"]) > slot else b
+        if len(closed["c"]) < 4:
+            return
+        ind = setups.indicators(closed)
+        ctx = self.context(sym, m)
+        v = closed["v"]
+        ctx["rel_vol"] = float(v[-1] / v[:-1].mean()) if len(v) > 1 and v[:-1].mean() > 0 else None
+        if len(closed["c"]) >= 8:
+            try:
+                self._pattern_alerts(sym, m, closed, ctx, emit)
+            except Exception as ex:
+                self.e.log(f"Pattern check {sym} failed: {ex}")
+        for s in setups.evaluate(closed, ind, ctx):
+            d = 1 if s["direction"] == "up" else -1
+            s["ts"] = now.timestamp()
+            self.active.setdefault(sym, []).append(s)
+            e = s["entry"]
+            hist = {"line": None, "grade": "unknown", "p": None}
+            edge = getattr(self.e, "edge", None)
+            if edge is not None and sym in ("NIFTY", "BANKNIFTY"):
                 try:
-                    self._pattern_alerts(sym, m, closed, ctx, emit)
-                except Exception as ex:
-                    self.e.log(f"Pattern check {sym} failed: {ex}")
-            for s in setups.evaluate(closed, ind, ctx):
-                d = 1 if s["direction"] == "up" else -1
-                s["ts"] = now.timestamp()
-                self.active.setdefault(sym, []).append(s)
-                e = s["entry"]
-                hist = {"line": None, "grade": "unknown", "p": None}
-                edge = getattr(self.e, "edge", None)
-                if edge is not None and sym in ("NIFTY", "BANKNIFTY"):
-                    try:
-                        edge.load()
-                        hist = edge.verdict(sym, s["setup"], s["direction"], self._edge_row(sym, m, closed, ind, ctx, s, slot))
-                    except Exception:
-                        pass
-                detail = f"Stop {s['stop']:,.1f}, target {s['target']:,.1f} (reward:risk {s['rr']}). " + "; ".join(s["why"]) + "."
-                if hist["line"]:
-                    detail += " " + hist["line"]
-                emit({"sym": sym, "kind": "setup_" + s["setup"], "direction": s["direction"],
-                      "severity": 1 if hist["grade"] == "losing" else 2,
-                      "title": f"{sym} {setups.NAMES[s['setup']]} {'long' if d > 0 else 'short'} at {e:,.1f}",
-                      "detail": detail,
-                      "price": m.get("spot"),
-                      "data": {"setup": s["setup"], "history": hist, "setup_levels": {
-                          "stop": round(s["stop"], 2), "target": round(s["target"], 2), "rr": float(s["rr"]),
-                          "stop_pct": round(abs(e - s["stop"]) / e * 100, 2), "target_pct": round(abs(s["target"] - e) / e * 100, 2)}}})
+                    edge.load()
+                    hist = edge.verdict(sym, s["setup"], s["direction"], self._edge_row(sym, m, closed, ind, ctx, s, slot))
+                except Exception:
+                    pass
+            detail = f"Stop {s['stop']:,.1f}, target {s['target']:,.1f} (reward:risk {s['rr']}). " + "; ".join(s["why"]) + "."
+            if hist["line"]:
+                detail += " " + hist["line"]
+            emit({"sym": sym, "kind": "setup_" + s["setup"], "direction": s["direction"],
+                  "severity": 1 if hist["grade"] == "losing" else 2,
+                  "title": f"{sym} {setups.NAMES[s['setup']]} {'long' if d > 0 else 'short'} at {e:,.1f}",
+                  "detail": detail,
+                  "price": m.get("spot"),
+                  "data": {"setup": s["setup"], "history": hist, "setup_levels": {
+                      "stop": round(s["stop"], 2), "target": round(s["target"], 2), "rr": float(s["rr"]),
+                      "stop_pct": round(abs(e - s["stop"]) / e * 100, 2), "target_pct": round(abs(s["target"] - e) / e * 100, 2)}}})
 
     @staticmethod
     def _levels(ctx) -> list:

@@ -50,3 +50,10 @@ def _stabilise_process():
 
 
 _stabilise_process()
+
+# yfinance prints "possibly delisted; no price data found" and "Cookie/crumb fetch failed" when the internet drops for a
+# moment: the app already keeps the last good prices and retries, so these lines are only noise in the window.
+import logging as _logging  # noqa: E402
+
+for _name in ("yfinance", "peewee", "curl_cffi"):
+    _logging.getLogger(_name).setLevel(_logging.CRITICAL)

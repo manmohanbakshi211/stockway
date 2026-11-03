@@ -28,6 +28,33 @@ _state_file: Path | None = None
 _last_check = 0.0
 
 
+on_dead = None                # set by the app: (message) -> None, e.g. a Telegram note (sent once per dead token)
+
+
+def mark_dead(token: str | None = None):
+    """Dhan refused this token: remember it, so nothing keeps calling Dhan with it (no log spam), until a new one is pasted."""
+    tok = token or latest()
+    if not tok:
+        return
+    st = state()
+    if st.get("dead") == tok[-12:]:
+        return
+    st.update({"dead": tok[-12:], "for": tok[-12:], "dead_at": dt.datetime.now().strftime("%d %b %H:%M"),
+               "error": "Dhan rejected the token (expired). Make a new one on web.dhan.co and paste it in Strategy desk -> Dhan keys: everything resumes by itself."})
+    _write(st)
+    if on_dead:
+        try:
+            on_dead("Stockway: the Dhan token has expired. Make a new one on web.dhan.co (Profile -> DhanHQ Trading APIs) "
+                    "and paste it in Strategy desk -> Dhan keys. The 5-year download, news and movers resume by themselves.")
+        except Exception:
+            pass
+
+
+def is_dead(token: str | None = None) -> bool:
+    tok = token or latest()
+    return bool(tok) and state().get("dead") == tok[-12:]
+
+
 def latest() -> str | None:
     """The token currently saved in the app (after a renew or a paste), or None if unknown."""
     try:
@@ -84,7 +111,8 @@ def status() -> dict:
     left = (exp - time.time()) / 3600 if exp else None
     return {"expires": dt.datetime.fromtimestamp(exp).strftime("%d %b %H:%M") if exp else None,
             "hours_left": round(left, 1) if left is not None else None, "renewed": st.get("renewed"),
-            "error": st.get("error") if st.get("for") == (tok or "")[-12:] else None}
+            "error": st.get("error") if st.get("for") == (tok or "")[-12:] else None,
+            "dead": bool(tok) and st.get("dead") == tok[-12:]}
 
 
 def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str | None:
@@ -97,7 +125,7 @@ def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str
     if not provider:
         return None
     cid, tok = provider()
-    if not (cid and tok):
+    if not (cid and tok) or is_dead(tok):
         return None
     st = state()
     exp = expiry(tok)
@@ -111,14 +139,12 @@ def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str
     if not force and exp - now > RENEW_BEFORE_H * 3600:
         return None
     if exp <= now:
-        st.update({"for": tok[-12:], "error": "expired: make a new token on web.dhan.co once"})
-        _write(st)
+        mark_dead(tok)
         return "expired"
     try:
         res = renew(cid, tok)
     except PermissionError as e:
-        st.update({"for": tok[-12:], "error": str(e)})
-        _write(st)
+        mark_dead(tok)
         log(str(e))
         return "expired"
     except Exception as e:

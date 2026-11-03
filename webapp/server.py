@@ -159,6 +159,9 @@ def start_news(label="Downloading news"):
 SCHED_FILE = "scheduler_state.json"
 
 
+_sched = {}
+
+
 def scheduler_loop():
     while True:
         try:
@@ -181,13 +184,12 @@ def scheduler_loop():
                 except Exception:
                     pass
             # 5-year Lab: Dhan allows ~100k calls a day, so the download continues by itself each evening until complete
-            if (now.hour >= 18 and state.get("last_dhan5y") != today and not DHAN5Y.running()
-                    and any((ROOT / "data" / "lab5y" / "history").glob("*/raw_????-??.parquet"))
-                    and (_lab_cfg().get("dhan_client_id") and _lab_cfg().get("dhan_token"))):
-                state["last_dhan5y"] = today
-                state_f.write_text(json.dumps(state))
+            # 5-year download: resumes by itself whenever it can (app reopened, network back, new day, new token)
+            if time.time() - _sched.get("d5", 0) > 120:
+                _sched["d5"] = time.time()
                 try:
-                    DHAN5Y.start(why="nightly")
+                    if DHAN5Y.should_auto_start():
+                        DHAN5Y.start(why="auto")
                 except Exception:
                     pass
             try:                                  # Dhan token: renew before it expires (24 h tokens), no PIN / TOTP involved
@@ -217,9 +219,15 @@ def _startup():
         from plotly.offline import get_plotlyjs
         vendor.parent.mkdir(parents=True, exist_ok=True)
         vendor.write_text(get_plotlyjs(), encoding="utf-8")
-    from lab import dhan_token
+    from lab import dhan_budget, dhan_token
+    dhan_budget.setup(ROOT / "data" / "dhan_calls.json")
     dhan_token.setup(ROOT / "data", lambda: (_lab_cfg().get("dhan_client_id"), _lab_cfg().get("dhan_token")),
                      lambda tok: save_user_settings({"lab.dhan_token": tok}))
+
+    def _dead_note(msg):
+        from webapp.live_api import engine as _eng
+        _eng().telegram.send("🔑 " + msg)
+    dhan_token.on_dead = _dead_note
     threading.Thread(target=scheduler_loop, daemon=True).start()
 
 
@@ -853,8 +861,13 @@ class Dhan5y(StockHist):
         c = _lab_cfg()
         if not (c.get("dhan_client_id") and c.get("dhan_token")):
             raise HTTPException(400, "Add your Dhan client ID and access token first (Strategy desk → Data and settings).")
+        from lab import dhan_token
+        if dhan_token.is_dead():
+            raise HTTPException(401, "The Dhan token has expired. Make a new one on web.dhan.co and paste it in Strategy desk → Dhan keys.")
         self._stop.clear()
-        self.st = {"status": "running", "log": [], "done": 0, "total": 0, "why": why,
+        if why == "manual":
+            self.user_stop = None
+        self.st = {"status": "running", "log": self.st.get("log", [])[-50:], "done": 0, "total": 0, "why": why,
                    "started": dt.datetime.now().isoformat(timespec="seconds"), "finished": None, "error": None}
 
         def log(m):
@@ -864,12 +877,16 @@ class Dhan5y(StockHist):
             self.st["done"], self.st["total"] = d, t
 
         def run():
-            from lab import dhan_hist, stock_hist
+            from lab import dhan_hist
             from lab.dhan import Dhan
             try:
                 d = Dhan(c["dhan_client_id"], c["dhan_token"])
-                dhan_hist.download(d, ROOT / "data", syms or stock_hist.DEFAULT, log=log, should_stop=self._stop.is_set, progress=prog)
-                self.st["status"] = "stopped" if self._stop.is_set() else "done"
+                res = dhan_hist.download(d, ROOT / "data", syms, log=log, should_stop=self._stop.is_set, progress=prog)
+                self.st["status"] = "stopped" if self._stop.is_set() else res.get("result", "done")
+                self.st["result_day"] = dt.date.today().isoformat()
+            except PermissionError as e:
+                self.st["status"], self.st["error"] = "token", str(e)
+                log("Dhan token expired: paste a new one in Strategy desk → Dhan keys; the download resumes by itself.")
             except Exception as e:
                 self.st["status"], self.st["error"] = "failed", str(e) or type(e).__name__
                 log("Error: " + self.st["error"])
@@ -879,14 +896,56 @@ class Dhan5y(StockHist):
         self._t.start()
         return self.view()
 
-    def view(self):
+    user_stop = None
+    _ov = (0.0, None)
+
+    def stop(self):
+        self.user_stop = dt.date.today().isoformat()      # a Stop by hand is respected until tomorrow or Update
+        return super().stop()
+
+    def overview(self):
         from lab import dhan_hist
+        t, ov = self._ov
+        if not ov or time.time() - t > 20:
+            try:
+                ov = dhan_hist.overview(ROOT / "data")
+            except Exception as e:
+                ov = {"error": str(e)}
+            self._ov = (time.time(), ov)
+        return ov
+
+    def should_auto_start(self) -> bool:
+        """Resume by itself: app reopened, network back, new day's budget, new token. Not after a Stop by hand today."""
+        from lab import dhan_budget, dhan_token
+        c = _lab_cfg()
+        if self.running() or not (c.get("dhan_client_id") and c.get("dhan_token")) or dhan_token.is_dead():
+            return False
+        if self.user_stop == dt.date.today().isoformat():
+            return False
+        if not any((ROOT / "data" / "lab5y" / "history").glob("*/raw_????-??.parquet")):
+            return False                                   # never started by hand: don't begin on its own
+        if dhan_budget.used() >= dhan_hist_cap():
+            return False
+        st = self.st.get("status")
+        if st in ("done",) and self.st.get("result_day") == dt.date.today().isoformat():
+            return False                                   # complete for today: tomorrow adds the new day
+        if st == "disk" and self.st.get("result_day") == dt.date.today().isoformat():
+            return False
+        if st == "failed" and self.st.get("finished") and \
+                (dt.datetime.now() - dt.datetime.fromisoformat(self.st["finished"])).total_seconds() < 900:
+            return False
+        return True
+
+    def view(self):
+        from lab import dhan_budget, dhan_hist, dhan_token
         hd = dhan_hist.root(ROOT / "data") / "history"
         months = {p.parent.name: 0 for p in hd.glob("*/raw_????-??.parquet")}
         for p in hd.glob("*/raw_????-??.parquet"):
             months[p.parent.name] += 1
         out = {**{k: v for k, v in self.st.items() if k != "log"}, "log": self.st["log"][-12:], "running": self.running(),
-               "months": months, "dhan": bool(_lab_cfg().get("dhan_client_id") and _lab_cfg().get("dhan_token"))}
+               "months": months, "dhan": bool(_lab_cfg().get("dhan_client_id") and _lab_cfg().get("dhan_token")),
+               "overview": self.overview(), "token": dhan_token.status(), "calls_today": dhan_budget.used(),
+               "user_stop": self.user_stop == dt.date.today().isoformat()}
         try:
             out["compare"] = dhan_hist.compare(ROOT / "data")
         except Exception as e:
@@ -895,6 +954,11 @@ class Dhan5y(StockHist):
 
 
 DHAN5Y = Dhan5y()
+
+
+def dhan_hist_cap():
+    from lab import dhan_hist
+    return dhan_hist.DAILY_CAP
 
 
 @app.get("/api/factory/lab5y")

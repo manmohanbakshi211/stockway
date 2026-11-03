@@ -21,7 +21,9 @@ import datetime as dt
 import hashlib
 import json
 import math
+import os
 import random
+import threading
 import time
 from pathlib import Path
 
@@ -515,7 +517,9 @@ def load_or_build(data_dir, log=print, should_stop=lambda: False, rebuild=False)
     df = build(data_dir, log=log, should_stop=should_stop)
     if not df.empty:
         f.parent.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(f, index=False)
+        tmp = f.with_name(f.name + ".tmp")
+        df.to_parquet(tmp, index=False)
+        os.replace(tmp, f)
     return df
 
 
@@ -883,12 +887,36 @@ def load(data_dir) -> dict:
 
 
 def save(data_dir, st: dict):
+    """Atomic: a crash or power cut mid-write leaves the previous results intact."""
     f = lab_file(data_dir)
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(st, default=str))
+    tmp = f.with_name(f.name + ".tmp")
+    tmp.write_text(json.dumps(st, default=str))
+    os.replace(tmp, f)
+
+
+_RUN_LOCKS: dict = {}
+_RUN_LOCKS_GUARD = threading.Lock()
 
 
 def run(data_dir, n_random=2000, n_mutate=1000, log=print, should_stop=lambda: False, extra: list | None = None) -> dict:
+    """One research round. Only one round per Lab folder at a time (a manual run and the nightly run can't overwrite
+    each other's results): a second request waits for the first to finish, then runs on its results."""
+    key = str(Path(data_dir).resolve())
+    with _RUN_LOCKS_GUARD:
+        lk = _RUN_LOCKS.setdefault(key, threading.Lock())
+    if not lk.acquire(blocking=False):
+        log("Another Strategy Lab run is in progress on this data: waiting for it to finish…")
+        while not lk.acquire(timeout=5):
+            if should_stop():
+                raise RuntimeError("Stopped while waiting for the other Strategy Lab run.")
+    try:
+        return _run(data_dir, n_random, n_mutate, log, should_stop, extra)
+    finally:
+        lk.release()
+
+
+def _run(data_dir, n_random=2000, n_mutate=1000, log=print, should_stop=lambda: False, extra: list | None = None) -> dict:
     """One research round: (re)score known rules on all periods, search new ones, keep the honest tally."""
     t0 = time.time()
     df = load_or_build(data_dir, log=log, should_stop=should_stop)

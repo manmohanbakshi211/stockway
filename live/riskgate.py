@@ -34,7 +34,7 @@ DEFAULTS = {
 
 
 def check(alert: dict, opt: dict | None, *, now: dt.datetime, paper_cfg: dict, guard: dict, open_syms: set,
-          ban: list | None = None, cfg: dict | None = None) -> dict:
+          ban: list | None = None, cfg: dict | None = None, sim: bool = False) -> dict:
     c = {**DEFAULTS, **(cfg or {})}
     reasons, warns, hard = [], [], []
 
@@ -42,7 +42,7 @@ def check(alert: dict, opt: dict | None, *, now: dt.datetime, paper_cfg: dict, g
         reasons.append(msg)
         hard.append(msg)
     hm = now.strftime("%H:%M")
-    if now.weekday() >= 5:
+    if now.weekday() >= 5 and not sim:                # the simulator replays a weekday session even on a weekend
         stop("Market closed today (weekend).")
     if hm < c["window_start"]:
         stop(f"Before {c['window_start']}: the opening range is still forming." if hm >= "09:15" else

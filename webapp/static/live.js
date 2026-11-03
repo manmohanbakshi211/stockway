@@ -2121,13 +2121,30 @@ async function pageLab() {
     const el = $("#lab-5y"); if (!el) return;
     let x; try { x = await api("/api/factory/lab5y"); } catch (e) { el.innerHTML = `<span class="muted small">${esc(e.message)}</span>`; return; }
     const ms = x.months || {}, nm = Object.values(ms).reduce((a, b) => a + b, 0);
-    const pct = x.total ? Math.round(x.done / x.total * 100) : 0;
+    const ov = x.overview || {}, tk = x.token || {}, f30 = ov.first30 || {};
+    const pct = ov.pct || 0;
     const c = x.compare || {}, A = c.current || {}, B = c.five_year || {};
     const row = (k, l) => `<tr><td>${l}</td><td class="r">${A[k] ?? "–"}</td><td class="r">${B[k] ?? "–"}</td></tr>`;
-    el.innerHTML = `<div class="toolbar" style="margin:0"><div><h3 style="margin:0">5-year Lab <span class="pill p-amber">challenger</span> <span class="muted small">${nm ? `${nm} months from Dhan on your Mac (${Object.keys(ms).length} symbols)` : "no Dhan data yet"}</span></h3>
-        <p class="small muted" style="margin:4px 0 0">Dhan's archive (1-minute options from 2021: Nifty, Bank Nifty ATM ±10, 30 stocks ATM ±3) joined with the Upstox history, tested in its own folder. Dhan serves one day per call and ~100,000 calls a day: Nifty and Bank Nifty finish in about a day, the 30 stocks over about 5 more; it continues by itself every evening, newest months first. The current Lab and its live rules are not touched; the two are compared here and switching is your call. Market data only.</p></div>
-        <div class="btn-row" style="margin:0">${x.running ? `<button class="btn" id="d5-stop">Stop</button>` : `<button class="btn ${nm ? "" : "primary"}" id="d5-go" ${x.dhan ? "" : "disabled title='Add Dhan keys on Strategy desk → Data and settings'"}>${nm ? "Update" : "Download 5 years"}</button>`}<button class="btn ${nm ? "primary" : ""}" id="d5-run" ${nm && !x.running ? "" : "disabled"}>Run 5-year research</button></div></div>
-      ${x.running || x.status === "failed" ? `<div style="margin-top:8px"><div class="bar"><i style="width:${pct}%"></i></div><small class="muted">${x.running ? `${pct}% · ` : ""}${x.error ? `<span class="down">${esc(x.error)}</span> · ` : ""}${esc((x.log || []).slice(-1)[0] || "starting…")}</small></div>` : ""}
+    const n = (v) => (v ?? 0).toLocaleString("en-IN");
+    const why = tk.dead ? `<span class="down"><b>Dhan token expired${tk.expires ? " (" + esc(tk.expires) + ")" : ""}.</b> Make a new one on web.dhan.co → paste it in Strategy desk → Dhan keys. The download resumes by itself.</span>`
+      : x.running ? `Downloading · ${esc((x.log || []).slice(-1)[0] || "starting…")}`
+      : x.user_stop ? `Stopped by you. Press <b>Update</b> to continue (it also resumes by itself tomorrow).`
+      : x.status === "budget" ? `Today's Dhan budget is used. It continues by itself after midnight.`
+      : x.status === "disk" ? `<span class="down">Less than 10 GB free on the Mac.</span> Free some space and press Update.`
+      : x.status === "failed" ? `<span class="down">${esc(x.error || "failed")}</span> · retries by itself in a few minutes`
+      : ov.months_pending === 0 && ov.months_total ? `Complete up to yesterday. Each new day is added by itself.`
+      : nm ? `Waiting · it resumes by itself while the app is open` : "";
+    el.innerHTML = `<div class="toolbar" style="margin:0"><div><h3 style="margin:0">5-year Lab <span class="pill p-amber">challenger</span> <span class="muted small">${ov.months_total ? `${n(ov.months_complete)} of ${n(ov.months_total)} months complete (${pct}%) · ${ov.symbols} symbols` : nm ? `${nm} months from Dhan on your Mac` : "no Dhan data yet"}</span></h3>
+        <p class="small muted" style="margin:4px 0 0">Dhan's archive of 1-minute options from 2021: Nifty and Bank Nifty (ATM ±10) and every NSE stock with options (the 30 most liquid first; top 80 by turnover ATM ±3, the rest ATM ±1), joined with the Upstox history and tested in its own folder. Dhan serves one trading day per call and allows 100,000 calls a day, so the speed is set by that limit. Every missing day is fetched, also after the app was closed, the Mac slept or the internet dropped. The current Lab and its live rules are not touched; switching is your call. Market data only.</p></div>
+        <div class="btn-row" style="margin:0">${x.running ? `<button class="btn" id="d5-stop">Stop</button>` : `<button class="btn ${nm ? "" : "primary"}" id="d5-go" ${x.dhan && !tk.dead ? "" : "disabled title='Add a valid Dhan token on Strategy desk → Dhan keys'"}>${nm ? "Update" : "Download 5 years"}</button>`}<button class="btn ${nm ? "primary" : ""}" id="d5-run" ${nm && !x.running ? "" : "disabled"}>Run 5-year research</button></div></div>
+      ${ov.months_total ? `<div style="margin-top:8px"><div class="bar"><i style="width:${pct}%"></i></div>
+        <small>${why}</small>
+        <div class="small muted" style="margin-top:4px;line-height:1.6">
+          Months: <b>${n(ov.months_complete)}</b> complete · <b>${n(ov.months_partial)}</b> partly on disk · <b>${n(ov.months_pending)}</b> pending (${n(ov.days_missing)} trading days, about ${n(ov.calls_left)} calls)<br>
+          Nifty, Bank Nifty and the first 30 stocks: ${n(f30.complete)} / ${n(f30.total)} months<br>
+          Dhan calls today: <b>${n(x.calls_today)}</b> / ${n(ov.cap)} for the download (Dhan's limit ${n(ov.dhan_limit)}) · about ${ov.eta_days ?? "–"} day(s) of calls left · disk free ${ov.free_gb ?? "–"} GB<br>
+          Token: ${tk.dead ? `<span class="down">expired</span>` : tk.expires ? `valid till ${esc(tk.expires)} (${tk.hours_left} h), renews by itself${tk.renewed ? " · last renewed " + esc(tk.renewed) : ""}` : "–"}
+        </div></div>` : why ? `<p class="small" style="margin:8px 0 0">${why}</p>` : ""}
       ${B.updated ? `<div class="table-wrap" style="margin-top:8px"><table class="mini"><thead><tr><th></th><th class="r">Current (2 years)</th><th class="r">5-year</th></tr></thead><tbody>
         ${row("days", "Days of history")}${row("tried", "Rules tried")}${row("promoted", "Passed all 3 periods")}${row("luck", "Would pass by luck")}${row("strong", "Moderate / strong evidence")}${row("buy_strong", "…of which option buying")}
         <tr><td>₹40K finder</td><td class="small">${esc(A.plan40 || "–")}</td><td class="small">${esc(B.plan40 || "–")}</td></tr></tbody></table></div>` : ""}`;
@@ -2136,7 +2153,7 @@ async function pageLab() {
     if (stp) stp.onclick = async () => { await post("/api/factory/lab5y/stop", {}); toast("Stopping: finished months are kept"); draw5y(); };
     if (run) run.onclick = async () => { try { await post("/api/factory/lab5y/run", { n: 8000 }); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
     clearTimeout(t5);
-    if (x.running) t5 = setTimeout(() => { if (document.getElementById("lab-5y")) draw5y(); }, 5000);
+    t5 = setTimeout(() => { if (document.getElementById("lab-5y")) draw5y(); }, x.running ? 5000 : 30000);
   };
   let stTimer = null;
   const drawStocks = async () => {

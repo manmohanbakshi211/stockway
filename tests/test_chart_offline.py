@@ -9,7 +9,7 @@ from live.clock import IST
 
 def _minutes(path, days=3):
     rows = []
-    d0 = dt.date.today() - dt.timedelta(days=days + 2)
+    d0 = dt.date.today() - dt.timedelta(days=days + 9)          # enough weekdays before today on any weekday
     k = 0
     while len({r[0] // 86400 for r in rows}) < days:
         d0 += dt.timedelta(days=1)

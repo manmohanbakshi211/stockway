@@ -27,8 +27,19 @@ def test_depth_parse_and_stats():
 class FakeDhan:
     calls = 0
 
+    fail = 0                      # next N calls raise a network error
+    empty_days = set()            # days Dhan has no data for
+
     def rolling(self, sym, flag, off, side, frm, to, code=1, interval=1, security_id=None, instrument="OPTIDX"):
+        from lab import dhan_budget
+        from lab.dhan import DhanError
         FakeDhan.calls += 1
+        dhan_budget.spend(1)
+        if FakeDhan.fail > 0:
+            FakeDhan.fail -= 1
+            raise DhanError("Network error: offline")
+        if frm in FakeDhan.empty_days:
+            return {}
         a, b = dt.date.fromisoformat(frm), dt.date.fromisoformat(to)
         ts, d = [], a
         while d < b:
@@ -70,19 +81,63 @@ def test_five_year_download_is_separate_and_resumable(tmp_path, monkeypatch):
         UNDERLYINGS.pop("TESTCO", None)
 
 
-def test_daily_call_budget_stops_and_resumes(tmp_path, monkeypatch):
+def _days_on_disk(tmp_path):
     from lab import dhan_hist as H
-    monkeypatch.setattr(H, "START", dt.date(2024, 8, 1))
-    monkeypatch.setattr(H, "DAILY_CAP", 42 * 25)            # about one index month
+    m = H.Manifest(H.root(tmp_path))
+    return sum(len(v["d"]) for v in m.m.values())
+
+
+def test_daily_call_budget_stops_and_resumes(tmp_path, monkeypatch):
+    from lab import dhan_budget as B
+    from lab import dhan_hist as H
+    monkeypatch.setattr(H, "START", dt.date(2026, 8, 1))
+    monkeypatch.setattr(H, "DAILY_CAP", 42 * 25)            # about 25 index days
+    monkeypatch.setattr(B, "_used", 0)
+    monkeypatch.setattr(B, "_day", dt.date.today().isoformat())
     monkeypatch.setattr(H, "stock_ids", lambda cache, syms, fetch=True: {})
     logs = []
-    H.download(FakeDhan(), tmp_path, [], log=logs.append)
-    got = sorted(p.name for p in (H.root(tmp_path) / "history").glob("*/raw_*.parquet"))
-    assert len(got) == 1 and any("budget" in m for m in logs)
-    monkeypatch.setattr(H, "_budget", lambda d: {"f": tmp_path / "b.json", "day": "x", "used": 0})
+    r = H.download(FakeDhan(), tmp_path, [], log=logs.append)
+    assert r["result"] == "budget" and any("budget" in m for m in logs)
+    n1 = _days_on_disk(tmp_path)
+    assert 0 < n1 <= 25
+    monkeypatch.setattr(B, "_used", 0)                       # a new day
     monkeypatch.setattr(H, "DAILY_CAP", 10 ** 6)
-    H.download(FakeDhan(), tmp_path, [], log=logs.append)
-    assert len(list((H.root(tmp_path) / "history").glob("*/raw_*.parquet"))) > 1
+    r = H.download(FakeDhan(), tmp_path, [], log=logs.append)
+    assert r["result"] == "done" and _days_on_disk(tmp_path) > n1
+    monkeypatch.setattr("lab.stock_hist.DEFAULT", [])
+    ov = H.overview(tmp_path)
+    assert ov["months_pending"] == 0 and ov["pct"] == 100.0
+
+
+def test_holes_network_errors_and_empty_days(tmp_path, monkeypatch):
+    """A hole inside a month is filled; a network error is retried (never taken as a holiday); a real no-data day is
+    remembered and not asked again."""
+    from lab import dhan_budget as B
+    from lab import dhan_hist as H
+    monkeypatch.setattr(H, "START", dt.date(2026, 9, 1))
+    monkeypatch.setattr(H, "PAUSES", (0,))
+    monkeypatch.setattr(H.time, "sleep", lambda s: None)
+    monkeypatch.setattr(B, "_used", 0)
+    monkeypatch.setattr(H, "stock_ids", lambda cache, syms, fetch=True: {})
+    monkeypatch.setattr(H, "_months_for", lambda d, sym, end: [(dt.date(2026, 9, 1), dt.date(2026, 10, 1))] if sym == "NIFTY" else [])
+    FakeDhan.empty_days = {"2026-09-15"}
+    FakeDhan.fail = 4                                         # the first day hits a network drop
+    H.download(FakeDhan(), tmp_path, [], log=lambda m: None)
+    f = H.root(tmp_path) / "history" / "NIFTY" / "raw_2026-09.parquet"
+    days = H.file_days(f)
+    weekdays = {d for d in range(1, 31) if dt.date(2026, 9, d).weekday() < 5}
+    assert days == weekdays - {15}                           # the network drop was retried, the 15th has no data
+    man = H.Manifest(H.root(tmp_path))
+    assert man.done("NIFTY", dt.date(2026, 9, 15))           # remembered as "no data", not asked again
+    # punch a hole: drop two days from the file and the manifest, as an old download would have left them
+    df = pd.read_parquet(f)
+    keep = ~pd.to_datetime(df["ts"] + 19800, unit="s").dt.day.isin([8, 9])
+    df[keep].to_parquet(f, index=False)
+    (H.root(tmp_path) / "manifest.json").unlink()
+    FakeDhan.empty_days, n = set(), FakeDhan.calls
+    H.download(FakeDhan(), tmp_path, [], log=lambda m: None)
+    assert H.file_days(f) == weekdays                         # holes (8th, 9th) and the 15th filled
+    assert FakeDhan.calls - n == 3 * 42                       # only the three missing days were fetched
 
 
 def test_news_and_movers_parsing(tmp_path):

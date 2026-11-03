@@ -551,7 +551,7 @@ class LiveEngine:
                         self.log(f"Next-expiry chain {sym} failed: {e}")
             self._compute_all(now, mins, emit=True, lc=lc)
             try:
-                self.charts.scan(now, lambda a, now=now, lc=lc: self._emit(a, now, lc))
+                self.charts.scan(now, lambda a, now=now, lc=lc: self._emit_safe(a, now, lc))
             except Exception as e:
                 if self._every("setup_err", 300, clock_time=False):
                     self.log(f"Setup scan error: {e}")
@@ -566,8 +566,8 @@ class LiveEngine:
             except Exception as e:
                 if self._every("expiry_err", 300, clock_time=False):
                     self.log(f"Expiry desk error: {e}")
-            self._big_prints(now, lc)
-            self.tracker.update(self.state, self.clock.ts())
+            self._guard("Big prints", self._big_prints, now, lc)
+            self._guard("Alert tracker", self.tracker.update, self.state, self.clock.ts())
             if self.depth:
                 try:
                     self.depth.tick(now)
@@ -578,14 +578,14 @@ class LiveEngine:
             except Exception as e:
                 if self._every("shadow_err", 300, clock_time=False):
                     self.log(f"Shadow exits error: {e}")
-            self.paper.update(self.state, now)
-            self._flat_by_reminder(now, lc)
+            self._guard("Paper trades", self.paper.update, self.state, now)
+            self._guard("Flat-by reminder", self._flat_by_reminder, now, lc)
             if self._every("pulse", 5, clock_time=False):
-                self._market_view()
-                self._rule_pulse()
-                self._watchdog(now)
+                self._guard("Market view", self._market_view)
+                self._guard("Rule pulse", self._rule_pulse)
+                self._guard("Watchdog", self._watchdog, now)
             if self._every("stats", 300, clock_time=False):
-                self._refresh_stats()
+                self._guard("Stats", self._refresh_stats)
             aic = self.cfg().get("ai") or {}
             pro = aic.get("provider") == "claude_pro"          # Pro plan: spread the few automatic notes over the day
             every = int(aic.get("brain_every_min") or 10) * 60 if self.ai.enabled() else 300
@@ -694,10 +694,34 @@ class LiveEngine:
             self.prev[sym] = m
             self.metrics[sym] = m
         if vix and emit:
-            new_alerts += detectors.vix_alerts(vix["ltp"], self.vix_prev, vix["cp"], dcfg)
+            try:
+                new_alerts += detectors.vix_alerts(vix["ltp"], self.vix_prev, vix["cp"], dcfg)
+            except Exception as e:
+                if self._every("vixerr", 600, clock_time=False):
+                    self.log(f"VIX alert check failed: {e}")
             self.vix_prev = vix["ltp"]
         for a in sorted(new_alerts, key=lambda a: -a["severity"]):
+            self._emit_safe(a, now, lc)
+
+    def _emit_safe(self, a, now, lc):
+        """One alert that fails (a bad fact, a model, a plan) is skipped and logged; the scanner and the other alerts go on."""
+        try:
             self._emit(a, now, lc)
+        except PermissionError:
+            raise
+        except Exception as e:
+            if self._every(f"emiterr:{a.get('kind')}", 300, clock_time=False):
+                self.log(f"Alert {a.get('kind')} {a.get('sym')} skipped: {e}")
+
+    def _guard(self, name, fn, *args):
+        """Run one part of the loop; if it fails, log it (at most every 5 min) and keep the scanner running."""
+        try:
+            return fn(*args)
+        except PermissionError:
+            raise
+        except Exception as e:
+            if self._every(f"guard:{name}", 300, clock_time=False):
+                self.log(f"{name} error (scanner keeps running): {e}")
 
     def _big_prints(self, now, lc):
         prints = list(self.state.prints)
@@ -718,7 +742,7 @@ class LiveEngine:
                  "title": f"₹{val / 1e7:,.1f} cr single {'buy' if side > 0 else 'sell'} in {sym} {what}",
                  "detail": f"{qty:,.0f} {'units' if kind == 'FUT' else 'shares'} at {px:,.2f}, {'hitting the ask' if side > 0 else 'hitting the bid'}. "
                            "One large player acting in a hurry.", "price": m.get("spot"), "data": {"qty": qty, "px": px}}
-            self._emit(a, now, lc)
+            self._emit_safe(a, now, lc)
 
     def _suggest(self, sym, direction):
         if direction not in ("up", "down"):
@@ -1081,7 +1105,8 @@ class LiveEngine:
         ban = (self.context.view().get("ban") or []) if self.context else []
         lc = self.cfg().get("live") or {}
         return riskgate.check(a, opt, now=now, paper_cfg=self.paper.cfg, guard=self.paper.guard(now),
-                              open_syms={t["sym"] for t in self.paper.open_trades()}, ban=ban, cfg=(lc.get("risk") or {}))
+                              open_syms={t["sym"] for t in self.paper.open_trades()}, ban=ban, cfg=(lc.get("risk") or {}),
+                              sim=self.source == "sim")
 
     BRAIN_RESERVE = 8          # automatic AI calls kept for the hourly market notes on the Pro plan
 
@@ -1138,10 +1163,10 @@ class LiveEngine:
 
     def _macro_alert(self, a):
         if self.running and self.source != "sim":
-            self._emit(a, self.clock.now(), self.cfg()["live"])
+            self._emit_safe(a, self.clock.now(), self.cfg()["live"])
         elif self.running:
             a["title"] = "[real market] " + a["title"]
-            self._emit(a, self.clock.now(), self.cfg()["live"])
+            self._emit_safe(a, self.clock.now(), self.cfg()["live"])
 
     def _world_loop(self):
         time.sleep(8)
@@ -1198,7 +1223,7 @@ class LiveEngine:
         if not opens and not desk_open:
             return
         names = ", ".join([t["label"] for t in opens][:6] + [f"{t['family']} {t['sym']}" for t in desk_open][:3])
-        self._emit({"sym": "PORTFOLIO", "kind": "flat_by", "direction": "neutral", "severity": 2,
+        self._emit_safe({"sym": "PORTFOLIO", "kind": "flat_by", "direction": "neutral", "severity": 2,
                     "title": f"Square-off at {ex}: {len(opens) + len(desk_open)} paper position(s) still open",
                     "detail": f"Open: {names}. Intraday positions close at {ex}; nothing is carried overnight.",
                     "price": None, "data": {}}, now, lc)
@@ -1265,7 +1290,7 @@ class LiveEngine:
         a = {"sym": f["sym"], "kind": "filing", "direction": d, "severity": f["severity"],
              "title": f"{f['sym']} filing: {f['label']}", "detail": (f.get("text") or f.get("desc") or "")[:220],
              "price": m.get("spot"), "data": {"link": f.get("link"), "desc": f.get("desc")}}
-        self._emit(a, self.clock.now(), self.cfg()["live"])
+        self._emit_safe(a, self.clock.now(), self.cfg()["live"])
 
     # ------------------------------------------------------------ market-wide views
     def _market_view(self):
@@ -1547,7 +1572,7 @@ class LiveEngine:
             a = {"sym": sym, "kind": "news", "direction": d, "severity": 1, "title": f"News: {n['title'][:110]}",
                  "detail": f"{n['source']}. {sym} {m.get('chg_pct') or 0:+.2f}% now.", "price": m.get("spot"),
                  "data": {"link": n["link"]}}
-            self._emit(a, self.clock.now(), self.cfg()["live"])
+            self._emit_safe(a, self.clock.now(), self.cfg()["live"])
 
     # ------------------------------------------------------------ views for the API
     @staticmethod

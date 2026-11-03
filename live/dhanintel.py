@@ -89,13 +89,30 @@ class DhanIntel:
         return self.ids
 
     # ---------------- news
+    def _dead(self) -> bool:
+        """The saved token was refused by Dhan: stay quiet until a new one is pasted (no call, no log every minute)."""
+        from lab.dhan_token import is_dead, latest
+        cur = getattr(self.d, "token", None)
+        tok = latest() or cur
+        if is_dead(tok):
+            self.errors["token"] = "Dhan token expired"
+            return True
+        if tok and cur and tok != cur and hasattr(self.d, "s"):
+            self.d.token = tok
+            self.d.s.headers["access-token"] = tok
+        self.errors.pop("token", None)
+        return False
+
     def news(self) -> list:
         """[{title, link, source, ts, dhan_syms}] newest first (Dhan headlines)."""
+        if self._dead():
+            return []
         try:
             res = self.d.post("/data/newsheadline", {"dhanClientId": self.d.client_id, "categories": ["ALL"], "limit": 50})
             self.errors.pop("news", None)
-        except PermissionError:
-            raise
+        except PermissionError as e:
+            self.log(f"Dhan news paused: {e}")
+            return []
         except Exception as e:
             self.errors["news"] = str(e)[:160]
             return []
@@ -122,6 +139,8 @@ class DhanIntel:
 
     # ---------------- market movers
     def refresh_movers(self, expiry: dt.date | None):
+        if self._dead():
+            return
         ids = self._ids()
         out = {}
         for key, seg, inst, cat, needs_exp, uni in MOVER_LISTS:
@@ -134,8 +153,9 @@ class DhanIntel:
                 body["universe"] = uni
             try:
                 res = self.d.post("/data/marketmovers", body)
-            except PermissionError:
-                raise
+            except PermissionError as e:
+                self.log(f"Dhan movers paused: {e}")
+                return
             except Exception as e:
                 self.errors["movers"] = str(e)[:160]
                 continue

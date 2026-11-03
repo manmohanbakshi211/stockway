@@ -114,6 +114,36 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 5-year download that completes itself, and a sturdier engine (2.21)
+
+**Download (Strategy Lab → 5-year Lab)**
+- Speed is set by Dhan: 5 calls a second and 100,000 a day on the Data APIs; one call = one strike, one side, one
+  trading day. The download now uses up to 92,000 calls a day (the rest stay for live news and movers) at the full
+  shared speed, and starts again by itself after midnight.
+- Nothing is missed: trading days come from Dhan's own Nifty candles (no guessed holidays); a manifest records every
+  day on disk; each run fetches exactly the missing days (whole months, holes inside months, the newest days). A
+  network error never counts as "no data": after 3 in a row the download pauses and retries the same day. Each
+  finished day is saved at once, so closing the app or a sleeping Mac loses at most one day in progress.
+- It resumes by itself whenever the app is open (after a restart, a network drop, a new day or a new token). A Stop by
+  hand is respected for the rest of the day.
+- Universe: Nifty, Bank Nifty and every NSE stock with options; the 30 most liquid first, top 80 by turnover ATM±3,
+  the rest ATM±1. It pauses below 10 GB free disk.
+- The panel shows the whole picture: months complete / partly on disk / pending, trading days and calls left, Dhan
+  calls used today, token validity, disk free. The bar is overall progress (it no longer restarts at 0%).
+- All Dhan clients share one speed limit and one daily counter, so the download and live news / movers never push
+  each other over Dhan's limits. Upstox stays the live price feed; the two don't overlap.
+- An expired Dhan token is remembered: news and movers go quiet (no log line every minute), a Telegram note goes out
+  once, and everything resumes by itself when a new token is pasted.
+
+**Engine (gun) armour**
+- One alert, setup, stock or Strategy Lab rule that fails is skipped and logged (at most every few minutes); the live
+  scanner keeps running. Paper updates, big prints, VIX checks and the market view are guarded the same way.
+- Strategy Lab: one research round per Lab folder at a time (a manual run waits for the nightly one instead of
+  overwriting it); results and the bar table are saved atomically.
+- Simulator on a weekend: the risk check no longer blocks every paper trade as "market closed".
+- Quieter window: yfinance's "possibly delisted" lines during a network blip are hidden; a repeated AI error is
+  logged once per 30 minutes.
+
 ## Dhan token renews by itself (2.20.1)
 
 Dhan Web tokens last 24 hours. While the app is open it now checks the token every 10 minutes and, about 3 hours
