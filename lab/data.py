@@ -19,9 +19,14 @@ from .dhan import Dhan
 IST_OFFSET = 19800
 N_MIN = 375                      # 09:15 .. 15:29
 OFFSETS = range(-10, 11)
-UNDERLYINGS = {
-    "NIFTY": {"flag": "WEEK", "step": 50, "lot": 65},
-    "BANKNIFTY": {"flag": "MONTH", "step": 100, "lot": 30},
+def _lot(sym, fallback):
+    from .rules import lot
+    return lot(sym) or fallback
+
+
+UNDERLYINGS = {                                   # lots from rules/lots.json (the lot valid today)
+    "NIFTY": {"flag": "WEEK", "step": 50, "lot": _lot("NIFTY", 65)},
+    "BANKNIFTY": {"flag": "MONTH", "step": 100, "lot": _lot("BANKNIFTY", 30)},
 }
 
 

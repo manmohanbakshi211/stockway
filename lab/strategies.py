@@ -23,13 +23,13 @@ FILTERS = {
     "strict": {"max_gap": 0.6, "vix_rise": 4.0, "iv_rv": 1.0, "events": True},
 }
 
-# scheduled high-volatility days (Budget, RBI policy, election results); extend with data/lab_events.csv
-EVENTS = {
-    "2023-02-01", "2023-02-08", "2023-04-06", "2023-06-08", "2023-08-10", "2023-10-06", "2023-12-08",
-    "2024-02-01", "2024-02-08", "2024-04-05", "2024-06-04", "2024-06-07", "2024-07-23", "2024-08-08",
-    "2024-10-09", "2024-12-06", "2025-02-01", "2025-02-07", "2025-04-09", "2025-06-06", "2025-08-06",
-    "2025-10-01", "2025-12-05", "2026-02-01",
-}
+# scheduled high-volatility days (Budget, RBI policy, election results): rules/events.json + data/lab_events.csv
+def _events():
+    from .rules import events
+    return events() or {"2026-02-01"}
+
+
+EVENTS = _events()
 
 
 def _rnd(x, step):

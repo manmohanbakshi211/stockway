@@ -26,9 +26,9 @@ import numpy as np
 
 from . import ta
 
-NAMES = {"double_top": "Double top", "double_bottom": "Double bottom", "head_shoulders": "Head & shoulders",
-         "inv_hs": "Inverse head & shoulders", "triangle": "Triangle breakout", "flag": "Flag breakout",
-         "breakout_retest": "Breakout + retest", "rsi_divergence": "RSI divergence", "candle_at_level": "Reversal candle at level"}
+from .registry import names as _names  # noqa: E402
+
+NAMES = _names("pattern")           # labels live in the bullet catalogue (live/registry.py)
 
 
 def pivots(h, l, atr, k=1.2):

@@ -1,0 +1,17 @@
+{
+ "about": "Index option lot sizes. The Lab uses the lot valid today for every past day (it answers 'what would this trade cost today'). Live trading uses the lot from the broker's instrument list. When NSE changes a lot, add an entry with its start date.",
+ "lots": {
+  "NIFTY": [
+   {
+    "from": "2000-01-01",
+    "lot": 65
+   }
+  ],
+  "BANKNIFTY": [
+   {
+    "from": "2000-01-01",
+    "lot": 30
+   }
+  ]
+ }
+}

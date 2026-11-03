@@ -13,8 +13,10 @@ from . import patterns as PT, setups, ta
 from .clock import IST
 
 IST_SHIFT = 19800          # the chart library shows UTC; shift so the axis reads IST
-NOISY_FOR_STOCKS = {"flag", "breakout_retest", "candle_at_level"}
-SHORT = {"ema_pullback": "EMA", "vwap_reclaim": "VWAP", "cpr_breakout": "CPR", "pdh_break": "PDH/L", "wall_fade": "Wall"}
+from .registry import noisy_for_stocks as _noisy, shorts as _shorts  # noqa: E402
+
+NOISY_FOR_STOCKS = _noisy()
+SHORT = _shorts()
 
 
 def _num(x):
@@ -164,10 +166,25 @@ class ChartData:
                 else:
                     fac = {"id": r["id"], "exit": list(factory.EXITS[r["exit"]][:3]) +
                            (list(factory.EXITS[r["exit"]][3]) if factory.EXITS[r["exit"]][3] else [])}
+                untested = is_stock and factory.STOCKS in r["syms"] and sym not in self._tested_stocks()
+                if untested and (self.e.cfg().get("lab") or {}).get("stock_rules_tested_only"):
+                    continue                       # setting: "any F&O stock" rules only on stocks the Lab tested them on
+                if untested:
+                    fac["untested_stock"] = True
                 emit({"sym": sym, "kind": "factory", "direction": "up" if d > 0 else "down", "severity": 3,
                       "title": f"{sym} Strategy Lab rule {r['id']}: {'BUY call' if d > 0 else 'BUY put'}",
-                      "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%.",
+                      "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%."
+                                + (f" Note: tested on other F&O stocks, not on {sym} itself." if untested else ""),
                       "price": m.get("spot"), "data": {"factory": fac}})
+
+    def _tested_stocks(self) -> set:
+        """Stocks with option history in the current Lab (the ones its 'any F&O stock' rules were tested on)."""
+        t = getattr(self, "_tested", None)
+        if t is None or time.time() - t[0] > 3600:
+            from pathlib import Path
+            hd = Path(self.e.data_dir) / "history"
+            self._tested = t = (time.time(), {p.parent.name for p in hd.glob("*/meta.json")})
+        return t[1]
 
     def _paper_straddle(self, sym, m, r, now) -> str | None:
         """Paper-sell the ATM call and put of the nearest expiry, each with the rule's stop, held to 15:15."""

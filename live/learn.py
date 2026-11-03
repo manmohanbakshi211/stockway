@@ -66,8 +66,13 @@ def _n(x, cap=None):
     return max(-cap, min(cap, x)) if cap else x
 
 
-BANK_SYMS = {"BANKNIFTY", "HDFCBANK", "ICICIBANK", "SBIN", "AXISBANK", "KOTAKBANK", "INDUSINDBK", "BANKBARODA", "PNB",
+_BANK_SYMS = {"BANKNIFTY", "HDFCBANK", "ICICIBANK", "SBIN", "AXISBANK", "KOTAKBANK", "INDUSINDBK", "BANKBARODA", "PNB",
              "CANBK", "FEDERALBNK", "IDFCFIRSTB", "AUBANK", "BANDHANBNK"}
+try:                                          # rules/stocks.json "banks"
+    from lab.rules import stock_list as _sl
+    BANK_SYMS = set(_sl("banks", sorted(_BANK_SYMS)))
+except Exception:
+    BANK_SYMS = _BANK_SYMS
 
 
 def _depth(mk: dict, sym) -> dict:

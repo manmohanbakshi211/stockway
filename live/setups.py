@@ -15,8 +15,9 @@ import numpy as np
 
 from . import ta
 
-NAMES = {"ema_pullback": "EMA pullback", "vwap_reclaim": "VWAP reclaim", "cpr_breakout": "CPR breakout",
-         "pdh_break": "Previous-day high/low break", "wall_fade": "OI wall rejection"}
+from .registry import names as _names  # noqa: E402
+
+NAMES = _names("setup")             # labels live in the bullet catalogue (live/registry.py)
 
 
 def indicators(b: dict) -> dict:

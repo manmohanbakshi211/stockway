@@ -26,15 +26,12 @@ DEFAULTS = {
 }
 
 # how long the same alert (symbol + kind + direction) stays quiet, in minutes
-COOLDOWN = {"orb": 999, "day_high": 30, "day_low": 30, "vwap_cross": 30, "oi_wall": 20, "pcr_shift": 60,
-            "iv_spike": 30, "beyond_priced": 999, "oi_buildup": 60, "news": 60, "unusual_options": 10,
-            "order_flow": 15, "absorption": 20, "gamma_flip": 30, "big_print": 10, "filing": 5,
-            "setup_ema_pullback": 45, "setup_vwap_reclaim": 45, "setup_cpr_breakout": 999, "setup_pdh_break": 999,
-            "setup_wall_fade": 45, "macro": 30, "pattern_double_top": 60, "pattern_double_bottom": 60,
-            "pattern_head_shoulders": 90, "pattern_inv_hs": 90, "pattern_triangle": 45, "pattern_flag": 30,
-            "pattern_breakout_retest": 45, "flat_by": 999, "insider": 5, "pattern_rsi_divergence": 45, "pattern_candle_at_level": 30}
-# for these, the cooldown ignores direction (they tend to flip back and forth)
-NO_DIRECTION_COOLDOWN = {"oi_wall", "vwap_cross", "gamma_flip"}
+# how long the same alert (symbol + kind + direction) stays quiet, and which ignore direction: from the bullet
+# catalogue (live/registry.py)
+from .registry import any_direction as _anydir, cooldowns as _cooldowns  # noqa: E402
+
+COOLDOWN = _cooldowns()
+NO_DIRECTION_COOLDOWN = _anydir()
 
 
 def _a(m, kind, direction, sev, title, detail, /, **data):

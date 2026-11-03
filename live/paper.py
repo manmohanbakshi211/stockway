@@ -8,7 +8,7 @@ from .clock import IST
 DEFAULTS = {
     "auto": True,
     "min_severity": 2,
-    "kinds": ["sharp_move", "orb", "volume_surge", "oi_buildup", "unusual_options", "beyond_priced", "factory"],
+    "kinds": None,                   # filled from the bullet catalogue (live/registry.py) below
     "lots": 1,
     "target_pct": 30.0,
     "stop_pct": 20.0,
@@ -30,6 +30,10 @@ DEFAULTS = {
     "profit_lock": 0,           # stop new trades for the day once this much is booked (0 = off)
 }
 
+from .registry import paper_kinds as _pk  # noqa: E402
+
+DEFAULTS["kinds"] = _pk()
+
 # the small-account preset (Paper page): ₹40K, 1 lot, 2 trades a day, the day ends after one loss, lock in a good day
 SMALL_ACCOUNT = {"capital": 40000, "risk_pct": 5.0, "max_lots": 1, "max_open": 1, "max_trades_day": 2,
                  "max_daily_loss_pct": 4.0, "profit_lock": 1200, "aggressive": False}
@@ -39,14 +43,8 @@ MODES = {0: "auto", 1: "you", 2: "override", 3: "aggressive", 4: "you (chain/cha
 
 def costs(entry: float, exit: float, qty: int) -> float:
     """Indian option-buying charges for one round trip (discount broker)."""
-    buy, sell = entry * qty, exit * qty
-    brokerage = 20 + 20
-    stt = 0.0015 * sell                      # 0.15% on sell-side premium (from 1 Apr 2026)
-    exch = 0.0003503 * (buy + sell)          # NSE transaction charges on premium
-    sebi = 10 / 1e7 * (buy + sell)
-    gst = 0.18 * (brokerage + exch + sebi)
-    stamp = 0.00003 * buy
-    return round(brokerage + stt + exch + sebi + gst + stamp, 2)
+    from lab.engine import charge_amount            # rates from rules/costs.json
+    return round(charge_amount(entry * qty, exit * qty, 2), 2)
 
 
 class PaperBook:

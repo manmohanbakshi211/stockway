@@ -114,6 +114,21 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Bullets out of the engine: rules/ folder and the bullet catalogue (2.24)
+
+- **rules/** (dated facts, plain JSON you can read): `events.json` (Budget, RBI policy, election days; now up to date
+  with RBI's FY27 calendar: 8 Apr, 5 Jun, 5 Aug, 7 Oct, 4 Dec 2026, 5 Feb 2027), `costs.json` (charges, each entry valid
+  from a date), `lots.json` (index lots), `stocks.json` (named stock lists). A broken file falls back to the built-in
+  values and shows on the System page. Paper trades, the risk check and the Lab read charges from here.
+- **live/registry.py** (the bullet catalogue): every alert / setup / pattern / strategy kind with its label, cooldown,
+  auto-paper flag and display details. The detectors, chart scanner, paper account and screens read it; a new kind is
+  one line there. System page → Bullets lists them all.
+- Same values as before, so nothing moved: tests compare the old tables and charges with the new ones; Lab regression
+  on a synthetic Lab: 103 of 103 rules identical. Only change in results: the Strategy desk's strict filter now also
+  skips the 2026 RBI policy days (they were missing).
+- "Any F&O stock" Lab rules firing on a stock the Lab never tested them on now say so in the alert ("tested on other
+  F&O stocks, not on X"). Setting `lab.stock_rules_tested_only` (off by default) limits them to tested stocks.
+
 ## System & logins page (2.23)
 
 Setup → **System & logins**: open it before the market opens.

@@ -1,0 +1,129 @@
+{
+ "about": "Scheduled high-volatility days (Union Budget, RBI policy decisions, election results). Used by the Strategy desk's strict filter and the live calendar. Add a line per event; your own extra events can also go in data/lab_events.csv (date,event). Source for RBI FY27: RBI press release 23 Mar 2026.",
+ "events": [
+  {
+   "date": "2023-02-01",
+   "name": "Union Budget"
+  },
+  {
+   "date": "2023-02-08",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2023-04-06",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2023-06-08",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2023-08-10",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2023-10-06",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2023-12-08",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2024-02-01",
+   "name": "Union Budget"
+  },
+  {
+   "date": "2024-02-08",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2024-04-05",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2024-06-04",
+   "name": "Election results"
+  },
+  {
+   "date": "2024-06-07",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2024-07-23",
+   "name": "Union Budget"
+  },
+  {
+   "date": "2024-08-08",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2024-10-09",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2024-12-06",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2025-02-01",
+   "name": "Union Budget"
+  },
+  {
+   "date": "2025-02-07",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2025-04-09",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2025-06-06",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2025-08-06",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2025-10-01",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2025-12-05",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2026-02-01",
+   "name": "Union Budget"
+  },
+  {
+   "date": "2026-04-08",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2026-06-05",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2026-08-05",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2026-10-07",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2026-12-04",
+   "name": "RBI policy decision"
+  },
+  {
+   "date": "2027-02-01",
+   "name": "Union Budget (expected)"
+  },
+  {
+   "date": "2027-02-05",
+   "name": "RBI policy decision"
+  }
+ ]
+}

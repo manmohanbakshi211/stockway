@@ -1,0 +1,15 @@
+{
+ "about": "Indian F&O option charges. Each entry is valid from its date until the next one. Paper trades, the risk check and the Strategy Lab use the entry valid today (the Lab answers 'what would this trade cost today'). When a rate changes, add a new entry with its start date; the old entry stays for the record.",
+ "entries": [
+  {
+   "from": "2000-01-01",
+   "brokerage_per_order": 20.0,
+   "stt_sell": 0.0015,
+   "exchange": 0.0003503,
+   "sebi": 1e-06,
+   "gst": 0.18,
+   "stamp_buy": 3e-05,
+   "note": "STT 0.15% on option sell premium (from 1 Apr 2026); NSE charges 0.03503% of premium"
+  }
+ ]
+}

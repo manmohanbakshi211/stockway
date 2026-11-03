@@ -35,6 +35,8 @@ def static_checks(cfg: dict | None = None) -> list:
     from live import dhandepth
     out.append(_c("dhan_depth_sockets", "Dhan 200-level order book uses at most 5 sockets",
                   "full-depth-api" in dhandepth.URL, "one socket per index future (Nifty, Bank Nifty)"))
+    from lab import rules
+    out += rules.check()
     from lab import factory
     out.append(_c("lab_one_run", "Strategy Lab: one research round per Lab folder at a time",
                   hasattr(factory, "_RUN_LOCKS"), "a second run waits for the first instead of overwriting it"))

@@ -47,6 +47,9 @@ const KIND = { manual: "By hand",
   pattern_breakout_retest: "Pattern: breakout + retest", pattern_rsi_divergence: "Pattern: RSI divergence", pattern_candle_at_level: "Pattern: candle at level",
 };
 
+// labels come from the bullet catalogue (live/registry.py); the table above is the fallback
+api("/api/registry").then((r) => (r.kinds || []).forEach((k) => { if (k.label) KIND[k.kind] = k.label; })).catch(() => {});
+
 /* ---------------- polling + notifications */
 function livePage() { return ["live", "chart", "world", "desk", "scanner", "sym", "alerts", "paper", "connect", "context", "scorecard", "briefs", "insiders"].includes(state.page); }
 
@@ -2323,6 +2326,10 @@ async function pageSystem() {
         <div class="panel tight"><h3>Background jobs</h3><table class="mini"><tbody>${x.jobs.map((j) => `<tr><td>${esc(j.name)}</td><td>${esc(j.state || "")}</td><td class="small muted">${esc(j.detail || "")}</td></tr>`).join("")}</tbody></table></div>
         <div class="panel tight"><h3>No-clash checks</h3><table class="mini"><tbody>${x.checks.map((c) => `<tr><td style="width:24px">${mark(c.ok)}</td><td>${esc(c.name)}<div class="small muted">${esc(c.detail || "")}</div></td></tr>`).join("")}</tbody></table></div>
       </div>
+      <details class="panel tight" style="margin-top:12px"><summary><b>Bullets: every alert, setup, pattern and strategy kind</b> <span class="small muted">(${(x.bullets || []).length}, from live/registry.py)</span></summary>
+        <div class="table-wrap" style="margin-top:8px"><table class="mini"><thead><tr><th>Kind</th><th>Family</th><th>Label</th><th class="r">Quiet for</th><th>Auto paper</th></tr></thead><tbody>
+        ${(x.bullets || []).map((b) => `<tr><td><code>${esc(b.kind)}</code></td><td>${esc(b.family)}</td><td>${esc(b.label)}</td><td class="r">${b.cooldown != null ? (b.cooldown >= 999 ? "once a day" : b.cooldown + " min") : "default"}</td><td>${b.paper ? "yes" : ""}</td></tr>`).join("")}</tbody></table></div>
+        <p class="small muted" style="margin:6px 0 0">Rules files (dated facts): ${(x.rules || []).map((r) => `${r.ok ? "✓" : "✗"} ${esc(r.name)}`).join(" · ")}</p></details>
       <div class="panel tight" style="margin-top:12px"><h3>Problems in the last hour</h3>${x.problems.length ? `<table class="mini"><tbody>${x.problems.map((p) => `<tr><td class="small">${esc(p.last)}</td><td class="r small">${p.n}×</td><td class="small">${esc(p.text)}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:0">None.</p>`}</div>`;
     const act = (id, fn) => { const b = $(id); if (b) b.onclick = async () => { try { await fn(b); } catch (e) { toast(e.message); } }; };
     act("#sy-refresh", () => draw());

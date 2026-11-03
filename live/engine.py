@@ -26,11 +26,16 @@ from . import riskgate
 from .upstox import TokenStore
 from .vol import atm_iv_from_chain, daily_stats, gex, percentile, structure
 
-LIQUID = ["RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "SBIN", "AXISBANK", "KOTAKBANK", "LT", "ITC",
+_LIQUID = ["RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "SBIN", "AXISBANK", "KOTAKBANK", "LT", "ITC",
           "BHARTIARTL", "BAJFINANCE", "MARUTI", "TATAMOTORS", "M&M", "SUNPHARMA", "TITAN", "ADANIENT", "ADANIPORTS",
           "TATASTEEL", "JSWSTEEL", "HCLTECH", "HAL", "BEL", "DIXON", "ETERNAL", "ZOMATO", "TRENT", "BAJAJ-AUTO",
           "HINDALCO", "VEDL", "DLF", "INDUSINDBK", "PNB", "CANBK", "BANKBARODA", "COALINDIA", "ONGC", "NTPC",
           "POWERGRID", "TECHM", "WIPRO", "SWIGGY", "PAYTM", "IRFC", "BSE", "CDSL", "ANGELONE", "MCX", "POLYCAB"]
+try:                                          # rules/stocks.json "liquid" (the built-in list is the fallback)
+    from lab.rules import stock_list as _sl
+    LIQUID = _sl("liquid", _LIQUID)
+except Exception:
+    LIQUID = _LIQUID
 
 LIVE_DEFAULTS = {
     "source": "upstox",
@@ -1243,9 +1248,9 @@ class LiveEngine:
             self.log(f"Scenario engine refresh failed: {ex}")
 
     def _world_calendar(self):
-        from lab.strategies import EVENTS
+        from lab.rules import events_named
         today = dt.datetime.now(IST).date()
-        extra = [(dt.date.fromisoformat(d), "India: scheduled policy / budget event") for d in EVENTS
+        extra = [(dt.date.fromisoformat(d), f"India: {name}") for d, name in events_named()
                  if today <= dt.date.fromisoformat(d) <= today + dt.timedelta(days=7)]
         if self.uni:
             exps = sorted({u.near_expiry(today) for u in self.uni.indices if u.near_expiry(today)})

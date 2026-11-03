@@ -52,6 +52,7 @@ EDITABLE = {
     "lab.daily_stop_pct": float,
     "lab.years": int,
     "lab.auto_trade": bool,
+    "lab.stock_rules_tested_only": bool,
     "ai.provider": str,
     "ai.api_key": str,
     "ai.model": str,

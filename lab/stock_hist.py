@@ -17,9 +17,14 @@ from . import upstox_hist as U
 from .data import UNDERLYINGS, hist_dir
 
 # Liquid F&O stocks with active option markets (filtered by what today's instrument list actually has).
-DEFAULT = ["RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS", "AXISBANK", "KOTAKBANK", "BHARTIARTL", "ITC",
+_DEFAULT = ["RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS", "AXISBANK", "KOTAKBANK", "BHARTIARTL", "ITC",
            "LT", "BAJFINANCE", "M&M", "MARUTI", "SUNPHARMA", "TATASTEEL", "ADANIENT", "HCLTECH", "HINDALCO", "JSWSTEEL",
            "BEL", "HAL", "TRENT", "DLF", "INDUSINDBK", "ONGC", "NTPC", "COALINDIA", "VEDL", "BAJAJ-AUTO"]
+try:                                          # rules/stocks.json "lab_first"
+    from .rules import stock_list as _sl
+    DEFAULT = _sl("lab_first", _DEFAULT)
+except Exception:
+    DEFAULT = _DEFAULT
 BAND = 3                     # strikes beyond the day's high/low (stock buyers trade ATM ± 2)
 EST_PER_EXPIRY = 70          # requests per stock expiry, for the progress bar
 

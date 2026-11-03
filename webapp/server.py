@@ -1403,7 +1403,25 @@ def system_view():
     free = shutil.disk_usage(ROOT / "data").free / 1e9
     return clean({"version": RUNNING_VERSION, "up_since": _ago(APP_STARTED), "free_gb": round(free, 1),
                   "overall": "bad" if bad else "warn" if warn else "ok", "services": svcs, "jobs": job_rows,
-                  "checks": checks, "problems": sorted(probs.values(), key=lambda p: p["last"], reverse=True)[:12]})
+                  "checks": checks, "problems": sorted(probs.values(), key=lambda p: p["last"], reverse=True)[:12],
+                  "bullets": _registry_list(), "rules": _rules_check()})
+
+
+def _registry_list():
+    from live import registry
+    return registry.view()
+
+
+def _rules_check():
+    from lab import rules
+    return rules.check()
+
+
+@app.get("/api/registry")
+def registry_view():
+    """The bullet catalogue (live/registry.py) for the screens."""
+    from live import registry
+    return {"kinds": registry.view()}
 
 
 @app.post("/api/system/check")

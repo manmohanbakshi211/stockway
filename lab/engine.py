@@ -17,17 +17,23 @@ def slip(sym, px):
     return max(a, p * px)
 
 
-def charges(fills: list, lot_units: int) -> float:
-    """Indian F&O option charges for a list of fills [(side, price)] where side is +1 buy / -1 sell, per lot."""
+def charges(fills: list, lot_units: int, day=None) -> float:
+    """Indian F&O option charges for a list of fills [(side, price)] where side is +1 buy / -1 sell, per lot.
+    Rates from rules/costs.json (the entry valid on `day`, today if None)."""
     buy = sum(p for s, p in fills if s > 0) * lot_units
     sell = sum(p for s, p in fills if s < 0) * lot_units
-    orders = len(fills)
-    brokerage = 20.0 * orders
-    stt = 0.0015 * sell                 # 0.15% on the sell premium (from 1 Apr 2026)
-    exch = 0.0003503 * (buy + sell)
-    sebi = 10 / 1e7 * (buy + sell)
-    gst = 0.18 * (brokerage + exch + sebi)
-    stamp = 0.00003 * buy
+    return charge_amount(buy, sell, len(fills), day)
+
+
+def charge_amount(buy: float, sell: float, orders: int, day=None) -> float:
+    from .rules import costs
+    r = costs(day)
+    brokerage = r["brokerage_per_order"] * orders
+    stt = r["stt_sell"] * sell
+    exch = r["exchange"] * (buy + sell)
+    sebi = r["sebi"] * (buy + sell)
+    gst = r["gst"] * (brokerage + exch + sebi)
+    stamp = r["stamp_buy"] * buy
     return brokerage + stt + exch + sebi + gst + stamp
 
 
