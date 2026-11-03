@@ -114,6 +114,15 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## One Dhan token, one keeper (2.22.1)
+
+All ways of getting a Dhan token (pasted token, Log in with Dhan, Renew, TOTP) go through one keeper, one at a time;
+whichever token was saved last is the one every part of the app uses (download, order book, news, movers switch to it
+on their next call). Order: renew ~3 h before expiry; if the token is gone, TOTP makes a new one (at most every 5 min).
+If Dhan refuses a token TOTP made minutes ago, the app does not make token after token: it says to check the Data API
+plan and tries again after an hour. Tip: let the app manage the token; a token made elsewhere for the same account
+can replace the app's (Dhan keeps one active), and the app then simply makes a fresh one.
+
 ## Dhan automatic login with TOTP (2.22)
 
 The app makes a new Dhan token by itself whenever the old one is gone (Mac was off, token expired, Dhan refused it),

@@ -171,3 +171,22 @@ def test_network_error_never_shows_the_pin(monkeypatch):
     with pytest.raises(RuntimeError) as e:
         A.generate("1100", "4321", base64.b32encode(b"12345678901234567890").decode())
     assert "4321" not in str(e.value)
+
+
+def test_no_token_churn_when_dhan_refuses_a_fresh_token(box, monkeypatch, tmp_path):
+    """If Dhan refuses a token TOTP made minutes ago (e.g. the Data API plan lapsed), don't make token after token."""
+    from lab import dhan_auto as A
+    monkeypatch.setattr(A, "_last_try", 0.0)
+    A.store("1234", base64.b32encode(b"12345678901234567890").decode())
+    made = []
+
+    def fake_post(url, params=None, timeout=None):
+        made.append(jwt(time.time() + 86400 + len(made)))
+        return Resp(200, {"accessToken": made[-1]})
+    monkeypatch.setattr(A.requests, "post", fake_post)
+    box["tok"] = None
+    assert T.maybe_renew() == "auto" and len(made) == 1
+    T.mark_dead(box["tok"])                                    # Dhan refuses the brand-new token
+    monkeypatch.setattr(A, "_last_try", 0.0)
+    assert T.maybe_renew() == "expired" and len(made) == 1     # no second login
+    assert "Data API" in A.status()["last_error"]

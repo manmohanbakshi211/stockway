@@ -197,6 +197,8 @@ def login(client_id: str, save_token, log=print, force=False, notify=None) -> st
         log(f"Dhan automatic login failed, will retry: {e}")
         return "failed"
     save_token(res["token"])
-    _set_state({"blocked": None, "last_error": None, "last_login": dt.datetime.now().strftime("%d %b %H:%M")})
+    import hashlib
+    _set_state({"blocked": None, "last_error": None, "last_login": dt.datetime.now().strftime("%d %b %H:%M"),
+                "made": hashlib.sha256(res["token"].encode()).hexdigest()[:16], "made_ts": time.time()})
     log("Dhan: new token made automatically (TOTP)")
     return "ok"

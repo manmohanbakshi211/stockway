@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -131,16 +132,37 @@ def status() -> dict:
             "dead": bool(tok) and st.get("dead") == _id(tok), "auto": dhan_auto.status()}
 
 
-def _auto(cid, log) -> str | None:
-    """TOTP automatic login, if it is set up (lab/dhan_auto.py). 'auto' when a new token was made."""
+REFUSED_FRESH_WAIT_S = 3600   # Dhan refused a token TOTP made minutes ago: the token isn't the problem; wait an hour
+
+
+def _auto(cid, log, tok=None) -> str | None:
+    """TOTP automatic login, if it is set up (lab/dhan_auto.py). 'auto' when a new token was made.
+    If Dhan refuses a token that TOTP made less than an hour ago, the problem is elsewhere (e.g. the Data API plan
+    lapsed): don't make token after token, say so once and try again after an hour."""
     from . import dhan_auto
     if not saver:
+        return None
+    st = dhan_auto.state()
+    if tok and st.get("made") == _id(tok) and time.time() - (st.get("made_ts") or 0) < REFUSED_FRESH_WAIT_S:
+        msg = ("Dhan refused a token it made minutes ago: check that the Data API (Pro) plan is active on web.dhan.co. "
+               "The app tries again in an hour.")
+        if st.get("last_error") != msg:
+            dhan_auto._set_state({"last_error": msg})
+            log(msg)
         return None
     r = dhan_auto.login(cid, saver, log=log, notify=on_dead)
     return "auto" if r == "ok" else None
 
 
+LOCK = threading.RLock()       # one token change at a time: scheduler, Renew now, TOTP turn-on, Log in with Dhan
+
+
 def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str | None:
+    with LOCK:
+        return _maybe_renew(now, force, log)
+
+
+def _maybe_renew(now: float | None = None, force: bool = False, log=print) -> str | None:
     """Renew if the saved token has less than RENEW_BEFORE_H hours left; if it is gone (expired / refused / missing) and
     TOTP auto-login is on, make a new one. Returns 'renewed', 'auto', 'expired', 'failed' or None."""
     global _last_check
@@ -150,7 +172,7 @@ def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str
     cid, tok = provider()
     gone = cid and (not tok or is_dead(tok) or ((expiry(tok) or now + 1) <= now))
     if gone:                                          # no throttle here: dhan_auto keeps its own 5-minute gap
-        r = _auto(cid, log)
+        r = _auto(cid, log, tok)
         if r:
             return r
         if tok and not is_dead(tok):
@@ -178,7 +200,8 @@ def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str
     try:
         res = renew(cid, tok)
     except PermissionError as e:
-        r = _auto(cid, log)
+        mark_dead(tok)
+        r = _auto(cid, log, tok)
         if r:
             return r
         mark_dead(tok)
@@ -189,7 +212,7 @@ def maybe_renew(now: float | None = None, force: bool = False, log=print) -> str
         _write(st)
         log(str(e))
         if exp - now < 3600:                          # renew keeps failing and the token is nearly gone
-            r = _auto(cid, log)
+            r = _auto(cid, log, tok)
             if r:
                 return r
         return "failed"

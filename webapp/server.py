@@ -1083,13 +1083,14 @@ async def lab_dhan_auto_on(req: Request):
     if not cid:
         raise HTTPException(400, "Save your Dhan client ID first.")
     try:
-        res = dhan_auto.generate(cid, pin, secret)
+        with dhan_token.LOCK:
+            res = dhan_auto.generate(cid, pin, secret)
+            save_user_settings({"lab.dhan_token": res["token"]})
     except dhan_auto.AuthRefused as e:
         raise HTTPException(400, f"Dhan refused this PIN / TOTP key ({e}). Nothing was saved. Is TOTP set up and confirmed on web.dhan.co?")
     except Exception as e:
         raise HTTPException(502, str(e))
     where = dhan_auto.store(pin, secret)
-    save_user_settings({"lab.dhan_token": res["token"]})
     dhan_auto._set_state({"blocked": None, "last_error": None, "where": where,
                           "last_login": dt.datetime.now().strftime("%d %b %H:%M")})
     return {"ok": True, "where": where, "token": dhan_token.status()}
@@ -1127,13 +1128,14 @@ def dhan_callback(tokenId: str | None = None, tokenid: str | None = None):
         return HTMLResponse(_dhan_page("Dhan login was cancelled", "No tokenId came back from Dhan.", ok=False))
     c = _lab_cfg()
     try:
-        res = dhan_token.consume(tid, c["dhan_api_key"], c["dhan_api_secret"])
+        with dhan_token.LOCK:
+            res = dhan_token.consume(tid, c["dhan_api_key"], c["dhan_api_secret"])
+            ch = {"lab.dhan_token": res["token"]}
+            if res.get("client_id") and not c.get("dhan_client_id"):
+                ch["lab.dhan_client_id"] = str(res["client_id"])
+            save_user_settings(ch)
     except Exception as e:
         return HTMLResponse(_dhan_page("Dhan login failed", str(e), ok=False))
-    ch = {"lab.dhan_token": res["token"]}
-    if res.get("client_id") and not c.get("dhan_client_id"):
-        ch["lab.dhan_client_id"] = str(res["client_id"])
-    save_user_settings(ch)
     exp = dhan_token.status().get("expires")
     return HTMLResponse(_dhan_page("Logged in to Dhan", f"Token saved{f' (valid till {exp})' if exp else ''}. "
                                    "The 5-year download, news and movers resume by themselves. You can close this tab.", ok=True))
