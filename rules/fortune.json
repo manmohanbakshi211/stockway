@@ -1,8 +1,11 @@
 {
- "about": "Fortune chart (bullets). For the timeframe you pick, the app replays this symbol's own history: every past candle is cut at the same point as the candle forming now (e.g. 70% done) and compared with how it really ended. That gives honest ranges (68% and 95%) for where the forming candle will close and how far its high / low may stretch, how often its shape so far (hammer, engulfing...) stayed that shape, and how often the rest of the candle went up. The next `horizon` candles get a range cone from the same history (moves measured in the candle size of the time, ATR). history_days: how much history each timeframe uses. min_samples: below this the app says there's too little history. Every forecast served is checked when its candle closes (live: does the close land inside the 68% range about 68% of the time?). Information only: it is never a signal; buying at 70% of a candle is paper-tested separately on the test bench (version '<tf>@70%').",
+ "about": "Fortune chart (bullets). For the timeframe you pick, the app replays this symbol's own history: every past candle is cut at the same point as the candle forming now (e.g. 70% done) and compared with how it really ended. That gives honest ranges (68% and 95%) for where the forming candle will close and how far its high / low may stretch, how often its shape so far (hammer, engulfing...) stayed that shape, and how often the rest of the candle went up. The next `horizon` candles get a range cone from the same history (moves measured in the candle size of the time, ATR). history_days: how much history each timeframe uses. min_samples: below this the app says there's too little history. Every forecast served is checked when its candle closes (live: does the close land inside the 68% range about 68% of the time?). Information only: it is never a signal; buying at 70% of a candle is paper-tested separately on the test bench (version '<tf>@70%'). ghost (2.38): faded candles ahead of the real ones (the forming candle finished at its likely close, then the next ghost_candles along the cone's middle path with this timeframe's typical wicks); refresh_s: how often the chart redraws while the market is open.",
  "horizon": 6,
  "history_days": {"3m": 6, "5m": 10, "15m": 25, "30m": 40, "1H": 60, "1D": 150, "1W": 1800, "1M": 3650},
  "min_samples": 30,
  "grade_from": 0.5,
+ "ghost": true,
+ "ghost_candles": 7,
+ "refresh_s": 10,
  "since": "2026-11-04"
 }

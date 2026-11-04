@@ -25,7 +25,7 @@ from .clock import CLOSE, IST, OPEN
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "fortune.json"
 DEFAULTS = {"horizon": 6, "history_days": {"3m": 6, "5m": 10, "15m": 25, "30m": 40, "1H": 60, "1D": 150, "1W": 1800, "1M": 3650},
-            "min_samples": 30, "grade_from": 0.5}
+            "min_samples": 30, "grade_from": 0.5, "ghost": True, "ghost_candles": 7, "refresh_s": 10}
 INTRA = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60}
 IST_SHIFT = 19800
 _C: dict = {}
@@ -316,6 +316,8 @@ class Fortune:
         if pts:
             pts.insert(0, {"time": int(last_start + IST_SHIFT), **{k: round(base, 2) for k in ("lo95", "lo68", "mid", "hi68", "hi95")}})
         out["cone"] = pts
+        out["ghost"] = self._ghosts(c, cands, hist, atr, atr_now, forming, out.get("now") or {}, pts, (cn.get(1) or {}).get("q"))
+        out["refresh_s"] = max(5, int(c.get("refresh_s") or 10))
         out["lean"] = hit.get("lean") or {}
         try:
             ev = self.e.events.risk(sym) if getattr(self.e, "events", None) is not None else None
@@ -329,6 +331,42 @@ class Fortune:
         out["note"] = ("Ranges from this symbol's own history: every past candle cut at the same point and compared with how it "
                        "ended. A probability, not a promise, and never a signal. Buying at 70% of a candle is being paper-tested "
                        "on the test bench (Strategy board, version '" + tf + "@70%').")
+        return out
+
+    @staticmethod
+    def _ghosts(c, cands, hist, atr, atr_now, forming, now_fc, pts, q1=None) -> list:
+        """2.38: faded 'ghost' candles ahead of the real ones. The forming candle is finished at its likely close (high /
+        low stretched by the typical extension). Each next candle is a range candle on the cone's middle path: its box is
+        where that candle's close likely lands (68%, from one candle's moves in this history) and its wicks this
+        timeframe's typical high / low beyond that (median, in ATRs). No direction is invented: when the history shows
+        no edge the boxes sit around the middle. They redraw as the real candle forms."""
+        if not c.get("ghost", True) or not pts:
+            return []
+        hh = hist[-400:]
+        aa = atr[:len(hist)][-400:]
+        ok = aa > 0
+        if ok.sum() < 20:
+            return []
+        up_w = float(np.median((hh[ok, 2] - np.maximum(hh[ok, 1], hh[ok, 4])) / aa[ok]))
+        dn_w = float(np.median((np.minimum(hh[ok, 1], hh[ok, 4]) - hh[ok, 3]) / aa[ok]))
+        out = []
+        prev = float(cands[-1][4])
+        if forming and now_fc.get("close_mid") is not None:
+            o, h, l = float(cands[-1][1]), float(cands[-1][2]), float(cands[-1][3])
+            cl = float(now_fc["close_mid"])
+            out.append({"time": pts[0]["time"], "open": round(o, 2), "close": round(cl, 2),
+                        "high": round(max(h, now_fc.get("high_to") or h, o, cl), 2),
+                        "low": round(min(l, now_fc.get("low_to") or l, o, cl), 2), "forming": True})
+            prev = cl
+        lo_q = (q1[1] - q1[2]) if q1 else -0.5            # one candle's 68% close range around its middle, in ATRs
+        hi_q = (q1[3] - q1[2]) if q1 else 0.5
+        for p in pts[1:int(c.get("ghost_candles") or len(pts))]:
+            mid = float(p["mid"])
+            lo_b, hi_b = mid + lo_q * atr_now, mid + hi_q * atr_now
+            out.append({"time": p["time"], "open": round(lo_b, 2), "close": round(hi_b, 2), "mid": round(mid, 2),
+                        "high": round(hi_b + up_w * atr_now, 2), "low": round(lo_b - dn_w * atr_now, 2), "range": True,
+                        "from": round(prev, 2)})
+            prev = mid
         return out
 
     def _now(self) -> float:

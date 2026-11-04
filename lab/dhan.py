@@ -33,6 +33,7 @@ class Dhan:
         self.last = 0.0
         self.lock = threading.Lock()
         self.calls = collections.deque(maxlen=1000)
+        self.background = False          # 2.38: the 5-year download sets this: it gives way to screens, news and movers
 
     def _wait(self):
         """Own pace (per_sec) and the app-wide Dhan pace (all clients together stay under Dhan's 5 calls a second)."""
@@ -41,7 +42,7 @@ class Dhan:
             d = self.gap - (time.time() - self.last)
             if d > 0:
                 time.sleep(d)
-            dhan_budget.wait()
+            dhan_budget.wait(priority=not self.background)
             dhan_budget.spend(1)
             self.last = time.time()
 

@@ -31,6 +31,10 @@ const compact = (v) => {
 const rupees = (v) => (v == null || isNaN(v) ? "–" : `${v < 0 ? "-" : ""}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}`);
 const hms = (ts) => new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
 const hm = (ts) => new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+/* 2.38: when a block's data was fetched, and whether its market is trading now (rules/market_hours.json) */
+const clockTs = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "";
+const asOf = (ts, what = "Data fetched at") => ts ? `<small class="asof" title="${esc(what)}">⟳ ${clockTs(ts)}</small>` : "";
+const mkPill = (m) => !m ? "" : `<span class="mk ${m.open && !m.stale ? "mk-open" : (m.label === "Break" || m.stale) ? "mk-pause" : "mk-closed"}" title="${esc((m.session || "") + " market: " + m.label)}">${esc(m.label)}</span>`;
 const arrow = (d) => (d === "up" ? `<span class="up" aria-label="up">▲</span>` : d === "down" ? `<span class="down" aria-label="down">▼</span>` : `<span class="amber" aria-label="watch">●</span>`);
 const SEV = { 1: "Watch", 2: "Important", 3: "Act now" };
 const KIND = { manual: "By hand",
@@ -56,6 +60,7 @@ function livePage() { return ["live", "chart", "world", "desk", "scanner", "sym"
 async function pollSnapshot() {
   try {
     const s = await api(`/api/live/snapshot?since=${L.lastId}`);
+    s.fetched = s.fetched || Date.now() / 1000;
     L.snap = s;
     if (s.alerts.length) {
       const fresh = s.alerts.filter((a) => a.id > L.lastId);
@@ -197,7 +202,7 @@ function indexCard(m) {
   const o = m.opt || {}, f = m.fut || {};
   const bu = f.buildup_label ? `<span class="pill ${f.buildup_sign > 0 ? "p-up" : "p-down"}">${esc(f.buildup_label)}</span>` : "";
   return `<a class="icard" href="#/sym?s=${encodeURIComponent(m.sym)}">
-    <div class="ic-head"><b>${esc(m.name)}</b>${bu}</div>
+    <div class="ic-head"><b>${esc(m.name)} ${mkPill(L.snap && L.snap.nse)}</b>${bu}</div>
     <div class="ic-price">${fx(m.spot)} ${fpc(m.chg_pct)}</div>
     ${rangeBar(m)}
     <dl class="ic-grid">
@@ -215,6 +220,7 @@ function indexCard(m) {
     ${depthLine(L.snap && L.snap.depth ? L.snap.depth[m.sym] : null)}
     ${biasMeter(m.score)}
     ${m.reasons && m.reasons.length ? `<p class="ic-why">${esc(m.reasons.slice(0, 3).join(" · "))}</p>` : ""}
+    <p class="ic-asof">${L.snap ? asOf(L.snap.status && !L.snap.status.running && L.snap.last_session ? L.snap.last_session.asof : L.snap.fetched, L.snap.status && !L.snap.status.running ? "Last session's data" : "Data fetched at") : ""}</p>
   </a>`;
 }
 
@@ -387,7 +393,7 @@ function extraIdx(x) {
       row(c.name === "GIFT Nifty" ? "vs Nifty" : "", giftGap)].join("");
     const lv = c.levels || {};
     const sr = (lv.support || []).length ? `<p class="small" style="margin:6px 0 0"><span class="down">R</span> ${(lv.resistance || []).slice(0, 2).map((z) => fk(Math.round(z.price))).join(" · ") || "–"} &nbsp; <span class="up">S</span> ${(lv.support || []).slice(0, 2).map((z) => fk(Math.round(z.price))).join(" · ")}</p>` : "";
-    return `<div class="xcard"><span>${esc(c.name)}</span>
+    return `<div class="xcard"><span>${esc(c.name)} ${mkPill(c.mkt)}</span>
       <b>${c.spot != null ? fx(c.spot) : "–"}</b> ${c.chg_pct != null ? `<em class="${c.chg_pct >= 0 ? "up" : "down"}">${c.chg_pct >= 0 ? "+" : ""}${c.chg_pct.toFixed(2)}%</em>` : ""}
       ${grid ? `<dl class="ic-grid xc-grid">${grid}</dl>` : ""}${sr}
       <small class="muted">${esc(c.src || "")}${c.expiry ? ` · expiry ${esc(c.expiry)}` : ""}${c.at ? ` · ${esc(c.at.slice(-8, -3))}` : ""}</small></div>`; }).join("")}</div>`;
@@ -399,12 +405,14 @@ function worldBoard(w) {
   const sp = (a, up) => { if (!a || a.length < 2) return ""; const lo = Math.min(...a), hi = Math.max(...a), r = hi - lo || 1;
     return `<svg viewBox="0 0 60 16" class="spark" aria-hidden="true"><polyline fill="none" stroke="${up ? "#1E8A5A" : "#C23B32"}" stroke-width="1.3" points="${a.map((v, i) => `${(i / (a.length - 1)) * 60},${15 - ((v - lo) / r) * 13}`).join(" ")}"/></svg>`; };
   const pr = w.pressure || {};
-  return `<div id="lv-world" class="panel tight wboard"><div class="toolbar" style="margin:0 0 6px"><h3 style="margin:0">World markets</h3>
-      ${pr.implied_pct != null ? `<span class="small">Overnight pressure on Nifty: <b class="${pr.implied_pct >= 0 ? "up" : "down"}">${pr.implied_pct >= 0 ? "+" : ""}${pr.implied_pct}%</b></span>` : ""}
+  const word = pr.label ? pr.label.charAt(0).toUpperCase() + pr.label.slice(1) : "";
+  const drv = (pr.drivers || []).slice(0, 3).map((d) => `${esc(d.name)} ${d.move >= 0 ? "+" : ""}${Number(d.move).toFixed(1)}%`).join(", ");
+  return `<div id="lv-world" class="panel tight wboard"><div class="toolbar" style="margin:0 0 6px"><h3 style="margin:0">World markets ${asOf(w.fetched)}</h3>
+      ${pr.implied_pct != null ? `<span class="small">Global pressure on Nifty: <b class="${pr.implied_pct > 0.1 ? "up" : pr.implied_pct < -0.1 ? "down" : ""}">${esc(word)}</b> <span class="${pr.implied_pct >= 0 ? "up" : "down"}">(${pr.implied_pct >= 0 ? "+" : ""}${pr.implied_pct}%)</span>${drv ? ` <span class="muted">· from ${drv}</span>` : ""}</span>` : ""}
       <a class="small" href="#/world">World page →</a></div>
     ${w.groups.map((g) => `<h4 class="wb-group">${esc(g.group)}</h4><div class="wb-grid">${g.items.map((x) => `<a class="wb" href="#/world" title="${x.day_l && x.day_h ? `Day ${fx(x.day_l)} – ${fx(x.day_h)}` : ""}${x.hi52 ? ` · 52 weeks ${fx(x.lo52)} – ${fx(x.hi52)}` : ""}${x.ath ? ` · all-time high ${fx(x.ath)}` : ""}">
-        <span>${esc(x.name)}</span><b>${fx(x.last)}</b> ${fpc(x.chg_pct)}${sp(x.spark, (x.chg_pct || 0) >= 0)}
-        ${x.day_l && x.day_h ? `<small class="muted">${fx(x.day_l)} – ${fx(x.day_h)}</small>` : ""}</a>`).join("")}</div>`).join("")}
+        <span>${esc(x.name)} ${mkPill(x.mkt)}</span><b>${fx(x.last)}</b> ${fpc(x.chg_pct)}${sp(x.spark, (x.chg_pct || 0) >= 0)}
+        ${x.day_l && x.day_h ? `<small class="muted">${fx(x.day_l)} – ${fx(x.day_h)}</small>` : ""}${x.ts ? `<small class="muted">price at ${clockTs(x.ts).slice(0, 5)}</small>` : ""}</a>`).join("")}</div>`).join("")}
     <p class="muted small" style="margin:6px 0 0">Yahoo, about 1 minute behind${w.updated ? ` · updated ${hm(w.updated)}` : ""}. Hover a card for its day, 52-week and all-time range.</p></div>`;
 }
 
@@ -443,10 +451,13 @@ function renderLive(force = false) {
   const pp = s.paper;
   const news = (s.news || []).slice(0, 8).map((n) => `<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a><span class="muted small"> ${esc(n.source)} · ${hm(n.ts)}${n.syms && n.syms.length ? " · " + n.syms.map(esc).join(", ") : ""}</span></li>`).join("");
   const mk = s.market || {}, br = mk.breadth, cx = s.context || {};
+  const off = s.status && !s.status.running && s.last_session;      // 2.38: each block says when its data is from
+  const T = asOf(off ? s.last_session.asof : s.fetched, off ? "Last session's data" : "Data fetched at");
   const fii = cx.fii, fd = cx.fii_dii || {};
   const g = Object.fromEntries((cx.global || []).map((x) => [x.name, x]));
   const reg = mk.regime;
   const strip = `<div class="mstrip">
+    <div class="ms-item"><span>NSE ${mkPill(s.nse)}</span><b>${clockTs(off ? s.last_session.asof : s.fetched)}</b><small>${off ? "last session's data" : "data fetched"}</small></div>
     ${reg ? `<div class="ms-item ms-wide"><span>Day type</span><b>${esc(reg.label)}</b><small>${esc(reg.detail || "")}</small></div>` : ""}
     ${br ? `<div class="ms-item"><span>Breadth</span><b><span class="up">${br.adv}</span> / <span class="down">${br.dec}</span></b>
       <div class="adbar"><i style="width:${(br.adv / Math.max(1, br.adv + br.dec)) * 100}%"></i></div><small>${br.above_vwap} of ${br.n} above VWAP</small></div>
@@ -457,11 +468,11 @@ function renderLive(force = false) {
     ${cx.ban && cx.ban.length ? `<div class="ms-item"><span>F&amp;O ban</span><b class="down">${cx.ban.slice(0, 4).map(esc).join(", ")}${cx.ban.length > 4 ? "…" : ""}</b><small><a href="#/context">Market context →</a></small></div>` : ""}
   </div>`;
   const secs = (mk.sectors || []).filter((x) => x.n >= 2);
-  const secHTML = secs.length ? `<div class="panel tight"><h3>Sectors</h3><div class="sectors">${secs.slice(0, 12).map((x) => `<div class="sec" style="--c:${Math.max(-3, Math.min(3, x.chg))}" title="${x.up} of ${x.n} up · best ${esc(x.best[0])} ${x.best[1].toFixed(1)}% · worst ${esc(x.worst[0])} ${x.worst[1].toFixed(1)}%"><span>${esc(x.sector)}</span><b>${x.chg > 0 ? "+" : ""}${x.chg.toFixed(2)}%</b></div>`).join("")}</div></div>` : "";
+  const secHTML = secs.length ? `<div class="panel tight"><h3>Sectors ${T}</h3><div class="sectors">${secs.slice(0, 12).map((x) => `<div class="sec" style="--c:${Math.max(-3, Math.min(3, x.chg))}" title="${x.up} of ${x.n} up · best ${esc(x.best[0])} ${x.best[1].toFixed(1)}% · worst ${esc(x.worst[0])} ${x.worst[1].toFixed(1)}%"><span>${esc(x.sector)}</span><b>${x.chg > 0 ? "+" : ""}${x.chg.toFixed(2)}%</b></div>`).join("")}</div></div>` : "";
   const ctab = LS.get("contribTab", "BANKNIFTY");
   const cb = (mk.contrib || {})[ctab];
   const maxPts = cb ? Math.max(1, ...cb.rows.map((r) => Math.abs(r.points))) : 1;
-  const contribHTML = mk.contrib && Object.keys(mk.contrib).length ? `<div class="panel tight"><div class="toolbar" style="margin:0 0 6px"><h3>Who is moving the index</h3>
+  const contribHTML = mk.contrib && Object.keys(mk.contrib).length ? `<div class="panel tight"><div class="toolbar" style="margin:0 0 6px"><h3>Who is moving the index ${T}</h3>
       <div class="seg small-seg">${Object.keys(mk.contrib).map((k) => `<button data-ctab="${k}" aria-pressed="${ctab === k}">${k === "BANKNIFTY" ? "Bank Nifty" : "Nifty"}</button>`).join("")}</div></div>
     ${cb ? `<div class="contrib">${cb.rows.slice(0, 8).map((r) => `<div class="cb-row"><span>${esc(r.sym)}</span><div class="cb-bar"><i class="${r.points >= 0 ? "pos" : "neg"}" style="width:${Math.abs(r.points) / maxPts * 50}%;${r.points >= 0 ? "left:50%" : `right:50%`}"></i></div><b class="${r.points >= 0 ? "up" : "down"}">${r.points > 0 ? "+" : ""}${r.points.toFixed(0)}</b></div>`).join("")}</div>
       <p class="muted small" style="margin:6px 0 0">Points from index moves × approximate weights. These explain ${cb.explained > 0 ? "+" : ""}${cb.explained.toFixed(0)} of the ${cb.actual > 0 ? "+" : ""}${cb.actual.toFixed(0)}-point move.</p>` : ""}</div>` : "";
@@ -474,17 +485,17 @@ function renderLive(force = false) {
         ${eventsMini(L.eventsMini)}
         ${boardMini(L.boardMini)}
         ${brainCard(L.brain, { button: true })}
-        <div class="panel pulse"><h3>Market pulse</h3>${pulseHTML}</div>
+        <div class="panel pulse"><h3>Market pulse ${T}</h3>${pulseHTML}</div>
         ${contribHTML}${secHTML}
         <p class="small"><a href="#/alerts">Alerts${L.alerts.length ? ` (${nFocus} in focus · ${L.alerts.length} today)` : ""} →</a></p>
       </section>
       <aside>
-        <div class="panel tight"><div class="toolbar" style="margin:0 0 6px"><h3>Movers</h3>
+        <div class="panel tight"><div class="toolbar" style="margin:0 0 6px"><h3>Movers ${T}</h3>
           <div class="seg small-seg">${[["hot", "Most active"], ["gainers", "Gainers"], ["losers", "Losers"]].map(([k, l]) => `<button data-mtab="${k}" aria-pressed="${tab === k}">${l}</button>`).join("")}</div></div>
           <table class="mini"><thead><tr><th>Stock</th><th class="r">Price</th><th class="r">Chg</th><th class="r">Vol</th><th class="r">Heat</th></tr></thead><tbody>${mrows}</tbody></table>
           <a class="small" href="#/scanner">Open full scanner →</a></div>
-        ${pp ? `<a class="panel tight paperbox" href="#/paper"><h3>Paper trading${pp.guard && pp.guard.blocked ? ` <span class="pill p-down">Stopped for today</span>` : ""}</h3><div class="pb-row"><div><span>Booked</span><b class="${pp.net >= 0 ? "up" : "down"}">${rupees(pp.net)}</b></div><div><span>Open</span><b class="${pp.unreal >= 0 ? "up" : "down"}">${rupees(pp.unreal)}</b></div><div><span>Trades</span><b>${pp.n}${pp.open ? ` <small class="muted">+${pp.open} open</small>` : ""}</b></div><div><span>Win rate</span><b>${pp.win_rate != null ? pp.win_rate + "%" : "–"}</b></div></div></a>` : ""}
-        <div class="panel tight"><h3>Market news</h3><ul class="news">${news || `<li class="muted">Loading headlines…</li>`}</ul></div>
+        ${pp ? `<a class="panel tight paperbox" href="#/paper"><h3>Paper trading${pp.guard && pp.guard.blocked ? ` <span class="pill p-down">Stopped for today</span>` : ""} ${T}</h3><div class="pb-row"><div><span>Booked</span><b class="${pp.net >= 0 ? "up" : "down"}">${rupees(pp.net)}</b></div><div><span>Open</span><b class="${pp.unreal >= 0 ? "up" : "down"}">${rupees(pp.unreal)}</b></div><div><span>Trades</span><b>${pp.n}${pp.open ? ` <small class="muted">+${pp.open} open</small>` : ""}</b></div><div><span>Win rate</span><b>${pp.win_rate != null ? pp.win_rate + "%" : "–"}</b></div></div></a>` : ""}
+        <div class="panel tight"><h3>Market news ${asOf(s.fetched)}</h3><ul class="news">${news || `<li class="muted">Loading headlines…</li>`}</ul></div>
       </aside>
     </div>`;
   bindLiveButtons(body);
@@ -838,6 +849,13 @@ async function pageAlerts() {
   bindAlertButtons(main);
 }
 
+/* 2.38: lot size, quantity in a lot, lots, and the money the trade took (and the account size then) */
+function sizeLine(t) {
+  const lot = t.lot || 0, lots = t.lots || 1, qty = t.qty || lot * lots;
+  const used = t.capital != null ? t.capital : (t.entry && qty && (t.dir || 1) > 0 ? t.entry * qty : null);
+  return `<small class="muted">Lot ${lot ? lot.toLocaleString("en-IN") : "–"} qty × ${lots} = <b>${qty ? qty.toLocaleString("en-IN") : "–"}</b> qty${used != null ? ` · ${(t.dir || 1) < 0 ? "margin ~" : "used "}${rupees(used)}` : ""}${t.acct_capital ? ` of ${rupees(t.acct_capital)}` : ""}</small><br>`;
+}
+
 /* ---------------- page: Paper trades */
 async function pagePaper() {
   stopPageTimer();
@@ -868,10 +886,10 @@ function drawPaper(p, first) {
   };
   const open = p.open.map((t) => {
     const chg = t.last && t.entry ? (t.last / t.entry - 1) * 100 : null;
-    return `<tr><td>${sideTag(t)} <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${links(t)}</td><td>${stockNow(t)}</td><td>${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r">${fx(t.last)} ${fpc(chg, 1)}</td>
+    return `<tr><td>${sideTag(t)} <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${sizeLine(t)}${links(t)}</td><td>${stockNow(t)}</td><td>${esc((t.day || "").slice(5))} ${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r">${fx(t.last)} ${fpc(chg, 1)}</td>
       <td class="r">${fx(t.target)} / ${fx(t.stop)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}"><b>${rupees(t.unreal)}</b></td><td><button class="link-btn" data-close="${t.id}">Exit</button></td></tr>`;
   }).join("");
-  const closed = p.closed.map((t) => `<tr><td>${sideTag(t)} <b>${esc(t.label)}</b><br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${links(t)}</td><td>${stockClosed(t)}</td><td>${t.day}<br><small class="muted">${hm(t.entry_ts)}–${hm(t.exit_ts)}</small></td><td class="r">${fx(t.entry)} → ${fx(t.exit)}</td><td>${esc(t.reason)}</td><td class="r muted">${rupees(t.costs)}</td><td class="r ${t.net >= 0 ? "up" : "down"}"><b>${rupees(t.net)}</b></td></tr>`).join("");
+  const closed = p.closed.map((t) => `<tr><td>${sideTag(t)} <b>${esc(t.label)}</b><br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${sizeLine(t)}${links(t)}</td><td>${stockClosed(t)}</td><td>${t.day}<br><small class="muted">${hm(t.entry_ts)}–${hm(t.exit_ts)}</small></td><td class="r">${fx(t.entry)} → ${fx(t.exit)}</td><td>${esc(t.reason)}</td><td class="r muted">${rupees(t.costs)}</td><td class="r ${t.net >= 0 ? "up" : "down"}"><b>${rupees(t.net)}</b></td></tr>`).join("");
   const kinds = p.by_kind.map((b) => `<tr><td>${esc(KIND[b.kind] || b.kind)}</td><td class="r">${b.n}</td><td class="r">${b.win_rate}%</td><td class="r ${b.avg >= 0 ? "up" : "down"}">${rupees(b.avg)}</td><td class="r ${b.net >= 0 ? "up" : "down"}"><b>${rupees(b.net)}</b></td></tr>`).join("");
   const cls = (v) => v >= 0 ? "up" : "down";
   const keepTop = $("#pp-top"); if (keepTop) main.appendChild(keepTop);       // out of the way while the rest redraws
@@ -1384,7 +1402,7 @@ function drawDeskLive(d) {
       <p class="small muted" style="margin:4px 0 0">${esc(p.describe || "")}</p>
       <p class="small" style="margin:2px 0 0">Last 6 months: ${p.train && p.train.n ? `${p.train.n} trades, ${Math.round(p.train.win)}% winners, avg ₹${fk(Math.round(p.train.mean))} per lot, profit factor ${p.train.pf.toFixed(2)}` : "–"}</p></div>
       <div class="pi-status">${esc(p.status)}</div></div>`).join("");
-  const open = d.today.map((t) => `<tr><td><b>${esc(SNAME[t.family] || t.family)}</b> ${esc(t.sym)}<br><small class="muted">${t.lots} lot${t.lots > 1 ? "s" : ""} · max loss ₹${fk(Math.round(t.max_loss))} · margin ~₹${fk(Math.round(t.margin))}</small></td>
+  const open = d.today.map((t) => `<tr><td><b>${esc(SNAME[t.family] || t.family)}</b> ${esc(t.sym)}<br><small class="muted">${t.entry_ts ? `in ${hm(t.entry_ts)}${t.exit_ts ? ` · out ${hm(t.exit_ts)}` : ""} · ` : ""}${t.lots} lot${t.lots > 1 ? "s" : ""}${t.lot ? ` × ${t.lot} = ${(t.lots * t.lot).toLocaleString("en-IN")} qty` : ""} · max loss ₹${fk(Math.round(t.max_loss))} · margin ~₹${fk(Math.round(t.margin))}</small></td>
     <td class="small">${esc(legsText(t.legs))}</td><td>${t.status === "open" ? `<span class="pill p-sig">Open</span>` : esc(t.reason || "")}</td>
     <td class="r"><b class="${((t.status === "open" ? t.mtm : t.net) || 0) >= 0 ? "up" : "down"}">${rupees(t.status === "open" ? t.mtm : t.net)}</b></td></tr>`).join("");
   el.innerHTML = `<div class="kpis"><div class="kpi"><b class="${d.today_pnl >= 0 ? "up" : "down"}">${rupees(d.today_pnl)}</b><span>Today (${esc(d.source === "sim" ? "simulator" : "live paper")})</span></div>
@@ -1707,8 +1725,8 @@ function fortuneInit() {
     if (state.page !== "chart" || !$("#fo-chart") || FO.key !== `${CH.sym}|${CH.tf}`) return;
     try { fortuneDraw(await api(`/api/live/fortune/${encodeURIComponent(CH.sym)}?tf=${CH.tf}`)); }
     catch (e) { const el = $("#fo-side"); if (el) el.innerHTML = `<p class="muted small">${esc(e.message)}</p>`; }
-    const running = L.snap && L.snap.status && L.snap.status.running;
-    FO.timer = setTimeout(loop, running ? 30000 : 300000);
+    const running = L.snap && L.snap.status && L.snap.status.running;      // 2.38: redraw often while the candle forms
+    FO.timer = setTimeout(loop, running ? (FO.refresh || 10) * 1000 : 300000);
   };
   loop();
 }
@@ -1722,13 +1740,21 @@ function fortuneDraw(d) {
     FO.chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 11 },
       grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" },
       timeScale: { borderColor: "#D5DCE3", timeVisible: CH_MIN[CH.tf] < 1440, secondsVisible: false, rightOffset: 2 }, crosshair: { mode: 0 } });
+    // 2.38: ghost candles first, so the real candles are drawn on top of them
+    FO.s.g = FO.chart.addSeries(LW.CandlestickSeries, { upColor: "rgba(30,138,90,.22)", downColor: "rgba(194,59,50,.22)", borderVisible: true,
+      borderUpColor: "rgba(30,138,90,.7)", borderDownColor: "rgba(194,59,50,.7)", wickUpColor: "rgba(30,138,90,.55)", wickDownColor: "rgba(194,59,50,.55)",
+      priceLineVisible: false, lastValueVisible: false });
     FO.s.c = FO.chart.addSeries(LW.CandlestickSeries, { upColor: "#1E8A5A", downColor: "#C23B32", borderVisible: false, wickUpColor: "#1E8A5A", wickDownColor: "#C23B32" });
     const ln = (color, w, style) => FO.chart.addSeries(LW.LineSeries, { color, lineWidth: w, lineStyle: style, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false });
     FO.s.hi95 = ln("rgba(61,47,168,.35)", 1, 1); FO.s.hi68 = ln("rgba(61,47,168,.75)", 2, 2); FO.s.mid = ln("rgba(94,107,120,.8)", 1, 0);
     FO.s.lo68 = ln("rgba(61,47,168,.75)", 2, 2); FO.s.lo95 = ln("rgba(61,47,168,.35)", 1, 1);
   }
+  FO.refresh = d.refresh_s || 10;
   if (FO.chart) {
     FO.s.c.setData(d.candles);
+    if (FO.s.g) FO.s.g.setData((d.ghost || []).map(({ time, open, high, low, close, range }) => range
+      ? { time, open, high, low, close, color: "rgba(61,47,168,.16)", borderColor: "rgba(61,47,168,.6)", wickColor: "rgba(61,47,168,.45)" }
+      : { time, open, high, low, close }));
     ["hi95", "hi68", "mid", "lo68", "lo95"].forEach((k) => FO.s[k].setData((d.cone || []).map((p) => ({ time: p.time, value: p[k] }))));
     FO.lines.forEach((pl) => { try { FO.s.c.removePriceLine(pl); } catch (_) {} });
     FO.lines = [];
@@ -1739,7 +1765,7 @@ function fortuneDraw(d) {
     }
     if (!FO.fitted) {                              // the last ~45 candles and the cone, so the ranges are readable
       const nb = d.candles.length;
-      FO.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, nb - 45), to: nb + Math.max(2, (d.cone || []).length) });
+      FO.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, nb - 36), to: nb + Math.max(2, (d.cone || []).length) });
       FO.fitted = true;
     }
   }
@@ -1756,7 +1782,7 @@ function fortuneDraw(d) {
     ${d.event && d.event.line ? `<p class="amber" style="margin:0 0 4px">⚡ ${esc(d.event.line)}</p>` : ""}
     <p class="muted" style="margin:6px 0 0"><b>Live check</b>: ${ck && ck.n ? `the 68% range held ${ck.in68_pct}% of ${ck.n} forecasts (should be ~68%), the 95% range ${ck.in95_pct}%${ck.shape_pct != null ? `; shapes held ${ck.shape_pct}%` : ""}.` : "starts with the first forecasts graded at their close."}
       ${ea && ea.n ? ` Scanner today: shapes seen at 70% of a ${esc(d.tf)} candle held at the close ${ea.pct}% of ${ea.n} times.` : ""}</p>
-    <p class="muted" style="margin:6px 0 0">On the chart: <span style="color:#3D2FA8">dashed purple = 68% range</span>, light purple = 95%, grey = middle; orange lines = where the forming candle's close lands (68%).</p>
+    <p class="muted" style="margin:6px 0 0">On the chart: <b>faded candles = ghost candles</b> ahead of the real ones${d.forming ? ": the forming candle finished at its likely close (green / red), then" : ":"} the next candles in purple, each box = where that candle's close likely lands (68%), wicks = its usual high / low. No direction is made up; they move as the real candle forms. <span style="color:#3D2FA8">Dashed purple = 68% range</span>, light purple = 95%, grey = middle; orange lines = where the forming candle's close lands (68%).</p>
     <p class="muted" style="margin:6px 0 0">${esc(d.note || "")} History: ${d.history_candles} candles (${esc(d.source || "")}).</p>`;
 }
 
@@ -2774,6 +2800,7 @@ async function pageSystem() {
       </div>
 
       ${healthPanel(x.health)}
+      ${speedPanel(x.perf)}
       ${qualityPanel(x.vault && x.vault.quality)}
       ${vaultPanel(x.vault)}
 
@@ -2823,6 +2850,20 @@ async function pageSystem() {
   main.innerHTML = `<p class="muted">Checking every connection…</p>`;
   await draw();
 }
+/* 2.38: how quickly the app answers (every /api call timed), the Lab's own process, the Dhan download giving way */
+function speedPanel(p) {
+  if (!p || p.error) return "";
+  const t = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "–";
+  const slow = (p.slow || []).slice(0, 8).map((x) => `<tr><td class="small">${t(x.at)}</td><td class="small"><code>${esc(x.path.length > 60 ? x.path.slice(0, 60) + "…" : x.path)}</code></td><td class="r small"><b class="down">${(x.ms / 1000).toFixed(1)} s</b></td></tr>`).join("");
+  const top = (p.slowest || []).slice(0, 6).map((x) => `<tr><td class="small"><code>${esc(x.call)}</code></td><td class="r small">${x.avg_ms} ms</td><td class="r small muted">max ${x.max_ms} ms · ${x.n}×</td></tr>`).join("");
+  const lab = p.lab_last;
+  return `<div class="panel tight" style="margin-top:12px"><h3>Speed <span class="pill ${p.slow_last_hour ? "p-down" : "p-up"}">${p.slow_last_hour ? `${p.slow_last_hour} slow in the last hour` : "quick"}</span></h3>
+    <p class="small muted" style="margin:0 0 6px">Every screen's data call is timed; over ${(p.slow_ms / 1000).toFixed(1)} s counts as slow. ${(p.calls || 0).toLocaleString("en-IN")} calls since ${t(p.since)}.
+      The Strategy Lab runs in its own low-priority process${lab ? ` (last: ${esc(lab.job)}, ${esc(lab.how)}, ${Math.round(lab.secs / 60)} min, ended ${t(lab.at)})` : ""}; the 5-year Dhan download gives way to screens, news and movers${p.dhan_gave_way ? ` (${p.dhan_gave_way.toLocaleString("en-IN")} times so far)` : ""}.</p>
+    ${slow ? `<div class="table-wrap"><table class="mini"><thead><tr><th>When</th><th>Slow call</th><th class="r">Took</th></tr></thead><tbody>${slow}</tbody></table></div>` : ""}
+    ${top ? `<details><summary class="small muted">Slowest kinds of call (average)</summary><div class="table-wrap"><table class="mini"><tbody>${top}</tbody></table></div></details>` : ""}</div>`;
+}
+
 /* 2.33 health monitor: is the app really collecting data right now? */
 function healthPanel(h) {
   if (!h) return "";
@@ -3049,7 +3090,8 @@ async function pageBoard() {
   const rows = b.rows.filter((r) => (!fitOnly || r.fits) && (style === "all" || r.style === style));
   const keyed = reg !== "all" && b.regime;
   const needs = (r) => r.family === "buy" || r.need_lot == null ? `${rupees(r.cost_lot)}` : `${rupees(r.need_lot)} <span class="muted">blocked</span>`;
-  const tr = rows.slice(0, 150).map((r) => `<tr><td><b>${esc(r.label)}</b><br><small class="muted">${esc(r.style_label)} · ${esc((b.family_labels || {})[r.family] || "")} · ${r.days} day${r.days === 1 ? "" : "s"}${r.fits ? "" : ` · <span class="down">needs more capital</span>`}</small></td>
+  const when = (ts) => ts ? new Date(ts * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+  const tr = rows.slice(0, 150).map((r) => `<tr class="click" data-bk="${esc(r.kind)}" data-bv="${esc(r.variant || "")}" data-bs="${esc(r.style)}" title="Show this strategy's trades"><td><b>${esc(r.label)}</b> <small class="muted">▸</small><br><small class="muted">${esc(r.style_label)} · ${esc((b.family_labels || {})[r.family] || "")} · ${r.days} day${r.days === 1 ? "" : "s"}${r.fits ? "" : ` · <span class="down">needs more capital</span>`}</small>${r.last_ts ? `<br><small class="muted">first ${when(r.first_ts)} · last ${when(r.last_ts)}</small>` : ""}</td>
       <td class="r">${S(r.all)}</td>${keyed ? `<td class="r">${S(r.regime)}</td>` : ""}<td class="r">${S(r.today)}</td>
       <td class="r small">${needs(r)}<br><span class="muted">risk ${rupees(r.risk_lot)}</span></td>
       <td class="r">${(keyed ? r.regime.rank : r.all.rank) != null ? `<b class="${(keyed ? r.regime.rank : r.all.rank) > 0 ? "up" : "down"}">${rupees(keyed ? r.regime.rank : r.all.rank)}</b>` : `<span class="muted small">collecting</span>`}</td></tr>`).join("");
@@ -3072,6 +3114,22 @@ async function pageBoard() {
       <tbody>${tr || `<tr><td colspan="6" class="muted">No bench trades ${fam !== "all" ? "in this way of trading " : ""}yet: they start with the next scanner session (every directional alert, every idea on trial, every Lab library / book setup and every mover test).</td></tr>`}</tbody></table></div>
     <p class="note">${esc(b.note)} Last ${b.days} days.</p>`;
   bindCapitalBox(() => pageBoard());
+  main.querySelectorAll("tr[data-bk]").forEach((row) => row.onclick = async () => {      // 2.38: every trade with its date and time
+    const nx = row.nextElementSibling;
+    if (nx && nx.classList.contains("bd-trades")) { nx.remove(); return; }
+    const cols = row.children.length;
+    row.insertAdjacentHTML("afterend", `<tr class="bd-trades"><td colspan="${cols}" class="small muted">Loading trades…</td></tr>`);
+    const box = row.nextElementSibling;
+    try {
+      const q = new URLSearchParams({ kind: row.dataset.bk, style: row.dataset.bs, variant: row.dataset.bv, limit: "60" });
+      const t = await api(`/api/live/board/trades?${q}`);
+      const body = (t.trades || []).map((x) => `<tr><td>${when(x.ts)}</td><td>${arrow(x.direction)} ${esc(x.sym)}</td>
+        <td class="r">${fx(x.entry)} → ${x.exit != null ? fx(x.exit) : "<span class='muted'>open</span>"}<br><small class="muted">${x.exit_ts ? "out " + when(x.exit_ts) : ""}${x.reason ? " · " + esc(x.reason) : ""}</small></td>
+        <td class="r">${x.lots} lot × ${(x.lot || 0).toLocaleString("en-IN")}<br><small class="muted">${(x.qty || 0).toLocaleString("en-IN")} qty · ${rupees(x.capital)}</small></td>
+        <td class="r">${x.net != null ? `<b class="${x.net >= 0 ? "up" : "down"}">${rupees(x.net)}</b>` : "<span class='muted'>–</span>"}</td></tr>`).join("");
+      box.firstElementChild.innerHTML = body ? `<div class="table-wrap"><table class="mini"><thead><tr><th>In at</th><th>Symbol</th><th class="r">Price</th><th class="r">Size · money</th><th class="r">Net</th></tr></thead><tbody>${body}</tbody></table></div>` : "No trades yet.";
+    } catch (e) { box.firstElementChild.textContent = e.message; }
+  });
   $("#bd-reg").onchange = (e) => go({ regime: e.target.value });
   $("#bd-style").onchange = (e) => go({ style: e.target.value });
   $("#bd-fit").onchange = (e) => go({ fit: e.target.checked ? "1" : "0" });
@@ -3098,6 +3156,7 @@ function accountsPanel(g) {
 /* 2.35 Live page: today's events (scheduled days, world events, fresh official news) */
 async function loadEventsMini() {
   let v; try { v = await api("/api/live/events"); } catch (_) { return; }
+  v.fetched = Date.now() / 1000;
   L.eventsMini = v; const el = $("#lv-events"); if (el) el.outerHTML = eventsMini(v);
 }
 function eventsMini(v) {
@@ -3106,7 +3165,7 @@ function eventsMini(v) {
   const fresh = (v.items || []).filter((x) => (x.impact === "high" || (x.impact === "medium" && (x.syms || []).length)) && x.ago_min <= 24 * 60).slice(0, 4);
   if (!items.length && !fresh.length) return `<div id="lv-events"></div>`;
   const col = (l) => l === "high" ? "down" : l === "medium" ? "amber" : "muted";
-  return `<div id="lv-events" class="panel tight"><h3 style="margin:0 0 4px">Events today <span class="muted small">information only</span></h3>
+  return `<div id="lv-events" class="panel tight"><h3 style="margin:0 0 4px">Events today <span class="muted small">information only</span> ${asOf(v.fetched)}</h3>
     ${items.length ? `<ul class="plain small" style="margin:0">${items.map((i) => `<li><span class="${col(i.level)}">●</span> ${esc(i.what)}</li>`).join("")}</ul>` : ""}
     ${fresh.length ? `<p class="small muted" style="margin:6px 0 2px">Latest official news</p><ul class="plain small" style="margin:0">${fresh.map((x) => `<li><span class="${col(x.impact)}">●</span> <b>${esc(x.who)}</b> ${x.link ? `<a href="${esc(x.link)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)} <span class="muted">${x.ago_min < 60 ? x.ago_min + " min" : Math.round(x.ago_min / 60) + " h"} ago${(x.syms || []).length ? " · " + x.syms.map(esc).join(", ") : ""}</span></li>`).join("")}</ul>` : ""}</div>`;
 }
@@ -3114,6 +3173,7 @@ function eventsMini(v) {
 /* Live page: what works today (top of the Strategy board) */
 async function loadBoardMini() {
   let b; try { b = await api("/api/live/board?regime=auto"); } catch (_) { return; }
+  b.fetched = Date.now() / 1000;
   L.boardMini = b; const el = $("#lv-board"); if (el) el.outerHTML = boardMini(b);
 }
 function boardMini(b) {
@@ -3121,6 +3181,6 @@ function boardMini(b) {
   const keyed = !!b.regime;
   const best = (b.best || []).slice(0, 3).map((r) => { const x = keyed ? r.regime : r.all;
     return `<li><b>${esc(r.label)}</b> <span class="muted small">${esc(r.style_label)}</span> <b class="up">${rupees(x.avg)}</b><small class="muted"> × ${x.n}</small></li>`; }).join("");
-  return `<div id="lv-board" class="panel tight"><div class="toolbar" style="margin:0 0 4px"><h3 style="margin:0">What works ${keyed ? `on ${esc(b.day_type || "days like today")}` : "so far"}</h3><a class="small" href="#/board">Strategy board →</a></div>
+  return `<div id="lv-board" class="panel tight"><div class="toolbar" style="margin:0 0 4px"><h3 style="margin:0">What works ${keyed ? `on ${esc(b.day_type || "days like today")}` : "so far"} ${asOf(b.fetched)}</h3><a class="small" href="#/board">Strategy board →</a></div>
     ${best ? `<ol class="small" style="margin:4px 0 0">${best}</ol>` : `<p class="small muted" style="margin:4px 0 0">Collecting: ${b.n_closed.toLocaleString("en-IN")} honest bench trades so far. Nothing fits ${rupees(b.capital)} with a positive record yet.</p>`}</div>`;
 }

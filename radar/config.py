@@ -104,12 +104,42 @@ def editable_values(cfg: dict) -> dict:
     return {k: _get(cfg, k) for k in EDITABLE}
 
 
+_PARSED: dict = {}          # 2.38: file -> ((mtime, size), parsed): read again only when the file changes
+
+
+def _cached(f: Path, parse):
+    try:
+        st = f.stat()
+        sig = (st.st_mtime_ns, st.st_size)
+    except FileNotFoundError:
+        return None
+    hit = _PARSED.get(str(f))
+    if hit and hit[0] == sig:
+        return hit[1]
+    val = parse(f)
+    _PARSED[str(f)] = (sig, val)
+    return val
+
+
+def _user_settings_cached() -> dict:
+    try:
+        return _cached(USER_SETTINGS, lambda f: json.loads(f.read_text())) or {}
+    except Exception:
+        return {}
+
+
 def load_config(path: str | None = None) -> dict:
+    """config.yaml + your settings. 2.38: the parsed files are kept until they change (the app asks for its settings
+    many times a second; parsing the YAML each time cost ~30 ms a call). Every call still gets its own copy."""
     cfg_path = Path(path) if path else ROOT / "config.yaml"
-    with open(cfg_path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-    cfg = copy.deepcopy(cfg)
-    for k, v in read_user_settings().items():
+
+    def _yaml(f):
+        with open(f, "r", encoding="utf-8") as fh:
+            return yaml.safe_load(fh)
+    cfg = copy.deepcopy(_cached(cfg_path, _yaml))
+    if cfg is None:
+        raise FileNotFoundError(str(cfg_path))
+    for k, v in copy.deepcopy(_user_settings_cached()).items():
         if k in EDITABLE:
             _set(cfg, k, v)
     for key in ("cache_dir", "output_dir", "model_dir"):

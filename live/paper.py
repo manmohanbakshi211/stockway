@@ -143,6 +143,12 @@ class PaperBook:
              "peak": entry, "last": ltp, "status": "open", "manual": manual, "dir": direction,
              "und_key": und_key, "und_entry": und.ltp if und and und.ltp else None, "und_last": und.ltp if und and und.ltp else None,
              "mode": MODES.get(manual, "auto"), "hold_max": hold, "trail": trail}
+        # 2.38: quantity (lot size x lots), the money the trade takes (premium paid; for a short, the margin estimate:
+        # short_margin_pct of the underlying's value, at least the premium) and the account size at the time
+        qty = int(opt["lot"]) * int(lots)
+        und_px = t["und_entry"]
+        need = entry * qty if direction > 0 else max(entry * qty, (und_px or 0) * qty * float(c.get("short_margin_pct") or 15) / 100)
+        t.update(qty=qty, capital=round(need, 2), acct_capital=float(c.get("capital") or 0))
         if plan and t["und_entry"] and plan.get("R"):     # chart-level exit: stop / target on the underlying (lab/exits.py)
             import json as _json
             from lab.exits import PREM_STOP, STYLES, LivePlan

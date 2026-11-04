@@ -1932,10 +1932,10 @@ class LiveEngine:
                     log(f"{q['queued']} untested library / book rules queued")
             except Exception as e:
                 log(f"library not queued ({e})")
-            factory.run(self.data_dir, n_random=6000, n_mutate=3000, log=log)
+            from lab import proc                          # 2.38: in its own low-priority process (the app stays quick)
+            proc.run("factory", self.data_dir, log=log, n_random=6000, n_mutate=3000)
             try:
-                from lab import mlstrat
-                mlstrat.run(self.data_dir, log=log)
+                proc.run("mlstrat", self.data_dir, log=log)
             except Exception as e:
                 log(f"ML strategies failed: {e}")
             try:                                          # the 5-year Lab (challenger) keeps searching too, once it has data
@@ -1944,7 +1944,7 @@ class LiveEngine:
                 if any(r5.glob("history/*/raw_*.parquet")):
                     from lab import library
                     factory.queue_untested(r5, library.rules(), source="library")
-                    factory.run(r5, n_random=3000, n_mutate=1500, log=lambda m: log("[5y] " + m))
+                    proc.run("factory", r5, log=lambda m: log("[5y] " + m), n_random=3000, n_mutate=1500)
             except Exception as e:
                 log(f"5-year Lab failed: {e}")
             self._fact_rules = (0.0, [])
@@ -2040,7 +2040,8 @@ class LiveEngine:
         cv = self.context.view()
         return {"status": {**self.status, "running": self.running, "logged_in": bool(self.tokens.load()),
                            "feed": feed, "ticks": self.state.tick_count if self.state else 0},
-                "clock": now.isoformat(), "mins": minutes_since_open(now),
+                "clock": now.isoformat(), "mins": minutes_since_open(now), "fetched": time.time(),
+                "nse": self._nse_state(),
                 "indices": self.index_cards(), "vix": self._vix(),
                 "alerts": new, "pulse": self.pulse if self.running or not self._last_session() else
                 {**self.pulse, "lines": self.pulse.get("lines") or self._last_session().get("pulse") or []},
@@ -2092,6 +2093,12 @@ class LiveEngine:
                 g["nifty_ref"] = round(ref, 2)
                 g["vs_nifty_when"] = "now" if self.running and nifty else "close"
         out.append(g if g else {"name": "GIFT Nifty", "spot": None, "src": "NSE IX: loading…" if not self.gift.err else "NSE IX not reachable now"})
+        try:                                          # 2.38: is it trading right now?
+            from .marketclock import state as _mstate
+            for c_ in out:
+                c_["mkt"] = _mstate("GIFT" if c_.get("name") == "GIFT Nifty" else "NSE", last_ts=c_.get("ts"))
+        except Exception:
+            pass
         return out
 
     # ------------------------------------------------------------ Live page when the scanner is off (2.29)
@@ -2187,6 +2194,8 @@ class LiveEngine:
         import json
         if not self._indices() or self.source == "sim":
             return
+        if minutes_since_open(self.clock.now()) < 0:     # 2.38: before 9:15 the prices are yesterday's: keep the real session
+            return
         d = {"asof": time.time(), "day": self.clock.now().date().isoformat(),
              "indices": [self.index_view(m) for m in self._indices()], "market": self.market,
              "daily": {m["sym"]: {"prev": (self.daily.get(m["sym"]) or {}).get("prev"), "htf": (self.daily.get(m["sym"]) or {}).get("htf")}
@@ -2196,6 +2205,17 @@ class LiveEngine:
         tmp = f.with_suffix(".tmp")
         tmp.write_text(json.dumps(d, default=str))
         tmp.replace(f)
+
+    def _nse_state(self) -> dict | None:
+        """2.38: NSE open / closed / holiday now (rules/market_hours.json); the simulator is always 'open'."""
+        if self.source == "sim" and self.running:
+            return {"session": "NSE", "open": True, "label": "Simulator"}
+        try:
+            from .marketclock import state as _mstate
+            last = getattr(self.state, "last_tick", None) if (self.running and self.state) else None
+            return _mstate("NSE", last_ts=last or None)
+        except Exception:
+            return None
 
     def markets_board(self) -> dict:
         """World markets for the Live page: US, Asia, Europe, money and commodities (Yahoo, about a minute behind)."""
@@ -2222,11 +2242,19 @@ class LiveEngine:
                             "asof": r.get("live_date") or r.get("asof"), "spark": (r.get("spark_day") or r.get("spark") or [])[-60:]})
             if out:
                 groups.append({"group": gname, "items": out})
+        try:                                          # 2.38: Open / Closed / Break for every card (rules/market_hours.json)
+            from .marketclock import state as _mstate
+            for g_ in groups:
+                for x in g_["items"]:
+                    x["mkt"] = _mstate(x["ticker"], last_ts=x.get("ts"))
+        except Exception:
+            pass
         try:
             pr = self.world.pressure() if self.world else None
         except Exception:
             pr = None
-        return {"groups": groups, "pressure": pr, "updated": (getattr(self.world, "updated", {}) or {}).get("live")}
+        return {"groups": groups, "pressure": pr, "updated": (getattr(self.world, "updated", {}) or {}).get("live"),
+                "fetched": time.time()}
 
     def _watch(self) -> list:
         """Sensex, Nasdaq, Dow and S&P on the Live page (Yahoo 1-minute prices, about a minute behind)."""

@@ -82,6 +82,14 @@ def static_checks(cfg: dict | None = None) -> list:
                   fl["error"] or (f"read by {', '.join(reads)}" if reads else
                                   f"{len(fl['versions'])} version(s) on trial: {', '.join(fl['versions'])} (main: {fl['main']})"
                                   + (f"; skipped: {'; '.join(fl['errors'])}" if fl["errors"] else ""))))
+    from lab import dhan as _dh, proc as _proc
+    nsrc = inspect.getsource(_eng.LiveEngine._nightly_lab)
+    out.append(_c("lab_own_process", "Strategy Lab rounds run in their own low-priority process (screens stay quick)",
+                  "proc.run(" in nsrc and "factory.run(" not in nsrc and hasattr(_proc, "_child"),
+                  f"nightly and manual rounds: a child process at nice {_proc.NICE}; the same code, the same results"))
+    out.append(_c("dhan_priority", "Screens, news and movers go before the 5-year Dhan download on the shared pace",
+                  "priority=not self.background" in inspect.getsource(_dh.Dhan._wait),
+                  "the download waits while a screen's Dhan call is waiting or ran in the last 2 s"))
     vsrc = inspect.getsource(_eng.LiveEngine._vault_loop)
     vc = vault.cfg()
     out.append(_c("vault_spare_calls", "Data vault: stock option chains only with spare Upstox calls, never changing the scanner",

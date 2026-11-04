@@ -728,12 +728,12 @@ async def factory_run(req: Request):
                 log(f"{q['queued']} untested library / book rules queued")
         except Exception as e:
             log(f"Library not queued: {e}")
-        factory.run(ROOT / "data", n_random=n, n_mutate=n // 2, log=log, should_stop=stop)
+        from lab import proc                              # 2.38: in its own low-priority process (the app stays quick)
+        proc.run("factory", ROOT / "data", log=log, should_stop=stop, n_random=n, n_mutate=n // 2)
         if not stop():
             try:
-                from lab import mlstrat
                 log("Training model-based strategies (3 models) on the same periods…")
-                mlstrat.run(ROOT / "data", log=log, should_stop=stop)
+                proc.run("mlstrat", ROOT / "data", log=log, should_stop=stop)
             except Exception as e:
                 log(f"ML strategies failed: {e}")
         try:
@@ -893,6 +893,7 @@ class Dhan5y(StockHist):
             from lab.dhan import Dhan
             try:
                 d = Dhan(c["dhan_client_id"], c["dhan_token"])
+                d.background = True                 # 2.38: gives way to charts, news and movers on the shared Dhan pace
                 res = dhan_hist.download(d, ROOT / "data", syms, log=log, should_stop=self._stop.is_set, progress=prog)
                 self.st["status"] = "stopped" if self._stop.is_set() else res.get("result", "done")
                 self.st["result_day"] = dt.date.today().isoformat()
@@ -1003,10 +1004,10 @@ async def factory_lab5y_run(req: Request):
         q = factory.queue_untested(root, library.rules(), source="library")   # new library / book setups too
         if q["queued"]:
             log(f"{q['queued']} untested library / book rules queued")
-        factory.run(root, n_random=n, n_mutate=n // 2, log=log, should_stop=stop)
+        from lab import proc                              # 2.38: in its own low-priority process
+        proc.run("factory", root, log=log, should_stop=stop, n_random=n, n_mutate=n // 2)
         if not stop():
-            from lab import mlstrat
-            mlstrat.run(root, log=log, should_stop=stop)
+            proc.run("mlstrat", root, log=log, should_stop=stop)
     return {"id": JOBS.start("factory5y", f"5-year Lab: testing {n + n // 2:,} rules on 5 years", job)["id"]}
 
 
@@ -1221,6 +1222,7 @@ async def lab_download_start(req: Request):
     def job(log, stop):
         _clear_synthetic()
         d = Dhan(c["dhan_client_id"], c["dhan_token"])
+        d.background = True                     # 2.38: a bulk download gives way to screens, news and movers
         end = dt.date.today() - dt.timedelta(days=1)
         start = dt.date(end.year - years, end.month, 1)
         log(f"Downloading {years} years of 1-minute Nifty and Bank Nifty options ({start:%b %Y} to {end:%b %Y})")
@@ -1312,6 +1314,16 @@ def _ago(ts):
 
 def _svc(id_, name, status, detail, **kw):
     return {"id": id_, "name": name, "status": status, "detail": detail, "roles": ROLES.get(id_, []), **kw}
+
+
+def _perf_view():
+    """2.38: how quickly the app answers, the Lab's last run (own process or not) and the Dhan download giving way."""
+    try:
+        from lab import dhan_budget, proc
+        from webapp import perf
+        return {**perf.view(), "lab_last": dict(proc.LAST) or None, "dhan_gave_way": dhan_budget.gave_way()}
+    except Exception as ex:
+        return {"error": str(ex)[:160]}
 
 
 @app.get("/api/system")
@@ -1437,6 +1449,7 @@ def system_view():
                   "checks": checks, "problems": sorted(probs.values(), key=lambda p: p["last"], reverse=True)[:12],
                   "bullets": _registry_list(), "rules": _rules_check(), "vault": _vault_view(e),
                   "health": e.health.view() if getattr(e, "health", None) is not None else None,
+                  "perf": _perf_view(),
                   "events": _events_view(e)})
 
 
@@ -1506,9 +1519,16 @@ def system_check():
 
 @app.middleware("http")
 async def _no_stale_ui(request, call_next):
-    """The browser must re-check the app's own files on every load, so an update is never hidden by its cache."""
+    """The browser must re-check the app's own files on every load, so an update is never hidden by its cache.
+    2.38: every /api call is timed (webapp/perf.py), so slow screens show on the System page."""
+    t0 = time.perf_counter()
     resp = await call_next(request)
     p = request.url.path
+    try:
+        from webapp import perf
+        perf.record(request.method, p, request.url.query, (time.perf_counter() - t0) * 1000, resp.status_code)
+    except Exception:
+        pass
     if p == "/" or (p.startswith("/static/") and not p.startswith(("/static/vendor/", "/static/lib/"))):
         resp.headers["Cache-Control"] = "no-cache"
     return resp

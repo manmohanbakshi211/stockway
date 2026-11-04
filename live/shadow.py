@@ -38,6 +38,10 @@ class ShadowExits:
         self.store, self.source, self.log = store, source, log
         with store.lock:
             store.db.executescript(SQL)
+            have = {r[1] for r in store.db.execute("PRAGMA table_info(plan_outcomes)").fetchall()}
+            for c_, t_ in (("lot", "INTEGER"), ("qty", "INTEGER"), ("capital", "REAL")):   # 2.38: lot size, quantity, money used
+                if c_ not in have:
+                    store.db.execute(f"ALTER TABLE plan_outcomes ADD COLUMN {c_} {t_}")
             store.db.commit()
         self.open: list[dict] = []
 
@@ -50,7 +54,8 @@ class ShadowExits:
         d = 1 if a["direction"] == "up" else -1
         cost = (o.get("ask") or o0) * (o.get("lot") or 1)
         base = {"alert_id": a["id"], "source": self.source, "day": a["day"], "sym": a["sym"], "kind": a["kind"], "ts": now_ts,
-                "o0": o0, "s0": s0, "d": d, "cost": round(cost, 0), "fits40": int(cost <= small_max)}
+                "o0": o0, "s0": s0, "d": d, "cost": round(cost, 0), "fits40": int(cost <= small_max),
+                "lot": int(o.get("lot") or 1), "qty": int(o.get("lot") or 1), "capital": round(cost, 2)}   # 1 lot (2.38)
         exits = {CHAMPION: (PremiumExit(o0, now_ts, *champion), None)}
         for st, r in R.items():
             if r and r > 0:
@@ -81,7 +86,7 @@ class ShadowExits:
         self.open = keep
         if done:
             cols = ["alert_id", "style", "source", "day", "sym", "kind", "ts", "o0", "s0", "d", "R", "cost", "fits40",
-                    "exit_ts", "reason", "o_exit", "opt_pct", "r_mult"]
+                    "exit_ts", "reason", "o_exit", "opt_pct", "r_mult", "lot", "qty", "capital"]
             with self.store.lock:
                 self.store.db.executemany(f"INSERT OR REPLACE INTO plan_outcomes({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
                                           [[r.get(c) for c in cols] for r in done])

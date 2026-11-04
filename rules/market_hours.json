@@ -1,0 +1,38 @@
+{
+ "about": "Market hours (bullets, dated, 2.38): when each market on the Live page trades, in its own time zone, so a card can say Open / Closed / Lunch break and a price that stopped moving is not mistaken for a live one. sessions: name -> {tz, days (0 = Monday), open / close (HH:MM, local; close before open = runs past midnight), breaks [[from, to]], always (trades all the time), weekly [day, time, day, time] (opens on one weekday, closes on another: futures and currencies), holidays (a rules file with dated holidays)}. tickers: Yahoo ticker -> session; the rest of a group follows its group's session. stale_min: a market that should be open but has had no new price for this long shows 'no update' (a holiday this file does not know). Times change rarely; when one does, add a new session with a valid_from date instead of editing the old one.",
+ "valid_from": "2026-11-04",
+ "stale_min": 25,
+ "sessions": {
+  "NSE": {"tz": "Asia/Kolkata", "days": [0, 1, 2, 3, 4], "open": "09:15", "close": "15:30", "holidays": "health"},
+  "GIFT": {"tz": "Asia/Kolkata", "days": [0, 1, 2, 3, 4], "open": "06:30", "close": "02:45", "breaks": [["15:40", "16:35"]]},
+  "US": {"tz": "America/New_York", "days": [0, 1, 2, 3, 4], "open": "09:30", "close": "16:00"},
+  "US_VIX": {"tz": "America/New_York", "days": [0, 1, 2, 3, 4], "open": "03:15", "close": "16:15"},
+  "CME": {"tz": "America/New_York", "weekly": [6, "18:00", 4, "17:00"], "daily_break": ["17:00", "18:00"]},
+  "ICE_BRENT": {"tz": "America/New_York", "weekly": [6, "20:00", 4, "18:00"], "daily_break": ["18:00", "20:00"]},
+  "FX": {"tz": "America/New_York", "weekly": [6, "17:00", 4, "17:00"]},
+  "CRYPTO": {"always": true},
+  "LONDON": {"tz": "Europe/London", "days": [0, 1, 2, 3, 4], "open": "08:00", "close": "16:30"},
+  "XETRA": {"tz": "Europe/Berlin", "days": [0, 1, 2, 3, 4], "open": "09:00", "close": "17:30"},
+  "PARIS": {"tz": "Europe/Paris", "days": [0, 1, 2, 3, 4], "open": "09:00", "close": "17:30"},
+  "TOKYO": {"tz": "Asia/Tokyo", "days": [0, 1, 2, 3, 4], "open": "09:00", "close": "15:30", "breaks": [["11:30", "12:30"]]},
+  "HONGKONG": {"tz": "Asia/Hong_Kong", "days": [0, 1, 2, 3, 4], "open": "09:30", "close": "16:00", "breaks": [["12:00", "13:00"]]},
+  "SHANGHAI": {"tz": "Asia/Shanghai", "days": [0, 1, 2, 3, 4], "open": "09:30", "close": "15:00", "breaks": [["11:30", "13:00"]]},
+  "KOREA": {"tz": "Asia/Seoul", "days": [0, 1, 2, 3, 4], "open": "09:00", "close": "15:30"},
+  "TAIWAN": {"tz": "Asia/Taipei", "days": [0, 1, 2, 3, 4], "open": "09:00", "close": "13:30"},
+  "SYDNEY": {"tz": "Australia/Sydney", "days": [0, 1, 2, 3, 4], "open": "10:00", "close": "16:00"},
+  "SINGAPORE": {"tz": "Asia/Singapore", "days": [0, 1, 2, 3, 4], "open": "09:00", "close": "17:00", "breaks": [["12:00", "13:00"]]}
+ },
+ "tickers": {
+  "ES=F": "CME", "NQ=F": "CME", "YM=F": "CME", "CL=F": "CME", "GC=F": "CME", "SI=F": "CME", "HG=F": "CME", "NG=F": "CME",
+  "BZ=F": "ICE_BRENT", "DX-Y.NYB": "FX",
+  "^DJI": "US", "^IXIC": "US", "^GSPC": "US", "INFY": "US", "HDB": "US", "IBN": "US", "WIT": "US",
+  "^TNX": "US", "^FVX": "US", "^IRX": "US", "^VIX": "US_VIX",
+  "INR=X": "FX", "EURUSD=X": "FX", "JPY=X": "FX", "CNH=X": "FX", "GBPUSD=X": "FX",
+  "BTC-USD": "CRYPTO", "ETH-USD": "CRYPTO",
+  "^FTSE": "LONDON", "^GDAXI": "XETRA", "^STOXX50E": "XETRA", "^FCHI": "PARIS",
+  "^N225": "TOKYO", "^HSI": "HONGKONG", "000001.SS": "SHANGHAI", "^KS11": "KOREA", "^TWII": "TAIWAN",
+  "^AXJO": "SYDNEY", "^STI": "SINGAPORE",
+  "^BSESN": "NSE", "^NSEI": "NSE", "^NSEBANK": "NSE", "NIFTY_FIN_SERVICE.NS": "NSE", "NIFTY_MID_SELECT.NS": "NSE", "^INDIAVIX": "NSE",
+  "GIFT": "GIFT", "SENSEX": "NSE", "NIFTY": "NSE", "BANKNIFTY": "NSE", "FINNIFTY": "NSE", "MIDCPNIFTY": "NSE"
+ }
+}

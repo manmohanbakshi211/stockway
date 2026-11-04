@@ -114,6 +114,33 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Speed, lot and money on every trade, dates on the board, market hours, ghost candles (2.38)
+
+- **Why the app crawled with the market closed:** the nightly Strategy Lab (thousands of rules on a 200 MB table, often
+  until the morning) ran inside the app's own process and took Python's single lock from every screen; the 5-year
+  Dhan download used the whole shared Dhan pace (72,000 calls by 7:45 AM today), so a chart's Dhan calls queued
+  behind it; and the settings file was parsed again on every call (~30 ms each).
+  - Lab rounds and model strategies now run in their own low-priority process (`lab/proc.py`, nice 10): the same
+    code, the same results (a test checks it), one run per Lab folder as before.
+  - Screens, news and movers go first on the shared Dhan pace; the download waits while they need it (`lab/dhan_budget.py`).
+  - Settings are parsed once and again only when the file changes (0.2 ms a call).
+  - Every screen call is timed: **System → Speed** shows the slow ones (over 1.5 s), so speed is measured, not guessed.
+- **Lot size, quantity and money on every trade:** paper trades show lot size × lots = quantity and the money the trade
+  took (premium; margin estimate for a short) out of the account size; the same is recorded for every test-bench and
+  shadow-exit trade (new columns, old trades worked out again).
+- **Strategy board:** every row shows its first and last trade time; tap a row for its trades (in at, out at, price,
+  lots, quantity, money, net). Strategy desk positions show in / out time and quantity.
+- **Live page:** every block shows when its data was fetched (or the last session's time), every market card says
+  Open / Closed / Break / Holiday / No update from `rules/market_hours.json` (dated bullet: each market in its own time
+  zone, lunch breaks, overnight GIFT Nifty, Sunday-Friday futures and currencies, 24/7 crypto, NSE holidays), and the
+  World markets block says the global pressure on Nifty in words with its biggest drivers, like the World page.
+- **Fortune chart ghost candles:** faded candles ahead of the real ones. The forming candle is drawn finished at its
+  likely close; the next 6 are purple range candles on the middle path (box = where that candle's close likely lands,
+  68%; wicks = its usual high / low). No direction is made up. They redraw every 10 s while the market is open
+  (`rules/fortune.json`: ghost, ghost_candles, refresh_s).
+- Checked: full tests, Lab regression 103/103, Live / Chart / Board / Paper / System / Desk at desktop and phone with
+  the Mac's own data (no errors, no sideways scroll; a long Lab rule name no longer widens the chart page on a phone).
+
 ## Shadow Focus: is Focus leaning on one or two alert types? (2.37)
 
 - **Why:** on the first live days 89% of Focus came from two alert types (unusual options 53-54%, sharp move 36-37%),

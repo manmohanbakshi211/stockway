@@ -41,14 +41,52 @@ def setup(path):
         _day, _used = today, max(best, _used if _day == today else 0)
 
 
-def wait(min_gap: float = 0.0):
-    """Block until another call is allowed (shared speed limit)."""
-    global _last
-    with _lock:
-        d = max(1.0 / RATE, min_gap) - (time.time() - _last)
+PRIO_HOLD = 2.0                # background calls wait this long after a screen / news / movers call (2.38)
+_prio_waiting = 0
+_prio_last = 0.0
+_bg_waits = 0                  # times the background download gave way (System page)
+
+
+def wait(min_gap: float = 0.0, priority: bool = True):
+    """Block until another call is allowed (shared speed limit). Each caller books the next free slot and sleeps
+    outside the lock (2.38), so callers queue in order instead of whoever grabs the lock. priority=False (the 5-year
+    download) gives way: it waits while a priority call (a chart, news, movers) is waiting or ran in the last
+    PRIO_HOLD seconds, so a screen's few calls never queue behind thousands of download calls."""
+    global _last, _prio_waiting, _prio_last, _bg_waits
+    if priority:
+        with _lock:
+            _prio_waiting += 1
+    try:
+        gave_way = False
+        while True:
+            with _lock:
+                now = time.time()
+                nxt = _last + max(1.0 / RATE, min_gap)
+                if not priority and (_prio_waiting > 0 or now - _prio_last < PRIO_HOLD):
+                    slot = None
+                    if not gave_way:
+                        gave_way = True
+                        _bg_waits += 1
+                elif not priority and nxt > now + 0.05:
+                    slot = None                         # background never books slots ahead: a screen's call gets the next one
+                else:
+                    slot = max(_last + max(1.0 / RATE, min_gap), now)
+                    _last = slot
+            if slot is not None:
+                break
+            time.sleep(0.05)
+        d = slot - time.time()
         if d > 0:
             time.sleep(d)
-        _last = time.time()
+    finally:
+        if priority:
+            with _lock:
+                _prio_waiting -= 1
+                _prio_last = time.time()
+
+
+def gave_way() -> int:
+    return _bg_waits
 
 
 def spend(n: int = 1):

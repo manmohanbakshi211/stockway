@@ -44,7 +44,8 @@ CREATE INDEX IF NOT EXISTS bench_sig_day ON bench_signals(source, day);
 """
 # bench_signals (2.31): one row per signal with the facts at entry (trend, VIX, IV, PCR, news, results, events, world...)
 # and how the app rated it (severity, score, conviction, Focus); the trades of that signal (one per style) share its sig.
-NEW_COLS = {"family": "TEXT", "need_lot": "REAL", "max_loss": "REAL", "sig": "TEXT"}     # 2.31
+NEW_COLS = {"family": "TEXT", "need_lot": "REAL", "max_loss": "REAL", "sig": "TEXT",     # 2.31
+            "lots": "INTEGER", "qty": "INTEGER", "capital": "REAL"}                      # 2.38: lot size, quantity, money used
 STYLE_FILE = Path(__file__).resolve().parents[1] / "rules" / "bench_styles.json"
 BUILTIN = {                                     # the 2.30 styles: used when the file is missing
     "buy": {"label": "Buy ATM", "legs": [{"side": "with", "offset": 0, "q": 1}], "exit": {}},
@@ -297,6 +298,8 @@ class Bench:
                    "risk_lot": round(basis * lot * sp + _charges(basis * lot, basis * (1 - sp) * lot), 2),
                    "target": round(px + tp * basis, 2), "stop": round(px - sp * basis, 2), "hold_min": hold,
                    "need_lot": mon.get("need"), "max_loss": mon.get("max_loss"),
+                   # 2.38: 1 lot of `lot` shares a leg; the money it takes: margin estimate if anything is sold, else the premium
+                   "lots": 1, "qty": int(lot), "capital": round(float(mon.get("need") or (px * lot if px > 0 else 0)), 2),
                    "data": json.dumps({"open_legs": p_open, "legs": [{k: l[k] for k in ("key", "side", "strike", "q")} for l in info],
                                        "money": mon}, default=str)}
             row["_legs"], row["_peak"], row["_low"], row["_basis"] = legs, px, px, basis
@@ -471,7 +474,8 @@ def style_family(style: str, family: str | None = None) -> str:
 GROUP_SQL = ("SELECT day, kind, IFNULL(variant, '') AS variant, style, family, regime, COUNT(*) AS n, SUM(net) AS s, "
              "SUM(net * net) AS s2, SUM(net > 0) AS wins, SUM(CASE WHEN net > 0 THEN net ELSE 0 END) AS win_s, "
              "SUM(CASE WHEN net < 0 THEN -net ELSE 0 END) AS loss_s, MIN(net) AS worst, AVG(cost_lot) AS cost, "
-             "AVG(risk_lot) AS risk, AVG(need_lot) AS need, MAX(name) AS name, IFNULL(is_index, 0) AS is_index "
+             "AVG(risk_lot) AS risk, AVG(need_lot) AS need, MAX(name) AS name, IFNULL(is_index, 0) AS is_index, "
+             "MIN(ts) AS first_ts, MAX(ts) AS last_ts "
              "FROM bench_trades WHERE source=? AND net IS NOT NULL AND {where} "
              "GROUP BY day, kind, IFNULL(variant, ''), style, family, regime, IFNULL(is_index, 0)")
 _DAYS: dict = {}            # (db path, source, day) -> grouped rows of a finished day (they no longer change)
@@ -509,6 +513,28 @@ def day_groups(bdb: BenchDB, source: str, days: int, today: str | None = None) -
         return out
     finally:
         con.close()
+
+
+def trades(store, source, kind: str, variant: str | None, style: str, limit: int = 100) -> list:
+    """2.38: the latest closed and open test trades of one strategy x style, newest first, with their date and time,
+    lot size, quantity and the money each took (Strategy board, a row opened)."""
+    con = db_for(store).reader()
+    try:
+        rows = con.execute("SELECT id, ts, day, sym, direction, regime, entry, exit, exit_ts, reason, net, charges, lot, "
+                           "lots, qty, capital, cost_lot, need_lot, is_index FROM bench_trades WHERE source=? AND kind=? "
+                           "AND IFNULL(variant, '')=? AND style=? ORDER BY ts DESC LIMIT ?",
+                           (source, kind, variant or "", style, max(1, min(int(limit), 500)))).fetchall()
+    finally:
+        con.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["lots"] = d.get("lots") or 1
+        d["qty"] = d.get("qty") or d.get("lot")
+        if d.get("capital") is None:                      # trades from before 2.38: the same money, worked out again
+            d["capital"] = d.get("need_lot") if d.get("need_lot") is not None else d.get("cost_lot")
+        out.append(d)
+    return out
 
 
 def board(store, source, capital: float, risk_pct: float, regime: str | None = None, days: int = 60, today: str | None = None,
@@ -553,7 +579,10 @@ def board(store, source, capital: float, risk_pct: float, regime: str | None = N
         n_closed += r["n"]
         g = groups.setdefault((r["kind"], r["variant"] or "", r["style"]), {"all": blank(), "reg": blank(), "today": blank(), "cost": 0.0,
                                                                           "risk": 0.0, "need": 0.0, "need_n": 0, "name": r["name"],
-                                                                          "days": set(), "family": fam})
+                                                                          "days": set(), "family": fam, "first": None, "last": None})
+        if r.get("first_ts") is not None:                 # 2.38: when this strategy's trades happened
+            g["first"] = r["first_ts"] if g["first"] is None else min(g["first"], r["first_ts"])
+            g["last"] = r["last_ts"] if g["last"] is None else max(g["last"], r["last_ts"])
         merge(g["all"], r)
         g["cost"] += (r["cost"] or 0) * r["n"]
         g["risk"] += (r["risk"] or 0) * r["n"]
@@ -586,6 +615,7 @@ def board(store, source, capital: float, risk_pct: float, regime: str | None = N
                     "style_label": (styles.get(style) or {}).get("label", style), "label": label, "all": stats(g["all"]),
                     "regime": stats(g["reg"]), "today": stats(g["today"]), "days": len(g["days"]), "cost_lot": round(cost),
                     "risk_lot": round(risk), "need_lot": round(need) if need is not None else None,
+                    "first_ts": g["first"], "last_ts": g["last"],
                     "fits": fits(cost, risk, capital, risk_pct, need, g["family"])})
     key = (lambda x: (x["regime"]["rank"] if x["regime"].get("rank") is not None else -1e12,
                       x["all"]["rank"] if x["all"].get("rank") is not None else -1e12)) if regime else \

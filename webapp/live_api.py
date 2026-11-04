@@ -671,6 +671,15 @@ def live_board(regime: str = "auto", days: int = 60, source: str | None = None, 
     return clean(out)
 
 
+@router.get("/api/live/board/trades")
+def live_board_trades(kind: str, style: str, variant: str | None = None, source: str | None = None, limit: int = 100):
+    """2.38: one Strategy board row's test trades with their date and time, lots, quantity and money used."""
+    from live import bench
+    e = engine()
+    src = source or e.source or e.cfg()["live"].get("source") or "upstox"
+    return clean({"trades": bench.trades(e.store, src, kind, variant, style, limit)})
+
+
 _FS_CACHE: dict = {}
 
 
