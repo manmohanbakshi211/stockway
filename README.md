@@ -114,6 +114,49 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Full audit: every day's data kept, connected and safe (2.42)
+
+- **Mandeep (5 Nov, 01:24):** ensure every piece of data strengthens the system, is connected and heads towards the
+  best accuracy, alerts and paper trades; scan the full app as a QA / senior engineer. (The hard rule stays: alerts +
+  paper only, no order code.)
+- **Found on the Mac's real data (30 Oct – 5 Nov) and fixed:**
+  1. **Data loss:** the 1-minute recordings of 3 and 4 Nov hold one minute each. An app restarted after the close
+     (16:24 on 4 Nov, 23:26 on 3 Nov) ended its "session" at once and its one-minute save replaced the whole day
+     (2 Nov, never restarted, kept 12.8 lakh rows). Now every part is merged into the day's earlier save (keyed, no
+     duplicates), an unreadable file is kept aside, never deleted (`live/record.py merge_write`).
+  2. **Night prices recorded as the new day:** a scanner started at 00:37 wrote 1.4 lakh rows of the last close into
+     5 Nov. Prices are recorded only inside 09:00–15:31 IST, and the day's save drops any outside it (news keeps its
+     own time). The simulator is unchanged (its days are replaced, as before).
+  3. **Stale previous day:** the daily history built at 00:46 on 5 Nov had 3 Nov as its previous day (30 Oct had 28
+     Oct): the broker publishes a day's daily candle hours later and the copy was cached for the whole day, so the
+     previous high / low / close, gaps, the daily trend and daily patterns were a day old. It is now loaded again when
+     it misses the last trading day, and retried every 30 minutes until the broker has it.
+  4. **Newer readings not stored with signals:** every bench signal now also records the candle forecast (fc5 / fc15,
+     signed strength and PAKKA), Nifty's (mfc5 / mfc15), the cascade's chance of green (nc / mnc), the India indication
+     (ind_al) and the data guard (dq_bad), all aligned with the trade's direction, for the honest-label model later.
+     Recorded only: nothing decides on them.
+  5. **No log on disk:** the engine log lived only in the Terminal window. Now also `data/logs/app.log` (5 MB × 10),
+     tokens / keys / PINs masked (`live/applog.py`).
+  6. **No backup:** six months of the app's own record would sit in two SQLite files with no copy. Now a daily safe
+     copy after 16:30 (SQLite online backup, checked, 7 days kept) in `data/backups/` (`live/backup.py`,
+     `rules/backup.json`: set "dir" to an iCloud Drive or external-disk folder to keep a copy off this disk).
+  7. A world-market alert at 00:46 was stamped on 5 Nov: macro alerts only 08:00–15:30 on weekdays now.
+  8. The symbol page answered 404 (a console error) when the scanner was off: it now answers "closed" and shows the
+     same message.
+  9. The candle forecast trained only when the chart was opened: the watcher loop now starts it (first time, then
+     weekly after 16:15), and a run that left a timeframe untrained (e.g. history missing) is retried after the close
+     instead of waiting a week.
+- **Checked and fine:** no duplicate rows (cascade grades, outcomes, bench trades / signals); no bench or paper trade
+  left open; facts on bench signals 98–100% filled (IV percentile builds up with days); no secret in git; the server
+  listens only on this Mac (127.0.0.1); no order / modify / cancel endpoint anywhere; every page on the Mac's data at
+  desktop and phone width: no console error, no sideways scroll, no API call over 1.5 s.
+- **Open, for Mandeep's say-so (it changes a working default):** the test bench triggers a stop on the executable price
+  (bid for a long leg); where the bid-ask spread is wider than the stop distance the trade stops out at once (239 trades
+  on 4 Nov, 0.7%, about −₹4,000 each). Brokers trigger SL-M on the last traded price. IV-spike alerts carry no
+  direction, so the Scorecard does not grade them (160 on 4 Nov). `live/positions.py` and `live/strategies.py` are
+  imported by nothing (kept: experiments are kept). Test coverage: 66% overall; bench 91%, paper 85%, recorder 89%,
+  store 90%, cascade 91%, candle forecast 88%; the engine 61% (mostly broker / network paths).
+
 ## Candle forecast on the Fortune chart: colour with an honest strength, shape, patterns, 90% close zone (2.41)
 
 - **Mandeep (4–5 Nov):** from the timeframe cascade, say which candle is forming on the real chart (hammer, shooting

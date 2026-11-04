@@ -144,8 +144,8 @@ def live_symbol(sym: str, expiry: str | None = None):
         d = e.symbol(sym.upper(), expiry)
     except PermissionError as ex:
         raise HTTPException(401, str(ex))
-    if not d:
-        raise HTTPException(404, "No live data for this symbol yet. Start the live scanner first.")
+    if not d:                                    # 2.42: an answer, not a 404 (the page shows it; no console error)
+        return {"closed": True, "message": "No live data for this symbol yet: the live scanner is not running."}
     return clean(d)
 
 

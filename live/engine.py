@@ -124,6 +124,11 @@ class LiveEngine:
         line = f"{dt.datetime.now(IST):%H:%M:%S}  {msg}"
         self.logs.append(line)
         print(line, flush=True)
+        try:                                         # 2.42: kept on disk too (data/logs), so a crash or restart keeps its reason
+            from .applog import write
+            write(self.data_dir, line)
+        except Exception:
+            pass
 
     def set_status(self, state, message):
         self.status.update(state=state, message=message, since=time.time())
@@ -355,9 +360,10 @@ class LiveEngine:
                 self.log(f"Sensex live price not available ({e}); using Yahoo")
         self.daily = self.store.get(f"daily:{self.source}:{day}", {}) or {}
         self.avg_vol = {s: d.get("avg_vol") for s, d in self.daily.items() if d.get("avg_vol")}
-        if len(self.daily) < len(self.uni.underlyings) * 0.8 or \
+        stale = self.source != "sim" and not self._daily_fresh(self.daily, self.clock.now().date())
+        if len(self.daily) < len(self.uni.underlyings) * 0.8 or stale or \
                 sum(1 for d in self.daily.values() if isinstance(d, dict) and d.get("d_ohlc")) < len(self.uni.underlyings) * 0.8:
-            threading.Thread(target=self._load_daily, daemon=True, name="daily-history").start()
+            threading.Thread(target=self._load_daily, kwargs={"force": stale}, daemon=True, name="daily-history").start()
         self._attach_iv_history()
         self.desk.load_plan()
         self._recenter()
@@ -382,13 +388,28 @@ class LiveEngine:
         self.state.set_baselines(base)
         self.state.apply(ticks, self.clock.ts())
 
-    def _load_daily(self):
-        """One year of daily candles per symbol: average volume, realised volatility and its percentile."""
+    @staticmethod
+    def _daily_fresh(daily: dict, day: dt.date) -> bool:
+        """2.42: the daily history must end on the last trading day before `day`. Built at night it can miss yesterday
+        (the broker publishes a day's daily candle hours later): the Mac's 5 Nov copy, made at 00:46, had 3 Nov as its
+        'previous day', so the previous high / low / close, gaps, the daily trend and daily patterns were a day old."""
+        from .health import is_trading_day
+        want = day - dt.timedelta(days=1)
+        for _ in range(12):
+            if is_trading_day(want):
+                break
+            want -= dt.timedelta(days=1)
+        p = ((daily or {}).get("NIFTY") or {}).get("prev") or {}
+        return bool(p.get("date")) and str(p["date"]) >= want.isoformat()
+
+    def _load_daily(self, force: bool = False):
+        """One year of daily candles per symbol: average volume, realised volatility and its percentile.
+        force (2.42): load every symbol again (the cached copy missed the last trading day)."""
         out = dict(self.daily)
         for u in list(self.uni.indices) + self._rank_stocks():
             if self.stop_evt.is_set():
                 return
-            if u.symbol in out and out[u.symbol].get("d_ohlc"):
+            if not force and u.symbol in out and out[u.symbol].get("d_ohlc"):
                 continue
             try:
                 cs = self.rest.daily_candles(u.key, 400)
@@ -418,6 +439,18 @@ class LiveEngine:
         self._attach_iv_history()
         self.store.put(f"daily:{self.source}:{self.clock.now().date()}", out)
         self.log(f"One-year history ready for {len(out)} symbols")
+        if self.source != "sim" and not self._daily_fresh(out, self.clock.now().date()) and not getattr(self, "_daily_retry", None):
+            p = ((out.get("NIFTY") or {}).get("prev") or {}).get("date")
+            self.log(f"Daily history ends on {p}: the broker has not published the last trading day yet; trying again in 30 minutes")
+            token = self._run_token
+
+            def again():
+                self._daily_retry = None
+                if self.running and self._run_token is token:
+                    self._load_daily(force=True)
+            self._daily_retry = threading.Timer(1800, again)
+            self._daily_retry.daemon = True
+            self._daily_retry.start()
 
     def _attach_iv_history(self):
         hist = self.store.get(f"ivhist:{self.source}", {}) or {}
@@ -996,8 +1029,55 @@ class LiveEngine:
                 f.update(self.events.risk(sym, now).get("facts") or {})
             except Exception:
                 pass
+        try:                                         # 2.42: the newer readings, recorded for a later honest-label model
+            f.update(self.forecast_facts(sym, direction, now))
+        except Exception:
+            pass
         out = {x: y for x, y in f.items() if x not in ("kind", "severity", "direction") and y is not None}
         self._facts_cache[k] = out
+        return out
+
+    IND_WORDS = {"gap up": 1.0, "positive": 0.5, "neutral": 0.0, "negative": -0.5, "gap down": -1.0}
+
+    def forecast_facts(self, sym, direction, now) -> dict:
+        """2.42: what the candle forecast (2.41), the next-candle cascade (2.39), the India indication (2.40) and the data
+        guard (2.34) said at this moment, aligned with the trade's direction (+ = with it). Only recorded with the signal
+        (bench, alerts) for a later challenger to learn from: nothing here decides anything.
+        fc5_al / fc15_al: the symbol's forming 5m / 15m candle forecast, strength signed (fc*_pakka: 1 at PAKKA);
+        mfc*: the same for Nifty (the market); nc*_al / mnc*_al: the cascade's chance of green, -1..+1;
+        ind_al: today's India indication word, -1..+1; dq_bad: 1 when the symbol's own price is suspect or stale."""
+        sgn = 1 if direction == "up" else -1 if direction == "down" else 0
+        out = {}
+        ts = now.timestamp()
+        nc = getattr(self, "nextc", None)
+        if nc is not None and sgn:
+            from .nextcandle import TF_MIN
+            cast = getattr(nc, "_cast", None)
+            for who, tag in ((sym, ""), ("NIFTY", "m")):
+                if tag and sym == "NIFTY":
+                    continue
+                for tf in ("5m", "15m"):
+                    n = tf[:-1]
+                    c = cast.cur.get((who, tf)) if cast is not None else None
+                    if c and c.get("stages") and c["start"] <= ts < c["start"] + TF_MIN[tf] * 60:
+                        p = c["stages"][max(c["stages"])]
+                        out[f"{tag}fc{n}_al"] = round(sgn * (1 if p["dir"] == "up" else -1) * float(p["strength"]) / 100, 3)
+                        out[f"{tag}fc{n}_pakka"] = int(bool(p.get("pakka")))
+                    k = nc.cur.get((who, tf))
+                    if k and k.get("pred") and k["start"] <= ts < k["start"] + TF_MIN[tf] * 60:
+                        out[f"{tag}nc{n}_al"] = round(sgn * (float(k["pred"]["p_green"]) - 50) / 50, 3)
+        ind = getattr(self, "indication", None)
+        lat = getattr(ind, "latest", None) if ind is not None else None
+        if sgn and lat and lat.get("day") == now.date().isoformat():
+            w = self.IND_WORDS.get(str(lat.get("word") or "").strip().lower())
+            if w is not None:
+                out["ind_al"] = sgn * w
+        dg = getattr(self, "dguard", None)
+        if dg is not None:
+            try:
+                out["dq_bad"] = int(bool(dg.symbol_problem(sym)))
+            except Exception:
+                pass
         return out
 
     def _mover_sweep(self, now):
@@ -1592,6 +1672,9 @@ class LiveEngine:
             self.log(f"Market brain failed: {e}")
 
     def _macro_alert(self, a):
+        now = dt.datetime.now(IST)
+        if self.source != "sim" and (now.weekday() >= 5 or not (dt.time(8, 0) <= now.time() <= dt.time(15, 30))):
+            return                                   # 2.42: a world move at night is not an alert of the next day (India indication covers it)
         if self.running and self.source != "sim":
             self._emit_safe(a, self.clock.now(), self.cfg()["live"])
         elif self.running:
@@ -1903,6 +1986,17 @@ class LiveEngine:
                     self.indication.tick()
                 except Exception as e:
                     self.log(f"Market indication error: {e}")
+            try:                                     # 2.42: candle-forecast models trained by themselves (child process)
+                self.next_candle().cast().ensure()
+            except Exception as e:
+                if self._every("cast_ensure_err", 3600, clock_time=False):
+                    self.log(f"Candle forecast training check: {e}")
+            try:                                     # 2.42: a safe copy of the databases once a day after the close
+                from . import backup
+                backup.tick(self)
+            except Exception as e:
+                if self._every("backup_err", 3600, clock_time=False):
+                    self.log(f"Backup error: {e}")
             try:
                 c = self.cfg()["live"]
                 now = dt.datetime.now(IST)

@@ -110,6 +110,16 @@ def static_checks(cfg: dict | None = None) -> list:
                   and "nextc" not in inspect.getsource(_eng.LiveEngine._loop),
                   _nc._C.get("error") or ", ".join(f"{v['after']} × {v['from']} → {k}" for k, v in prs.items())
                   + "; information only, graded at every close"))
+    from live import applog as _al, backup as _bk
+    bc = _bk.cfg()
+    wsrc2 = inspect.getsource(_eng.LiveEngine._watch_loop)
+    out.append(_c("db_backup", "Daily safe copy of live.db and bench.db after the close (SQLite backup, checked, kept a week)",
+                  "backup.tick(self)" in wsrc2 and not _bk._C.get("error") and not any(x in " ".join(bc["files"]).lower() for x in _bk.NEVER),
+                  _bk._C.get("error") or f"after {bc['after']}, {bc['keep']} days kept in {bc['dir'] or 'data/backups'}"
+                                         f"{'' if bc.get('on', True) else ' (switched off)'}"))
+    out.append(_c("app_log", "Engine log kept on disk (data/logs/app.log, rotated), tokens and keys masked",
+                  "applog import write" in inspect.getsource(_eng.LiveEngine.log) and _al.mask("access_token=abcdef123456") == "access_token=<hidden>",
+                  "5 MB × 10 files"))
     from live import candlecast as _cc
     from lab import proc as _proc
     ccc = _cc.cfg()

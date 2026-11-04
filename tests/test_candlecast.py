@@ -146,3 +146,11 @@ def test_training_starts_once_in_the_background(tmp_path, monkeypatch):
     CC._TRAIN.release()
     cast.ensure()                                                # tried a moment ago: not again for hours
     assert len(calls) == 1
+    import json as _j, time as _t                                # 2.42: a run that left a timeframe untrained is retried
+    (tmp_path / "candlecast").mkdir(exist_ok=True)
+    (tmp_path / "candlecast" / "report.json").write_text(_j.dumps({"trained_at": _t.time(), "tfs": {"15m": {}}, "errors": {"5m": "x"}}))
+    cast._tried = 0.0
+    monkeypatch.setattr(CC, "_hm", lambda s: __import__("datetime").time(0, 0) if s == SMALL["train_after"] else __import__("datetime").time(0, 0))
+    done.clear()
+    cast.ensure()
+    assert done.wait(5) and len(calls) == 2

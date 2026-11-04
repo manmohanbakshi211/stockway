@@ -25,5 +25,7 @@ data/context_cache.json
 data/index_weights.json
 data/history/
 data/candlecast/
+data/logs/
+data/backups/
 data/lab/
 data/world_cache.json

@@ -1,0 +1,10 @@
+{
+  "about": "2.42 daily safe copy of live.db and bench.db (live/backup.py): once a day after the close, SQLite online backup, checked, kept for `keep` days. dir: null = data/backups; set an iCloud Drive or external-disk folder to keep a copy off this disk. Token, key and settings files are never copied.",
+  "on": true,
+  "after": "16:30",
+  "keep": 7,
+  "dir": null,
+  "files": ["live.db", "bench.db"],
+  "min_free_gb": 5,
+  "since": "2026-11-05"
+}

@@ -18,11 +18,56 @@ OPT_TARGET, OPT_STOP = 20.0, 20.0         # option +20% before -20% within 60 mi
 
 
 # ---------------------------------------------------------------- recorder
+# 2.42: what each part of a day file is keyed by (merging a later save into an earlier one never duplicates a row)
+PART_KEYS = {"minutes": ["ts", "key"], "metrics": ["ts", "sym"], "chains": ["ts", "sym", "expiry", "strike", "side"],
+             "news": ["ts", "source", "title"], "context": ["ts", "kind"], "candles": ["ts", "sym", "tf", "bar_t", "pattern"],
+             "bars": ["sym", "t"], "quality": ["ts", "key", "kind", "what"]}
+WINDOWED = ("minutes", "metrics", "chains", "candles", "bars", "quality")   # prices: only inside the session window
+
+
+def session_window(day: str) -> tuple[float, float] | None:
+    """09:00 to 15:31 IST of `day` (the pre-open and the session): prices outside it are the last close, not the day."""
+    import datetime as _dt
+    try:
+        d = _dt.date.fromisoformat(day)
+    except Exception:
+        return None
+    ist = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    return (_dt.datetime.combine(d, _dt.time(9, 0), ist).timestamp(), _dt.datetime.combine(d, _dt.time(15, 31), ist).timestamp())
+
+
+def merge_write(path: Path, df, keys: list | None, log=print, merge: bool = True):
+    """2.42: write a day part, merged with what is already saved for that day (never overwritten). The Mac lost the
+    whole of 3 and 4 Nov this way: the app restarted after the close and its one-minute save replaced the day."""
+    import time as _t
+    import pandas as pd
+    path = Path(path)
+    if merge and path.exists():
+        try:
+            old = pd.read_parquet(path)
+            df = pd.concat([old, df], ignore_index=True)
+            k = [c for c in (keys or []) if c in df.columns]
+            if k:
+                df = df.drop_duplicates(subset=k, keep="last")
+        except Exception as e:                         # unreadable: kept aside, never deleted
+            bak = path.with_name(f"{path.stem}.{int(_t.time())}.unreadable.parquet")
+            path.rename(bak)
+            log(f"Recording part {path.name} could not be read ({e}); kept as {bak.name}")
+    sort = [c for c in ("ts", "t") if c in df.columns][:1]
+    if sort:
+        df = df.sort_values(sort, kind="stable")
+    tmp = path.with_name(path.name + ".tmp")
+    df.to_parquet(tmp, compression="zstd", index=False)
+    tmp.replace(path)
+    return len(df)
+
+
 class Recorder:
     def __init__(self, data_dir: Path, source: str, day: str):
         d = Path(data_dir) / "recordings"
         d.mkdir(parents=True, exist_ok=True)
         self.path = d / f"{source}_{day}.sqlite"
+        self.window = None if source == "sim" else session_window(day)      # 2.42: no stale night / after-close prices
         self.db = sqlite3.connect(str(self.path), check_same_thread=False)
         self.lock = threading.Lock()
         with self.lock:
@@ -47,7 +92,12 @@ class Recorder:
         self.rows = 0
         self.counts = {"chains": 0, "chain_rows": 0, "news": 0, "context": 0, "candles": 0, "bars": 0}
 
+    def in_window(self, ts) -> bool:
+        return self.window is None or (self.window[0] <= float(ts) <= self.window[1])
+
     def snapshot(self, ts: int, state, metrics: dict, slim):
+        if not self.in_window(ts):
+            return
         with state.lock:
             rows = [(ts, i.key, i.ltp, i.vol, i.oi, i.iv, i.bid, i.ask, i.tbq, i.tsq, i.cvd)
                     for i in state.insts.values() if i.ltp]
@@ -60,6 +110,8 @@ class Recorder:
 
     def chain(self, ts: int, res: dict):
         """One full option chain snapshot (every strike, both sides) as the app fetched it."""
+        if not self.in_window(ts):
+            return 0
         rows = []
         for r in res.get("rows") or []:
             for side in ("CE", "PE"):
@@ -96,6 +148,7 @@ class Recorder:
 
     def candles(self, rows: list):
         """[(ts, sym, tf, bar_t, pattern, dir, alertable, level_atr, close)]"""
+        rows = [r for r in rows if self.in_window(r[0])]
         if rows:
             with self.lock:
                 self.db.executemany("INSERT INTO candles VALUES (?,?,?,?,?,?,?,?,?)", rows)
@@ -104,6 +157,7 @@ class Recorder:
 
     def quality(self, rows: list):
         """[(ts, key, sym, kind, what, a, b)] from live/dataguard.py"""
+        rows = [r for r in rows if self.in_window(r[0])]
         if rows:
             with self.lock:
                 self.db.executemany("INSERT INTO quality VALUES (?,?,?,?,?,?,?)", rows)
@@ -111,8 +165,9 @@ class Recorder:
             self.counts["quality"] = self.counts.get("quality", 0) + len(rows)
 
     def bars(self, by_sym: dict):
-        """The day's 1-minute candles of every index and stock: {sym: [[t, o, h, l, c, v], ...]} (replaces earlier saves)."""
-        rows = [(s, *map(float, r[:6])) for s, rs in by_sym.items() for r in rs]
+        """The day's 1-minute candles of every index and stock: {sym: [[t, o, h, l, c, v], ...]} (replaces earlier saves
+        in this file; merged with an earlier save of the same day when the day is finalized)."""
+        rows = [(s, *map(float, r[:6])) for s, rs in by_sym.items() for r in rs if self.in_window(r[0])]
         with self.lock:
             self.db.execute("DELETE FROM bars")
             self.db.executemany("INSERT INTO bars VALUES (?,?,?,?,?,?,?)", rows)
@@ -138,24 +193,34 @@ class Recorder:
         return out
 
     def finalize(self, keep_days: int = 365, log=print):
-        """End of day: squeeze the day into compressed Parquet files (about 10x smaller) and drop old days."""
+        """End of day: squeeze the day into compressed Parquet files (about 10x smaller) and drop old days.
+        2.42: merged into the day's earlier save (a restart after the close no longer replaces the day), prices
+        outside the session window dropped (a scanner started at night recorded the last close as the new day)."""
         try:
             import pandas as pd
+            base = self.path.with_suffix("")
+            parts = {}
             with self.lock:
-                mins = pd.read_sql("SELECT * FROM minutes", self.db)
-                mets = pd.read_sql("SELECT * FROM metrics", self.db)
-            if len(mins):
-                base = self.path.with_suffix("")
-                mins.to_parquet(f"{base}_minutes.parquet", compression="zstd", index=False)
-                mets.to_parquet(f"{base}_metrics.parquet", compression="zstd", index=False)
-                for t in ("chains", "news", "context", "candles", "bars", "quality"):     # 2.31 data vault
-                    with self.lock:
-                        df = pd.read_sql(f"SELECT * FROM {t}", self.db)
-                    if len(df):
-                        df.to_parquet(f"{base}_{t}.parquet", compression="zstd", index=False)
-                self.close()
-                self.path.unlink(missing_ok=True)
-                log(f"Saved today's recording ({len(mins):,} rows)")
+                for t in ("minutes", "metrics", "chains", "news", "context", "candles", "bars", "quality"):
+                    try:
+                        parts[t] = pd.read_sql(f"SELECT * FROM {t}", self.db)
+                    except Exception:
+                        parts[t] = None
+            if self.window is not None:
+                for t in WINDOWED:
+                    df = parts.get(t)
+                    col = "t" if t == "bars" else "ts"
+                    if df is not None and len(df) and col in df.columns:
+                        parts[t] = df[(df[col] >= self.window[0]) & (df[col] <= self.window[1])]
+            total = {}
+            for t, df in parts.items():
+                if df is not None and len(df):
+                    total[t] = merge_write(Path(f"{base}_{t}.parquet"), df, PART_KEYS.get(t), log,
+                                           merge=self.window is not None)      # a simulator day is replaced, as before
+            self.close()
+            self.path.unlink(missing_ok=True)
+            log(f"Saved today's recording ({total.get('minutes', 0):,} minute rows for the day)" if total
+                else "Nothing new to save in today's recording")
         except Exception as e:
             log(f"Compressing the recording failed (kept as is): {e}")
         import datetime as _dt

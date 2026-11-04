@@ -203,17 +203,19 @@ def test_mover_pick_uses_each_stocks_own_range():
 def test_vault_records_chains_news_and_context(tmp_path):
     from live.record import Recorder
     from live import vault
+    from live.record import session_window
     r = Recorder(tmp_path, "upstox", "2026-11-04")
+    t = int(session_window("2026-11-04")[0]) + 3600            # 10:00 IST (2.42: prices only inside the session)
     res = {"sym": "RELIANCE", "expiry": "2026-11-25", "spot": 1500.0,
            "rows": [{"strike": 1500.0, "CE": {"key": "c", "ltp": 30, "bid": 29.5, "ask": 30.5, "oi": 1000, "iv": 22},
                      "PE": {"key": "p", "ltp": 28, "oi": 900}}]}
-    assert r.chain(1000, res) == 2
-    r.news([{"title": "Reliance results beat", "ts": 990, "source": "x", "syms": ["RELIANCE"], "tone": 1}], 1000)
-    r.context(1000, "market", {"vix": 12.5})
+    assert r.chain(t, res) == 2
+    r.news([{"title": "Reliance results beat", "ts": t - 10, "source": "x", "syms": ["RELIANCE"], "tone": 1}], t)
+    r.context(t, "market", {"vix": 12.5})
     h = r.health()
     assert h["chain_rows"] == 2 and h["news"] == 1 and h["context"] == 1
     st = types.SimpleNamespace(lock=__import__("threading").Lock(), insts={"k": types.SimpleNamespace(key="k", ltp=1, vol=1, oi=1, iv=1, bid=1, ask=1, tbq=1, tsq=1, cvd=1)})
-    r.snapshot(1000, st, {}, lambda m: m)
+    r.snapshot(t, st, {}, lambda m: m)
     r.finalize(keep_days=100000, log=lambda *a: None)
     parts = {p["day"]: p["parts"] for p in vault.days(tmp_path)}
     assert {"minutes", "chains", "news", "context"} <= set(parts["2026-11-04"])

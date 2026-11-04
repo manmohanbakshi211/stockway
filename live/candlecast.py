@@ -478,7 +478,8 @@ class Cast:
             return
         t = dt.datetime.now(IST)
         quiet = t.time() >= _hm(c["train_after"]) or t.time() < _hm(c["train_before"]) or t.weekday() >= 5
-        stale = rep is None or time.time() - float(rep.get("trained_at") or 0) > float(c["retrain_days"]) * 86400
+        missing = rep is not None and any(tf not in (rep.get("tfs") or {}) for tf in N.pairs())   # 2.42: a failed run is retried
+        stale = rep is None or missing or time.time() - float(rep.get("trained_at") or 0) > float(c["retrain_days"]) * 86400
         if rep is not None and not (stale and quiet):
             return
         if not _TRAIN.acquire(blocking=False):

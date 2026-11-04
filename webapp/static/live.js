@@ -683,6 +683,7 @@ async function pageSym() {
     if (state.page !== "sym" || L.sym !== sym) return;
     try {
       const d = await api(`/api/live/symbol/${encodeURIComponent(sym)}${L.expiry ? `?expiry=${L.expiry}` : ""}`);
+      if (d && d.closed) throw new Error(d.message || "No live data yet.");
       drawSym(d, first);
     } catch (e) {
       if (first) $("#sym-body").innerHTML = `<div class="empty"><h2>${esc(sym)}: option chain needs the live feed</h2><p>${esc(e.message)} The live scanner starts by itself at 9:00 AM on market days (or start it on the Live page). Meanwhile the chart shows the last session.</p><div class="btn-row"><a class="btn primary" href="#/chart?s=${encodeURIComponent(sym)}">Open last chart</a><a class="btn" href="#/live">Go to Live</a></div></div>`;
