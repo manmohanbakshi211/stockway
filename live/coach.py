@@ -47,12 +47,12 @@ def challenge(trades: list, capital: float, start: str | None) -> dict:
         pnl = sum(by_day[d])
         worst_day = min(worst_day, pnl)
         if broke is None and pnl < -capital * r["daily_loss_pct"] / 100:
-            broke = f"Daily loss limit broken on {d}: ₹{pnl:,.0f} (limit −₹{capital * r['daily_loss_pct'] / 100:,.0f})."
+            broke = f"Daily loss limit broken on {d}: {_rs(pnl)} (limit −₹{capital * r['daily_loss_pct'] / 100:,.0f})."
         eq += pnl
         peak = max(peak, eq)
         worst_dd = min(worst_dd, eq - peak)
         if broke is None and eq - peak < -capital * r["max_drawdown_pct"] / 100:
-            broke = f"Drawdown limit broken on {d}: ₹{eq - peak:,.0f} from the best point (limit −₹{capital * r['max_drawdown_pct'] / 100:,.0f})."
+            broke = f"Drawdown limit broken on {d}: {_rs(eq - peak)} from the best point (limit −₹{capital * r['max_drawdown_pct'] / 100:,.0f})."
         curve.append({"day": d, "pnl": round(pnl), "equity": round(eq)})
     target = capital * r["profit_target_pct"] / 100
     n_days = len(days)
@@ -68,6 +68,17 @@ def challenge(trades: list, capital: float, start: str | None) -> dict:
             "progress_pct": round(max(0.0, eq) / target * 100) if target else None, "worst_day": round(worst_day),
             "max_drawdown": round(worst_dd), "trades": len(closed), "rules": r, "curve": curve[-60:],
             "days_left": max(0, r["min_days"] - n_days)}
+
+
+def _rs(x) -> str:
+    """−₹251, ₹1,200 (the minus before the rupee sign, Indian grouping not needed for these sizes)."""
+    x = round(float(x or 0))
+    return f"{'−' if x < 0 else ''}₹{abs(x):,}"
+
+
+MODE_NAMES = {None: "the first day (before 2.14 saved how a trade was taken)", "auto": "auto (risk check passed)",
+              "aggressive": "aggressive mode (risk check ignored)", "you": "you", "override": "you, over a soft block",
+              "you (chain/chart)": "you, from the chain / chart", "Lab rule": "Strategy Lab rules"}
 
 
 def patterns(trades: list) -> dict:
@@ -99,18 +110,18 @@ def patterns(trades: list) -> dict:
     lines = []
     a = agg(after)
     if a["n"] >= 3:
-        lines.append(f"After 2 losses in a row: {a['n']} trades, won {a['win_pct']}%, average ₹{a['avg']:,} "
-                     f"(all trades: {base['win_pct']}%, ₹{base['avg']:,}).")
+        lines.append(f"After 2 losses in a row: {a['n']} trades, won {a['win_pct']}%, average {_rs(a['avg'])} "
+                     f"(all trades: {base['win_pct']}%, {_rs(base['avg'])}).")
     for mname, xs in sorted(by_mode.items(), key=lambda kv: sum(kv[1])):
         s = agg(xs)
-        lines.append(f"Taken by {mname}: {s['n']} trades, net ₹{s['net']:,}, won {s['win_pct']}%.")
+        lines.append(f"Taken by {MODE_NAMES.get(mname, mname)}: {s['n']} trades, net {_rs(s['net'])}, won {s['win_pct']}%.")
     if busy and calm:
-        lines.append(f"Busy days (7+ trades): {len(busy)} day(s), average ₹{sum(busy) / len(busy):,.0f} a day; calmer days: "
-                     f"{len(calm)} day(s), average ₹{sum(calm) / len(calm):,.0f}.")
+        lines.append(f"Busy days (7+ trades): {len(busy)} day(s), average {_rs(sum(busy) / len(busy))} a day; calmer days: "
+                     f"{len(calm)} day(s), average {_rs(sum(calm) / len(calm))}.")
     hours = sorted(((h, agg(v)) for h, v in by_hour.items() if len(v) >= 3), key=lambda x: x[1]["net"])
     if hours:
-        lines.append(f"Worst hour: {hours[0][0]} (₹{hours[0][1]['net']:,} over {hours[0][1]['n']} trades); "
-                     f"best hour: {hours[-1][0]} (₹{hours[-1][1]['net']:,}).")
+        lines.append(f"Worst hour: {hours[0][0]} ({_rs(hours[0][1]['net'])} over {hours[0][1]['n']} trades); "
+                     f"best hour: {hours[-1][0]} ({_rs(hours[-1][1]['net'])}).")
     return {"lines": lines, "n": len(closed), "base": base, "after_2_losses": a,
             "by_mode": {k: agg(v) for k, v in by_mode.items()}, "by_hour": {k: agg(v) for k, v in by_hour.items()}}
 
@@ -123,6 +134,6 @@ def streak_warning(trades_today: list, history: list) -> str | None:
     p = patterns(history)
     a = p.get("after_2_losses") or {}
     if a.get("n", 0) >= 3:
-        return (f"Two losses in a row today. Your trades right after two losses won {a['win_pct']}% (average ₹{a['avg']:,}); "
+        return (f"Two losses in a row today. Your trades right after two losses won {a['win_pct']}% (average {_rs(a['avg'])}); "
                 "a 30-minute pause usually helps.")
     return "Two losses in a row today: a 30-minute pause usually helps."

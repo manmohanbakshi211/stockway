@@ -1,0 +1,14 @@
+{
+ "about": "India market indication (bullets, 2.40, Mandeep): one word for where the Indian market is headed (Gap up / Gap down / Positive / Negative / Neutral) and one or two short lines, on the Live page's market strip. Written by Claude (AI) from GIFT Nifty's gap, global indices and the pressure on Nifty, US futures, crude, USD/INR, India VIX, FII / DII, today's events and the latest headlines (after the open also Nifty's move, breadth and the day type). Slots: from `start` to `end` every `every_min` minutes on trading days (8:30, 8:45, 9:00, 9:15 ... 4:00 PM); after `end` the last reading stays until the next morning. Without AI (or over max_ai_per_day, or a bad answer) the same word comes from rules: pre-open, a GIFT gap of gap_pct% or more = Gap up / down, a combined lean (GIFT gap and global pressure) of lean_pct% = Positive / Negative, else Neutral; during the session Nifty's move from the previous close (session_pct). Every reading is saved and the last pre-open one is graded after the close (opening gap and close direction). Information only: never a signal.",
+ "start": "08:30",
+ "end": "16:00",
+ "every_min": 15,
+ "ai": true,
+ "max_ai_per_day": 32,
+ "late_ok_min": 10,
+ "gap_pct": 0.35,
+ "lean_pct": 0.12,
+ "session_pct": 0.4,
+ "headlines": 8,
+ "valid_from": "2026-11-04"
+}

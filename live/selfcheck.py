@@ -90,6 +90,18 @@ def static_checks(cfg: dict | None = None) -> list:
     out.append(_c("dhan_priority", "Screens, news and movers go before the 5-year Dhan download on the shared pace",
                   "priority=not self.background" in inspect.getsource(_dh.Dhan._wait),
                   "the download waits while a screen's Dhan call is waiting or ran in the last 2 s"))
+    from live import indication as _ind
+    ic = _ind.cfg()
+    wsrc = inspect.getsource(_eng.LiveEngine._watch_loop)
+    isrc = inspect.getsource(_eng.LiveEngine.__init__)
+    out.append(_c("watcher_loop", "The app's watcher loop runs (9:00 auto-start, health monitor, keep-awake, briefs, nightly Lab)",
+                  "target=self._watch_loop" in isrc and "while True" in wsrc and "self.health.tick()" in wsrc,
+                  "one thread, every 20 s (2.40: a duplicate method name had silently replaced it since 2.11)"))
+    out.append(_c("market_indication", "India market indication: slots load (rules/indication.json) and each reading runs in its own thread",
+                  not _ind._C.get("error") and len(_ind.slots(__import__("datetime").date(2026, 11, 4), ic)) >= 2
+                  and "self.indication.tick()" in wsrc and "threading.Thread" in inspect.getsource(_ind.Indication.tick),
+                  _ind._C.get("error") or f"{ic['start']}-{ic['end']} every {ic['every_min']} min; AI up to {ic['max_ai_per_day']} a day "
+                                          f"({'on' if ic.get('ai') else 'off'}), else rules"))
     from live import nextcandle as _nc
     prs = _nc.pairs()
     lsrc = inspect.getsource(_eng.LiveEngine._nextcandle_loop)

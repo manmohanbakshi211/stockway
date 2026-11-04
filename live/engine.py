@@ -102,7 +102,13 @@ class LiveEngine:
         except Exception as e:
             self.events = None
             self.log(f"Event engine off: {e}")
-        threading.Thread(target=self._watch, daemon=True, name="live-watch").start()
+        try:                                         # 2.40: India market indication every 15 min (live/indication.py)
+            from .indication import Indication
+            self.indication = Indication(self)
+        except Exception as e:
+            self.indication = None
+            self.log(f"Market indication off: {e}")
+        threading.Thread(target=self._watch_loop, daemon=True, name="live-watch").start()
         threading.Thread(target=self._news_loop, daemon=True, name="live-news").start()
         threading.Thread(target=self.context.run_forever, args=(self._filings_wanted,), daemon=True,
                          name="live-context").start()
@@ -1880,8 +1886,11 @@ class LiveEngine:
                 "report": self.store.get(f"report:{day}")}
 
     # ------------------------------------------------------------ background: watcher + news
-    def _watch(self):
-        """Auto-start at 9:00 on market days when logged in; remind to log in; briefs at 8:45 and 15:40."""
+    def _watch_loop(self):
+        """Auto-start at 9:00 on market days when logged in; remind to log in; briefs at 8:45 and 15:40.
+        2.40: was named _watch, and a later `_watch` (the Sensex / Nasdaq list, 2.11) replaced it inside the class, so
+        this loop never started (no 9:00 auto-start, health monitor, keep-awake or nightly Lab). Renamed; a test now
+        fails on any method defined twice in a class."""
         while True:
             time.sleep(20)
             if getattr(self, "health", None) is not None:
@@ -1889,6 +1898,11 @@ class LiveEngine:
                     self.health.tick()
                 except Exception as e:
                     self.log(f"Health monitor error: {e}")
+            if getattr(self, "indication", None) is not None:      # 2.40: starts its own thread when a slot is due
+                try:
+                    self.indication.tick()
+                except Exception as e:
+                    self.log(f"Market indication error: {e}")
             try:
                 c = self.cfg()["live"]
                 now = dt.datetime.now(IST)
@@ -2062,6 +2076,7 @@ class LiveEngine:
                            "feed": feed, "ticks": self.state.tick_count if self.state else 0},
                 "clock": now.isoformat(), "mins": minutes_since_open(now), "fetched": time.time(),
                 "nse": self._nse_state(),
+                "indication": self.indication.view() if getattr(self, "indication", None) is not None else None,
                 "indices": self.index_cards(), "vix": self._vix(),
                 "alerts": new, "pulse": self.pulse if self.running or not self._last_session() else
                 {**self.pulse, "lines": self.pulse.get("lines") or self._last_session().get("pulse") or []},

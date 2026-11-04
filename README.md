@@ -114,6 +114,28 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## India market indication, the watcher loop back on, Paper page tidy (2.40)
+
+- **India market tile (Live page, the market strip's empty space):** one word for the whole Indian market (Nifty, Bank
+  Nifty, Fin Nifty, Midcap Select, Sensex together): **Gap up / Gap down** before the open, **Positive / Negative /
+  Neutral** after it, with one or two short lines, marked **AI suggestion**. Claude writes it every 15 minutes from 8:30
+  to 4:00 PM on trading days (8:30, 8:45, 9:00, 9:15 ...) from GIFT Nifty's move, the global indices and their pressure
+  on Nifty, US futures, crude, USD/INR, the VIXes, FII / DII, today's events and the latest headlines (after the open
+  also the indices' moves, breadth and the day type); after 4 PM the last reading stays until the morning. Without AI,
+  past its own allowance (32 a day, apart from the other automatic notes) or on an unreadable answer, the same word comes
+  from rules and the tile says "rules". Every reading is saved; after the close the last pre-open reading is graded
+  (did it open with that gap, did it close that way) and the tile shows how often the open call was right.
+  `live/indication.py`, bullets in `rules/indication.json`; it fills exactly the rest of its row at any width.
+- **Found and fixed: the app's watcher loop had not been running since 2.11.** A second method named `_watch` (the
+  Sensex / Nasdaq list) silently replaced the loop inside the class, so the 9:00 auto-start, login reminders, the 8:45
+  brief, the nightly Strategy Lab, the 2.33 health monitor and keep-awake never ran. Renamed (`_watch_loop`); a no-clash
+  test now fails on any method defined twice, and the System page checks the loop. From this version these all run:
+  the nightly Lab in its own low-priority process (2.38) from 4:15 PM.
+- **Paper page:** the prop-firm challenge numbers sit in a 2 x 2 grid (no more "−₹66," / "Biggest dro" cut off); the
+  patterns say who took the trades in words ("the first day (before 2.14 ...)" instead of "None") and money as −₹251;
+  the closed trades show the latest 25 (10 on a phone) with "Show all", dates as "3 Nov" and prices / exits on one line.
+- Checked: full tests, Lab regression 103/103, Live strip at 1440 / 1100 / phone and the Paper page on the Mac's data.
+
 ## Next candle from the smaller ones: the Fortune chart's shadow candle and smart report (2.39)
 
 - **Mandeep's cascade (4 Nov):** once 3 one-minute candles of a 5-minute candle have closed, say how that 5-minute

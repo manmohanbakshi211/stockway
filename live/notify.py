@@ -111,6 +111,7 @@ class AI:
         self.day = None
         self.used = 0
         self.used_auto = 0
+        self.budgets: dict = {}          # 2.40: features with their own daily allowance (e.g. the market indication)
         self.last_error = None
         self._cli = None
 
@@ -134,23 +135,31 @@ class AI:
     def label(self):
         return {"claude_pro": "Claude (your Pro plan)", "claude": "Claude API", "gemini": "Gemini"}.get(self.provider(), "AI")
 
-    def ask(self, prompt: str, max_tokens=400, auto=True) -> str | None:
-        """auto=True for notes the app writes by itself; False when you clicked or asked."""
+    def ask(self, prompt: str, max_tokens=400, auto=True, budget: tuple | None = None) -> str | None:
+        """auto=True for notes the app writes by itself; False when you clicked or asked. budget=(name, per day): a
+        feature with its own daily allowance (2.40), counted apart from the other automatic notes (still in the total)."""
         if not self.enabled():
             return None
         c = self.cfg()
         today = dt.date.today()
         if self.day != today:
-            self.day, self.used, self.used_auto = today, 0, 0
+            self.day, self.used, self.used_auto, self.budgets = today, 0, 0, {}
         pro = c.get("provider") == "claude_pro"
         if self.used >= int(c.get("daily_limit") or (80 if pro else 200)):
             self.last_error = "Daily AI limit reached"
             return None
-        if pro and auto and self.used_auto >= int(c.get("pro_auto_per_day") or 12):
+        if budget:
+            if self.budgets.get(budget[0], 0) >= int(budget[1]):
+                self.last_error = f"The {budget[0]} allowance for today is used up"
+                return None
+        elif pro and auto and self.used_auto >= int(c.get("pro_auto_per_day") or 12):
             self.last_error = "Automatic notes on the Pro plan are used up for today (questions still work)"
             return None
         self.used += 1
-        self.used_auto += 1 if auto else 0
+        if budget:
+            self.budgets[budget[0]] = self.budgets.get(budget[0], 0) + 1
+        else:
+            self.used_auto += 1 if auto else 0
         try:
             if pro:
                 text = self._ask_claude_code(prompt, c)

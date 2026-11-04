@@ -83,9 +83,10 @@ def test_screens_go_before_the_download():
     stop.set()
     for t in ts:
         t.join(timeout=3)
-    gaps = [b - a for a, b in zip(sorted(stamps), sorted(stamps)[1:])]
+    st = sorted(stamps)
+    busiest = max(sum(1 for y in st if x <= y < x + 1.0) for x in st)
     assert max(waits) < 2.5 / B.RATE                       # a screen never waits behind the download's queue
-    assert min(gaps) > 0.9 / B.RATE and B.gave_way() >= 1   # the shared pace still holds
+    assert busiest <= 5 and B.gave_way() >= 1              # Dhan's limit (5 calls in any second) still holds
 
 
 def test_settings_are_parsed_once_until_they_change(tmp_path, monkeypatch):

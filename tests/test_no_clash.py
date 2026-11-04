@@ -58,3 +58,23 @@ def test_system_page_endpoint(tmp_path, monkeypatch):
         assert {s["id"] for s in j["services"]} >= {"upstox", "dhan", "claude", "telegram", "yahoo", "nse"}
         assert all(s["roles"] for s in j["services"])
         assert not [x for x in j["checks"] if x["ok"] is False and x["id"] != "disk"]
+
+
+def test_no_method_is_defined_twice():
+    """2.40: a second `def _watch` in LiveEngine silently replaced the watcher loop (no 9:00 auto-start, health monitor,
+    keep-awake or nightly Lab from 2.11 to 2.39). Python allows it without a word, so this test does not."""
+    import ast
+    dup = []
+    for p, src in _code():
+        for node in ast.walk(ast.parse(src)):
+            body = node.body if isinstance(node, (ast.ClassDef, ast.Module)) else None
+            if body is None:
+                continue
+            seen = {}
+            for b in body:
+                if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    prop = any(isinstance(d, ast.Attribute) and d.attr in ("setter", "getter", "deleter") for d in b.decorator_list)
+                    if b.name in seen and not prop:
+                        dup.append(f"{p.name}: {getattr(node, 'name', 'module')}.{b.name} (lines {seen[b.name]} and {b.lineno})")
+                    seen[b.name] = b.lineno
+    assert not dup, dup

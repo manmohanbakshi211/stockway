@@ -399,6 +399,40 @@ function extraIdx(x) {
       <small class="muted">${esc(c.src || "")}${c.expiry ? ` · expiry ${esc(c.expiry)}` : ""}${c.at ? ` · ${esc(c.at.slice(-8, -3))}` : ""}</small></div>`; }).join("")}</div>`;
 }
 
+/* 2.40: the indication tile takes whatever is left of its row in the market strip (no empty box beside it) */
+function fitIndTile() {
+  const strip = document.querySelector(".mstrip"), tile = strip && strip.querySelector(".ms-ind");
+  if (!tile) return;
+  tile.style.gridColumn = "";
+  const cols = getComputedStyle(strip).gridTemplateColumns.split(" ").filter(Boolean).length || 1;
+  let used = 0;
+  for (const el of strip.children) {
+    if (el === tile) break;
+    const span = /span (\d+)/.exec(getComputedStyle(el).gridColumnStart + " " + getComputedStyle(el).gridColumnEnd);
+    const w = Math.min(cols, span ? parseInt(span[1], 10) : 1);
+    used = (used % cols) + w > cols ? w : used + w;          // an item that does not fit starts a new row
+  }
+  const left = cols - (used % cols);
+  tile.style.gridColumn = `span ${left === 0 ? cols : left}`;
+}
+window.addEventListener("resize", () => { clearTimeout(window._fitT); window._fitT = setTimeout(fitIndTile, 150); });
+
+/* 2.40: India market indication (live/indication.py): one word for the whole Indian market, AI every 15 min */
+function indTile(v) {
+  if (!v) return "";
+  const x = v.latest;
+  const col = (w) => (w === "Gap up" || w === "Positive" ? "up" : w === "Gap down" || w === "Negative" ? "down" : "");
+  const hhmm = (iso) => { try { return new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false }); } catch (_) { return ""; } };
+  const nextTxt = v.next ? (new Date(v.next).toDateString() === new Date().toDateString() ? hhmm(v.next) : `${new Date(v.next).toLocaleDateString("en-IN", { weekday: "short" })} ${hhmm(v.next)}`) : "";
+  const rec = v.record || {};
+  const ph = x ? ({ "pre-open": "pre-open", session: "market hours", closed: "after the close" }[x.phase] || x.phase) : "";
+  const tag = x ? (x.by === "AI" ? `<em class="ind-tag">AI suggestion</em>` : `<em class="ind-tag rules" title="${esc(x.error || "AI off")}">rules</em>`) : "";
+  return `<div class="ms-item ms-ind"><span>India market ${tag}</span>
+    ${x ? `<b class="ind-word ${col(x.word)}">${esc(x.word)}</b><small class="ind-line">${esc(x.line)}</small>
+      <small>${esc(ph)} · ${esc(x.day === new Date().toLocaleDateString("en-CA") ? x.at : `${x.day.slice(5)} ${x.at}`)}${v.busy ? " · updating…" : nextTxt ? ` · next ${esc(nextTxt)}` : ""}${rec.open_n ? ` · open call right ${rec.open_right} of ${rec.open_n} days` : ""}</small>`
+      : `<b class="ind-word">–</b><small>${v.busy ? "Reading the market…" : `First reading at ${esc(nextTxt || "8:30")}.`}</small>`}</div>`;
+}
+
 /* World markets that move India (Yahoo, about a minute behind): grouped cards, refreshed every 30 s */
 function worldBoard(w) {
   if (!w || !(w.groups || []).length) return `<div id="lv-world"></div>`;
@@ -466,6 +500,7 @@ function renderLive(force = false) {
     ${fd.FII ? `<div class="ms-item"><span>Cash (${esc(fd.FII.date)})</span><b>FII <span class="${fd.FII.net >= 0 ? "up" : "down"}">${fd.FII.net >= 0 ? "+" : ""}${fk(Math.round(fd.FII.net))}</span> · DII <span class="${(fd.DII || {}).net >= 0 ? "up" : "down"}">${(fd.DII || {}).net >= 0 ? "+" : ""}${fk(Math.round((fd.DII || {}).net || 0))}</span></b><small>₹ crore</small></div>` : ""}
     ${g["US S&P 500 fut"] ? `<div class="ms-item"><span>Global</span><b>US ${fpc(g["US S&P 500 fut"].chg_pct, 1)} · Crude ${fpc((g["Brent crude"] || {}).chg_pct, 1)}</b><small>USD/INR ${g["USD/INR"] ? g["USD/INR"].last.toFixed(2) : "–"}</small></div>` : ""}
     ${cx.ban && cx.ban.length ? `<div class="ms-item"><span>F&amp;O ban</span><b class="down">${cx.ban.slice(0, 4).map(esc).join(", ")}${cx.ban.length > 4 ? "…" : ""}</b><small><a href="#/context">Market context →</a></small></div>` : ""}
+    ${indTile(s.indication)}
   </div>`;
   const secs = (mk.sectors || []).filter((x) => x.n >= 2);
   const secHTML = secs.length ? `<div class="panel tight"><h3>Sectors ${T}</h3><div class="sectors">${secs.slice(0, 12).map((x) => `<div class="sec" style="--c:${Math.max(-3, Math.min(3, x.chg))}" title="${x.up} of ${x.n} up · best ${esc(x.best[0])} ${x.best[1].toFixed(1)}% · worst ${esc(x.worst[0])} ${x.worst[1].toFixed(1)}%"><span>${esc(x.sector)}</span><b>${x.chg > 0 ? "+" : ""}${x.chg.toFixed(2)}%</b></div>`).join("")}</div></div>` : "";
@@ -503,6 +538,7 @@ function renderLive(force = false) {
   body.querySelectorAll("[data-ctab]").forEach((b) => b.onclick = () => { LS.set("contribTab", b.dataset.ctab); renderLive(true); });
   body.querySelectorAll("[data-brain-run]").forEach((b) => b.onclick = async () => { b.disabled = true; b.textContent = "Thinking…"; try { L.brain = await post("/api/brain/run", {}); renderLive(true); } catch (e) { toast(e.message); b.disabled = false; } });
   body.querySelectorAll("tr[data-sym]").forEach((tr) => tr.onclick = () => { location.hash = `#/sym?s=${encodeURIComponent(tr.dataset.sym)}`; });
+  fitIndTile();
 }
 
 /* ---------------- page: Scanner */
@@ -889,7 +925,11 @@ function drawPaper(p, first) {
     return `<tr><td>${sideTag(t)} <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${sizeLine(t)}${links(t)}</td><td>${stockNow(t)}</td><td>${esc((t.day || "").slice(5))} ${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r">${fx(t.last)} ${fpc(chg, 1)}</td>
       <td class="r">${fx(t.target)} / ${fx(t.stop)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}"><b>${rupees(t.unreal)}</b></td><td><button class="link-btn" data-close="${t.id}">Exit</button></td></tr>`;
   }).join("");
-  const closed = p.closed.map((t) => `<tr><td>${sideTag(t)} <b>${esc(t.label)}</b><br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${sizeLine(t)}${links(t)}</td><td>${stockClosed(t)}</td><td>${t.day}<br><small class="muted">${hm(t.entry_ts)}–${hm(t.exit_ts)}</small></td><td class="r">${fx(t.entry)} → ${fx(t.exit)}</td><td>${esc(t.reason)}</td><td class="r muted">${rupees(t.costs)}</td><td class="r ${t.net >= 0 ? "up" : "down"}"><b>${rupees(t.net)}</b></td></tr>`).join("");
+  // 2.40: the latest 25 closed trades (the rest one tap away), dates short and on one line
+  const shortDay = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" }); } catch (_) { return d; } };
+  const nShow = window.innerWidth < 700 ? 10 : 25;
+  const allClosed = L.paperAll || p.closed.length <= nShow;
+  const closed = (allClosed ? p.closed : p.closed.slice(0, nShow)).map((t) => `<tr><td>${sideTag(t)} <b>${esc(t.label)}</b><br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${sizeLine(t)}${links(t)}</td><td>${stockClosed(t)}</td><td class="nw">${esc(shortDay(t.day))}<br><small class="muted">${hm(t.entry_ts)}–${hm(t.exit_ts)}</small></td><td class="r nw">${fx(t.entry)} → ${fx(t.exit)}</td><td class="nw">${esc(t.reason)}</td><td class="r muted">${rupees(t.costs)}</td><td class="r ${t.net >= 0 ? "up" : "down"}"><b>${rupees(t.net)}</b></td></tr>`).join("");
   const kinds = p.by_kind.map((b) => `<tr><td>${esc(KIND[b.kind] || b.kind)}</td><td class="r">${b.n}</td><td class="r">${b.win_rate}%</td><td class="r ${b.avg >= 0 ? "up" : "down"}">${rupees(b.avg)}</td><td class="r ${b.net >= 0 ? "up" : "down"}"><b>${rupees(b.net)}</b></td></tr>`).join("");
   const cls = (v) => v >= 0 ? "up" : "down";
   const keepTop = $("#pp-top"); if (keepTop) main.appendChild(keepTop);       // out of the way while the rest redraws
@@ -915,10 +955,12 @@ function drawPaper(p, first) {
     <div class="split" style="margin-top:28px"><div><h2 style="margin-top:0">Which alerts make money</h2>
       <div class="table-wrap"><table><thead><tr><th>Alert type</th><th class="r">Trades</th><th class="r">Win</th><th class="r">Avg</th><th class="r">Total</th></tr></thead><tbody>${kinds || `<tr><td colspan="5" class="muted">Fills in as trades close.</td></tr>`}</tbody></table></div></div>
       <div><h2 style="margin-top:0">Equity</h2><div class="chart" id="eq-chart" style="height:240px"></div></div></div>
-    <h2>Closed trades</h2>
-    <div class="table-wrap"><table><thead><tr><th>Option</th><th>Stock</th><th>When</th><th class="r">Price</th><th>Exit</th><th class="r">Charges</th><th class="r">Net</th></tr></thead><tbody>${closed || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>
+    <h2>Closed trades <span class="muted small">${p.closed.length.toLocaleString("en-IN")}</span></h2>
+    <div class="table-wrap"><table class="pp-closed"><thead><tr><th>Option</th><th>Stock</th><th>When</th><th class="r">Price</th><th>Exit</th><th class="r">Charges</th><th class="r">Net</th></tr></thead><tbody>${closed || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>
+    ${p.closed.length > nShow ? `<p style="margin:8px 0 0"><button class="btn" id="pp-all">${allClosed ? `Show the latest ${nShow} only` : `Show all ${p.closed.length.toLocaleString("en-IN")} closed trades`}</button></p>` : ""}
     <p class="note">Paper only: no order ever reaches a broker. Charges are real (brokerage, STT, exchange, GST, stamp). Target +${s.target_pct}% / stop −${s.stop_pct}% on the option; alert trades exit after ${s.max_hold_min} min, all by ${esc(s.exit_time)}. ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : ""}</p>`;
   main.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => { try { await post(`/api/live/paper/${b.dataset.close}/close`, {}); toast("Closed"); pagePaper(); } catch (e) { toast(e.message); } });
+  { const b = $("#pp-all"); if (b) b.onclick = () => { L.paperAll = !L.paperAll; pagePaper(); }; }
   // capital box + challenge + patterns: built once, then moved into place on every redraw (typing is never reset)
   let top = $("#pp-top");
   if (!top) { main.insertAdjacentHTML("beforeend", `<div id="pp-top"></div>`); top = $("#pp-top"); }
@@ -3123,7 +3165,7 @@ function coachBox(c) {
   const st = { "in progress": ["p-amber", "In progress"], passed: ["p-up", "Passed"], failed: ["p-down", "Failed"], "not started": ["", "Not started"] }[ch.state] || ["", ch.state];
   const chal = `<div class="panel tight"><div class="toolbar" style="margin:0 0 6px"><h3 style="margin:0">Prop-firm challenge <span class="pill ${st[0]}">${esc(st[1])}</span></h3><button class="btn" id="ch-new">Start a new one today</button></div>
     <p class="small" style="margin:0">Make <b>+${r.profit_target_pct}%</b> without losing more than ${r.daily_loss_pct}% in a day or ${r.max_drawdown_pct}% from the best point, over at least ${r.min_days} trading days (max ${r.max_days}). Pass it on paper before thinking about real money.</p>
-    ${ch.days != null ? `<div class="kpis" style="margin-top:8px"><div class="kpi"><b class="${ch.net >= 0 ? "up" : "down"}">${rupees(ch.net)}</b><span>Net since ${esc(ch.start)} (target ${rupees(ch.target)})</span></div>
+    ${ch.days != null ? `<div class="kpis ch-kpis" style="margin-top:8px"><div class="kpi"><b class="${ch.net >= 0 ? "up" : "down"}">${rupees(ch.net)}</b><span>Net since ${esc(ch.start)} (target ${rupees(ch.target)})</span></div>
       <div class="kpi"><b>${ch.days}</b><span>Trading days${ch.days_left ? ` (${ch.days_left} more needed)` : ""}</span></div>
       <div class="kpi"><b class="down">${rupees(ch.worst_day)}</b><span>Worst day</span></div><div class="kpi"><b class="down">${rupees(ch.max_drawdown)}</b><span>Biggest drop</span></div></div>
       <div class="meter"><i class="${ch.progress_pct >= 100 ? "on" : ""}" style="width:${Math.min(100, ch.progress_pct || 0)}%"></i></div>` : ""}
