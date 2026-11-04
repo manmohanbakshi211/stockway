@@ -763,3 +763,4 @@ tr.best td { background: var(--up-soft); }
 @media (max-width: 700px) { .pp-closed td, .pp-closed th { padding: 8px 8px; } }
 /* 2.40.1: Fortune's own market: predicted up = blue, predicted down = orange */
 .fo-up { color: #2F6FDE; } .fo-dn { color: #E07B00; }
+.fo-cast { border-left: 3px solid #2F6FDE; padding: 2px 0 2px 10px; margin: 0 0 10px; overflow-wrap: anywhere; }

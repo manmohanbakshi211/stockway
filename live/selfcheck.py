@@ -110,6 +110,15 @@ def static_checks(cfg: dict | None = None) -> list:
                   and "nextc" not in inspect.getsource(_eng.LiveEngine._loop),
                   _nc._C.get("error") or ", ".join(f"{v['after']} × {v['from']} → {k}" for k, v in prs.items())
                   + "; information only, graded at every close"))
+    from live import candlecast as _cc
+    from lab import proc as _proc
+    ccc = _cc.cfg()
+    out.append(_c("candle_forecast", "Candle forecast (2.41): trained in a low-priority child process, predicted in the next-candle thread, every stage graded",
+                  "candlecast" in _proc.JOBS and 'proc.run("candlecast"' in inspect.getsource(_cc.Cast.ensure)
+                  and "_cast_step" in inspect.getsource(_nc.NextCandle.tick) and "_TRAIN.acquire(blocking=False)" in inspect.getsource(_cc.Cast.ensure)
+                  and not _cc._C.get("error"),
+                  _cc._C.get("error") or f"{', '.join(ccc['symbols'])}; PAKKA = the strength that was {int(float(ccc['target']) * 100)}% right "
+                                         f"on validation days; one training at a time, again every {ccc['retrain_days']} days after {ccc['train_after']}"))
     vsrc = inspect.getsource(_eng.LiveEngine._vault_loop)
     vc = vault.cfg()
     out.append(_c("vault_spare_calls", "Data vault: stock option chains only with spare Upstox calls, never changing the scanner",

@@ -19,5 +19,16 @@
  "market_ref": {"default": "NIFTY", "NIFTY": "BANKNIFTY"},
  "past_shown": 150,
  "show_cone": false,
- "since": "2026-11-04"
+ "since": "2026-11-04",
+  "cast": {
+    "about": "2.41 candle forecast (live/candlecast.py): the forming candle's colour with a strength ladder (PAKKA = the strength from which calls were 90% right on validation days; every number shown is from holdout days), its shape family, multi-candle patterns, a 90% close zone and the most similar past charts. Trained on data/history/<SYM>/minutes.parquet in a child process (lab/proc.py), graded live in the candlecast table. Information only.",
+    "on": true, "symbols": ["NIFTY", "BANKNIFTY"], "history_days": 2000, "min_days": 60, "target": 0.90,
+    "split": [0.6, 0.2], "min_calls_share": 0.003, "min_calls": 40, "window": 12,
+    "model": {"iters": 300, "lr": 0.05, "leaves": 31},
+    "similar": {"on": true, "neighbors": 50, "pool": 15000, "show": 3},
+    "shape": {"on": true, "iters": 150, "leaves": 15},
+    "patterns": {"list": ["engulfing", "harami", "inside_bar", "outside_bar", "star", "tweezer", "pin_bar", "hammer"], "iters": 150, "leaves": 15, "min_pos": 50, "min_calls": 20},
+    "zone": {"cover": 0.90, "iters": 200, "leaves": 15},
+    "no_volume": true, "retrain_days": 7, "train_after": "16:15", "train_before": "08:45", "since": "2026-11-05"
+  }
 }

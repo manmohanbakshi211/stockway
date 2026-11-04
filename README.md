@@ -114,6 +114,35 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Candle forecast on the Fortune chart: colour with an honest strength, shape, patterns, 90% close zone (2.41)
+
+- **Mandeep (4–5 Nov):** from the timeframe cascade, say which candle is forming on the real chart (hammer, shooting
+  star, doji, marubozu, engulfing, inside / outside bar ...) and where it closes; give it strength from the times the
+  chart looked like this before; 90%+ accuracy, counted only on predictions made before the candle closed.
+- **Gun (`live/candlecast.py`):** pattern / shape labeller (8 shape families named by the move before: Hammer, Hanging
+  man, Shooting star, Inverted hammer, Doji, Spinning top, Marubozu, plain up / down candle; multi-candle patterns from
+  `live/candles.py`), similar-chart matcher (shape of the last 12 candles + the candle so far, nearest 50 in the
+  history), strength ladder + PAKKA level, 90% close zone (quantile models widened on validation: conformal), forward
+  grader (`candlecast` table, every stage of every candle), training job `lab/proc.py "candlecast"` (child process,
+  nice 10, one at a time; first time when no models exist, then every 7 days after 16:15), System check `candle_forecast`.
+- **Bullets (`rules/fortune.json` "cast"):** symbols (Nifty, Bank Nifty: years of 1-minute history), target 0.90,
+  split 60 / 20 / 20 by days, model sizes, similar-chart pool and neighbours, pattern list, zone cover, retrain days.
+  A failing pattern bullet is skipped and logged; the 2.39 cascade candle (champion) is unchanged.
+- **Honest test (data/history 1-minute, Jan 2022 → Nov 2026, Nifty + Bank Nifty; learned to Nov 2024, numbers from
+  the 240 days after 14 Nov 2025 no model or level saw):** PAKKA calls at 90%: 5m after 2 min 22% of candles 89.7%,
+  after 3 min 54% 90.2%, after 4 min 87% 90.3%; 15m after 5 min 16% 90.9%, after 10 min 65% 90.0%; 1H after 30 min
+  41% 89.9%, after 45 min 79% 88.8%; 1D after 5 hours 92% 89.9%. **The plain rule "it keeps the colour it has so
+  far" was right as often on the same candles** (calls against it: almost none, about half right): price history alone
+  shows what the chart already shows. Before a candle starts: 50–51% (a coin flip). Shape family: 4–6 points better
+  than "the shape so far" on 5m / 15m / 1H (34–54% right), not on 1D. Inside / outside bar 90–96% right when called.
+  90% close zone held 89.5–90.7% (1D 86–90%). Similar charts alone: weaker than the model (72% vs 78% at 5m after 3 min).
+- **Chart:** side panel "Candle forecast (trial)": PAKKA / Watching, direction and strength, how right that strength was
+  on unseen days, the plain rule's view, shape (top 3), patterns with their unseen-day record, 90% close zone, the 50
+  most similar past charts (share green, closest three with date and symbol); arrow + strength on the forming candle and
+  the 90% zone as two lines; report table "Candle forecast: how good" per stage with the live PAKKA record.
+- **Next (to beat the plain rule):** option-chain facts from the 5-year 1-minute option files (premium, IV, OI, volume
+  per strike) as a challenger voter; live order flow / OI / news after 5+ days of graded candles.
+
 ## Fortune chart: its own market of predicted candles (2.40.1)
 
 - **Mandeep (4 Nov evening):** the shadow candle under the real one was hard to read. The Fortune chart is now its own

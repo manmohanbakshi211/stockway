@@ -1820,13 +1820,66 @@ function nextCandleReport(nx) {
     ${rec ? `<details><summary class="small muted">Latest graded predictions</summary><div class="table-wrap"><table class="mini"><thead><tr><th>Candle</th><th class="r">At</th><th class="r">Predicted</th><th class="r">Real</th><th></th></tr></thead><tbody>${rec}</tbody></table></div></details>` : ""}
     <p class="small muted" style="margin:4px 0 0">"Keeps its colour" = the plain rule that the candle ends the colour it has so far: the bar the model must beat. Pool: ${(nx.pool || 0).toLocaleString("en-IN")} past moments from ${(nx.history_rows || 0).toLocaleString("en-IN")} ${esc(nx.from)} bars. Information only: never a signal.</p></div>`;
 }
+/* 2.41 candle forecast (live/candlecast.py): for the candle forming now, its colour with a strength (PAKKA = the strength
+   from which calls were 90% right on validation days; the numbers shown are from holdout days it never saw), its shape,
+   multi-candle patterns, a 90% close zone and the most similar past charts, next to the plain rule "it keeps its colour". */
+const CAST_PAT = { engulfing: "Engulfing", harami: "Harami", inside_bar: "Inside bar", outside_bar: "Outside bar", star: "Morning / evening star",
+  tweezer: "Tweezer", pin_bar: "Pin bar", hammer: "Hammer / shooting star" };
+function castSide(c, d) {
+  if (!c || !c.on) return "";
+  const head = `<p style="margin:0 0 4px"><b>Candle forecast</b> <span class="pill p-amber">trial</span></p>`;
+  if (c.status === "symbol") return `<div class="fo-cast">${head}<p class="muted small" style="margin:0">${esc(c.message || "")}</p></div>`;
+  if (c.status !== "ready") return `<div class="fo-cast">${head}<p class="muted small" style="margin:0">${c.training || c.status === "training"
+    ? "Learning from 5 years of 1-minute candles in the background (about 15 minutes, the first time only)…" : c.status === "error" ? esc(c.error || "Not available.") : "Starts learning in a moment…"}</p></div>`;
+  const p = c.now, rep = c.report || {};
+  const running = !!(L.snap && L.snap.status && L.snap.status.running);
+  if (!p) return `<div class="fo-cast">${head}<p class="muted small" style="margin:0">${running ? `Starts when the first ${esc(rep.from || "")} candle of the next ${esc(d.tf)} candle closes.`
+    : "Market closed: the forecast starts with the first candle after the open. How good it was: in the table under the chart."}</p></div>`;
+  const st = (rep.stages || []).find((s) => s.k === p.k) || {};
+  const arrow = p.dir === "up" ? `<b class="fo-up">▲ Up (green)</b>` : `<b class="fo-dn">▼ Down (red)</b>`;
+  const badge = p.pakka ? `<span class="pill p-up">PAKKA</span>` : `<span class="pill">Watching</span>`;
+  const band = p.band ? `At this strength, unseen days were right <b>${p.band.right}%</b> (${(p.band.n || 0).toLocaleString("en-IN")} candles).` : "";
+  const pk = st.bar != null ? `PAKKA from ${Math.round(st.bar * 100)}%: ${st.right}% right on ${st.cover}% of candles.` : "No 90% level at this stage.";
+  const simple = p.simple == null ? "" : p.agrees ? `The plain rule (it keeps the colour it has so far) says the same.`
+    : `<b class="down">Against the plain rule</b>: such calls were right ${st.flips_right != null ? st.flips_right + "%" : "–"} (${st.flips || 0} on unseen days).`;
+  const shape = (p.shape || []).map((x) => `${esc(x.name)} <b>${x.pct}%</b>`).join(" · ");
+  const pats = (p.patterns || []).map((x) => `<span class="pill">${esc(x.name)}</span> <small class="muted">${x.hold != null ? `${x.hold}% right when called` : ""}${x.already ? " · already formed" : ""}</small>`).join(" ");
+  const when = (t) => new Date((t - 19800) * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
+  const sim = p.similar ? `${p.similar.n} most similar charts since ${esc((rep.first_day || "").slice(0, 4))}: <b>${p.similar.green_pct}% ended green</b>, close ~${fx(p.similar.close)} (${p.similar.agrees ? "agree" : "disagree"}).`
+    + ((p.similar.closest || []).length ? ` Closest: ${p.similar.closest.map((x) => `${x.sym ? esc(x.sym) + " " : ""}${when(x.time)} <span class="${x.green ? "up" : "down"}">${x.green ? "green" : "red"}</span>`).join(", ")}.` : "") : "";
+  return `<div class="fo-cast">${head}
+    <p style="margin:0 0 4px">${badge} ${arrow} · strength <b>${p.strength}%</b> <span class="muted small">after ${p.k} of ${p.n_sub} ${esc(rep.from || "")} candles</span></p>
+    <p class="small" style="margin:0 0 4px">${band} ${pk}</p>
+    ${simple ? `<p class="small muted" style="margin:0 0 4px">${simple}</p>` : ""}
+    ${shape ? `<p class="small" style="margin:0 0 4px">Shape: ${shape} <span class="muted">(so far: ${esc(p.shape_so_far || "")})</span></p>` : ""}
+    ${pats ? `<p class="small" style="margin:0 0 4px">Pattern: ${pats}</p>` : ""}
+    ${p.zone ? `<p class="small" style="margin:0 0 4px">90% close zone <b>${fx(p.zone[0])} – ${fx(p.zone[1])}</b></p>` : ""}
+    ${sim ? `<p class="small muted" style="margin:0">${sim}</p>` : ""}</div>`;
+}
+function castReport(c) {
+  if (!c || c.status !== "ready" || !c.report) return "";
+  const r = c.report, lv = {};
+  (c.live || []).forEach((x) => { lv[x.k] = x; });
+  const pc = (v) => v == null ? "–" : `${v}%`;
+  const rows = (r.stages || []).map((s) => { const l = lv[s.k];
+    const pats = Object.entries(s.patterns || {}).filter(([, v]) => v.bar != null && (v.calls || 0) >= 20).map(([k, v]) => `${esc(CAST_PAT[k] || k)} ${pc(v.right)}`).join(", ");
+    return `<tr><td>${esc(s.label)}</td><td class="r">${s.bar != null ? `<b>${pc(s.right)}</b> <small class="muted">on ${pc(s.cover)}</small>` : "–"}</td><td class="r">${s.bar != null ? pc(s.simple_same) : "–"}</td>
+      <td class="r">${pc(s.all_right)} <small class="muted">vs ${pc(s.simple_all)}</small></td><td class="r">${s.shape ? `${pc(s.shape.all_right)} <small class="muted">vs ${pc(s.shape.plain_all)}</small>` : "–"}</td>
+      <td class="r">${pc((s.zone || {}).held)}</td><td class="small">${pats || "–"}</td>
+      <td class="r">${l && l.calls ? `<b>${pc(l.right)}</b> <small class="muted">of ${l.calls} · plain ${pc(l.simple_same)}</small>` : l ? `<small class="muted">${l.n} graded</small>` : "–"}</td></tr>`; }).join("");
+  return `<div class="fo-report"><h3 style="margin:12px 0 4px">Candle forecast: how good <span class="pill p-amber">trial</span></h3>
+    <p class="small muted" style="margin:0 0 6px">Learned from ${esc(r.first_day || "")} → ${esc(r.train_to || "")}; every number here is from the ${r.hold_days || 0} days after ${esc(r.hold_from || "")} that no model or level ever saw. Counted only for calls made before the candle closed.</p>
+    <div class="table-wrap"><table class="mini"><thead><tr><th>Stage</th><th class="r">PAKKA right <small>(share of candles)</small></th><th class="r">Plain rule, same candles</th><th class="r">Every candle vs plain</th>
+      <th class="r">Shape right vs "so far"</th><th class="r">90% zone held</th><th>Patterns: right when called</th><th class="r">Live PAKKA</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="small muted" style="margin:4px 0 0">PAKKA = the strength from which calls were 90% right on validation days (patterns too: shown when they reached 90% there; the number is what they did on the unseen days). Plain rule = the candle ends the colour it has so far: where both columns match, the chart already showed it; the edge is the gap between them. Information only: never a signal.</p></div>`;
+}
 function fortuneDraw(d) {
   const el = $("#fo-chart"), side = $("#fo-side"), rep = $("#fo-report");
   if (!el || !side) return;
   FO.last = d; FO.refresh = d.refresh_s || 10;
   const nx = d.next || {};
-  side.innerHTML = nextCandleSide(d, nx);
-  if (rep) rep.innerHTML = nextCandleReport(nx);
+  side.innerHTML = castSide(nx.cast, d) + nextCandleSide(d, nx);
+  if (rep) rep.innerHTML = nextCandleReport(nx) + castReport(nx.cast);
   if (!nx.cascade || nx.status !== "ready") { if (!FO.chart) el.innerHTML = `<p class="muted small" style="padding:12px">${nx.status === "building" ? "Fortune is reading the history…" : ""}</p>`; return; }
   const LW = window.LightweightCharts;
   if (!LW) return;
@@ -1840,6 +1893,7 @@ function fortuneDraw(d) {
     FO.s.r = FO.chart.addSeries(LW.LineSeries, { color: "rgba(94,107,120,.8)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     FO.s.p = FO.chart.addSeries(LW.CandlestickSeries, { upColor: FO_UP, downColor: FO_DN, borderVisible: false, wickUpColor: FO_UP, wickDownColor: FO_DN,
       priceLineVisible: false, lastValueVisible: true });
+    FO.mk = LW.createSeriesMarkers ? LW.createSeriesMarkers(FO.s.p, []) : null;
   }
   const all = (nx.past || []).concat(nx.now ? [{ ...nx.now, now: true }] : []).sort((a, b) => a.time - b.time);
   const preds = all.filter((x, i) => i === all.length - 1 || x.time !== all[i + 1].time).slice(-200);
@@ -1851,6 +1905,10 @@ function fortuneDraw(d) {
   FO.lines.forEach((pl) => { try { FO.s.p.removePriceLine(pl); } catch (_) {} });
   FO.lines = [];
   if (nx.now) ["close_hi", "close_lo"].forEach((k) => FO.lines.push(FO.s.p.createPriceLine({ price: nx.now[k], color: "#5E6B78", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "likely close" })));
+  const cn = nx.cast && nx.cast.now, onBar = cn && nx.now && cn.time === nx.now.time;       // 2.41: the forecast on the forming candle
+  if (onBar && cn.zone) cn.zone.forEach((v) => FO.lines.push(FO.s.p.createPriceLine({ price: v, color: "#9AA6B2", lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: "90%" })));
+  if (FO.mk) FO.mk.setMarkers(onBar ? [{ time: cn.time, position: cn.dir === "up" ? "aboveBar" : "belowBar", color: cn.dir === "up" ? FO_UP : FO_DN,
+    shape: cn.dir === "up" ? "arrowUp" : "arrowDown", text: `${cn.pakka ? "PAKKA " : ""}${Math.round(cn.strength)}%` }] : []);
   if (!FO.fitted && preds.length) { FO.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, preds.length - 40), to: preds.length + 2 }); FO.fitted = true; }
 }
 

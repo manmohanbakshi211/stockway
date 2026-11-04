@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-JOBS = ("factory", "mlstrat", "echo")
+JOBS = ("factory", "mlstrat", "candlecast", "echo")
 NICE = 10
 RESULT = "@@RESULT "
 LAST: dict = {}                   # the latest run: how it ran (child / in-process), when, how long (System page)
@@ -40,6 +40,9 @@ def _inproc(job: str, data_dir, log, should_stop, kw: dict):
     if job == "mlstrat":
         from . import mlstrat
         return mlstrat.run(data_dir, log=log, should_stop=should_stop)
+    if job == "candlecast":                              # 2.41: the Fortune candle forecast models (live/candlecast.py)
+        from live import candlecast
+        return candlecast.run(data_dir, log=log, should_stop=should_stop, tfs=kw.get("tfs"))
     if job == "echo":                                    # for the tests: proves the child runs, logs and stops
         for i in range(int(kw.get("n", 3))):
             if should_stop():

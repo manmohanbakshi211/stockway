@@ -412,12 +412,42 @@ class NextCandle:
         """Called every few seconds by the scanner loop: cheap (pools are built in their own thread)."""
         now = now or self._now()
         today = _day(now).isoformat()
+        try:
+            self.cast().ensure()
+        except Exception as ex:
+            self.status["errors"]["cast"] = str(ex)[:120]
         for sym in self.tracked():
             for tf in pairs():
                 try:
                     self._step(sym, tf, now, today)
                 except Exception as ex:
                     self.status["errors"][f"{sym} {tf}"] = str(ex)[:120]
+                try:                                     # 2.41: the candle forecast, isolated (it never stops the cascade)
+                    self._cast_step(sym, tf, now, today)
+                except Exception as ex:
+                    self.status["errors"][f"cast {sym} {tf}"] = str(ex)[:120]
+
+    def cast(self):
+        """2.41: the candle forecast (live/candlecast.py): colour with a strength ladder, shape, patterns, 90% zone."""
+        if getattr(self, "_cast", None) is None:
+            from .candlecast import Cast
+            self._cast = Cast(self.e)
+        return self._cast
+
+    def _cast_step(self, sym, tf, now, today):
+        from . import candlecast as CC
+        cc = CC.cfg()
+        if not cc.get("on", True) or sym not in cc["symbols"]:
+            return
+        sub = pairs()[tf]["from"]
+        live_rows = self._today_rows(sym, sub)
+        if not live_rows:
+            return
+        need = max(60, 3 * round(TF_MIN[tf] / SUB_MIN[sub]) * 30)
+        tail = self._hist_tail(sym, sub, today, need)
+        ms = self._mkt_sym(sym)
+        mrows = (self._hist_tail(ms, sub, today, need) + self._today_rows(ms, sub)) if ms else None
+        self.cast().step(sym, tf, sub, tail + live_rows, mrows, now, today)
 
     def _step(self, sym, tf, now, today):
         p = self.pool(sym, tf, today)
@@ -575,6 +605,16 @@ class NextCandle:
         return out
 
     def view(self, sym, tf) -> dict:
+        """The cascade's view plus the 2.41 candle forecast (its own block: a failure there never hides the chart)."""
+        out = self._view(sym, tf)
+        if pairs().get(tf):
+            try:
+                out["cast"] = self.cast().view(sym, tf)
+            except Exception as ex:
+                out["cast"] = {"on": True, "status": "error", "error": str(ex)[:160]}
+        return out
+
+    def _view(self, sym, tf) -> dict:
         """Everything the Fortune chart needs for the shadow next candle and the smart report (cheap: no building here)."""
         pr = pairs().get(tf)
         if not pr:
