@@ -62,6 +62,11 @@ def static_checks(cfg: dict | None = None) -> list:
                   mtfcandles._C.get("error") or ("timeframes " + ", ".join(mtfcandles.TF_NAME.get(int(x), f"{x}m") for x in cc["intraday_min"])
                                                  + (", 1D" if cc.get("daily") else "") + (", 1W" if cc.get("weekly") else "")
                                                  + f"; on the test bench: {', '.join(cc.get('bench') or []) or 'none'}")))
+    from live import events as _ev
+    ec = _ev.cfg()
+    out.append(_c("event_sources", "Event engine settings load (rules/event_sources.json); event risk never blocks anything",
+                  not _ev._C.get("error") and bool(ec.get("sources")),
+                  _ev._C.get("error") or f"{len(ec.get('sources') or [])} official feeds: " + ", ".join(x['name'] for x in ec.get('sources') or [])))
     from live import dataguard
     dc = dataguard.cfg()
     esrc = inspect.getsource(_eng.LiveEngine._emit)

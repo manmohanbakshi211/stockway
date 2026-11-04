@@ -95,6 +95,13 @@ class LiveEngine:
         except Exception as e:
             self.health = None
             self.log(f"Health monitor off: {e}")
+        try:                                         # 2.35: official feeds + event risk on every alert (live/events.py)
+            from .events import EventEngine
+            self.events = EventEngine(self)
+            self.events.start()
+        except Exception as e:
+            self.events = None
+            self.log(f"Event engine off: {e}")
         threading.Thread(target=self._watch, daemon=True, name="live-watch").start()
         threading.Thread(target=self._news_loop, daemon=True, name="live-news").start()
         threading.Thread(target=self.context.run_forever, args=(self._filings_wanted,), daemon=True,
@@ -969,6 +976,11 @@ class LiveEngine:
                 f.update(self.cdl.facts(sym, direction))
             except Exception:
                 pass
+        if getattr(self, "events", None) is not None:   # 2.35: the event risk at that moment
+            try:
+                f.update(self.events.risk(sym, now).get("facts") or {})
+            except Exception:
+                pass
         out = {x: y for x, y in f.items() if x not in ("kind", "severity", "direction") and y is not None}
         self._facts_cache[k] = out
         return out
@@ -1021,7 +1033,8 @@ class LiveEngine:
             "breadth": mk.get("breadth"), "sectors": [{"sector": x.get("sector"), "chg": x.get("chg")} for x in mk.get("sectors") or []],
             "indices": idx, "vix": self._vix(), "gift": self.gift.row if self.gift else None, "world": world,
             "pressure": pressure, "regimes": {s: r.get("code") for s, r in self.regimes.items() if r},
-            "in_play": sorted(self.in_play), "movers": (self.mover_last or {}).get("picks")})
+            "in_play": sorted(self.in_play), "movers": (self.mover_last or {}).get("picks"),
+            "events": (self.events.risk("NIFTY", now).get("items") if getattr(self, "events", None) is not None else None)})
 
     def _vault_loop(self, token):
         """2.31 data vault: a full option chain for every F&O stock every few minutes (rules/vault.json), spread over the
@@ -1301,6 +1314,15 @@ class LiveEngine:
         except Exception as e:
             if self._every("bigpic_err", 600, clock_time=False):
                 self.log(f"Bigger-picture facts skipped: {e}")
+        evr = None
+        if getattr(self, "events", None) is not None:   # 2.35: event risk (information and warnings only)
+            try:
+                evr = self.events.risk(a["sym"], now)
+                feats.update(evr.get("facts") or {})
+            except Exception as e:
+                evr = None
+                if self._every("event_risk_err", 600, clock_time=False):
+                    self.log(f"Event risk skipped: {e}")
         p = self.ranker.predict(feats) if self.ranker else None
         sc = signal_score(a["severity"], ev, st, regime_adjust((reg or {}).get("code"), a["kind"], a["direction"]), p)
         muted = None
@@ -1337,6 +1359,7 @@ class LiveEngine:
                      "conviction": conv, "regime": (reg or {}).get("label"),
                      "plan": tp_plan,
                      "bigger": big or None,
+                     "event_risk": {k: evr.get(k) for k in ("level", "line", "items", "warnings")} if evr and evr.get("items") else None,
                      "fits_small": bool(a.get("option") and (a["option"].get("cost_per_lot") or 1e9) <= float(lc.get("small_lot_max") or 10000)),
                      "context": {k: feats.get(k) for k in ("nifty_al", "sector_al", "global_al", "breadth_al", "news_n", "news_al")}}
         # risk gate: PASS / BLOCK with reasons and lots, before anything can become a paper trade
@@ -1449,6 +1472,9 @@ class LiveEngine:
         out = riskgate.check(a, opt, now=now, paper_cfg=self.paper.cfg, guard=self.paper.guard(now),
                              open_syms={t["sym"] for t in self.paper.open_trades()}, ban=ban, cfg=(lc.get("risk") or {}),
                              sim=self.source == "sim", bigger=(a.get("data") or {}).get("bigger"))
+        er = (a.get("data") or {}).get("event_risk") or {}
+        if er.get("warnings"):                       # 2.35: event risk, warnings only
+            out["warnings"] = (out.get("warnings") or []) + list(er["warnings"])
         try:                                         # tilt coach: a warning (never a block) after two losses in a row
             from .coach import streak_warning
             day = now.date().isoformat()

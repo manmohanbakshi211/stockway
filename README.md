@@ -114,6 +114,23 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Event engine: official feeds and event risk on every alert (2.35)
+
+- **Official feeds (live/events.py, rules/event_sources.json):** RBI press releases and notifications, SEBI orders and
+  circulars, Government (PIB, economy-related only), NSE circulars and BSE notices: free RSS, read every 2 minutes in
+  market hours (checked live: all six read on the Mac). Each item is tagged high / medium / low by its words, noise
+  (recruitment, greetings, sanctions lists, auction results...) is dropped, it is matched to F&O stocks by name, kept
+  across restarts and saved with the day's data. A new **high-impact** one naming an F&O stock (or hitting the whole
+  market) goes to Telegram, at most 6 an hour.
+- **Event risk on every alert and every test signal:** India's scheduled days (RBI policy, Budget, rules/events.json),
+  high-impact world events in the next 2 hours (US CPI, Fed...), the stock's results / board meeting, expiry day, the
+  F&O ban list, a market holiday on the next weekday, and fresh official news on the stock or the market. Shown as one
+  "⚡ Event risk" line on the alert, the important ones as warnings in the risk check, and recorded as facts
+  (ev_level, ev_glob_min, ev_results_d, ev_expiry, ev_ban, ev_off_sym_min...) for the models. **It never blocks an
+  alert or a trade.**
+- Live page "Events today" panel; System page card for the official feeds (each feed's status); selfcheck
+  event_sources. Checked: 194 tests, Lab regression 103/103, Live / Alerts / System pages at desktop and phone.
+
 ## Data quality guard (2.34)
 
 - **live/dataguard.py, rules/dataguard.json:** every 5 seconds every live price is checked.

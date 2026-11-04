@@ -1296,6 +1296,8 @@ ROLES = {
     "telegram": ["Alerts and important notices on your phone (token expired, live data stopped)"],
     "yahoo": ["World markets, India VIX history, global context (free, no login)",
               "All-time and 52-week highs / lows of the indices; chart history when Dhan isn't available"],
+    "official": ["RBI press releases and notifications, SEBI orders and circulars, Government (PIB) releases, NSE circulars, "
+                 "BSE notices (free RSS feeds, no login)", "Event risk on every alert; a new high-impact item to Telegram"],
     "nse": ["Insider trades and company filings, F&O ban list, end-of-day files (free, no login)",
             "Upcoming results / board meetings (event calendar, every 6 hours): warnings on alerts"],
 }
@@ -1380,6 +1382,17 @@ def system_view():
                f"updated {_ago(cal_at)}" if cal else " · results calendar: not loaded yet")
     svcs.append(_svc("nse", "NSE (free files)", "ok" if ins and time.time() - ins < 2 * 86400 else "warn",
                      (f"Filings read {_ago(ins)}" if ins else "Not read yet") + cal_txt, updated=_ago(ins)))
+    # 2.35 official feeds (event engine)
+    evs = getattr(e, "events", None)
+    if evs is not None:
+        srcs = list(evs.status.items())
+        ok = sum(1 for _, v in srcs if v.get("ok"))
+        bad_src = [n for n, v in srcs if v.get("ok") is False]
+        st = "warn" if not srcs else "ok" if not bad_src else "warn"
+        msg = (f"{ok} of {len(srcs)} feeds read, last {_ago(max(v.get('at') or 0 for _, v in srcs))}"
+               + (f"; not reachable: {', '.join(bad_src)}" if bad_src else "")) if srcs else "First read within a minute of starting"
+        svcs.append(_svc("official", "Official feeds (RBI, SEBI, Govt, NSE, BSE)", st, msg,
+                         sources=[{"name": n, **v} for n, v in srcs]))
     # jobs
     d5 = DHAN5Y.view()
     cur = JOBS.current or {}
@@ -1423,7 +1436,16 @@ def system_view():
                   "overall": "bad" if bad else "warn" if warn else "ok", "services": svcs, "jobs": job_rows,
                   "checks": checks, "problems": sorted(probs.values(), key=lambda p: p["last"], reverse=True)[:12],
                   "bullets": _registry_list(), "rules": _rules_check(), "vault": _vault_view(e),
-                  "health": e.health.view() if getattr(e, "health", None) is not None else None})
+                  "health": e.health.view() if getattr(e, "health", None) is not None else None,
+                  "events": _events_view(e)})
+
+
+def _events_view(e):
+    try:
+        v = e.events.view() if getattr(e, "events", None) is not None else None
+        return {"sources": v["sources"], "error": v.get("error")} if v else None
+    except Exception as ex:
+        return {"error": str(ex)[:160], "sources": []}
 
 
 def _vault_view(e):

@@ -272,12 +272,19 @@ function alertItem(a, full = false, extra = "") {
     <div class="al-time">${hms(a.ts)}<span class="sevtag s${a.severity}">${SEV[a.severity]}</span>${score}</div>
     <div class="al-body"><div class="al-title">${arrow(a.direction)} <a href="${a.sym === "GLOBAL" ? "#/world" : `#/chart?s=${encodeURIComponent(a.sym)}`}">${esc(a.title)}</a></div>
       <p>${esc(a.detail)}${link} <span class="muted small">${esc(KIND[a.kind] || a.kind)}</span> ${track}</p>${live ? `<p class="small" style="margin:2px 0 6px">${live}</p>` : ""}
-      ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}${bigLine(d.bigger)}
+      ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}${bigLine(d.bigger)}${eventLine(d.event_risk)}
       ${ev || ctxChips || conv || fits ? `<div class="evs">${conv}${fits}${ev}${ctxChips}</div>` : ""}${plan}${pro}${trade}${riskLine(d.risk)}
       ${a.ai ? `<div class="ai-text">${fmtAI(a.ai)}</div>` : ""}${extra}</div></li>`;
 }
 
 /* The bigger picture (live/htf.py + results calendar): information only, not in the score until it proves itself */
+/* 2.35: event risk on an alert (information and warnings only) */
+function eventLine(r) {
+  if (!r || !(r.items || []).length) return "";
+  const col = r.level === "high" ? "down" : r.level === "medium" ? "amber" : "muted";
+  return `<p class="small" style="margin:2px 0 6px" title="Information only: never blocks an alert or a trade"><span class="${col}">⚡ Event risk${r.level ? ` (${esc(r.level)})` : ""}:</span> ${r.items.slice(0, 3).map((i) => esc(i.what)).join(" · ")}</p>`;
+}
+
 function bigLine(b) {
   if (!b || !(b.line || b.event || b.index_event)) return "";
   const ev = b.event ? `${b.event.results ? "Results" : esc(b.event.purpose || "Board meeting")} ${b.event.days === 0 ? "today" : b.event.days === 1 ? "tomorrow" : `in ${b.event.days} trading days`} (${esc(b.event.date.slice(5))})` : "";
@@ -351,9 +358,9 @@ async function pageLive() {
       <p class="lede" style="margin-bottom:14px">Nifty, Bank Nifty and every F&amp;O stock with its options, checked every second.</p></div></div>
     <div id="lv-bar"></div><div id="lv-body"></div>`;
   renderLive(true);
-  loadWorldBoard(); loadBoardMini();
+  loadWorldBoard(); loadBoardMini(); loadEventsMini();
   let k = 0;
-  const tick = () => { if (state.page !== "live") return; loadWorldBoard(); if (++k % 2 === 0) loadBoardMini(); L.pageTimer = setTimeout(tick, 30000); };
+  const tick = () => { if (state.page !== "live") return; loadWorldBoard(); if (++k % 2 === 0) { loadBoardMini(); loadEventsMini(); } L.pageTimer = setTimeout(tick, 30000); };
   L.pageTimer = setTimeout(tick, 30000);
 }
 
@@ -464,6 +471,7 @@ function renderLive(force = false) {
     ${worldBoard(L.world)}
     <div class="live-grid">
       <section>
+        ${eventsMini(L.eventsMini)}
         ${boardMini(L.boardMini)}
         ${brainCard(L.brain, { button: true })}
         <div class="panel pulse"><h3>Market pulse</h3>${pulseHTML}</div>
@@ -2663,6 +2671,7 @@ async function pageSystem() {
         ${card(tg, "", `<button class="btn" id="sy-tg">Send test message</button><a class="btn" href="#/data">Telegram settings</a>`)}
         ${card(S.yahoo)}
         ${card(S.nse)}
+        ${S.official ? card(S.official, (S.official.sources || []).length ? `<table class="mini" style="margin-top:6px"><tbody>${S.official.sources.map((x) => `<tr><td>${mark(x.ok)}</td><td class="small">${esc(x.name)}</td><td class="small muted r">${x.ok ? `${x.n} items` : esc(x.error || "")}</td></tr>`).join("")}</tbody></table>` : "") : ""}
       </div>
 
       ${healthPanel(x.health)}
@@ -2677,6 +2686,7 @@ async function pageSystem() {
           <tr><td>Telegram</td><td>Alerts and notices on your phone</td><td>–</td><td>Bot token (once)</td></tr>
           <tr><td>Yahoo Finance</td><td>World markets, VIX history</td><td>Free, unofficial</td><td>None</td></tr>
           <tr><td>NSE</td><td>Filings, insider trades, ban list, end-of-day files</td><td>Free</td><td>None</td></tr>
+          <tr><td>RBI, SEBI, PIB, NSE / BSE circulars</td><td>Official news and orders: event risk on alerts, Telegram for high-impact ones</td><td>Free RSS, read every 2 min in market hours</td><td>None</td></tr>
         </tbody></table></div>
         <p class="small muted" style="margin:6px 0 0">Live prices come only from Upstox; Dhan is never a second price feed, so the two can't disagree in the scanner. Market data only: no orders anywhere.</p></div>
 
@@ -2984,6 +2994,22 @@ function accountsPanel(g) {
     <p class="small muted" style="margin:0 0 8px">Each account replays the test bench with its own rules (lots, risk a trade, trades a day, daily loss stop, money for premium and margin) and grows or shrinks with its profit. <b>All signals</b> = every signal that fits, first come. <b>Proven only</b> = only strategies already positive after costs on earlier days (${g.proven_min_n}+ trades)${g.proven_today ? `: ${g.proven_today} qualify today` : ": none qualify yet"}.</p>
     <div class="capgrid">${cards}</div>
     <p class="small muted" style="margin:6px 0 0">${g.n_trades.toLocaleString("en-IN")} closed bench trades. ${esc(g.note)}</p></div>`;
+}
+
+/* 2.35 Live page: today's events (scheduled days, world events, fresh official news) */
+async function loadEventsMini() {
+  let v; try { v = await api("/api/live/events"); } catch (_) { return; }
+  L.eventsMini = v; const el = $("#lv-events"); if (el) el.outerHTML = eventsMini(v);
+}
+function eventsMini(v) {
+  if (!v) return `<div id="lv-events"></div>`;
+  const r = v.today || {}, items = r.items || [];
+  const fresh = (v.items || []).filter((x) => (x.impact === "high" || (x.impact === "medium" && (x.syms || []).length)) && x.ago_min <= 24 * 60).slice(0, 4);
+  if (!items.length && !fresh.length) return `<div id="lv-events"></div>`;
+  const col = (l) => l === "high" ? "down" : l === "medium" ? "amber" : "muted";
+  return `<div id="lv-events" class="panel tight"><h3 style="margin:0 0 4px">Events today <span class="muted small">information only</span></h3>
+    ${items.length ? `<ul class="plain small" style="margin:0">${items.map((i) => `<li><span class="${col(i.level)}">●</span> ${esc(i.what)}</li>`).join("")}</ul>` : ""}
+    ${fresh.length ? `<p class="small muted" style="margin:6px 0 2px">Latest official news</p><ul class="plain small" style="margin:0">${fresh.map((x) => `<li><span class="${col(x.impact)}">●</span> <b>${esc(x.who)}</b> ${x.link ? `<a href="${esc(x.link)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)} <span class="muted">${x.ago_min < 60 ? x.ago_min + " min" : Math.round(x.ago_min / 60) + " h"} ago${(x.syms || []).length ? " · " + x.syms.map(esc).join(", ") : ""}</span></li>`).join("")}</ul>` : ""}</div>`;
 }
 
 /* Live page: what works today (top of the Strategy board) */

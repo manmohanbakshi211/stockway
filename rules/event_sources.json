@@ -1,0 +1,35 @@
+{
+ "about": "Event engine (bullets). Official feeds read every poll_market_s seconds in market hours (poll_other_s otherwise); every item is saved with the day's data and matched to F&O symbols by name. impact: words that make an item high or medium impact; skip: words that make it noise. only_if (per source): keep an item only if its title has one of these words (PIB publishes everything the government does). Event risk on every alert and test signal comes from: India's scheduled days (rules/events.json: RBI policy, Budget...), high-impact world events in the next global_window_min minutes (economic calendar), the stock's results / board meeting, expiry day, the F&O ban list, a market holiday tomorrow, and fresh official items (fresh_min_symbol minutes for one naming the stock, fresh_min_market for market-wide ones). It is information and warnings only: it never blocks an alert or a trade. telegram_high: a new high-impact official item naming an F&O stock, or hitting the whole market, is sent to Telegram (at most telegram_per_hour).",
+ "sources": [
+  {"name": "RBI press releases", "who": "RBI", "url": "https://www.rbi.org.in/pressreleases_rss.xml"},
+  {"name": "RBI notifications", "who": "RBI", "url": "https://www.rbi.org.in/notifications_rss.xml"},
+  {"name": "SEBI", "who": "SEBI", "url": "https://www.sebi.gov.in/sebirss.xml"},
+  {"name": "Government (PIB)", "who": "Government", "url": "https://www.pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3&reg=3",
+   "only_if": ["gst", "tax", "duty", "tariff", "finance", "economy", "economic", "inflation", "gdp", "fiscal", "disinvestment", "bank",
+               "rbi", "sebi", "pli", "cabinet approves", "defence", "railway", "power", "petroleum", "coal", "steel", "telecom",
+               "pharma", "export", "import", "fdi", "budget", "subsidy", "msp", "monsoon", "trade deal", "auto", "semiconductor"]},
+  {"name": "NSE circulars", "who": "NSE", "url": "https://nsearchives.nseindia.com/content/RSS/Circulars.xml"},
+  {"name": "BSE notices", "who": "BSE", "url": "https://www.bseindia.com/data/xml/notices.xml",
+   "only_if": ["derivative", "f&o", "margin", "trading", "suspension", "surveillance", "ban", "circuit", "settlement"]}
+ ],
+ "impact": {
+  "high": ["repo rate", "monetary policy", "policy rate", "crr", "slr", "cancellation of licence", "cancels licence", "cancels the licence",
+           "penalty", "restrictions on", "directions under", "supersedes", "supersession", "interim order", "ex-parte", "debarred",
+           "impounding", "fraud", "gst council", "customs duty", "excise duty", "windfall", "tariff", "disinvestment",
+           "budget", "securities transaction tax", "derivatives", "lot size", "position limit", "weekly expiry",
+           "suspension of trading", "ban period"],
+  "medium": ["order in the matter", "settlement order", "adjudication order", "show cause", "circular", "consultation paper",
+             "offer for sale", "open market operation", "pli scheme", "cabinet approves", "approves",
+             "amendment", "surveillance", "margin"]
+ },
+ "skip": ["daily bulletin", "holiday", "recruitment", "tender", "corrigendum", "vacancy", "yoga", "award", "felicitates", "greets",
+          "condoles", "birth anniversary", "swachh", "sanctions list", "uapa", "auction result", "result of"],
+ "fresh_min_symbol": 240,
+ "fresh_min_market": 90,
+ "global_window_min": 120,
+ "telegram_high": true,
+ "telegram_per_hour": 6,
+ "poll_market_s": 120,
+ "poll_other_s": 900,
+ "since": "2026-11-04"
+}

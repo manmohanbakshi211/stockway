@@ -655,6 +655,15 @@ def live_candles_now(sym: str):
     return clean(engine().candles_now(sym.upper()))
 
 
+@router.get("/api/live/events")
+def live_events(sym: str | None = None):
+    """2.35: official feeds (RBI, SEBI, Government, NSE, BSE) and the event risk right now (NIFTY or a symbol)."""
+    e = engine()
+    if getattr(e, "events", None) is None:
+        return {"sources": [], "items": [], "today": None}
+    return clean(e.events.view(sym.upper() if sym else None))
+
+
 @router.get("/api/live/vault")
 def live_vault():
     """2.31 data vault: what is being recorded today and on past days, the test bench styles and the mover sweep."""
