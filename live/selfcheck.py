@@ -62,6 +62,13 @@ def static_checks(cfg: dict | None = None) -> list:
                   mtfcandles._C.get("error") or ("timeframes " + ", ".join(mtfcandles.TF_NAME.get(int(x), f"{x}m") for x in cc["intraday_min"])
                                                  + (", 1D" if cc.get("daily") else "") + (", 1W" if cc.get("weekly") else "")
                                                  + f"; on the test bench: {', '.join(cc.get('bench') or []) or 'none'}")))
+    from live import dataguard
+    dc = dataguard.cfg()
+    esrc = inspect.getsource(_eng.LiveEngine._emit)
+    out.append(_c("data_guard", "Data quality guard: suspect / stale prices hold their alerts and never fill a test trade",
+                  not dataguard._C.get("error") and "_data_hold" in esrc,
+                  dataguard._C.get("error") or f"mode {dc['mode']}; jumps over {dc['jump_pct'].get('index')}% (index) / "
+                                               f"{dc['jump_pct'].get('stock')}% (stock) in {dc['every_s']} s are checked"))
     vsrc = inspect.getsource(_eng.LiveEngine._vault_loop)
     vc = vault.cfg()
     out.append(_c("vault_spare_calls", "Data vault: stock option chains only with spare Upstox calls, never changing the scanner",

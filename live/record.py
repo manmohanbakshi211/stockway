@@ -40,7 +40,9 @@ class Recorder:
             -- 2.31 candle scanner: every pattern on every timeframe as each candle closed, and the day's 1-minute candles
             CREATE TABLE IF NOT EXISTS candles (ts INTEGER, sym TEXT, tf TEXT, bar_t REAL, pattern TEXT, dir INTEGER,
               alertable INTEGER, level_atr REAL, close REAL);
-            CREATE TABLE IF NOT EXISTS bars (sym TEXT, t REAL, o REAL, h REAL, l REAL, c REAL, v REAL);""")
+            CREATE TABLE IF NOT EXISTS bars (sym TEXT, t REAL, o REAL, h REAL, l REAL, c REAL, v REAL);
+            -- 2.33 data quality guard: bad prints, big moves confirmed, crossed quotes, stale instruments
+            CREATE TABLE IF NOT EXISTS quality (ts INTEGER, key TEXT, sym TEXT, kind TEXT, what TEXT, a REAL, b REAL);""")
             self.db.commit()
         self.rows = 0
         self.counts = {"chains": 0, "chain_rows": 0, "news": 0, "context": 0, "candles": 0, "bars": 0}
@@ -100,6 +102,14 @@ class Recorder:
                 self.db.commit()
             self.counts["candles"] += len(rows)
 
+    def quality(self, rows: list):
+        """[(ts, key, sym, kind, what, a, b)] from live/dataguard.py"""
+        if rows:
+            with self.lock:
+                self.db.executemany("INSERT INTO quality VALUES (?,?,?,?,?,?,?)", rows)
+                self.db.commit()
+            self.counts["quality"] = self.counts.get("quality", 0) + len(rows)
+
     def bars(self, by_sym: dict):
         """The day's 1-minute candles of every index and stock: {sym: [[t, o, h, l, c, v], ...]} (replaces earlier saves)."""
         rows = [(s, *map(float, r[:6])) for s, rs in by_sym.items() for r in rs]
@@ -119,6 +129,7 @@ class Recorder:
                          ("chain_syms", "SELECT COUNT(DISTINCT sym) FROM chains"), ("chain_rows", "SELECT COUNT(*) FROM chains"),
                          ("news", "SELECT COUNT(*) FROM news"), ("context", "SELECT COUNT(*) FROM context"),
                          ("candles", "SELECT COUNT(*) FROM candles"), ("candle_tfs", "SELECT COUNT(DISTINCT tf) FROM candles"),
+                         ("quality", "SELECT COUNT(*) FROM quality"),
                          ("first", "SELECT MIN(ts) FROM minutes"), ("last", "SELECT MAX(ts) FROM minutes")):
                 try:
                     out[t] = self.db.execute(q).fetchone()[0]
@@ -137,7 +148,7 @@ class Recorder:
                 base = self.path.with_suffix("")
                 mins.to_parquet(f"{base}_minutes.parquet", compression="zstd", index=False)
                 mets.to_parquet(f"{base}_metrics.parquet", compression="zstd", index=False)
-                for t in ("chains", "news", "context", "candles", "bars"):     # 2.31 data vault
+                for t in ("chains", "news", "context", "candles", "bars", "quality"):     # 2.31 data vault
                     with self.lock:
                         df = pd.read_sql(f"SELECT * FROM {t}", self.db)
                     if len(df):

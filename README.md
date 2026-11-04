@@ -114,6 +114,22 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Data quality guard (2.34)
+
+- **live/dataguard.py, rules/dataguard.json:** every 5 seconds every live price is checked.
+  - A jump bigger than 1.5% (index), 6% (stock / future) or 45% (option above ₹3) since the last check is held as
+    suspect: if it snaps back within 10 s it was a **bad print** (recorded, never used); if it stays it was a real move.
+  - Crossed quotes (bid above ask) are suspect while they last.
+  - An index / stock / future with no tick for 90 / 300 / 120 s in market hours is **stale**.
+- **What it changes:** a price-based alert on a symbol whose own price is suspect or stale **waits** (mode "hold",
+  on your say-so; listed on the System page; news alerts are never held). The test bench never fills on a quote older
+  than 3 minutes or suspect, and never closes a trade on a suspect price. If 30%+ of the liquid instruments go stale
+  at once, the health monitor tells you (a stuck feed).
+- **Saved for backtests:** every finding goes into the day's recording (part "quality"), so bad ticks can be left
+  out of any test. The Kite cross-check will plug in here as one more rule.
+- System page "Data quality guard" card; selfcheck data_guard. Simulator: time limits scale with its speed.
+  Checked: 192 tests, Lab regression 103/103, System page at desktop and phone.
+
 ## Health monitor and keeping the Mac awake (2.33)
 
 - **Health monitor (live/health.py, rules/health.json):** every ~20 s, whether or not the scanner runs, it checks that

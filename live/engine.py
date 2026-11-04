@@ -134,6 +134,7 @@ class LiveEngine:
         self.mover_last = None                       # the last mover sweep (live/movers.py)
         self.vault_last = None                       # the last stock option-chain sweep (data vault)
         self.cdl = None                              # 2.31: candle patterns on every timeframe (live/mtfcandles.py)
+        self.dguard = None                           # 2.33: bad ticks / crossed / stale prices (live/dataguard.py)
         self._run_token = None
         self.depth = None                            # Dhan 200-level order book for index futures (live/dhandepth.py)
         self.dhan_intel = None                       # Dhan news headlines + market movers (live/dhanintel.py)
@@ -297,6 +298,12 @@ class LiveEngine:
         except Exception as e:
             self.log(f"Test bench off: {e}")
         self.in_play, self._facts_cache, self.mover_last = set(), {}, None
+        try:
+            from .dataguard import DataGuard
+            self.dguard = DataGuard(self)
+        except Exception as e:
+            self.dguard = None
+            self.log(f"Data quality guard off: {e}")
         try:
             from .mtfcandles import CandleScanner
             self.cdl = CandleScanner(self)
@@ -604,6 +611,8 @@ class LiveEngine:
                         raise
                     except Exception as e:
                         self.log(f"Next-expiry chain {sym} failed: {e}")
+            if self.dguard is not None:              # before the alerts: a suspect price holds its symbol's alerts
+                self._guard("Data quality guard", self.dguard.check, now)
             self._compute_all(now, mins, emit=True, lc=lc)
             try:
                 self.charts.scan(now, lambda a, now=now, lc=lc: self._emit_safe(a, now, lc))
@@ -641,7 +650,8 @@ class LiveEngine:
             if self.trials is not None:
                 self._guard("Trial alerts", self.trials.update, self.state, self.clock.ts())
             if self.bench is not None:
-                self._guard("Test bench", self.bench.update, self.state, self.clock.ts(), (self.paper.cfg if self.paper else {}).get("exit_time") or "15:15")
+                self._guard("Test bench", self.bench.update, self.state, self.clock.ts(), (self.paper.cfg if self.paper else {}).get("exit_time") or "15:15",
+                            False, self.dguard.is_bad if self.dguard is not None else None)
                 self._guard("Mover sweep", self._mover_sweep, now)
             self._guard("Data vault", self._vault_context, now)
             self._guard("Flat-by reminder", self._flat_by_reminder, now, lc)
@@ -1057,6 +1067,7 @@ class LiveEngine:
         out["bench"] = self.bench.status() if self.bench is not None else None
         out["movers"] = self.mover_last
         out["candles"] = self.cdl.status() if self.cdl is not None else None
+        out["quality"] = self.dguard.view() if self.dguard is not None else None
         return out
 
     def _save_bars(self):
@@ -1074,9 +1085,21 @@ class LiveEngine:
             return {"sym": sym, "rows": [], "note": "Starts with the live scanner."}
         return self.cdl.now_view(sym)
 
+    def _data_hold(self, a) -> bool:
+        """2.33: hold a price-based alert while its symbol's own price is suspect (a jump being checked, a crossed
+        quote) or stale (live/dataguard.py). News and other information alerts are never held."""
+        if self.dguard is None or registry.get(a.get("kind") or "").get("family") == "info":
+            return False
+        try:
+            return self.dguard.hold(a)
+        except Exception:
+            return False
+
     def bench_signal(self, sym, direction, now, kind, variant, name):
         """A signal that is only paper-tested on the bench (Lab library / book rules live): no alert, no paper account."""
         if self.bench is None:
+            return 0
+        if self.dguard is not None and self.dguard.symbol_problem(sym):
             return 0
         a = {"sym": sym, "kind": kind, "direction": direction, "option": self._suggest(sym, direction), "data": {}}
         return self.bench.add(a, self, now, self.paper.cfg if self.paper else {}, name=name, variant=variant)
@@ -1227,7 +1250,7 @@ class LiveEngine:
     def _trial(self, a, now, lc):
         """A bullet on trial ("shadow" in live/registry.py): recorded and graded only (live/trials.py). It never reaches
         the feed, Telegram, Focus, AI notes, stories, the scorecard, the conviction model or the paper account."""
-        if self.trials is None:
+        if self.trials is None or self._data_hold(a):
             return
         u = self.uni.underlyings.get(a["sym"]) if self.uni else None
         i = self.state.get(u.key) if u and self.state is not None else None
@@ -1246,6 +1269,8 @@ class LiveEngine:
     def _emit(self, a, now, lc):
         if registry.is_shadow(a.get("kind")):
             return self._trial(a, now, lc)
+        if self._data_hold(a):                       # 2.33: its own price is suspect or stale right now
+            return
         ts = now.timestamp()
         key = (a["sym"], a["kind"], None if a["kind"] in detectors.NO_DIRECTION_COOLDOWN else a["direction"])
         last = self.cool.get(key)

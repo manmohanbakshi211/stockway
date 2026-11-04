@@ -2666,6 +2666,7 @@ async function pageSystem() {
       </div>
 
       ${healthPanel(x.health)}
+      ${qualityPanel(x.vault && x.vault.quality)}
       ${vaultPanel(x.vault)}
 
       <div class="panel tight" style="margin-top:12px"><h3>Which source does what (and its limits)</h3>
@@ -2733,6 +2734,26 @@ function healthPanel(h) {
         <p class="small muted" style="margin:6px 0 0">Telegram tells you if the Mac sleeps, the scanner or the recording stops, the disk fills up or the Mac runs on battery during the market, plus one summary after the close. Closing a MacBook's lid still puts it to sleep: keep it open and charging.</p></div>
       <div><b class="small">Gaps today</b>${gaps.length ? `<table class="mini"><tbody>${gaps.map((g) => `<tr><td>${esc(g.from_hm)}–${esc(g.to_hm)}</td><td class="r down">${g.market_mins} market min</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:4px 0">None: every market minute so far was recorded.</p>`}
         <b class="small" style="display:block;margin-top:8px">Latest notices</b>${(h.notices || []).length ? `<table class="mini"><tbody>${h.notices.slice(0, 6).map((n) => `<tr><td class="small">${esc(n.at)}</td><td class="small">${esc(n.text)}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:4px 0">None.</p>`}</div>
+    </div></div>`;
+}
+
+/* 2.33 data quality guard: suspect / stale prices, bad prints, alerts held */
+function qualityPanel(q) {
+  if (!q) return "";
+  const st = q.state || {}, c = q.counts || {}, n = (x) => (x || 0).toLocaleString("en-IN");
+  const tm = (ts) => ts ? hm(ts) : "";
+  const list = (xs, f) => xs.length ? `<table class="mini"><tbody>${xs.map(f).join("")}</tbody></table>` : `<p class="small muted" style="margin:4px 0">None.</p>`;
+  return `<div class="panel tight" style="margin-top:12px"><h3>Data quality guard <span class="muted small">mode: ${esc(q.mode || "")} · ${n(st.checked)} prices checked every few seconds</span></h3>
+    <div class="vault-grid">
+      <div><table class="mini"><tbody>
+        <tr><td>Suspect right now</td><td class="r">${n(st.suspect)}</td></tr>
+        <tr><td>Indices / stocks / futures with no update for minutes</td><td class="r">${n(st.stale)} of ${n(st.liquid)}</td></tr>
+        <tr><td>Bad prints caught today</td><td class="r">${n(c.bad_prints)}</td></tr>
+        <tr><td>Big moves checked and confirmed</td><td class="r">${n(c.real_moves)}</td></tr>
+        <tr><td>Alerts held on suspect data</td><td class="r">${n(c.alerts_held)}</td></tr></tbody></table>
+        <p class="small muted" style="margin:6px 0 0">A sudden jump is held for a few seconds: if it snaps back it was a bad print and is never used; if it stays it was a real move. Test trades never fill on an old or suspect quote. Everything is saved with the day's data.</p></div>
+      <div><b class="small">Latest findings</b>${list((q.events || []).slice(0, 8), (e) => `<tr><td class="small">${tm(e.ts)}</td><td class="small">${esc(e.sym || e.key)} <span class="muted">${esc(e.kind)}</span></td><td class="small">${esc(e.what)}${e.a != null && e.b != null ? ` (${fx(e.a)} → ${fx(e.b)})` : ""}</td></tr>`)}
+        <b class="small" style="display:block;margin-top:8px">Alerts held</b>${list((q.held || []).slice(0, 6), (h) => `<tr><td class="small">${tm(h.ts)}</td><td class="small">${esc(h.title || h.sym)}</td><td class="small muted">${esc(h.why)}</td></tr>`)}</div>
     </div></div>`;
 }
 

@@ -202,6 +202,7 @@ class Bench:
         self.cool: dict = {}
         self.skips: dict = {}            # style -> signals it could not price (no live price for a leg)
         self.opened: dict = {}           # style -> trades opened this session
+        self.stale_skips: dict = {}      # style -> signals skipped because a leg's quote was old or suspect (2.33)
         self.bdb = db_for(store)
         with self.bdb.lock:
             if source == "sim":
@@ -260,6 +261,7 @@ class Bench:
                                  ("focus", ad.get("focus")), ("muted", bool(ad.get("muted")) if "muted" in ad else None))
                if v is not None}
         styles, _ = load_styles()
+        guard = getattr(engine, "dguard", None)
         rows = []
         for style, spec in styles.items():
             legs, info = self._legs(u, opt, spec)
@@ -269,6 +271,9 @@ class Bench:
             p_open = self._leg_prices(state, legs, "open")
             if len(p_open) != len(legs) or min(p_open) <= 0:
                 self.skips[style] = self.skips.get(style, 0) + 1
+                continue
+            if guard is not None and not all(guard.fresh(k) for k, _ in legs):
+                self.stale_skips[style] = self.stale_skips.get(style, 0) + 1   # an old or suspect quote is no fill
                 continue
             px = sum(p * q for p, (_, q) in zip(p_open, legs))
             if abs(px) < 1e-9:
@@ -384,7 +389,8 @@ class Bench:
         return sum(px * q for px, (_, q) in zip(p, legs))
 
     # ------------------------------------------------------------ following
-    def update(self, state, now_ts: float, exit_time="15:15", force=False):
+    def update(self, state, now_ts: float, exit_time="15:15", force=False, bad=None):
+        """bad: optional callable(key) -> True while a leg's price is suspect (live/dataguard.py): no exit on it."""
         if not self.open:
             return
         import datetime as _dt
@@ -392,6 +398,9 @@ class Bench:
         hm = _dt.datetime.fromtimestamp(now_ts, IST).strftime("%H:%M")
         keep, done = [], []
         for r in self.open:
+            if bad is not None and not force and any(bad(k) for k, _ in r["_legs"]):
+                keep.append(r)                        # a suspect price never closes a test trade
+                continue
             v = self._value(state, r["_legs"], side="close")
             if v is None:
                 if force:
@@ -435,7 +444,7 @@ class Bench:
     def status(self) -> dict:
         styles, errs = load_styles()
         return {"styles": {k: {"label": v["label"], "family": v["family"], "opened": self.opened.get(k, 0),
-                               "skipped": self.skips.get(k, 0)} for k, v in styles.items()},
+                               "skipped": self.skips.get(k, 0), "stale": self.stale_skips.get(k, 0)} for k, v in styles.items()},
                 "errors": errs, "open": len(self.open)}
 
 

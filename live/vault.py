@@ -11,7 +11,7 @@ from pathlib import Path
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "vault.json"
 DEFAULTS = {"stock_chains_every_min": 30, "start": "09:20", "end": "15:20", "max_upstox_share": 0.7, "context_every_min": 5}
-PARTS = ("minutes", "metrics", "chains", "news", "context", "candles", "bars")
+PARTS = ("minutes", "metrics", "chains", "news", "context", "candles", "bars", "quality")
 _C: dict = {}
 
 

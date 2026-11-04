@@ -1,0 +1,12 @@
+{
+ "about": "Data quality guard (bullets). Every few seconds it checks every live price: a jump bigger than jump_pct within one check is held as suspect; if the price snaps back within confirm_s it was a bad print (recorded, never used), if it stays it was a real move (released). Crossed quotes (bid above ask) are suspect too. A liquid instrument with no tick for stale_s seconds while the market is open is stale. mode 'hold': an alert on a symbol whose own price is suspect or stale waits (it is listed on the System page, not lost from the record of what the guard did); 'warn' would only mark it. The test bench never opens a trade on a leg whose quote is older than fresh_s_bench seconds or suspect, and never exits on a suspect price. stale_share_alert: tell you when that share of the liquid instruments goes stale at once (a feed problem). Every finding is saved with the day's recording (part 'quality') so backtests can leave bad ticks out. A second feed (Kite) will add a cross-check here as one more rule.",
+ "every_s": 5,
+ "jump_pct": {"index": 1.5, "stock": 6.0, "future": 6.0, "option": 45.0},
+ "option_min_price": 3.0,
+ "confirm_s": 10,
+ "stale_s": {"index": 90, "future": 120, "stock": 300},
+ "fresh_s_bench": 180,
+ "mode": "hold",
+ "stale_share_alert": 0.3,
+ "since": "2026-11-04"
+}
