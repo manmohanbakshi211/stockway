@@ -90,6 +90,14 @@ def static_checks(cfg: dict | None = None) -> list:
     out.append(_c("dhan_priority", "Screens, news and movers go before the 5-year Dhan download on the shared pace",
                   "priority=not self.background" in inspect.getsource(_dh.Dhan._wait),
                   "the download waits while a screen's Dhan call is waiting or ran in the last 2 s"))
+    from live import nextcandle as _nc
+    prs = _nc.pairs()
+    lsrc = inspect.getsource(_eng.LiveEngine._nextcandle_loop)
+    out.append(_c("next_candle", "Next-candle cascade loads (rules/fortune.json) and runs in its own thread (never in the scanner loop)",
+                  bool(prs) and not _nc._C.get("error") and "next_candle().tick()" in lsrc
+                  and "nextc" not in inspect.getsource(_eng.LiveEngine._loop),
+                  _nc._C.get("error") or ", ".join(f"{v['after']} × {v['from']} → {k}" for k, v in prs.items())
+                  + "; information only, graded at every close"))
     vsrc = inspect.getsource(_eng.LiveEngine._vault_loop)
     vc = vault.cfg()
     out.append(_c("vault_spare_calls", "Data vault: stock option chains only with spare Upstox calls, never changing the scanner",

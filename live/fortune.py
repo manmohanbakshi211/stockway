@@ -25,7 +25,8 @@ from .clock import CLOSE, IST, OPEN
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "fortune.json"
 DEFAULTS = {"horizon": 6, "history_days": {"3m": 6, "5m": 10, "15m": 25, "30m": 40, "1H": 60, "1D": 150, "1W": 1800, "1M": 3650},
-            "min_samples": 30, "grade_from": 0.5, "ghost": True, "ghost_candles": 7, "refresh_s": 10}
+            "min_samples": 30, "grade_from": 0.5, "ghost": True, "ghost_candles": 7, "refresh_s": 10,
+            "show_cone": False}
 INTRA = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60}
 IST_SHIFT = 19800
 _C: dict = {}
@@ -318,6 +319,7 @@ class Fortune:
         out["cone"] = pts
         out["ghost"] = self._ghosts(c, cands, hist, atr, atr_now, forming, out.get("now") or {}, pts, (cn.get(1) or {}).get("q"))
         out["refresh_s"] = max(5, int(c.get("refresh_s") or 10))
+        out["show_cone"] = bool(c.get("show_cone"))
         out["lean"] = hit.get("lean") or {}
         try:
             ev = self.e.events.risk(sym) if getattr(self.e, "events", None) is not None else None

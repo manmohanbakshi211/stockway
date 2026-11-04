@@ -114,6 +114,33 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Next candle from the smaller ones: the Fortune chart's shadow candle and smart report (2.39)
+
+- **Mandeep's cascade (4 Nov):** once 3 one-minute candles of a 5-minute candle have closed, say how that 5-minute
+  candle ends; after 2 five-minute candles, the 15-minute one; after 3 fifteen-minute candles, the hour; after 3 hours,
+  the day (pairs are bullets: `rules/fortune.json` "cascade"). The prediction updates with every small candle.
+- **How (live/nextcandle.py):** every past candle of the same kind is cut at the same point and described by the same
+  facts (move so far, stretch up / down, place in its range, the last small candles, volume against normal, distance
+  from VWAP, trend on that timeframe, the previous candle, time of day, the day's move, the market's move in the same
+  minutes: Nifty, or Bank Nifty for Nifty itself). The 60 most similar past moments (earlier days only) give the shadow
+  candle: close at their middle, a 68% box, high / low by their usual stretch, and the chance it ends green.
+- **On the chart:** the prediction is a faded candle under the forming one; the real candle is drawn on top and takes
+  its place when it is done. "Past predictions" shows the earlier ones under the real candles (unseen days, then live);
+  "Range cone" brings back the 2.38 cone and boxes (off by default: the chart is about the next candle).
+- **Smart report (under the chart):** on the latest days the history never saw, live (all days) and today: how often
+  green / red was called right, against the plain rule "it keeps the colour it has so far" (the real bar: after 3 of 5
+  minutes most candles already show their colour), close error against "it stays put", and how often the real close
+  landed in the 68% box; plus the latest graded predictions.
+- **Tracked all day** (its own thread, every ~10 s): Nifty, Bank Nifty, any chart you open and the in-play stocks;
+  every prediction is graded at its candle's close into the `nextcandle` table with the facts that have no history
+  yet (order flow / buying, OI, PCR, news, event risk, breadth, VIX) for a later challenger.
+- **First honest result (Mac history, Nifty and Bank Nifty, unseen days):** colour called right 74-89%, but "keeps its
+  colour" was 76-89% on the same candles: the other facts add −2 to +1 points (no edge on any pair), the close error
+  equals "stays put" (−2% to +1%), and the 68% box held 55-73%. The report says exactly this; the live record (with
+  order flow, news and the rest) decides from here.
+- Checked: full tests (a planted volume pattern is found, a random walk is not), Lab regression 103/103, chart on
+  5m / 15m / 1H / 1D / 3m at desktop and phone on the Mac's data.
+
 ## Speed, lot and money on every trade, dates on the board, market hours, ghost candles (2.38)
 
 - **Why the app crawled with the market closed:** the nightly Strategy Lab (thousands of rules on a 200 MB table, often

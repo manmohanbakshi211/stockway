@@ -359,6 +359,7 @@ class LiveEngine:
                                    f"{len(self.opt_subs)} options streaming")
         token = self._run_token = object()
         threading.Thread(target=self._vault_loop, args=(token,), daemon=True, name="data-vault").start()
+        threading.Thread(target=self._nextcandle_loop, args=(token,), daemon=True, name="next-candle").start()
         self._loop()
 
     def _seed(self, quotes: dict):
@@ -1043,6 +1044,25 @@ class LiveEngine:
             "pressure": pressure, "regimes": {s: r.get("code") for s, r in self.regimes.items() if r},
             "in_play": sorted(self.in_play), "movers": (self.mover_last or {}).get("picks"),
             "events": (self.events.risk("NIFTY", now).get("items") if getattr(self, "events", None) is not None else None)})
+
+    def next_candle(self):
+        """2.39: the Fortune chart's next-candle cascade (live/nextcandle.py), kept for the app's life."""
+        if getattr(self, "nextc", None) is None:
+            from .nextcandle import NextCandle
+            self.nextc = NextCandle(self)
+        return self.nextc
+
+    def _nextcandle_loop(self, token):
+        """2.39: every few seconds, predict the forming 5m / 15m / 1H / 1D candles from their closed small candles and
+        grade the ones that finished (in its own thread: never slows the scanner)."""
+        time.sleep(5)
+        while self._run_token is token and not self.stop_evt.is_set():
+            try:
+                self.next_candle().tick()
+            except Exception as e:
+                if self._every("nextcandle_err", 600, clock_time=False):
+                    self.log(f"Next-candle tracker: {e}")
+            self.stop_evt.wait(max(2.0, 10.0 / max(1.0, float(getattr(self.clock, "speed", 1) or 1))))
 
     def _vault_loop(self, token):
         """2.31 data vault: a full option chain for every F&O stock every few minutes (rules/vault.json), spread over the

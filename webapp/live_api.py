@@ -234,7 +234,13 @@ async def live_fortune(sym: str, tf: str = "15m"):
     from live.mtf import MAIN_TFS
     if tf not in MAIN_TFS:
         raise HTTPException(400, f"Timeframe must be one of {', '.join(MAIN_TFS)}")
-    return clean(await _run_blocking(_fortune().compute, _mtf(), sym.upper(), tf))
+    out = await _run_blocking(_fortune().compute, _mtf(), sym.upper(), tf)
+    try:                                       # 2.39: the shadow next candle from the smaller ones + the smart report
+        _mtf()
+        out["next"] = engine().next_candle().view(sym.upper(), tf)
+    except Exception as ex:
+        out["next"] = {"cascade": False, "error": str(ex)[:160]}
+    return clean(out)
 
 
 @router.get("/api/live/mtf/{sym}")
