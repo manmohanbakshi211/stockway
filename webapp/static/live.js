@@ -1592,6 +1592,9 @@ async function pageChart() {
         <div class="panel tight" id="ch-scen-wrap"><h3>Scenarios <span class="muted small">next 5 / 15 / 60 min</span></h3><div id="ch-scen"><p class="muted small">Nifty and Bank Nifty.</p></div></div>
         <div class="panel tight"><h3>Setups today</h3><div id="ch-setups"></div></div>
         <div class="panel tight"><h3>Key levels</h3><div id="ch-levels"></div></div></aside></div>
+    <section class="fortune panel tight" id="fortune"><div class="toolbar" style="margin:0 0 6px"><div><h2 style="margin:0">Fortune chart <span class="pill p-amber">testing</span></h2>
+      <div class="small muted" id="fo-sub">${esc(CH.tf)}: where the forming candle and the next few can go, from ${esc(CH.sym)}'s own history</div></div></div>
+      <div class="fo-grid"><div id="fo-chart" class="fo-chart"></div><div id="fo-side" class="small"><p class="muted">Working it out from the history…</p></div></div></section>
     <section class="mtf" id="mtf">
       <div class="toolbar" style="margin:14px 0 8px"><div><h2 style="margin:0">All timeframes</h2><div id="mtf-trend" class="mtf-trend small"></div></div>
         <div class="btn-row" style="margin:0;align-items:center">
@@ -1659,6 +1662,70 @@ async function pageChart() {
   };
   if (await loadBars()) { overlay(); L.pageTimer = setTimeout(live, 2000); }
   mtfInit();
+  fortuneInit();
+}
+
+/* 2.36 Fortune chart: ranges for the forming candle and the next few, from the symbol's own history (testing) */
+const FO = { chart: null, s: {}, lines: [], key: null, timer: null };
+function fortuneInit() {
+  clearTimeout(FO.timer);
+  if (FO.chart) { try { FO.chart.remove(); } catch (_) {} }
+  FO.chart = null; FO.s = {}; FO.lines = []; FO.fitted = false; FO.key = `${CH.sym}|${CH.tf}`;
+  const loop = async () => {
+    if (state.page !== "chart" || !$("#fo-chart") || FO.key !== `${CH.sym}|${CH.tf}`) return;
+    try { fortuneDraw(await api(`/api/live/fortune/${encodeURIComponent(CH.sym)}?tf=${CH.tf}`)); }
+    catch (e) { const el = $("#fo-side"); if (el) el.innerHTML = `<p class="muted small">${esc(e.message)}</p>`; }
+    const running = L.snap && L.snap.status && L.snap.status.running;
+    FO.timer = setTimeout(loop, running ? 30000 : 300000);
+  };
+  loop();
+}
+function fortuneDraw(d) {
+  const el = $("#fo-chart"), side = $("#fo-side");
+  if (!el || !side) return;
+  if (!d.enough || !(d.candles || []).length) { side.innerHTML = `<p class="muted">${esc(d.note || "Not enough history yet.")}</p>`; return; }
+  const LW = window.LightweightCharts;
+  if (!FO.chart && LW) {
+    el.innerHTML = "";
+    FO.chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 11 },
+      grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" },
+      timeScale: { borderColor: "#D5DCE3", timeVisible: CH_MIN[CH.tf] < 1440, secondsVisible: false, rightOffset: 2 }, crosshair: { mode: 0 } });
+    FO.s.c = FO.chart.addSeries(LW.CandlestickSeries, { upColor: "#1E8A5A", downColor: "#C23B32", borderVisible: false, wickUpColor: "#1E8A5A", wickDownColor: "#C23B32" });
+    const ln = (color, w, style) => FO.chart.addSeries(LW.LineSeries, { color, lineWidth: w, lineStyle: style, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false });
+    FO.s.hi95 = ln("rgba(61,47,168,.35)", 1, 1); FO.s.hi68 = ln("rgba(61,47,168,.75)", 2, 2); FO.s.mid = ln("rgba(94,107,120,.8)", 1, 0);
+    FO.s.lo68 = ln("rgba(61,47,168,.75)", 2, 2); FO.s.lo95 = ln("rgba(61,47,168,.35)", 1, 1);
+  }
+  if (FO.chart) {
+    FO.s.c.setData(d.candles);
+    ["hi95", "hi68", "mid", "lo68", "lo95"].forEach((k) => FO.s[k].setData((d.cone || []).map((p) => ({ time: p.time, value: p[k] }))));
+    FO.lines.forEach((pl) => { try { FO.s.c.removePriceLine(pl); } catch (_) {} });
+    FO.lines = [];
+    const n = d.now || {};
+    if (n.close_68) {
+      FO.lines.push(FO.s.c.createPriceLine({ price: n.close_68[1], color: "#E07B00", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "close 68% hi" }));
+      FO.lines.push(FO.s.c.createPriceLine({ price: n.close_68[0], color: "#E07B00", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "close 68% lo" }));
+    }
+    if (!FO.fitted) {                              // the last ~45 candles and the cone, so the ranges are readable
+      const nb = d.candles.length;
+      FO.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, nb - 45), to: nb + Math.max(2, (d.cone || []).length) });
+      FO.fitted = true;
+    }
+  }
+  const n = d.now || {}, ln_ = d.lean || {}, ck = d.check, ea = d.early, last = (d.cone || []).slice(-1)[0];
+  const edge = (p) => p == null ? "" : Math.abs(p - 50) < 6 ? "no direction edge" : `a lean ${p > 50 ? "up" : "down"}, not proven`;
+  const shp = (n.shape || []).map((x) => `<li><b class="${x.d > 0 && !["doji", "inside_bar", "nr7"].includes(x.pattern) ? "up" : x.d < 0 ? "down" : ""}">${esc(x.name)}</b> so far · ${x.n >= 10 ? `held to the close ${x.pct}% of ${x.n} times in this history` : "too few past cases to say"}</li>`).join("");
+  side.innerHTML = `<p style="margin:0 0 6px"><b>${esc(d.tf)}</b> · ${d.forming ? `forming candle ${Math.round((d.fraction || 0) * 100)}% done${n.mins_left != null ? `, ${n.mins_left} min left` : ""}` : "no candle forming now: the cone starts from the last close"}</p>
+    ${n.close_68 ? `<p style="margin:0 0 4px">Close likely <b>${fx(n.close_68[0])} – ${fx(n.close_68[1])}</b> (68%), ${fx(n.close_95[0])} – ${fx(n.close_95[1])} (95%).</p>
+      <p style="margin:0 0 4px">High may stretch to ~${fx(n.high_to)}, low to ~${fx(n.low_to)} (half the time).</p>
+      <p class="muted" style="margin:0 0 6px">The rest of such candles went up ${n.up_pct}% of ${n.n} times: ${edge(n.up_pct)}.</p>
+      ${shp ? `<ul class="plain" style="margin:0 0 6px">${shp}</ul>` : ""}` : d.forming ? `<p class="muted">Too little history at this point of the candle (${n.n || 0} cases).</p>` : ""}
+    ${last ? `<p style="margin:0 0 4px">Next ${(d.cone || []).length - 1} candles: <b>${fx(last.lo68)} – ${fx(last.hi68)}</b> (68%), ${fx(last.lo95)} – ${fx(last.hi95)} (95%).</p>` : ""}
+    ${ln_.trend != null ? `<p class="muted" style="margin:0 0 4px">Trend on ${esc(d.tf)}: ${ln_.trend > 0 ? "up" : ln_.trend < 0 ? "down" : "none"}${ln_.with_trend_pct != null ? ` · the next candle went the trend's way ${ln_.with_trend_pct}% of ${ln_.n} times` : ""}.</p>` : ""}
+    ${d.event && d.event.line ? `<p class="amber" style="margin:0 0 4px">⚡ ${esc(d.event.line)}</p>` : ""}
+    <p class="muted" style="margin:6px 0 0"><b>Live check</b>: ${ck && ck.n ? `the 68% range held ${ck.in68_pct}% of ${ck.n} forecasts (should be ~68%), the 95% range ${ck.in95_pct}%${ck.shape_pct != null ? `; shapes held ${ck.shape_pct}%` : ""}.` : "starts with the first forecasts graded at their close."}
+      ${ea && ea.n ? ` Scanner today: shapes seen at 70% of a ${esc(d.tf)} candle held at the close ${ea.pct}% of ${ea.n} times.` : ""}</p>
+    <p class="muted" style="margin:6px 0 0">On the chart: <span style="color:#3D2FA8">dashed purple = 68% range</span>, light purple = 95%, grey = middle; orange lines = where the forming candle's close lands (68%).</p>
+    <p class="muted" style="margin:6px 0 0">${esc(d.note || "")} History: ${d.history_candles} candles (${esc(d.source || "")}).</p>`;
 }
 
 /* scroll-back: near the left edge, load the bars before the first one and keep the view where it was */

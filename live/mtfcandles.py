@@ -26,7 +26,8 @@ from .clock import IST
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "candle_tfs.json"
 DEFAULTS = {"intraday_min": [15, 30, 60, 75], "daily": True, "weekly": True, "five_min_all_stocks": True,
-            "bench": ["15m", "30m", "1H", "75m", "1D", "1W"], "max_bench_per_close": 120}
+            "bench": ["15m", "30m", "1H", "75m", "1D", "1W"], "max_bench_per_close": 120,
+            "early_at": 0.7, "early_min": [15, 30, 60, 75], "early_bench": True}
 TF_NAME = {5: "5m", 15: "15m", 30: "30m", 60: "1H", 75: "75m"}
 NO_DIRECTION = {"doji", "inside_bar", "nr7"}
 PLAIN = {"doji": "Doji", "inside_bar": "Inside bar", "nr7": "Narrowest of 7 (NR7)", "doji_dir": "Dragonfly / gravestone doji"}
@@ -103,6 +104,9 @@ class CandleScanner:
         self._prev_day = None
         self.counts = {"closes": 0, "patterns": 0, "bench": 0}
         self.last_run = {}
+        self.early_done: dict = {}            # timeframe minutes -> candle index checked at early_at today
+        self.early_seen: dict = {}            # (sym, tf, start) -> {pattern: direction} seen at early_at
+        self.early_stats: dict = {}           # tf -> {"n", "held", "pct", "bench"}: did the early shape survive the close?
 
     # ------------------------------------------------------------ data
     def prev_rows(self, sym) -> tuple[list, float | None]:
@@ -148,6 +152,7 @@ class CandleScanner:
         today = now.date()
         if self.day != today:
             self.day, self.done, self.latest, self.daily_done = today, {}, {}, None
+            self.early_done, self.early_seen = {}, {}
         t0 = session_start(today)
         el = now.timestamp() - t0 - 2                      # 2 s after a candle closes, so its last minute is complete
         if el < 0:
@@ -161,6 +166,14 @@ class CandleScanner:
             self._close(tf, t0 + k * tf * 60, now, c)
             return                                         # one timeframe per loop: when several close together the
                                                            # others follow a second later, the live loop never stalls
+        at = float(c.get("early_at") or 0)
+        for tf in sorted(int(x) for x in (c.get("early_min") or [])) if 0 < at < 1 else []:
+            k = int(el // (tf * 60))
+            frac = (el - k * tf * 60) / (tf * 60)
+            if frac >= at and self.early_done.get(tf) != k:
+                self.early_done[tf] = k
+                self._early(tf, t0 + k * tf * 60, now, c)
+                return
         if self.daily_done != today and now.strftime("%H:%M") >= "09:20":
             self.daily_done = today
             self._daily(now, c)
@@ -196,9 +209,47 @@ class CandleScanner:
                     self.log(f"Candle scanner {sym} {name} skipped: {ex}")
         self._record(now, found)
         self.counts["closes"] += 1
+        if any(k[1] == name and k[2] == float(boundary - tf * 60) for k in self.early_seen):
+            self._early_check(name, boundary - tf * 60)
         sent = self._bench([f for f in found if len(f) == 9], name, now, c) if bench_on else 0
         self.last_run[name] = {"at": now.strftime("%H:%M"), "symbols": n_sym, "patterns": sum(1 for f in found if len(f) == 8),
                                "ideas": sum(1 for f in found if len(f) == 9), "bench": sent}
+
+    def _early(self, tf, start, now, c):
+        """2.36: the candle is early_at through its time: its shape so far, recorded and (alertable ones) paper-tested on
+        the bench as version '<tf>@70%' (buying before the close). At the close (_close) we count whether it held."""
+        from . import candles as CDL, registry
+        name = TF_NAME.get(tf, f"{tf}m")
+        spec = registry.candle_spec()
+        ideas_all = []
+        for sym in list(self.e.metrics):
+            try:
+                b = self.bars(sym, tf)
+                if len(b) < 3 or b[-1][0] != start:
+                    continue
+                b = b[-KEEP:]
+                pats, ideas = CDL.last_bar_scan(b[:, 1], b[:, 2], b[:, 3], b[:, 4], self._levels(sym, len(b)), spec)
+                if pats:
+                    self.early_seen[(sym, name, float(start))] = {p: v for p, v in pats.items() if p not in NO_DIRECTION}
+                for x in ideas:
+                    ideas_all.append((sym, f"{name}@{int(round(float(c.get('early_at') or 0.7) * 100))}%", start, x["name"], x["d"], True,
+                                      x.get("lvl_atr"), float(b[-1][4]), x))
+            except Exception:
+                continue
+        sent = self._bench(ideas_all, ideas_all[0][1] if ideas_all else name, now, c) if c.get("early_bench") and ideas_all else 0
+        st = self.early_stats.setdefault(name, {"n": 0, "held": 0, "pct": None, "bench": 0})
+        st["bench"] += sent
+
+    def _early_check(self, name, start):
+        """At the close: of the shapes seen early in this candle, how many are still there?"""
+        st = self.early_stats.setdefault(name, {"n": 0, "held": 0, "pct": None, "bench": 0})
+        for key in [k for k in self.early_seen if k[1] == name and k[2] == float(start)]:
+            seen = self.early_seen.pop(key)
+            fin = (self.latest.get((key[0], name)) or {}).get("patterns") or {}
+            for p, v in seen.items():
+                st["n"] += 1
+                st["held"] += int(fin.get(p) == v)
+        st["pct"] = round(st["held"] / st["n"] * 100) if st["n"] else None
 
     def _daily(self, now, c):
         from . import candles as CDL, registry
@@ -325,4 +376,4 @@ class CandleScanner:
         return {"sym": sym, "rows": rows, "note": "Closed candles only count as patterns; 'forming' is how the open candle looks so far and can change before it closes."}
 
     def status(self) -> dict:
-        return {"counts": dict(self.counts), "last": dict(self.last_run), "error": _C.get("error")}
+        return {"counts": dict(self.counts), "last": dict(self.last_run), "error": _C.get("error"), "early": dict(self.early_stats)}

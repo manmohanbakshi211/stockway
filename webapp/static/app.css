@@ -720,3 +720,10 @@ tr.best td { background: var(--up-soft); }
 .capcard h4 { margin: 0 0 4px; font-size: 15px; }
 .capcard td { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .vault-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+
+/* 2.36 Fortune chart */
+.fortune { margin-top: 12px; }
+.fo-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; }
+.fo-grid > * { min-width: 0; }
+.fo-chart { height: 380px; background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; }
+@media (max-width: 1000px) { .fo-grid { grid-template-columns: 1fr; } .fo-chart { height: 300px; } }

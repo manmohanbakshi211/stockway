@@ -114,6 +114,25 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Fortune chart: honest ranges for the forming candle and the next few (2.36)
+
+- **Chart page, under the main chart (live/fortune.py, rules/fortune.json):** for the timeframe you pick (1m to 1M) the
+  app replays the symbol's own history: every past candle is cut at the same point the forming candle has reached
+  (say 70% of its time) and compared with how it really ended. It shows:
+  - where the forming candle's close will likely land (68% and 95% ranges, orange lines on the chart) and how far its
+    high / low still stretch;
+  - its shape so far (hammer, inside bar...) and how often that shape held to the close in this history;
+  - how often the rest of such candles went up: about 50% means **no direction edge**, and the page says so;
+  - a range cone for the next 6 candles (purple: 68% and 95%), moves measured in the ATR of the time;
+  - the trend on that timeframe with its own historical hit rate (a lean, not proven) and the event risk.
+- **Checked live:** every forecast is graded when its candle closes ("the 68% range held 69% of 120 forecasts"). In
+  the tests, the 68% range held 58-78% on days the history never saw.
+- **Buying at 70% of a candle, tested honestly:** the candle scanner now also checks every 15m / 30m / 1H / 75m candle
+  at 70% of its time; alertable shapes are paper-traded on the test bench as version `<tf>@70%` next to the
+  close-based `<tf>` version, and how often a 70% shape held at the close is counted. The Strategy board will show
+  whether entering early beats waiting. Information only: no alert, no paper account.
+- Checked: 198 tests, Lab regression 103/103, chart page (1m-1D, index and stock) at desktop and phone, no errors.
+
 ## Event engine: official feeds and event risk on every alert (2.35)
 
 - **Official feeds (live/events.py, rules/event_sources.json):** RBI press releases and notifications, SEBI orders and

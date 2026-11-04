@@ -219,6 +219,24 @@ def _mtf():
     return e.mtf
 
 
+def _fortune():
+    e = engine()
+    if getattr(e, "fortune", None) is None:
+        from live.fortune import Fortune
+        e.fortune = Fortune(e)
+    return e.fortune
+
+
+@router.get("/api/live/fortune/{sym}")
+async def live_fortune(sym: str, tf: str = "15m"):
+    """2.36 Fortune chart: ranges for the forming candle and the next few of a timeframe, from the symbol's own history
+    (every past candle cut at the same point and compared with how it ended), checked live. Information only."""
+    from live.mtf import MAIN_TFS
+    if tf not in MAIN_TFS:
+        raise HTTPException(400, f"Timeframe must be one of {', '.join(MAIN_TFS)}")
+    return clean(await _run_blocking(_fortune().compute, _mtf(), sym.upper(), tf))
+
+
 @router.get("/api/live/mtf/{sym}")
 async def live_mtf(sym: str, tfs: str | None = None):
     """All timeframes of one symbol: candles, markings, higher-timeframe levels, confluence and the trend strip."""
