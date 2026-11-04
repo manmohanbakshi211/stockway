@@ -114,6 +114,32 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Shadow Focus: is Focus leaning on one or two alert types? (2.37)
+
+- **Why:** on the first live days 89% of Focus came from two alert types (unusual options 53-54%, sharp move 36-37%),
+  and both lost on paper. The old grade (last price, ±20%) is far kinder than real fills: the same 30 sharp-move alerts
+  the paper account took were +1.8% on the old grade and −6.5% in real paper trades (spread, slippage, stops).
+- **Champion vs challengers (live/focuslab.py, rules/focus_shadow.json):** the current Focus is untouched. Every
+  directional alert is also judged by 3 challenger versions at the same moment, and their choice (pick + why) is saved
+  with the alert (`data.focus_ch`) and on its test-bench signal. Nothing you see, Telegram, the risk check or the paper
+  account reads it (checked on the System page and in the tests).
+  - `honest_cap30` (main): honest grade + no alert type over ~30% of the day's picks;
+  - `cap30`: the current Focus rules + the same cap (is it the cap that helps?);
+  - `honest`: honest grade only (is it the grade that helps?).
+- **Honest grade:** the test bench's 1-lot trades of that alert type (ask in, bid out, every charge, the paper
+  account's exits), from earlier days only. 15+ trades and average minus its uncertainty above 0 = winning (gets in from
+  severity 2, even if the old scorecard demoted it); average plus uncertainty below 0 = losing (never in); anything else
+  uses the current Focus bar. Today the bench has no record yet, so the challengers start on the current bar.
+- **Type cap:** with 4+ types good enough today, none above 30% of the picks; with 2-3 types, an even split at most;
+  while only one type has shown up, 2 of it. One pick per symbol per hour, like Focus.
+- **Where:** Scorecard → "Focus: current vs challengers" (picks, mix, honest ₹ a trade on the same alerts, old grade,
+  by day); Alerts → **Shadow Focus** view. Days before a version existed are replayed with the same code ("replayed");
+  days before the current Focus rules (2 Nov) are not compared.
+- **Replay on the Mac's 2 and 3 Nov:** current Focus 255 picks (127 a day: 54% unusual options, 37% sharp move);
+  `honest_cap30` 46 picks (23 a day: 30% / 30% / 28% volume surge / 7%), option +9.3% vs +6.4% an hour later (last
+  price, before costs: not proof). The honest bench result decides from today on.
+- A challenger replaces the current Focus only on Mandeep's say-so, after it beats it on the same days with enough trades.
+
 ## Fortune chart: honest ranges for the forming candle and the next few (2.36)
 
 - **Chart page, under the main chart (live/fortune.py, rules/fortune.json):** for the timeframe you pick (1m to 1M) the

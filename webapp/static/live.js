@@ -813,21 +813,23 @@ async function pageAlerts() {
   const day = params.get("day") || "latest";
   LS.set("alertsView", view); LS.set("alertsSym", sym); LS.set("alertsKind", kind);
   const d = await api(`/api/live/alerts?day=${day}&view=${view}${sym ? `&sym=${encodeURIComponent(sym)}` : ""}`);
+  if (d.shadow) VIEWS.push(["shadow", "Shadow Focus", `On trial: ${d.shadow.label}. Recorded only: nothing you see, get on Telegram or paper-trade changes`]);
   const cnt = d.counts || {};
   const byKind = {};
   d.alerts.forEach((a) => { byKind[a.kind] = (byKind[a.kind] || 0) + 1; });
   const shown = kind ? d.alerts.filter((a) => a.kind === kind) : d.alerts;
   const go = (p) => { const q = new URLSearchParams({ day: d.day || "", view, sym, kind, ...p }); location.hash = `#/alerts?${q}`; };
-  const vName = (VIEWS.find((v) => v[0] === view) || VIEWS[1])[1];
+  const vName = (VIEWS.find((v) => v[0] === (d.view || view)) || VIEWS[1])[1];
   main.innerHTML = `<h1 class="page-title">Alerts</h1><p class="lede">Every alert, saved by day. ${d.day ? `${shown.length} ${esc(vName.toLowerCase())}${kind ? ` · ${esc(KIND[kind] || kind)}` : ""} (of ${d.total}) on ${new Date(d.day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}.` : "None yet: they appear here as the scanner finds them."}</p>
     <div class="toolbar"><div class="btn-row">
       <label class="field inline">Day <select id="al-day">${d.days.map((x) => `<option value="${x.day}" ${x.day === d.day ? "selected" : ""}>${x.day} (${x.n})</option>`).join("") || `<option>No alerts yet</option>`}</select></label>
-      <div class="seg">${VIEWS.map(([v, l, t]) => `<button data-v="${v}" aria-pressed="${view === v}" title="${esc(t)}">${l}${cnt[v] != null ? ` <small class="muted">${cnt[v]}</small>` : ""}</button>`).join("")}</div>
+      <div class="seg">${VIEWS.map(([v, l, t]) => `<button data-v="${v}" aria-pressed="${(d.view || view) === v}" title="${esc(t)}">${l}${cnt[v] != null ? ` <small class="muted">${cnt[v]}</small>` : ""}</button>`).join("")}</div>
       <input type="search" id="al-sym" placeholder="Symbol" value="${esc(sym)}" aria-label="Filter by symbol"></div></div>
     <div class="chips small al-kinds" role="group" aria-label="Filter by alert type">
       <button class="chip${kind ? "" : " on"}" data-k="" aria-pressed="${!kind}">All types ${d.alerts.length}</button>
       ${Object.entries(byKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<button class="chip${kind === k ? " on" : ""}" data-k="${esc(k)}" aria-pressed="${kind === k}">${esc(KIND[k] || k)} ${n}</button>`).join("")}
       ${kind && !byKind[kind] ? `<button class="chip on" data-k="${esc(kind)}" aria-pressed="true">${esc(KIND[kind] || kind)} 0</button>` : ""}</div>
+    ${d.view === "shadow" && d.shadow ? `<p class="small muted" style="margin:0 0 8px"><span class="pill">shadow</span> What the challenger <b>${esc(d.shadow.label)}</b> picks (or would have picked, on days before it existed). On trial only: the current Focus is still the one that reaches you. <a href="#/scorecard">Compare them →</a></p>` : ""}
     <ul class="alerts">${shown.map((a) => alertItem(a, true)).join("") || `<li class="muted" style="padding:18px">No alerts for this filter.</li>`}</ul>`;
   $("#al-day").onchange = (e) => go({ day: e.target.value });
   main.querySelectorAll("[data-v]").forEach((b) => b.onclick = () => go({ view: b.dataset.v }));
@@ -1132,6 +1134,7 @@ async function pageScorecard() {
       ${(m.models || []).length ? `<p class="small">Models compared on the same unseen days: ${m.models.map((x) => `${esc(x.name)} <b>${x.auc}</b>${x.chosen ? " ✓ in use" : ""}${x.champion ? " (champion)" : ""}`).join(" · ")}. A challenger replaces the champion only if it is 0.02 AUC better.</p>` : ""}</div>
     ${exitBoardLive(sc.exits)}
     <div id="trials-box"></div>
+    <div id="focus-shadow-box"></div>
     <p class="note">${esc(sc.rule)} Alert types under 45% of decided cases (20+) are demoted automatically: out of Focus, no Telegram, no auto paper trade.</p>
     <h2>By alert type</h2>
     <div class="table-wrap"><table><thead><tr><th>Alert</th><th class="r">Graded</th><th class="r">Worked</th><th class="r">Recently</th><th class="r">Option 15 min</th><th class="r">Option 60 min</th><th class="r" title="Price move in the alert's favour">Price 15 min</th><th class="r">Honest ₹ a trade<br><small class="muted">after costs (bench)</small></th><th></th></tr></thead>
@@ -1141,6 +1144,35 @@ async function pageScorecard() {
     <div class="table-wrap"><table><thead><tr><th>When</th><th>Alert</th><th>Result</th><th class="r" title="Price move in the alert's favour">In favour 5m</th><th class="r">15m</th><th class="r">60m</th><th class="r">Option best / worst</th></tr></thead><tbody>${recent || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>`;
   bindAIReview(main);
   api(`/api/live/trials${sc.source ? `?source=${sc.source}` : ""}`).then((t) => { const el = $("#trials-box"); if (el) el.innerHTML = trialsBox(t); }).catch(() => {});
+  api(`/api/live/focus_shadow?days=10${sc.source ? `&source=${sc.source}` : ""}`).then((f) => { const el = $("#focus-shadow-box"); if (el) el.innerHTML = focusShadowBox(f); }).catch(() => {});
+}
+
+/* 2.37 shadow Focus: the current Focus vs the challenger versions on the same alerts (live/focuslab.py) */
+function focusShadowBox(f) {
+  if (!f || !(f.selectors || []).length || !(f.days || []).length) return "";
+  const B = (b) => b && b.n ? `<b class="${b.avg >= 0 ? "up" : "down"}">${rupees(b.avg)}</b> <small class="muted">× ${b.n}, ${b.win_pct}% won</small><br><small class="muted">total ${rupees(b.net)}</small>` : `<span class="muted small">collecting</span>`;
+  const mix = (s) => (s.top || []).slice(0, 2).map((t) => `${esc(t.label)} ${t.pct}%`).join(" · ");
+  const rows = f.selectors.map((s) => `<tr${s.main ? ` class="best"` : ""}><td><b>${esc(s.label)}</b> ${s.champion ? `<span class="pill">in use</span>` : s.baseline ? "" : `<span class="pill">shadow</span>`}
+      ${!s.champion && !s.baseline && s.replayed_days ? `<br><small class="muted">${s.live_days} live, ${s.replayed_days} replayed</small>` : ""}</td>
+    <td class="r">${s.n.toLocaleString("en-IN")}<br><small class="muted">${s.per_day}/day${s.both != null ? `, ${s.both} in Focus too` : ""}</small></td>
+    <td class="small">${s.top_pct != null ? `<b class="${s.top_pct > 40 ? "down" : ""}">${s.top_pct}%</b> top type · ${s.types} types<br><span class="muted">${mix(s)}</span>` : `<span class="muted">–</span>`}</td>
+    <td class="r">${B(s.bench)}</td>
+    <td class="r">${s.worked_pct != null ? s.worked_pct + "%" : "–"}<br><small class="muted">${fpc(s.o60, 1)} 1 h</small></td></tr>`).join("");
+  const ver = (f.verdicts || []).filter((v) => v.verdict !== "new").slice(0, 10)
+    .map((v) => `<span class="pill ${v.verdict === "good" ? "p-up" : v.verdict === "bad" ? "p-down" : ""}">${esc(v.label)}${v.is_index ? " (indices)" : ""} ${rupees(v.avg)} × ${v.n}</span>`).join(" ");
+  const nNew = (f.verdicts || []).filter((v) => v.verdict === "new").length;
+  const ids = f.selectors.map((s) => s.id);
+  const short = { focus: "Focus", all: "All" };
+  const dayRows = (f.per_day || []).slice().reverse().map((d) => `<tr><td>${esc(d.day.slice(5))}${d.from ? ` <small class="muted">from ${hm(d.from)}</small>` : ""}</td>
+    ${ids.map((k) => { const x = d.sel[k] || {}; return `<td class="r">${x.n ?? 0}${x.top_pct != null ? ` <small class="muted">${x.top_pct}% ${esc(((x.top || [])[0] || {}).label || "")}</small>` : ""}${x.bn ? `<br><small class="${x.net >= 0 ? "up" : "down"}">${rupees(x.net)}</small>` : ""}</td>`; }).join("")}</tr>`).join("");
+  return `<div class="panel tight" style="margin-top:14px"><h3>Focus: current vs challengers <span class="pill">shadow</span></h3>
+    <p class="small">Is Focus leaning on one or two alert types? Each challenger judges the same alerts at the same moment; only the current Focus reaches you, Telegram and the paper account. Last ${f.days.length} day${f.days.length === 1 ? "" : "s"}, ${(f.bench_trades || 0).toLocaleString("en-IN")} honest bench trades on these alerts. <a href="#/alerts?view=shadow">See the shadow Focus alerts →</a></p>
+    <div class="table-wrap"><table class="mini"><thead><tr><th>Way of choosing</th><th class="r">Picks</th><th>Mix</th><th class="r">Honest ₹/trade<br><small class="muted">bench</small></th><th class="r">Old grade</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <ul class="plain small muted" style="margin:6px 0 0">${f.selectors.filter((s) => s.rule).map((s) => `<li><b>${esc(s.label)}:</b> ${esc(s.rule)}.</li>`).join("")}</ul>
+    <p class="small" style="margin:8px 0 0"><b>Honest record the challengers use today</b> <span class="muted">(earlier days, ${esc(f.style)} style)</span>: ${ver || `<span class="muted">no alert type has enough bench trades yet, so they use the current Focus bar</span>`}${nNew ? ` <span class="muted">· ${nNew} type${nNew === 1 ? "" : "s"} still collecting</span>` : ""}</p>
+    ${dayRows ? `<details><summary class="small muted">By day</summary><div class="table-wrap"><table class="mini"><thead><tr><th>Day</th>${f.selectors.map((s) => `<th class="r">${esc(short[s.id] || s.id)}</th>`).join("")}</tr></thead><tbody>${dayRows}</tbody></table></div></details>` : ""}
+    ${(f.errors || []).length ? `<p class="small down">Skipped: ${f.errors.map(esc).join("; ")}</p>` : ""}
+    <p class="note">${esc(f.note)}</p></div>`;
 }
 
 /* Bullets on trial (live/trials.py): recorded and graded only */

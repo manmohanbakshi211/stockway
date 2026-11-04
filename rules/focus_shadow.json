@@ -1,0 +1,15 @@
+{
+ "about": "Shadow Focus (bullets, 2.37). Other ways of choosing Focus, run next to the current Focus on every alert and recorded only: they never change what you see, Telegram, the paper account or anything else (champion vs challenger). Each version: rank 'honest' = use the test bench's honest record for the alert type (grade_style, 1 lot, ask in, bid out, every charge), from earlier days only (never today's, never later): a type with min_n+ trades whose average minus its uncertainty is above 0 is 'good' (it gets in from severity good_min_sev, even if the old scorecard demoted it), one whose average plus its uncertainty is below 0 is 'bad' (never in, when skip_bad), anything else follows the current Focus rules (strength, demotion). rank 'none' = the current Focus rules only. type_cap: no alert type may be more than this share of the version's picks today (with only 2 or 3 types good enough today, an even split is the limit; while only one type has shown up, at most cap_floor of it; cap_floor of each type is always allowed); 1 = no cap. gap_min: at most one pick per symbol in this many minutes. Only directional alerts are judged; market-wide news follows the current Focus. Add or change a version here; no code change. A broken version is skipped and shown on the System page; the rest keep running. A version replaces the current Focus only on Mandeep's say-so, after it beats it on the same days. champion_since: the first market day of the current Focus rules (dated: earlier days are not compared).",
+ "main": "honest_cap30",
+ "champion_since": "2026-11-02",
+ "champion_note": "The current Focus rules (2.13 Focus feed + 2.17 conviction model) first ran on a market day on 2 Nov 2026; earlier days were chosen by older rules, so they are not compared.",
+ "versions": {
+  "honest_cap30": {"label": "Honest grade + 30% type cap", "rank": "honest", "grade_style": "buy", "min_n": 15, "days": 30,
+                   "type_cap": 0.30, "cap_floor": 2, "gap_min": 60, "good_min_sev": 2, "skip_bad": true, "since": "2026-11-04"},
+  "cap30": {"label": "Current rules + 30% type cap", "rank": "none", "type_cap": 0.30, "cap_floor": 2, "gap_min": 60,
+            "since": "2026-11-04"},
+  "honest": {"label": "Honest grade, no cap", "rank": "honest", "grade_style": "buy", "min_n": 15, "days": 30,
+             "type_cap": 1.0, "cap_floor": 2, "gap_min": 60, "good_min_sev": 2, "skip_bad": true, "since": "2026-11-04"}
+ },
+ "since": "2026-11-04"
+}

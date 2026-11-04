@@ -136,7 +136,8 @@ class LiveEngine:
         self.shadow = None                           # exit styles graded in shadow on every alert (live/shadow.py)
         self.trials = None                           # bullets on trial: recorded and graded only (live/trials.py)
         self.bench = None                            # an honest paper trade for every signal (live/bench.py)
-        self.in_play: set = set()                    # 2.31: stocks the mover sweep tested today (library rules run on them)
+        self.focuslab = None                         # 2.37: shadow Focus challengers, recorded only (live/focuslab.py)
+        self.in_play: set = set()                   # 2.31: stocks the mover sweep tested today (library rules run on them)
         self._facts_cache: dict = {}                 # (sym, direction, minute) -> facts for test-bench trades
         self.mover_last = None                       # the last mover sweep (live/movers.py)
         self.vault_last = None                       # the last stock option-chain sweep (data vault)
@@ -304,6 +305,13 @@ class LiveEngine:
             self.bench = Bench(self.store, self.source, self.log)
         except Exception as e:
             self.log(f"Test bench off: {e}")
+        try:                                         # 2.37: shadow Focus (recorded next to every alert, changes nothing)
+            from .focuslab import FocusLab
+            self.focuslab = FocusLab(self.store, self.source, self.log)
+            self.focuslab.warm(day)
+        except Exception as e:
+            self.focuslab = None
+            self.log(f"Shadow Focus off: {e}")
         self.in_play, self._facts_cache, self.mover_last = set(), {}, None
         try:
             from .dataguard import DataGuard
@@ -1325,6 +1333,7 @@ class LiveEngine:
                     self.log(f"Event risk skipped: {e}")
         p = self.ranker.predict(feats) if self.ranker else None
         sc = signal_score(a["severity"], ev, st, regime_adjust((reg or {}).get("code"), a["kind"], a["direction"]), p)
+        sev0 = a["severity"]                         # before any scorecard demotion (the shadow Focus judges it too)
         muted = None
         if st and a["direction"] in ("up", "down") and st.get("hit_rate") is not None and (
                 (st.get("decided", 0) >= 20 and st["hit_rate"] < float(lc["mute_hit_rate"])) or
@@ -1346,6 +1355,14 @@ class LiveEngine:
                 self.focus_last[a["sym"]] = ts
         elif a["direction"] not in ("up", "down") and a["severity"] >= 3:
             focus = True                      # market-wide news / macro events
+        fch = None
+        if getattr(self, "focuslab", None) is not None:   # 2.37: challengers judge the same alert; saved with it, read by nothing else
+            try:
+                fch = self.focuslab.decide(a, sev0=sev0, muted=bool(muted), strong=bool(strong_enough), ts=ts, day=a["day"])
+            except Exception as e:
+                fch = None
+                if self._every("focuslab_err", 600, clock_time=False):
+                    self.log(f"Shadow Focus skipped: {e}")
         lv_setup = (a.get("data") or {}).get("setup_levels")
         tp_plan, tp_R, tp_s0 = None, None, None
         try:
@@ -1356,6 +1373,7 @@ class LiveEngine:
                      "levels": lv_setup or (levels(m, a["direction"], self.state) if m else {}),
                      "structure": structure(a["direction"], m, ctx) if m else None,
                      "track": st, "score": sc, "model_p": round(p * 100) if p is not None else None, "muted": muted, "focus": focus,
+                     **({"focus_ch": fch} if fch else {}),
                      "conviction": conv, "regime": (reg or {}).get("label"),
                      "plan": tp_plan,
                      "bigger": big or None,

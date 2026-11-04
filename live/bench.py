@@ -258,7 +258,8 @@ class Bench:
                 ctx = None
         ad = a.get("data") or {}
         tag = {k: v for k, v in (("sev", a.get("severity")), ("score", ad.get("score")), ("conv", ad.get("conviction")),
-                                 ("focus", ad.get("focus")), ("muted", bool(ad.get("muted")) if "muted" in ad else None))
+                                 ("focus", ad.get("focus")), ("muted", bool(ad.get("muted")) if "muted" in ad else None),
+                                 ("focus_ch", [n for n, r in (ad.get("focus_ch") or {}).items() if (r or {}).get("pick")] or None))
                if v is not None}
         styles, _ = load_styles()
         guard = getattr(engine, "dguard", None)

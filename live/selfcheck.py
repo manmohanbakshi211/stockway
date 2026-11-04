@@ -74,6 +74,14 @@ def static_checks(cfg: dict | None = None) -> list:
                   not dataguard._C.get("error") and "_data_hold" in esrc,
                   dataguard._C.get("error") or f"mode {dc['mode']}; jumps over {dc['jump_pct'].get('index')}% (index) / "
                                                f"{dc['jump_pct'].get('stock')}% (stock) in {dc['every_s']} s are checked"))
+    from live import focuslab, notify, paper, riskgate
+    fl = focuslab.load()
+    reads = [m.__name__ for m in (paper, notify, riskgate) if "focus_ch" in inspect.getsource(m)]
+    out.append(_c("focus_shadow", "Shadow Focus: challengers load (rules/focus_shadow.json) and nothing you see or trade reads them",
+                  not fl["error"] and not fl["errors"] and bool(fl["versions"]) and not reads,
+                  fl["error"] or (f"read by {', '.join(reads)}" if reads else
+                                  f"{len(fl['versions'])} version(s) on trial: {', '.join(fl['versions'])} (main: {fl['main']})"
+                                  + (f"; skipped: {'; '.join(fl['errors'])}" if fl["errors"] else ""))))
     vsrc = inspect.getsource(_eng.LiveEngine._vault_loop)
     vc = vault.cfg()
     out.append(_c("vault_spare_calls", "Data vault: stock option chains only with spare Upstox calls, never changing the scanner",

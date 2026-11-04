@@ -299,15 +299,30 @@ def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1
     if day == "latest":
         days = e.store.alert_days(1)
         day = days[0]["day"] if days else None
-    if view in ("act", "focus", "all"):
+    if view in ("act", "focus", "all", "shadow"):
         from live.dayreport import _focus
         al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=1, source=source, limit=6000)
         pick = {"act": lambda a: a["severity"] >= 3,
                 "focus": lambda a: _focus(a) or (a["severity"] >= 2 and not (a.get("data") or {}).get("muted")),
                 "all": lambda a: True}
+        shadow = None
+        try:                                     # 2.37: what the main shadow Focus version picked (live) or would have (replayed)
+            from live import focuslab
+            fl = focuslab.load()
+            if fl["main"] and day:
+                src = source or e.source or e.cfg()["live"].get("source") or "upstox"
+                ids = focuslab.picks(e.store, src, day, fl["main"], e.cfg().get("live") or {},
+                                     today=e.clock.now().date().isoformat() if getattr(e, "clock", None) else None)
+                pick["shadow"] = lambda a: a["id"] in ids
+                shadow = {"version": fl["main"], "label": fl["versions"][fl["main"]]["label"]}
+        except Exception:
+            shadow = None
+        if view == "shadow" and "shadow" not in pick:
+            view = "focus"
         counts = {k: sum(1 for a in al if f(a)) for k, f in pick.items()}
         out = [a for a in al if pick[view](a)][:max(1, min(int(limit), 2000))]
-        return clean({"day": day, "alerts": out, "total": len(al), "counts": counts, "view": view, "days": e.store.alert_days(60)})
+        return clean({"day": day, "alerts": out, "total": len(al), "counts": counts, "view": view, "days": e.store.alert_days(60),
+                      "shadow": shadow})
     al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=min_sev, source=source,
                         limit=6000 if focus else max(1, min(int(limit), 6000)))
     total = len(al)
@@ -654,6 +669,29 @@ def live_board(regime: str = "auto", days: int = 60, source: str | None = None, 
     out.update(day_type=now_reg.get("label") if e.running else None, day_code=now_reg.get("code") if e.running else None, source=src,
                styles=[{"style": k, "label": v["label"], "family": v["family"]} for k, v in bench.load_styles()[0].items()])
     return clean(out)
+
+
+_FS_CACHE: dict = {}
+
+
+@router.get("/api/live/focus_shadow")
+def live_focus_shadow(days: int = 10, source: str | None = None):
+    """2.37 shadow Focus: the current Focus vs the challenger versions (rules/focus_shadow.json) on the same alerts:
+    picks, how much is one alert type, and the test bench's honest 1-lot result on those picks. Shadow only."""
+    from live import focuslab
+    e = engine()
+    src = source or e.source or e.cfg()["live"].get("source") or "upstox"
+    days = max(1, min(60, int(days)))
+    k = (src, days)
+    hit = _FS_CACHE.get(k)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    today = e.clock.now().date().isoformat() if getattr(e, "clock", None) else None
+    out = focuslab.compare(e.store, src, days, today=today, lc=e.cfg().get("live") or {})
+    out.update(source=src, status=e.focuslab.status() if getattr(e, "focuslab", None) is not None else None)
+    out = clean(out)
+    _FS_CACHE[k] = (time.time(), out)
+    return out
 
 
 @router.get("/api/live/accounts")
