@@ -557,6 +557,23 @@ class NextCandle:
                         "in68": bool(i)})
         return out
 
+    def graded(self, sym, tf, k, n=400) -> list:
+        """2.40.1: every live prediction made at k small candles (the first call), oldest first, with the real close: the
+        Fortune chart's own market from live predictions."""
+        try:
+            with self.e.store.lock:
+                rs = self.e.store.db.execute("SELECT start, pred, actual FROM nextcandle WHERE sym=? AND tf=? AND k=? "
+                                             "ORDER BY start DESC LIMIT ?", (sym, tf, k, n)).fetchall()
+        except Exception:
+            rs = []
+        out = []
+        for st, p, a in reversed(rs):
+            p, a = json.loads(p), json.loads(a)
+            out.append({"time": int(st + IST_SHIFT), **{x: p.get(x) for x in ("open", "high", "low", "close", "close_lo", "close_hi",
+                                                                               "p_green", "similar")},
+                        "actual_close": a.get("close"), "live": True})
+        return out
+
     def view(self, sym, tf) -> dict:
         """Everything the Fortune chart needs for the shadow next candle and the smart report (cheap: no building here)."""
         pr = pairs().get(tf)
@@ -583,6 +600,9 @@ class NextCandle:
         rep = words(tf, pr["from"], pr["after"], bt, f"on {bt.get('test_days', 0)} days it never saw")
         if live.get("n"):
             rep += words(tf, pr["from"], pr["after"], live, "live")
+        lv = self.graded(sym, tf, pr["after"])
+        seen = {x["time"] for x in lv}
+        shown = [x for x in shown if x["time"] not in seen] + lv          # unseen days, then every live first call
         out.update(status="ready", past=shown, backtest={k: v for k, v in bt.items() if k != "shown"}, live=live, today=today_s,
                    report=rep, recent=self.recent(sym, tf), pool=len(p["t"]["meta"]), history_rows=p.get("rows"),
                    market_ref=p.get("mkt"))

@@ -114,6 +114,19 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Fortune chart: its own market of predicted candles (2.40.1)
+
+- **Mandeep (4 Nov evening):** the shadow candle under the real one was hard to read. The Fortune chart is now its own
+  "market ahead" chart: **only Fortune's predicted candles**, no real candles (those are on the chart above).
+  **Blue = predicted up, orange = predicted down**; each candle is what Fortune predicted for that candle after its
+  first small candles closed (same calculation as 2.39); the lighter one at the right edge is the candle forming now,
+  drawn before the real one is done, with its likely close range as two grey lines.
+- Its own timeframe buttons: **5m / 15m / 1H / 1D** (remembered), whatever the main chart shows. "Real close line"
+  (off by default) draws the real closes as a thin grey line to compare. Past candles: the days the history never saw,
+  then every live first call (graded) from the `nextcandle` table.
+- Side panel in plain words (the candle forming now, how good it has been against "keeps its colour"); the smart
+  report stays under the chart. The 2.36 / 2.38 ranges and ghost candles are no longer drawn (the data is unchanged).
+
 ## India market indication, the watcher loop back on, Paper page tidy (2.40)
 
 - **India market tile (Live page, the market strip's empty space):** one word for the whole Indian market (Nifty, Bank

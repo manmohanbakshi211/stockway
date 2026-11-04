@@ -100,6 +100,8 @@ def test_live_predictions_grading_and_view(monkeypatch):
     assert sorted(r[0] for r in rows) == [3, 4] and all(r[3] is not None for r in rows)
     assert ("NIFTY", "5m") not in nc.cur or nc.cur[("NIFTY", "5m")]["start"] != t0
     v = nc.view("NIFTY", "5m")
+    lv = [x for x in v["past"] if x.get("live")]                # 2.40.1: the first call of every graded candle, on the chart
+    assert len(lv) == 1 and lv[0]["time"] == int(t0 + F.IST_SHIFT) and lv[0]["actual_close"] is not None and lv[0]["low"] <= lv[0]["high"]
     assert v["recent"] and v["recent"][0]["actual"]["close"] == F.groups([r for r in today if r[0] < t0 + 300], "5m")[0][1][-1][4]
     assert nc.status["graded"] == 2
 

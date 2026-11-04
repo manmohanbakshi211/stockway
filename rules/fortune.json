@@ -17,7 +17,7 @@
  "track_opened": true,
  "track_in_play": 6,
  "market_ref": {"default": "NIFTY", "NIFTY": "BANKNIFTY"},
- "past_shown": 80,
+ "past_shown": 150,
  "show_cone": false,
  "since": "2026-11-04"
 }

@@ -1685,9 +1685,9 @@ async function pageChart() {
         <div class="panel tight"><h3>Setups today</h3><div id="ch-setups"></div></div>
         <div class="panel tight"><h3>Key levels</h3><div id="ch-levels"></div></div></aside></div>
     <section class="fortune panel tight" id="fortune"><div class="toolbar" style="margin:0 0 6px"><div><h2 style="margin:0">Fortune chart <span class="pill p-amber">testing</span></h2>
-      <div class="small muted" id="fo-sub">${esc(CH.tf)}: how the candle forming now will end, from the smaller candles and ${esc(CH.sym)}'s own history</div></div>
-      <div class="btn-row small" style="margin:0"><label class="check"><input type="checkbox" id="fo-past"><span>Past predictions</span></label>
-        <label class="check"><input type="checkbox" id="fo-cone"><span>Range cone</span></label></div></div>
+      <div class="small muted" id="fo-sub">Fortune's own market: every candle is what it predicted, <span class="fo-up">blue = up</span>, <span class="fo-dn">orange = down</span></div></div>
+      <div class="btn-row small" style="margin:0"><div class="seg small-seg" id="fo-tfs">${FO_TFS.map((t) => `<button data-fotf="${t}" aria-pressed="false">${t}</button>`).join("")}</div>
+        <label class="check"><input type="checkbox" id="fo-real"><span>Real close line</span></label></div></div>
       <div class="fo-grid"><div id="fo-chart" class="fo-chart"></div><div id="fo-side" class="small"><p class="muted">Working it out from the history…</p></div></div>
       <div id="fo-report"></div></section>
     <section class="mtf" id="mtf">
@@ -1762,34 +1762,46 @@ async function pageChart() {
 
 /* 2.36 Fortune chart: ranges for the forming candle and the next few, from the symbol's own history (testing) */
 const FO = { chart: null, s: {}, lines: [], key: null, timer: null };
-function fortuneInit() {
+const FO_TFS = ["5m", "15m", "1H", "1D"];              // 2.40.1: Fortune draws its own market on the cascade timeframes
+const FO_UP = "#2F6FDE", FO_DN = "#E07B00";           // predicted up = blue, predicted down = orange (never green / red)
+function fortuneInit(tf) {
   clearTimeout(FO.timer);
   if (FO.chart) { try { FO.chart.remove(); } catch (_) {} }
-  FO.chart = null; FO.s = {}; FO.lines = []; FO.fitted = false; FO.key = `${CH.sym}|${CH.tf}`;
+  FO.tf = tf || LS.get("fo_tf", FO_TFS.includes(CH.tf) ? CH.tf : "5m");
+  if (!FO_TFS.includes(FO.tf)) FO.tf = "5m";
+  LS.set("fo_tf", FO.tf);
+  FO.chart = null; FO.s = {}; FO.lines = []; FO.fitted = false; FO.key = `${CH.sym}|${FO.tf}`;
+  document.querySelectorAll("[data-fotf]").forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.fotf === FO.tf)); b.onclick = () => fortuneInit(b.dataset.fotf); });
+  const el = $("#fo-chart"); if (el) el.innerHTML = "";
   const loop = async () => {
-    if (state.page !== "chart" || !$("#fo-chart") || FO.key !== `${CH.sym}|${CH.tf}`) return;
+    if (state.page !== "chart" || !$("#fo-chart") || FO.key !== `${CH.sym}|${FO.tf}`) return;
     let building = false;
-    try { const d = await api(`/api/live/fortune/${encodeURIComponent(CH.sym)}?tf=${CH.tf}`); building = !!(d.next && d.next.status === "building"); fortuneDraw(d); }
+    const key = FO.key;
+    try { const d = await api(`/api/live/fortune/${encodeURIComponent(CH.sym)}?tf=${FO.tf}`); if (key !== FO.key) return; building = !!(d.next && d.next.status === "building"); fortuneDraw(d); }
     catch (e) { const el = $("#fo-side"); if (el) el.innerHTML = `<p class="muted small">${esc(e.message)}</p>`; }
     const running = L.snap && L.snap.status && L.snap.status.running;      // 2.38: redraw often while the candle forms
     FO.timer = setTimeout(loop, building ? 3000 : running ? (FO.refresh || 10) * 1000 : 300000);   // 2.39: soon while it learns
   };
   loop();
 }
-/* 2.39: the next candle from the smaller ones (live/nextcandle.py): the prediction and the smart report */
+/* 2.40.1: Fortune's own market (live/nextcandle.py): every candle is what it predicted for that candle, after its first
+   small candles closed (3 x 1m for 5m, 2 x 5m for 15m, 3 x 15m for 1H, 3 x 1H for 1D); blue = up, orange = down; the
+   lighter one at the right edge is the candle forming now. No real candles on this chart (they are on the chart above). */
 function nextCandleSide(d, nx) {
-  if (!nx || !nx.cascade) return "";
+  if (!nx || !nx.cascade) return `<p class="muted">Fortune draws its own 5m, 15m, 1H and 1D market: pick one above.</p>`;
   const sub = esc(nx.from), tf = esc(d.tf);
-  if (nx.status === "building") return `<div class="fo-next"><p style="margin:0"><b>Next ${tf} candle</b>: learning from ${esc(d.sym)}'s past ${tf} candles cut after ${nx.after} × ${sub}… (a few seconds)</p></div>`;
-  if (nx.status === "error") return `<div class="fo-next"><p class="muted" style="margin:0">Next ${tf} candle: ${esc(nx.error || "not available")}</p></div>`;
-  const p = nx.now;
-  const pg = p ? p.p_green : null;
-  const lean = pg == null ? "" : pg >= 55 ? `<b class="up">${pg}% chance it ends green</b>` : pg <= 45 ? `<b class="down">${100 - pg}% chance it ends red</b>` : `<b>${pg}% green / ${100 - pg}% red</b> (no call)`;
-  return `<div class="fo-next"><p style="margin:0 0 4px"><b>Next ${tf} candle</b> <span class="muted">· from ${nx.after}+ closed ${sub} candles</span></p>
-    ${p ? `<p style="margin:0 0 4px">After ${p.k} of ${p.n_sub} × ${sub}: likely close <b>${fx(p.close)}</b> (68%: ${fx(p.close_lo)} – ${fx(p.close_hi)}), high ~${fx(p.high)}, low ~${fx(p.low)}.</p>
-      <p style="margin:0 0 4px">${lean} <span class="muted">· ${p.similar} most similar past moments · made ${clockTs(p.made)}</span></p>`
-      : `<p class="muted" style="margin:0 0 4px">${L.snap && L.snap.status && L.snap.status.running ? `Waits for ${nx.after} closed ${sub} candles of the next ${tf} candle.` : "Market closed: the next prediction comes after the open. Below: how it did on days it never saw."}</p>`}
-    <details class="muted" style="margin:0 0 6px"><summary>Facts it uses</summary>${(nx.factors || []).map(esc).join(", ")}${nx.market_ref ? ` (market = ${esc(nx.market_ref)})` : ""}. Recorded with every prediction for a later test: ${(nx.recorded || []).map(esc).join(", ")}.</details></div>`;
+  if (nx.status === "building") return `<p style="margin:0"><b>Fortune ${tf}</b>: learning from ${esc(d.sym)}'s past ${tf} candles… (a few seconds)</p>`;
+  if (nx.status === "error") return `<p class="muted" style="margin:0">Fortune ${tf}: ${esc(nx.error || "not available")}</p>`;
+  const p = nx.now, b = nx.backtest || {};
+  const dir = (x) => x.close >= x.open ? `<b class="fo-up">Up</b>` : `<b class="fo-dn">Down</b>`;
+  const running = !!(L.snap && L.snap.status && L.snap.status.running);
+  const nowHTML = p ? `<p style="margin:0 0 6px">Candle forming now (${hm(p.time - 19800)}): ${dir(p)} · close ~<b>${fx(p.close)}</b> <span class="muted">(likely ${fx(p.close_lo)} – ${fx(p.close_hi)})</span> · ${p.p_green}% chance up</p>
+      <p class="muted" style="margin:0 0 6px">Made after ${p.k} of ${p.n_sub} closed ${sub} candles, from the ${p.similar} most similar past moments. It updates with every ${sub} candle.</p>`
+    : `<p class="muted" style="margin:0 0 6px">${running ? `The next ${tf} candle appears after ${nx.after} of its ${sub} candles close.` : "Market closed: the next one comes after the open. On the chart: what it predicted before."}</p>`;
+  const honest = b.calls ? `<p class="small" style="margin:0 0 6px">How good: on ${b.test_days} days it never saw it called up / down right <b>${b.hit_pct}%</b> of the time; the plain rule "the candle keeps the colour it has so far" was right <b>${b.mom_pct}%</b>. ${b.edge ? "So it adds a real edge." : "So far it adds nothing beyond what the chart already shows."}</p>` : "";
+  return `<div class="fo-next"><p style="margin:0 0 6px"><b>Fortune ${tf}</b> <span class="muted">· each candle predicted after ${nx.after} closed ${sub} candles</span></p>${nowHTML}${honest}
+    <p class="small muted" style="margin:0"><span class="fo-up">■</span> blue = it expected the candle to close up · <span class="fo-dn">■</span> orange = to close down · the lighter one at the right edge = the candle forming now${LS.get("fo_real", false) ? " · grey line = the real close" : ""}.</p>
+    <details class="small muted" style="margin:6px 0 0"><summary>Facts it uses</summary>${(nx.factors || []).map(esc).join(", ")}${nx.market_ref ? ` (market = ${esc(nx.market_ref)})` : ""}. Recorded with every prediction for a later test: ${(nx.recorded || []).map(esc).join(", ")}.</details></div>`;
 }
 function nextCandleReport(nx) {
   if (!nx || !nx.cascade || nx.status !== "ready") return "";
@@ -1809,86 +1821,37 @@ function nextCandleReport(nx) {
     <p class="small muted" style="margin:4px 0 0">"Keeps its colour" = the plain rule that the candle ends the colour it has so far: the bar the model must beat. Pool: ${(nx.pool || 0).toLocaleString("en-IN")} past moments from ${(nx.history_rows || 0).toLocaleString("en-IN")} ${esc(nx.from)} bars. Information only: never a signal.</p></div>`;
 }
 function fortuneDraw(d) {
-  const el = $("#fo-chart"), side = $("#fo-side");
+  const el = $("#fo-chart"), side = $("#fo-side"), rep = $("#fo-report");
   if (!el || !side) return;
-  if (!d.enough || !(d.candles || []).length) { side.innerHTML = `<p class="muted">${esc(d.note || "Not enough history yet.")}</p>`; return; }
+  FO.last = d; FO.refresh = d.refresh_s || 10;
+  const nx = d.next || {};
+  side.innerHTML = nextCandleSide(d, nx);
+  if (rep) rep.innerHTML = nextCandleReport(nx);
+  if (!nx.cascade || nx.status !== "ready") { if (!FO.chart) el.innerHTML = `<p class="muted small" style="padding:12px">${nx.status === "building" ? "Fortune is reading the history…" : ""}</p>`; return; }
   const LW = window.LightweightCharts;
-  if (!FO.chart && LW) {
+  if (!LW) return;
+  const showReal = LS.get("fo_real", false);
+  const rb = $("#fo-real"); if (rb) { rb.checked = showReal; rb.onchange = () => { LS.set("fo_real", rb.checked); if (FO.last) fortuneDraw(FO.last); }; }
+  if (!FO.chart) {
     el.innerHTML = "";
     FO.chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 11 },
       grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" },
-      timeScale: { borderColor: "#D5DCE3", timeVisible: CH_MIN[CH.tf] < 1440, secondsVisible: false, rightOffset: 2 }, crosshair: { mode: 0 } });
-    // 2.38: ghost candles first, so the real candles are drawn on top of them
-    FO.s.g = FO.chart.addSeries(LW.CandlestickSeries, { upColor: "rgba(30,138,90,.22)", downColor: "rgba(194,59,50,.22)", borderVisible: true,
-      borderUpColor: "rgba(30,138,90,.7)", borderDownColor: "rgba(194,59,50,.7)", wickUpColor: "rgba(30,138,90,.55)", wickDownColor: "rgba(194,59,50,.55)",
-      priceLineVisible: false, lastValueVisible: false });
-    FO.s.c = FO.chart.addSeries(LW.CandlestickSeries, { upColor: "#1E8A5A", downColor: "#C23B32", borderVisible: false, wickUpColor: "#1E8A5A", wickDownColor: "#C23B32" });
-    const ln = (color, w, style) => FO.chart.addSeries(LW.LineSeries, { color, lineWidth: w, lineStyle: style, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false });
-    FO.s.hi95 = ln("rgba(61,47,168,.35)", 1, 1); FO.s.hi68 = ln("rgba(61,47,168,.75)", 2, 2); FO.s.mid = ln("rgba(94,107,120,.8)", 1, 0);
-    FO.s.lo68 = ln("rgba(61,47,168,.75)", 2, 2); FO.s.lo95 = ln("rgba(61,47,168,.35)", 1, 1);
+      timeScale: { borderColor: "#D5DCE3", timeVisible: FO.tf !== "1D", secondsVisible: false, rightOffset: 3 }, crosshair: { mode: 0 } });
+    FO.s.r = FO.chart.addSeries(LW.LineSeries, { color: "rgba(94,107,120,.8)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    FO.s.p = FO.chart.addSeries(LW.CandlestickSeries, { upColor: FO_UP, downColor: FO_DN, borderVisible: false, wickUpColor: FO_UP, wickDownColor: FO_DN,
+      priceLineVisible: false, lastValueVisible: true });
   }
-  FO.refresh = d.refresh_s || 10;
-  FO.last = d;
-  const nx = d.next || {}, nxOk = nx.cascade && nx.status === "ready";
-  const running = !!(L.snap && L.snap.status && L.snap.status.running);
-  const showCone = LS.get("fo_cone", !!d.show_cone), showPast = LS.get("fo_past", !running);
-  const cb = (id, v, key) => { const el = $(id); if (el) { el.checked = v; el.onchange = () => { LS.set(key, el.checked); if (FO.last) fortuneDraw(FO.last); }; } };
-  cb("#fo-cone", showCone, "fo_cone"); cb("#fo-past", showPast, "fo_past");
-  if (FO.chart) {
-    FO.s.c.setData(d.candles);
-    // 2.39: the shadow candle. Cascade timeframes: the next-candle model (from the smaller candles); others: the replay.
-    // The real candle is drawn on top: when it is finished it takes the prediction's place.
-    const faded = (x) => ({ time: x.time, open: x.open, high: x.high, low: x.low, close: x.close });
-    let gh = [];
-    if (nxOk) {
-      const last = d.candles.length ? d.candles[d.candles.length - 1].time : 0;
-      if (showPast) {
-        const live = (nx.recent || []).filter((r) => r.k === nx.after).map((r) => ({ time: r.time, ...r.pred }));
-        const seen = new Set(live.map((x) => x.time));
-        gh = (nx.past || []).filter((x) => !seen.has(x.time) && x.time <= last).concat(live.filter((x) => x.time <= last));
-      }
-      if (nx.now) gh = gh.filter((x) => x.time !== nx.now.time).concat([nx.now]);
-    } else {
-      gh = (d.ghost || []).filter((x) => x.forming || (showCone && x.range));
-    }
-    gh.sort((a, b) => a.time - b.time);
-    const uniq = gh.filter((x, i) => i === 0 || x.time !== gh[i - 1].time);
-    if (FO.s.g) FO.s.g.setData(uniq.map((x) => x.range
-      ? { ...faded(x), color: "rgba(61,47,168,.16)", borderColor: "rgba(61,47,168,.6)", wickColor: "rgba(61,47,168,.45)" } : faded(x)));
-    ["hi95", "hi68", "mid", "lo68", "lo95"].forEach((k) => FO.s[k].setData(showCone ? (d.cone || []).map((p) => ({ time: p.time, value: p[k] })) : []));
-    FO.lines.forEach((pl) => { try { FO.s.c.removePriceLine(pl); } catch (_) {} });
-    FO.lines = [];
-    const n = d.now || {};
-    if (nxOk && nx.now) {
-      FO.lines.push(FO.s.c.createPriceLine({ price: nx.now.close_hi, color: "#E07B00", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "close 68% hi" }));
-      FO.lines.push(FO.s.c.createPriceLine({ price: nx.now.close_lo, color: "#E07B00", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "close 68% lo" }));
-    } else if (n.close_68 && !nxOk) {
-      FO.lines.push(FO.s.c.createPriceLine({ price: n.close_68[1], color: "#E07B00", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "close 68% hi" }));
-      FO.lines.push(FO.s.c.createPriceLine({ price: n.close_68[0], color: "#E07B00", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "close 68% lo" }));
-    }
-    if (!FO.fitted) {                              // the last ~45 candles and the cone, so the ranges are readable
-      const nb = d.candles.length;
-      FO.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, nb - 36), to: nb + (showCone ? Math.max(2, (d.cone || []).length) : 3) });
-      FO.fitted = true;
-    }
-  }
-  const n = d.now || {}, ln_ = d.lean || {}, ck = d.check, ea = d.early, last = (d.cone || []).slice(-1)[0];
-  const edge = (p) => p == null ? "" : Math.abs(p - 50) < 6 ? "no direction edge" : `a lean ${p > 50 ? "up" : "down"}, not proven`;
-  const shp = (n.shape || []).map((x) => `<li><b class="${x.d > 0 && !["doji", "inside_bar", "nr7"].includes(x.pattern) ? "up" : x.d < 0 ? "down" : ""}">${esc(x.name)}</b> so far · ${x.n >= 10 ? `held to the close ${x.pct}% of ${x.n} times in this history` : "too few past cases to say"}</li>`).join("");
-  const nxHTML = nextCandleSide(d, nx);
-  const rep_ = $("#fo-report"); if (rep_) rep_.innerHTML = nextCandleReport(nx);
-  side.innerHTML = nxHTML + `<p style="margin:0 0 6px"><b>${esc(d.tf)}</b> · ${d.forming ? `forming candle ${Math.round((d.fraction || 0) * 100)}% done${n.mins_left != null ? `, ${n.mins_left} min left` : ""}` : showCone ? "no candle forming now: the cone starts from the last close" : "no candle forming now"}</p>
-    ${n.close_68 ? `<p style="margin:0 0 4px">${nxOk ? `<span class="muted">Without the other facts (every past candle at this point):</span> close` : "Close likely"} <b>${fx(n.close_68[0])} – ${fx(n.close_68[1])}</b> (68%), ${fx(n.close_95[0])} – ${fx(n.close_95[1])} (95%).</p>
-      <p style="margin:0 0 4px">High may stretch to ~${fx(n.high_to)}, low to ~${fx(n.low_to)} (half the time).</p>
-      <p class="muted" style="margin:0 0 6px">The rest of such candles went up ${n.up_pct}% of ${n.n} times: ${edge(n.up_pct)}.</p>
-      ${shp ? `<ul class="plain" style="margin:0 0 6px">${shp}</ul>` : ""}` : d.forming ? `<p class="muted">Too little history at this point of the candle (${n.n || 0} cases).</p>` : ""}
-    ${last && showCone ? `<p style="margin:0 0 4px">Next ${(d.cone || []).length - 1} candles: <b>${fx(last.lo68)} – ${fx(last.hi68)}</b> (68%), ${fx(last.lo95)} – ${fx(last.hi95)} (95%).</p>` : ""}
-    ${ln_.trend != null ? `<p class="muted" style="margin:0 0 4px">Trend on ${esc(d.tf)}: ${ln_.trend > 0 ? "up" : ln_.trend < 0 ? "down" : "none"}${ln_.with_trend_pct != null ? ` · the next candle went the trend's way ${ln_.with_trend_pct}% of ${ln_.n} times` : ""}.</p>` : ""}
-    ${d.event && d.event.line ? `<p class="amber" style="margin:0 0 4px">⚡ ${esc(d.event.line)}</p>` : ""}
-    <p class="muted" style="margin:6px 0 0"><b>Live check</b>: ${ck && ck.n ? `the 68% range held ${ck.in68_pct}% of ${ck.n} forecasts (should be ~68%), the 95% range ${ck.in95_pct}%${ck.shape_pct != null ? `; shapes held ${ck.shape_pct}%` : ""}.` : "starts with the first forecasts graded at their close."}
-      ${ea && ea.n ? ` Scanner today: shapes seen at 70% of a ${esc(d.tf)} candle held at the close ${ea.pct}% of ${ea.n} times.` : ""}</p>
-    <p class="muted" style="margin:6px 0 0">On the chart: the <b>faded candle</b> is the prediction for the candle forming now; the real candle is drawn on top and takes its place when it is done. <b>Past predictions</b> shows the earlier ones under the real candles (days the history never saw, then live). Orange lines = where its close likely lands (68%).${showCone ? ` <span style="color:#3D2FA8">Range cone</span>: dashed purple = 68%, light = 95%, purple boxes = the next candles' likely closes.` : ""}</p>
-    <p class="muted" style="margin:6px 0 0">${esc(d.note || "")} History: ${d.history_candles} candles (${esc(d.source || "")}).</p>`;
+  const all = (nx.past || []).concat(nx.now ? [{ ...nx.now, now: true }] : []).sort((a, b) => a.time - b.time);
+  const preds = all.filter((x, i) => i === all.length - 1 || x.time !== all[i + 1].time).slice(-200);
+  FO.s.p.setData(preds.map((x) => x.now
+    ? { time: x.time, open: x.open, high: x.high, low: x.low, close: x.close, color: x.close >= x.open ? "rgba(47,111,222,.45)" : "rgba(224,123,0,.45)",
+        wickColor: x.close >= x.open ? "rgba(47,111,222,.6)" : "rgba(224,123,0,.6)", borderColor: x.close >= x.open ? FO_UP : FO_DN }
+    : { time: x.time, open: x.open, high: x.high, low: x.low, close: x.close }));
+  FO.s.r.setData(showReal ? preds.filter((x) => x.actual_close != null).map((x) => ({ time: x.time, value: x.actual_close })) : []);
+  FO.lines.forEach((pl) => { try { FO.s.p.removePriceLine(pl); } catch (_) {} });
+  FO.lines = [];
+  if (nx.now) ["close_hi", "close_lo"].forEach((k) => FO.lines.push(FO.s.p.createPriceLine({ price: nx.now[k], color: "#5E6B78", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "likely close" })));
+  if (!FO.fitted && preds.length) { FO.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, preds.length - 40), to: preds.length + 2 }); FO.fitted = true; }
 }
 
 /* scroll-back: near the left edge, load the bars before the first one and keep the view where it was */
