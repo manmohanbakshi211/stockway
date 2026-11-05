@@ -195,10 +195,19 @@ class ChartData:
                       "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%."
                                 + (f" Note: tested on other F&O stocks, not on {sym} itself." if untested else ""),
                       "price": m.get("spot"), "data": {"factory": fac}})
-            for r in lib:                                  # test bench only: every library / book setup, live
+            hits = []
+            for r in lib:                                  # 2.46: which named strategies fire on this bar (all of them first)
                 try:
-                    if not factory.signal_now(r, f, sym):
-                        continue
+                    if factory.signal_now(r, f, sym):
+                        hits.append(r)
+                except Exception as ex:
+                    if self._rate(f"bench_rule:{r.get('_variant')}", 3600):
+                        self.e.log(f"Test bench rule {r.get('_name')} skipped: {ex}")
+            if hits and hasattr(self.e, "note_confluence"):
+                for r in hits:
+                    self.e.note_confluence(sym, r["dir"], r["_variant"], now.timestamp())
+            for r in hits:                                 # test bench only: every library / book setup, live
+                try:
                     fired = self.e.fact_fired.setdefault((r["_variant"], sym, now.date()), [])
                     if len(fired) >= int(r.get("max_day") or 1):
                         continue
@@ -240,12 +249,44 @@ class ChartData:
         except Exception as ex:
             if self._rate("bench_rules", 3600):
                 self.e.log(f"Test bench: library rules not loaded: {ex}")
+        try:                                                   # 2.46: fusions the Lab promoted (bench until switched on)
+            out += self._fusion_rules()
+        except Exception as ex:
+            if self._rate("bench_fusions", 3600):
+                self.e.log(f"Test bench: fusions not loaded: {ex}")
         try:                                                   # 2.43: strategy files (lab/packs.py), switched-on ones
             out += self._pack_rules()
         except Exception as ex:
             if self._rate("bench_packs", 3600):
                 self.e.log(f"Test bench: strategy files not loaded: {ex}")
         self._lib_cache = (time.time(), out)
+        return out
+
+    def _fusion_rules(self) -> list:
+        """Promoted fusions from the 1-year and the 5-year Lab, one bench rule per entry (exits aside)."""
+        import hashlib
+        import json as _json
+        from lab import dhan_hist, factory
+        out, seen = [], set()
+        for d in (self.e.data_dir, dhan_hist.root(self.e.data_dir)):
+            try:
+                rules = factory.load(d).get("rules", {}).values()
+            except Exception:
+                continue
+            for r in rules:
+                if not str(r.get("source", "")).startswith("fusion:") or r.get("stage") != "promoted" or not r.get("dir"):
+                    continue
+                sig = _json.dumps([r["conds"], r["dir"], r.get("win"), r["syms"]], sort_keys=True)
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                v = factory.validate(dict(r))
+                if not v:
+                    continue
+                v["_kind"] = "fusion"
+                v["_variant"] = "F" + hashlib.sha1(sig.encode()).hexdigest()[:7]
+                v["_name"] = (str(r["source"])[7:] + f" ({'long' if r['dir'] > 0 else 'short'})")[:160]
+                out.append(v)
         return out
 
     def _pack_rules(self) -> list:
@@ -294,7 +335,7 @@ class ChartData:
         if hit and hit[0] is base:
             return hit[1]
         out = [dict(r, syms=[factory.STOCKS], _variant=r["_variant"] + "s", _name=(r["_name"] + " · stocks in play")[:180]) for r in base
-               if r.get("_kind") != "pack" or factory.STOCKS in r.get("syms", [])]     # file rules: only where the file says
+               if r.get("_kind") not in ("pack", "fusion") or factory.STOCKS in r.get("syms", [])]   # only where they say
         self._lib_stock_cache = (base, out)
         return out
 

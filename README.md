@@ -114,6 +114,71 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Fusions: the best strategies mixed, and how many agree at once (2.46)
+
+- **Mandeep (6 Nov):** "system should prepare the list of all the fusion strategies like mixing the strategies and all
+  the trades should be done with each strategy."
+- **Every strategy already sees every trade:** the test bench takes every alert of every named strategy (library,
+  book, file) on every symbol, and the Lab tests every rule on every day of the bar table. Nothing new was needed there.
+- **Fusions (`lab/fusions.py`, a bullet maker):** two named strategies that must agree on the same bar. Mixing all
+  with all would be tens of thousands of rules, and with that many tries some pass by luck alone, so: each named
+  strategy is ranked on **train days only**; the best 24 per direction are paired (conditions joined, at most 4; the
+  time windows' overlap; the symbols both trade); each pair is tested with 3 exits on train / validation / holdout like
+  every rule, and every one counts in the Lab's "tried" number (the luck number grows with them). Validation and
+  holdout days never choose the pairs. Queued in every Lab run (1 year and 5 years), only once each.
+- **Never live by itself:** a promoted fusion runs on the test bench (kind "fusion") until you switch it on.
+- **Confluence (gun, shadow):** at each alert the engine notes how many *different* named strategies fired the same
+  way (`conf_al`) and the other way (`conf_against`) on that symbol in the last 15 minutes. Recorded with every bench
+  signal, so the grader can show later whether "3 strategies agree" really wins more. Changes no alert or trade.
+- 5-year Bank Nifty: 142 named entries, 49 with enough train trades, 1,221 fusion rules built (407 pairs × 3 exits).
+
+## Trade journeys: every alert held all day, the full story of its profit and loss (2.45)
+
+- **Mandeep (6 Nov):** "do not sell the trade whole day … record when profit start dropping and what was the
+  situation … same with loss, when it started, why, how much max loss, what made it reverse."
+- **What it records (`live/paths.py`, runs by itself after 15:50 from the day's recording; data/paths.db):** for every
+  bench signal, its option bought at the ask and held to 15:15 with no exit, valued at the bid every minute:
+  - highest profit and when; how deep it went first; how much it gave back after the peak;
+  - when it first reached +10 / 20 / 30 / 50% and −10 / 20 / 30%; which came first, +20% or −20%;
+  - where it stood at 15, 30, 60 and 120 minutes and at 15:15; whether a −20% trade came back to entry;
+  - **the moments**: the peak, the start of the drop (gave back a third), the start of a loss, the bottom, the
+    turn back (won back half), each with the market at that minute: underlying move since entry, distance from VWAP,
+    last 5 minutes, option IV, open interest, Nifty.
+- **Strategy board → Trade journeys:** the totals, the market at each moment, and a table per strategy. The **best
+  fixed exit** (target × stop × time) is chosen on the older 60% of days and shown with its result on the newer days
+  it never saw ("needs more days" until there are enough).
+- **First real day (5 Nov, 5,036 signals):** +20% came first 22%, −20% first 15%; average max profit +13% at 39 min,
+  then gave back 15.8 points; average max loss −11.3%; of 764 that fell 20%+, 12% came back to entry; held to 15:15
+  +1.2% before charges. At the peak the underlying was +0.96% with the trade and only 6% were on the wrong side of
+  VWAP; at the bottom 75% were on the wrong side of VWAP and Nifty was against 60%.
+- Recorded only: nothing here changes alerts, the paper account or the bench's exits. A better exit becomes a bench
+  style only when it wins on days it never saw, on your say-so (champion vs challenger).
+
+## Four more strategies as files: option selling, EMA 8/20, Smart Money Concepts, daily 50% (2.44)
+
+- **Mandeep (6 Nov):** four new inputs: Deepak Wadhwa's option-selling video (transcript + screenshots), Laksh Fxt's
+  EMA 8/20 and SMC guides, KTZFx's daily-candle 50% guide. Gun-vs-bullet split said first, then built.
+- **Gun pieces (once, same code live and in the Lab):**
+  - `live/smc.py`: swings, break of structure (BOS), change of character (CHoCH), order blocks, fair value gaps,
+    premium / discount, liquidity sweeps; no look-ahead (a swing is known only n bars later; tested on prefixes).
+    Facts `smc_trend`, `smc_brk`, `smc_choch`, `smc_pd`, `smc_ob`, `smc_ob_recent`, `smc_fvg`, `smc_sweep`.
+  - EMA 8/20: `ema8_20`, `ema8_20_x` (cross on this bar), `ema8_20_age`, `ema8_20s_x` (TradingView "smoothing line"
+    version); `pd_pos` (where price is in yesterday's range; 0.5 = its 50% level); `brk_up_age` / `brk_dn_age`
+    (bars since a 1-hour consolidation breakout).
+  - Exit vocabulary for strategy files: stops at the other side of the **first 15 / 30 minutes' range** and **beyond
+    the last swing**; targets in **index points / %** and in **option points / %**; and **option selling**
+    (`"sell": true`: a bullish rule sells the ATM put, a bearish one the ATM call; bought back at the ask; safety stop
+    when the option is up 40%). Old exits keep their keys (2.43 results unchanged).
+  - The model strategies keep their 2.42 inputs; the search uses the new facts. Fixed nothing else.
+- **Files (bullets): `deepak_orb30.json` (6 strategies × 5 exits), `laksh_ema820.json` (10 × 5), `laksh_smc.json`
+  (12 × 5), `ktzfx_daily50.json` (10 × 4)**: 180 Lab rules, on trial (Lab + test bench only).
+- **5-year Bank Nifty check (Aug 2021 → Oct 2026, real 1-minute option prices, every charge; Nifty runs on the Mac):**
+  0 of 180 pass. Deepak's exact rule (30-minute range break, sell the ATM option, 30 option points target, stop at
+  the other side of the range) wins **68-76% of trades** but averages −₹24 to −₹182 a trade after costs: many small
+  wins, a few big losses. EMA crosses, SMC setups and the 50% level lose on train with every exit; a few look good on
+  one period only (small samples). Nothing is promoted; they keep running on the bench.
+- Results don't move: Lab regression 103 / 103 on all three saved sets, 280 / 280 on the 5-year Lab with the files.
+
 ## Strategy files: a new strategy is an upload, not an app update (2.43)
 
 - **Mandeep (5 Nov):** "mein tumhe different transcript ya stretegies dunga tum file do or vo mein upload karu …

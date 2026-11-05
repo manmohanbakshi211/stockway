@@ -806,6 +806,22 @@ async def factory_rule_live(rid: str, req: Request):
     return {"ok": True, "live": r.get("live")}
 
 
+# ---- 2.45 trade journeys (live/paths.py): bench signals held to 15:15, built from the day's recording
+@app.get("/api/paths")
+def paths_view(days: int = 60):
+    from live import paths
+    return clean(paths.view(ROOT / "data", days=max(1, min(int(days), 365))))
+
+
+@app.post("/api/paths/run")
+def paths_run():
+    from lab import proc
+
+    def job(log, stop):
+        proc.run("paths", ROOT / "data", log=log, should_stop=stop)
+    return {"id": JOBS.start("paths", "Trade journeys: replaying recorded days", job)["id"]}
+
+
 # ---- 2.43 strategy files (lab/packs.py): upload a .json, checked against a fixed vocabulary, data only
 @app.get("/api/packs")
 def packs_view():

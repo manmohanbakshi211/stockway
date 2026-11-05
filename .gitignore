@@ -17,6 +17,7 @@ user_settings.json
 webapp/static/vendor/
 data/live.db*
 data/bench.db*
+data/paths.db*
 data/upstox_token.json
 data/instruments/
 data/recordings/
