@@ -201,6 +201,20 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
     out.append(_c("scheduler", "Background scheduler alive (auto-renew, auto-resume)",
                   (sched is not None and sched < 180) if sched is not None else None,
                   f"last tick {int(sched)} s ago" if sched is not None else "starting"))
+    try:                                                   # 2.45: trade journeys (live/paths.py), built after each close
+        from live import paths as _pa
+        if _pa.db_path(data_dir).exists():
+            _db = _pa.connect(data_dir, ro=True)
+            last = _db.execute("SELECT day, n, note FROM path_days WHERE source='upstox' ORDER BY day DESC LIMIT 1").fetchone()
+            _db.close()
+        else:
+            last = None
+        out.append(_c("trade_paths", "Trade journeys built from each day's recording (every bench signal held to 15:15)",
+                      (last is not None) if last is not None else None,
+                      f"last day {last['day']}: {last['n']} signals" + (f" ({last['note']})" if last['note'] else "") if last
+                      else "first run after the next close"))
+    except Exception as e:
+        out.append(_c("trade_paths", "Trade journeys readable", False, str(e)[:160]))
     try:                                                   # 2.43: strategy files (lab/packs.py): data only, checked on upload
         from lab import packs as _pk
         cur = _pk.current(data_dir, only_on=False)

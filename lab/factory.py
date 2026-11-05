@@ -33,6 +33,7 @@ import pandas as pd
 from .data import UNDERLYINGS, day_table, heavyweights, iter_days, register_stocks, spot_map, vix_table
 from .engine import charges, slip
 from .exits import PACK_STYLES, STYLES, atr14, first_exit, momentum_k, risk_pts, spec_of
+from live.smc import last_swings  # noqa: E402  (2.44: same code live and in the Lab)
 
 M_EXIT = 360                 # 15:15
 LAST_ENTRY_TOD = 330         # no entries after 14:45 (minutes since 09:15)
@@ -97,6 +98,24 @@ FEATURES.update({
     "fc_run": ("5-min closes in a row beyond the first candle (+ above its high, - below its low, 0 inside)", ""),
     "hw_open": ("index heavyweights since today's open, weighted (+1 all up, -1 all down; rules/heavyweights.json)", ""),
     "hw_day": ("index heavyweights vs yesterday's close, weighted (+1 all up, -1 all down)", ""),
+})
+# 2.44 (gun pieces for the Laksh Fxt EMA 8/20 and SMC guides, the daily-candle 50% guide; live/smc.py)
+FEATURES.update({
+    "ema8_20": ("EMA 8 minus EMA 20 (5-min)", "%"),
+    "ema8_20_x": ("EMA 8 crossed EMA 20 on this bar: +1 up, -1 down, 0 no cross", ""),
+    "ema8_20_age": ("bars since the last EMA 8/20 cross (+ when 8 is above 20, - below)", ""),
+    "ema8_20s_x": ("smoothed EMA 8/20 cross on this bar (TradingView smoothing line: EMA of each EMA), +1 / -1 / 0", ""),
+    "pd_pos": ("where price is in yesterday's range (0 = yesterday's low, 0.5 = its 50% level, 1 = its high)", ""),
+    "brk_up_age": ("bars since the last 1-hour range (consolidation) breakout up today (none = unknown)", ""),
+    "brk_dn_age": ("bars since the last 1-hour range (consolidation) breakdown today (none = unknown)", ""),
+    "smc_trend": ("smart-money swing structure: +1 up (after an up-break), -1 down", ""),
+    "smc_brk": ("break of structure on this bar: +1 above the last swing high, -1 below the last swing low", ""),
+    "smc_choch": ("change of character on this bar: the first break against the trend (+1 up / -1 down)", ""),
+    "smc_pd": ("premium / discount: where price is in the current swing range (0 discount low, 0.5 equilibrium, 1 premium high)", ""),
+    "smc_ob": ("bar dipped into a bullish order block and held (+1) / rose into a bearish one and was rejected (-1)", ""),
+    "smc_ob_recent": ("an order block was touched in the last hour: +1 bullish, -1 bearish", ""),
+    "smc_fvg": ("bar dipped into a bullish fair value gap and held (+1) / bearish (-1)", ""),
+    "smc_sweep": ("liquidity sweep: took out the last swing low / yesterday's low and closed back above (+1), mirror (-1)", ""),
 })
 INDEX_SYMS = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX")
 STOCKS = "STOCKS"             # in a rule's syms: any F&O stock (tested on every stock with downloaded history)
@@ -332,7 +351,72 @@ def bar_features(o, h, l, c, ctx: dict, iv=None, prem=None) -> dict:
         f["hw_open"], f["hw_day"] = hw_series(ctx.get("hw"), n)
     except Exception:
         f["hw_open"], f["hw_day"] = np.full(n, np.nan), np.full(n, np.nan)
+    # 2.44: EMA 8/20, yesterday's 50% level, consolidation breakouts, smart-money structure (each isolated)
+    try:
+        f.update(ema_cross_facts(c))
+    except Exception:
+        for k in ("ema8_20", "ema8_20_x", "ema8_20_age", "ema8_20s_x"):
+            f[k] = np.full(n, np.nan)
+    f["pd_pos"] = (c - pl) / (ph - pl) if ph and pl and ph > pl else np.full(n, np.nan)
+    try:
+        f["brk_up_age"], f["brk_dn_age"] = break_ages(f.get("rect_break"), n)
+    except Exception:
+        f["brk_up_age"], f["brk_dn_age"] = np.full(n, np.nan), np.full(n, np.nan)
+    try:
+        from live import smc as _S
+        f.update(_S.structure(o, h, l, c, ph, pl))
+    except Exception:
+        from live.smc import FACTS as _SF
+        for k in _SF:
+            f[k] = np.full(n, np.nan)
     return f
+
+
+def ema_cross_facts(c) -> dict:
+    """EMA 8 vs EMA 20 on 5-min closes (Laksh Fxt): the gap, a cross on this bar, bars since the last cross; and the
+    same cross for the TradingView 'smoothing line' setting (an EMA of each EMA with the same length)."""
+    c = np.asarray(c, float)
+    n = len(c)
+    e8, e20 = _ema(c, 8), _ema(c, 20)
+    out = {"ema8_20": (e8 - e20) / c * 100}
+
+    def cross(a, b):
+        side = np.sign(a - b)
+        x, age = np.zeros(n), np.full(n, np.nan)
+        prev, cur, cnt = 0.0, 0.0, 0
+        for i in range(n):
+            sd = float(side[i]) if np.isfinite(side[i]) else 0.0
+            if prev and sd and sd != prev:                      # crossed on this bar (the cross bar is age 1)
+                x[i], cur, cnt = sd, sd, 1
+            elif cur:
+                cnt += 1
+            if cur:
+                age[i] = cur * cnt
+            if sd:
+                prev = sd
+        return x, age
+    out["ema8_20_x"], out["ema8_20_age"] = cross(e8, e20)
+    out["ema8_20s_x"], _ = cross(_ema(e8, 8), _ema(e20, 20))
+    return out
+
+
+def break_ages(rb, n: int):
+    """Bars since today's last consolidation breakout up / down (from the rect_break fact), NaN before the first."""
+    up, dn = np.full(n, np.nan), np.full(n, np.nan)
+    if rb is None:
+        return up, dn
+    rb = np.asarray(rb, float)
+    lu = ld = None
+    for i in range(n):
+        if rb[i] > 0.5:
+            lu = i
+        elif rb[i] < -0.5:
+            ld = i
+        if lu is not None:
+            up[i] = i - lu
+        if ld is not None:
+            dn[i] = i - ld
+    return up, dn
 
 
 def first_candle_facts(o, h, l, c, prev_high=None, prev_low=None) -> dict:
@@ -423,16 +507,23 @@ def hold_of(ex: str) -> int:
         PACK_STYLES[ex]["max"] if ex in PACK_STYLES else 360
 
 
-def _sim_lv(c, sp, m0, entry, sym, lot, d, style, atr, bar_lo, bar_hi, fc=None, bars=None, i=None):
+def _sim_lv(c, sp, m0, entry, sym, lot, d, style, atr, bar_lo, bar_hi, fc=None, bars=None, i=None, lv=None, opp=None):
     """Option bought at m0, out when a chart level (lab/exits.py) is touched; the option's price at that minute.
     2.43 (strategy-file exits only): fc = (first candle low, high) for a first-candle stop; bars = the day's 5-min
-    (o, h, l, c) and i = the signal bar, for a momentum exit."""
+    (o, h, l, c) and i = the signal bar, for a momentum exit. 2.44: lv = level pairs for or15 / or30 / swing stops;
+    opp = the opposite at-the-money option's prices, for exits that SELL it (the same view: a bullish rule sells the put)."""
     st = spec_of(style)
     end = min(M_EXIT, m0 + st["max"])
+    sell = bool(st.get("sell"))
+    if sell:
+        if opp is None or math.isnan(opp[m0]) or opp[m0] <= 0.5:
+            return math.nan
+        c = opp
+        entry = max(0.05, opp[m0] - slip(sym, opp[m0]))          # sold at the bid
     seg, sseg = c[m0 + 1:end + 1], sp[m0 + 1:end + 1]
     if not len(seg):
         return math.nan
-    R = risk_pts(style, sp[m0], d, atr, bar_lo, bar_hi, *(fc or (None, None)))
+    R = risk_pts(style, sp[m0], d, atr, bar_lo, bar_hi, *(fc or (None, None)), lv=lv)
     if not math.isfinite(R):
         return math.nan
     mk = momentum_k(*bars, i, d, st.get("momentum"), m0, end) if st.get("momentum") and bars is not None else None
@@ -444,6 +535,9 @@ def _sim_lv(c, sp, m0, entry, sym, lot, d, style, atr, bar_lo, bar_hi, fc=None, 
         if not len(ok):
             return math.nan
         x = seg[ok[-1]]
+    if sell:
+        back = x + slip(sym, x)                                   # bought back at the ask
+        return (entry - back) * lot - charges([(-1, entry), (1, back)], lot)
     ex = max(0.05, x - slip(sym, x))
     return (ex - entry) * lot - charges([(1, entry), (-1, ex)], lot)
 
@@ -571,6 +665,7 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                 ctx["hw"] = _hw_ctx(sym, day.date, hw_maps, nb)
             f = bar_features(o, h, l, c, ctx, ivs, prem)
             atr = atr14(h, l, c)
+            sw_lo, sw_hi = last_swings(h, l)                  # 2.44: the swing stop of file exits
             for i in range(nb):
                 tod = (i + 1) * 5
                 if tod < SELL_FIRST_TOD or tod > LAST_ENTRY_TOD:
@@ -608,10 +703,16 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                         row["pnl_" + rule] = _sim(px["c"], sp, m0, entry, sym, lot, rule)
                     for style in STYLES:
                         row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i])
+                    if pack_styles:                       # 2.44: levels for file exits, the opposite option for sells
+                        lv = {"fc": (l[0], h[0]), "or15": (l[:3].min(), h[:3].max()) if i >= 2 else (None, None),
+                              "or30": (l[:6].min(), h[:6].max()) if i >= 5 else (None, None),
+                              "swing": (sw_lo[i], sw_hi[i])}
+                        oppx = day.px.get((float(k), "PE" if side == "CE" else "CE"))
                     for style in pack_styles:             # a bad file exit is NaN for its own column, nothing else
                         try:
                             row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i],
-                                                          fc=(l[0], h[0]), bars=(o, h, l, c), i=i)
+                                                          fc=(l[0], h[0]), bars=(o, h, l, c), i=i, lv=lv,
+                                                          opp=oppx["c"] if oppx is not None else None)
                         except Exception:
                             row["pnl_" + style] = math.nan
                     rows.append(row)
@@ -704,6 +805,8 @@ def words(s: dict) -> str:
     hm = lambda t: (dt.datetime(2000, 1, 1, 9, 15) + dt.timedelta(minutes=t)).strftime("%H:%M")
     side = ("Buy the ATM call" if s["dir"] > 0 else "Buy the ATM put" if s["dir"] < 0 else
             "Sell an iron fly (margin ~₹40-60K)" if s["exit"].startswith("fly") else "Sell the ATM straddle (needs ~₹1-2 lakh margin)")
+    if s["dir"] and (PACK_STYLES.get(s["exit"]) or {}).get("sell"):                 # 2.44: directional option selling
+        side = "Sell the ATM put (bullish view; margin ~₹1 lakh+)" if s["dir"] > 0 else "Sell the ATM call (bearish view; margin ~₹1 lakh+)"
     names = {"BANKNIFTY": "Bank Nifty", "NIFTY": "Nifty", STOCKS: "any F&O stock"}
     return (f"{side} on {' / '.join(names.get(x, x) for x in s['syms'])} "
             f"between {hm(s['win'][0])} and {hm(s['win'][1])} when " + " and ".join(cs) +
@@ -1103,11 +1206,20 @@ def _run(data_dir, n_random=2000, n_mutate=1000, log=print, should_stop=lambda: 
             log(f"{q['queued']} untested strategy-file rules queued")
     except Exception as e:
         log(f"Strategy files not queued ({e})")
+    fused = 0
+    try:                                                  # 2.46: fusions of the best named strategies (train days only)
+        from . import fusions
+        q = fusions.queue(data_dir)
+        fused = int(q.get("queued") or 0)
+        if fused:
+            log(f"{fused} new fusions queued (pairs of the best library / book / file strategies on train days)")
+    except Exception as e:
+        log(f"Fusions not queued ({e})")
     df = load_or_build(data_dir, log=log, should_stop=should_stop)
     if df.empty:
         raise RuntimeError("No 1-minute option history yet: download it on the Strategy desk first.")
     book = Book(df)
-    st = load(data_dir)
+    st = load(data_dir)                                   # (fusions, like every queued idea, count as tried in search())
     known = st.get("rules", {})
     seeds = [validate(x) for x in (extra or [])] + [validate({**r, "source": r.get("source")}) for r in st.get("ideas", [])]
     seeds = [s for s in seeds if s]
@@ -1236,6 +1348,8 @@ def is_live(r: dict) -> bool:
         return False
     if str(r.get("source", "")).startswith("pack:"):
         return False
+    if str(r.get("source", "")).startswith("fusion:"):              # 2.46: only when you switch it on
+        return r.get("live") == "on"
     return r.get("live") == "on" or r.get("evidence") in ("strong", "moderate")
 
 

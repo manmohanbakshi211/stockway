@@ -60,9 +60,12 @@ def atr14(h, l, c) -> np.ndarray:
 
 
 PACK_STYLES: dict = {}        # 2.43: exits defined in strategy files (key -> spec), registered by lab/packs.py
-STOP_KINDS = ("atr", "bar", "fc", "pct")
+STOP_KINDS = ("atr", "bar", "fc", "pct", "or15", "or30", "swing")    # 2.44: opening ranges and the last swing
 MOMENTUM = ("close", "wick")
-SPEC_KEYS = {"stop", "target_r", "be_at", "trail_atr", "momentum", "max", "words"}
+SPEC_KEYS = {"stop", "target_r", "be_at", "trail_atr", "momentum", "max", "words",
+             "target_pts", "target_pct", "opt_target_pts", "opt_target_pct", "sell"}             # 2.44
+NEW_244 = ("target_pts", "target_pct", "opt_target_pts", "opt_target_pct", "sell")
+LEVEL_STOPS = ("fc", "or15", "or30", "swing")       # stop at the other side of a level pair (low for a buy, high for a sell)
 
 
 def spec_of(style: str) -> dict:
@@ -74,20 +77,33 @@ def spec_words(sp: dict) -> str:
     kind = sp["stop"][0]
     k = sp["stop"][1] if len(sp["stop"]) > 1 else None
     stop = (f"stop {k:g}×ATR" if kind == "atr" else f"stop {k:g}% away" if kind == "pct" else
-            "stop at the other side of the first 5-min candle" if kind == "fc" else "stop just beyond the signal candle (0.5-2 ATR)")
-    parts = [stop]
+            "stop at the other side of the first 5-min candle" if kind == "fc" else
+            "stop at the other side of the first 15 minutes' range" if kind == "or15" else
+            "stop at the other side of the first 30 minutes' range" if kind == "or30" else
+            "stop beyond the last swing low (buy) / high (sell)" if kind == "swing" else
+            "stop just beyond the signal candle (0.5-2 ATR)")
+    parts = [("SELL the opposite at-the-money option (the view: same direction); " if sp.get("sell") else "") + stop]
     if sp.get("be_at"):
         parts.append(f"at +{sp['be_at']:g}R stop to entry")
     if sp.get("trail_atr"):
         parts.append(f"trail best price − {sp['trail_atr']:g}×ATR")
-    parts.append(f"target {sp['target_r']:g}R" if sp.get("target_r") else "no fixed target")
+    tg = [f"{sp['target_r']:g}R"] if sp.get("target_r") else []
+    if sp.get("target_pts"):
+        tg.append(f"{sp['target_pts']:g} index points")
+    if sp.get("target_pct"):
+        tg.append(f"{sp['target_pct']:g}% on the index")
+    if sp.get("opt_target_pts"):
+        tg.append(f"{sp['opt_target_pts']:g} points on the option")
+    if sp.get("opt_target_pct"):
+        tg.append(f"{sp['opt_target_pct']:g}% on the option")
+    parts.append("target " + " or ".join(tg) if tg else "no fixed target")
     if sp.get("momentum") == "close":
         parts.append("out when a 5-min candle closes beyond the previous candle against the trade")
     elif sp.get("momentum") == "wick":
         parts.append("out when a 5-min candle makes a new extreme against the trade and closes against it")
     mx = int(sp.get("max") or 375)
     parts.append("out by 15:15" if mx >= 360 else f"max {mx} min")
-    return ", ".join(parts) + " (premium stop −40%)"
+    return ", ".join(parts) + (" (safety stop: option +40% against)" if sp.get("sell") else " (premium stop −40%)")
 
 
 def spec_check(raw) -> tuple[dict | None, str | None]:
@@ -120,6 +136,15 @@ def spec_check(raw) -> tuple[dict | None, str | None]:
         sp = {"stop": stop, "target_r": num("target_r", 0.25, 20), "be_at": num("be_at", 0.25, 10),
               "trail_atr": num("trail_atr", 0.25, 10), "momentum": raw.get("momentum") or None,
               "max": int(min(375, max(5, int(raw.get("max") or 375))))}
+        for key, lo, hi in (("target_pts", 1, 5000), ("target_pct", 0.02, 10), ("opt_target_pts", 0.5, 2000),
+                            ("opt_target_pct", 1, 500)):
+            v = num(key, lo, hi)
+            if v is not None:
+                sp[key] = v
+        if raw.get("sell") not in (None, False, True):
+            raise ValueError("sell must be true or false")
+        if raw.get("sell"):
+            sp["sell"] = True
     except (TypeError, ValueError, IndexError) as e:
         return None, str(e)[:120]
     if sp["momentum"] is not None and sp["momentum"] not in MOMENTUM:
@@ -136,6 +161,7 @@ def spec_key(sp: dict) -> str:
     import hashlib
     import json
     core = {k: sp.get(k) for k in ("stop", "target_r", "be_at", "trail_atr", "momentum", "max")}
+    core.update({k: sp[k] for k in NEW_244 if sp.get(k)})        # 2.44 fields only when used: 2.43 keys unchanged
     return "x" + hashlib.sha1(json.dumps(core, sort_keys=True).encode()).hexdigest()[:7]
 
 
@@ -159,12 +185,14 @@ def momentum_k(o, h, l, c, i: int, d: int, mode: str | None, m0: int, end: int) 
 
 
 def risk_pts(style: str, s0: float, d: int, atr: float, bar_lo: float | None = None, bar_hi: float | None = None,
-             fc_lo: float | None = None, fc_hi: float | None = None) -> float:
-    """R: distance from entry to the initial stop, in points of the underlying."""
+             fc_lo: float | None = None, fc_hi: float | None = None, lv: dict | None = None) -> float:
+    """R: distance from entry to the initial stop, in points of the underlying. lv (2.44): {"fc" | "or15" | "or30" |
+    "swing": (low, high)} for stops at the other side of a level pair."""
     st = spec_of(style)
     kind, k = st["stop"][0], (st["stop"][1] if len(st["stop"]) > 1 else None)
-    if kind == "fc":                                         # 2.43: the other side of the first 5-min candle (no ATR needed)
-        lvl = fc_lo if d > 0 else fc_hi
+    if kind in LEVEL_STOPS:                                  # 2.43 / 2.44: a level, no ATR needed
+        lo, hi = (lv or {}).get(kind) or ((fc_lo, fc_hi) if kind == "fc" else (None, None))
+        lvl = lo if d > 0 else hi
         if lvl is None or not math.isfinite(lvl) or not math.isfinite(s0):
             return math.nan
         r = (s0 - lvl) * d
@@ -198,9 +226,22 @@ def first_exit(style: str, spot, opt, s0: float, entry: float, d: int, R: float,
     if st["trail_atr"]:
         atr = R / st["stop"][1]
         stop = np.maximum(stop, prev_best - st["trail_atr"] * atr)
-    reasons = [("stop", move <= stop), ("premium stop", np.nan_to_num(opt, nan=1e18) <= entry * (1 - PREM_STOP / 100))]
+    sell = bool(st.get("sell"))
+    if sell:                                                 # 2.44: a sold option hurts when it rises
+        reasons = [("stop", move <= stop), ("premium stop", np.nan_to_num(opt, nan=-1e18) >= entry * (1 + PREM_STOP / 100))]
+    else:
+        reasons = [("stop", move <= stop), ("premium stop", np.nan_to_num(opt, nan=1e18) <= entry * (1 - PREM_STOP / 100))]
     if st["target_r"]:
         reasons.append(("target", move >= st["target_r"] * R))
+    if st.get("target_pts"):
+        reasons.append(("target", move >= st["target_pts"]))
+    if st.get("target_pct"):
+        reasons.append(("target", move >= s0 * st["target_pct"] / 100))
+    for key in ("opt_target_pts", "opt_target_pct"):
+        if st.get(key):
+            gain = st[key] if key == "opt_target_pts" else entry * st[key] / 100
+            hit = (np.nan_to_num(opt, nan=1e18) <= entry - gain) if sell else (np.nan_to_num(opt, nan=-1e18) >= entry + gain)
+            reasons.append(("target", hit))
     first, why = None, "time"
     for name, hit in reasons:
         hit = hit & ~np.isnan(move) if name != "premium stop" else hit

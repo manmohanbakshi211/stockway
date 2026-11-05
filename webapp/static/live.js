@@ -2697,7 +2697,7 @@ async function pageLab() {
     const rs = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
     const st = (x) => x && x.n ? `${x.n} · ${rs(x.avg)} · t ${x.t} · ${x.green_pct}% green` : `<span class="muted">–</span>`;
     const stage = { promoted: ["p-up", "Promoted: passed all 3"], duplicate: ["", "Same trades as another rule"], "failed holdout": ["p-down", "Failed holdout"], "failed validation": ["", "Failed validation"], "failed train": ["", "Failed train"] };
-    const src = (s) => s === "generated" || s === "mutation" ? "search" : s.startsWith("pack:") ? "🗂 " + esc(s.slice(5)) : s.startsWith("ebook:") ? "📕 " + esc(s.slice(6)) : s.startsWith("library:") ? "📚 " + esc(s.slice(8)) : s.startsWith("book:") ? "📗 " + esc(s.slice(5)) : s === "claude" ? "Claude" : esc(s);
+    const src = (s) => s === "generated" || s === "mutation" ? "search" : s.startsWith("pack:") ? "🗂 " + esc(s.slice(5)) : s.startsWith("fusion:") ? "🔗 " + esc(s.slice(7)) : s.startsWith("ebook:") ? "📕 " + esc(s.slice(6)) : s.startsWith("library:") ? "📚 " + esc(s.slice(8)) : s.startsWith("book:") ? "📗 " + esc(s.slice(5)) : s === "claude" ? "Claude" : esc(s);
     const fits = (r) => r.dir !== 0 || String(r.exit || "").startsWith("fly");
     const only40 = LS.get("lab40", false);
     const rows = (f.rules || []).filter((r) => r.stage !== "failed train" && r.stage !== "duplicate" && (!only40 || fits(r))).slice(0, 60).map((r) => `<tr>
@@ -3233,6 +3233,28 @@ function coachBox(c) {
 
 /* ---------------- page: Strategy board (2.30) */
 const REGIMES = [["auto", "Today's day type"], ["all", "All days"], ["trend_up", "Trend up"], ["trend_down", "Trend down"], ["range", "Range"], ["quiet", "Quiet range"], ["volatile", "Volatile"]];
+/* 2.45: trade journeys (live/paths.py): every bench signal held to 15:15, peaks, givebacks, bottoms, recoveries */
+async function drawJourneys() {
+  const el = $("#bd-paths"); if (!el) return;
+  let j; try { j = await api("/api/paths"); } catch (e) { el.innerHTML = `<span class="muted small">${esc(e.message)}</span>`; return; }
+  const pc = (v) => v == null ? "–" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : ""}${v}%</span>`;
+  const mn = (v) => v == null ? "" : ` <small class="muted">@${Math.round(v)} min</small>`;
+  const bx = (b) => !b ? `<span class="muted small">needs more days</span>` : `<small>${b.target ? "+" + b.target + "%" : "no target"} / ${b.stop ? "−" + b.stop + "%" : "no stop"} / ${b.time === "eod" ? "15:15" : b.time + " min"}<br>older days ${pc(b.train_avg)} · newer ${pc(b.hold_avg)} <span class="muted">(${b.hold_n})</span></small>`;
+  const ctx = (c, what) => !c ? "" : `<li>${what} (${c.n}): underlying ${c.und_avg >= 0 ? "+" : ""}${c.und_avg}% with the trade since entry · ${c.vwap_avg >= 0 ? "+" : ""}${c.vwap_avg}% from VWAP (wrong side ${c.wrong_side_vwap}%) · last 5 min against ${c.last5_against}% · option IV ${c.iv_avg >= 0 ? "+" : ""}${c.iv_avg} (falling ${c.iv_falling}%) · Nifty against ${c.nifty_against}%</li>`;
+  const a = j.all || {};
+  const rows = (j.groups || []).slice(0, 25).map((g) => `<tr><td><b>${esc(g.name)}</b><br><small class="muted">${esc(g.kind)}</small></td><td class="r">${g.n}</td>
+      <td class="r">${g.p20_first ?? "–"}% / ${g.m20_first ?? "–"}%</td><td class="r">${pc(g.mfe)}${mn(g.mfe_min)}</td><td class="r">${pc(g.giveback != null ? -g.giveback : null)}</td>
+      <td class="r">${pc(g.mae)}${mn(g.mae_min)}</td><td class="r">${g.recovered != null ? g.recovered + "%" : "–"} <small class="muted">${g.deep ? "of " + g.deep : ""}</small></td>
+      <td class="r">${pc(g.end)}</td><td>${bx(g.best_exit)}</td></tr>`).join("");
+  el.innerHTML = `<h3 style="margin-top:0">Trade journeys <span class="muted small">every bench signal's option held to 15:15 with no exit: when it peaked, how much it gave back, how deep it went, whether it came back</span></h3>
+    ${!j.ready || !a.n ? `<p class="small muted">Built after each close from the day's recording (also for earlier recorded days). Nothing yet.</p>` : `
+    <p class="small">${a.n.toLocaleString("en-IN")} signals: +20% came first ${a.p20_first}%, −20% first ${a.m20_first}% · average max profit ${pc(a.mfe)}${mn(a.mfe_min)}, then gave back ${pc(a.giveback != null ? -a.giveback : null)} · average max loss ${pc(a.mae)} · of ${a.deep} that fell 20%+, ${a.recovered ?? "–"}% came back to entry · held to 15:15 ${pc(a.end)}. Option %, entry at the ask, valued at the bid, before charges.</p>
+    <ul class="small">${ctx(j.at_peak, "At the peak (just before profit started dropping)")}${ctx(j.at_drop, "When the drop began (gave back a third)")}${ctx(j.at_bottom, "At the bottom (just before a loss turned back)")}${ctx(j.at_turn, "When it had won back half the loss")}</ul>
+    <div class="table-wrap"><table class="mini"><thead><tr><th>Strategy</th><th class="r">Signals</th><th class="r">+20% / −20% first</th><th class="r">Max profit</th><th class="r">Gave back</th><th class="r">Max loss</th><th class="r">Back from −20%</th><th class="r">At 15:15</th><th>Best fixed exit (chosen on older days, judged on newer)</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <p class="note">Recorded only: nothing here changes alerts, the paper account or the bench's exits. A better exit becomes a bench style only when it wins on days it never saw, on your say-so.</p>`}`;
+}
+
 async function pageBoard() {
   stopPageTimer();
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
@@ -3266,6 +3288,7 @@ async function pageBoard() {
     ${accountsPanel(acc)}
     <div class="panel tight"><h3>Best for you right now <span class="muted small">fits ${rupees(b.capital)}, positive after costs, enough trades</span></h3>
       ${best ? `<ol class="small">${best}</ol>` : `<p class="small muted">Nothing has earned it yet: ${b.n_closed.toLocaleString("en-IN")} bench trades closed so far${b.n_open ? `, ${b.n_open} open` : ""}. A strategy needs at least ${b.min_n} closed trades and a positive average after its uncertainty. The record grows every market day.</p>`}</div>
+    <div class="panel tight" id="bd-paths"></div>
     <div class="toolbar"><div class="chips" role="group" aria-label="Way of trading">${famChips}</div></div>
     <div class="toolbar"><div class="btn-row">
       <label class="field inline">Day type <select id="bd-reg">${REGIMES.map(([v, l]) => `<option value="${v}" ${v === reg ? "selected" : ""}>${l}</option>`).join("")}</select></label>
@@ -3275,6 +3298,7 @@ async function pageBoard() {
       <tbody>${tr || `<tr><td colspan="6" class="muted">No bench trades ${fam !== "all" ? "in this way of trading " : ""}yet: they start with the next scanner session (every directional alert, every idea on trial, every Lab library / book setup and every mover test).</td></tr>`}</tbody></table></div>
     <p class="note">${esc(b.note)} Last ${b.days} days.</p>`;
   bindCapitalBox(() => pageBoard());
+  drawJourneys();
   main.querySelectorAll("tr[data-bk]").forEach((row) => row.onclick = async () => {      // 2.38: every trade with its date and time
     const nx = row.nextElementSibling;
     if (nx && nx.classList.contains("bd-trades")) { nx.remove(); return; }

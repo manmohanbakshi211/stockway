@@ -1033,9 +1033,33 @@ class LiveEngine:
             f.update(self.forecast_facts(sym, direction, now))
         except Exception:
             pass
+        try:                                         # 2.46: how many named strategies agree right now
+            f.update(self.confluence_facts(sym, direction, now))
+        except Exception:
+            pass
         out = {x: y for x, y in f.items() if x not in ("kind", "severity", "direction") and y is not None}
         self._facts_cache[k] = out
         return out
+
+    CONF_WINDOW_S = 900
+
+    def note_confluence(self, sym, d, who, ts):
+        """2.46: a named strategy (library / book / file setup) fired on `sym` in direction d (+1 / -1) at ts."""
+        q = self.__dict__.setdefault("_conf", {}).setdefault(sym, [])
+        q.append((float(ts), int(d), str(who)))
+        cut = float(ts) - self.CONF_WINDOW_S
+        while q and q[0][0] < cut:
+            q.pop(0)
+
+    def confluence_facts(self, sym, direction, now) -> dict:
+        """2.46: how many different named strategies fired with / against this direction on `sym` in the last 15
+        minutes (this signal's own setup included). Recorded with every bench signal; nothing decides on it."""
+        sgn = 1 if direction == "up" else -1 if direction == "down" else 0
+        if not sgn:
+            return {}
+        ts = now.timestamp()
+        q = [x for x in (self.__dict__.get("_conf") or {}).get(sym, []) if ts - self.CONF_WINDOW_S <= x[0] <= ts + 1]
+        return {"conf_al": len({w for _t, d, w in q if d == sgn}), "conf_against": len({w for _t, d, w in q if d == -sgn})}
 
     IND_WORDS = {"gap up": 1.0, "positive": 0.5, "neutral": 0.0, "negative": -0.5, "gap down": -1.0}
 
@@ -2007,6 +2031,9 @@ class LiveEngine:
                         self.context.refresh_daily()
                         self.context.refresh_global()
                         self.make_brief("pre")
+                if now.time() >= dt.time(15, 50) and ("paths", today) not in self.brief_done and not self.running:
+                    self.brief_done.add(("paths", today))          # 2.45: trade journeys from today's recording
+                    threading.Thread(target=self._trade_paths, daemon=True, name="trade-paths").start()
                 lab_on = (self.cfg().get("lab") or {}).get("nightly", True)
                 if lab_on and now.time() >= dt.time(16, 15) and ("lab", today) not in self.brief_done and not self.running:
                     self.brief_done.add(("lab", today))
@@ -2026,6 +2053,14 @@ class LiveEngine:
                     self.telegram.send("🔑 Stockway: log in with Upstox to start today's live scanner (open the app → Live).")
             except Exception as e:
                 self.log(f"Watcher error: {e}")
+
+    def _trade_paths(self):
+        """2.45: every bench signal of the recorded days held to 15:15 (live/paths.py), in a low-priority child process."""
+        try:
+            from lab import proc
+            proc.run("paths", self.data_dir, log=lambda m: self.log(f"Journeys: {m}"))
+        except Exception as e:
+            self.log(f"Trade journeys failed: {e}")
 
     def _nightly_lab(self):
         """Every evening: fetch new expiries (if logged in), switch off rules losing money live, ask Claude for a few
