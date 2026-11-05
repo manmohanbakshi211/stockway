@@ -2697,7 +2697,7 @@ async function pageLab() {
     const rs = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
     const st = (x) => x && x.n ? `${x.n} · ${rs(x.avg)} · t ${x.t} · ${x.green_pct}% green` : `<span class="muted">–</span>`;
     const stage = { promoted: ["p-up", "Promoted: passed all 3"], duplicate: ["", "Same trades as another rule"], "failed holdout": ["p-down", "Failed holdout"], "failed validation": ["", "Failed validation"], "failed train": ["", "Failed train"] };
-    const src = (s) => s === "generated" || s === "mutation" ? "search" : s.startsWith("ebook:") ? "📕 " + esc(s.slice(6)) : s.startsWith("library:") ? "📚 " + esc(s.slice(8)) : s.startsWith("book:") ? "📗 " + esc(s.slice(5)) : s === "claude" ? "Claude" : esc(s);
+    const src = (s) => s === "generated" || s === "mutation" ? "search" : s.startsWith("pack:") ? "🗂 " + esc(s.slice(5)) : s.startsWith("ebook:") ? "📕 " + esc(s.slice(6)) : s.startsWith("library:") ? "📚 " + esc(s.slice(8)) : s.startsWith("book:") ? "📗 " + esc(s.slice(5)) : s === "claude" ? "Claude" : esc(s);
     const fits = (r) => r.dir !== 0 || String(r.exit || "").startsWith("fly");
     const only40 = LS.get("lab40", false);
     const rows = (f.rules || []).filter((r) => r.stage !== "failed train" && r.stage !== "duplicate" && (!only40 || fits(r))).slice(0, 60).map((r) => `<tr>
@@ -2714,6 +2714,7 @@ async function pageLab() {
       ${f.has_history ? "" : `<div class="banner">Download the 1-minute option history first: Strategy desk → Download history (Upstox Plus).</div>`}
       <div class="panel tight" id="lab-stocks" style="margin-top:14px"></div>
       <div class="panel tight" id="lab-5y" style="margin-top:14px"></div>
+      <div class="panel tight" id="lab-packs" style="margin-top:14px"></div>
       <div class="kpis kpi6" style="margin-top:16px">
         <div class="kpi"><b>${(f.tried_total || 0).toLocaleString("en-IN")}</b><span>Rules tried so far</span></div>
         <div class="kpi"><b class="${prom ? "up" : ""}">${prom}</b><span>Passed all 3 periods (promoted)</span></div>
@@ -2755,9 +2756,42 @@ async function pageLab() {
     main.querySelectorAll("[data-read]").forEach((b) => b.onclick = () => job("/api/factory/ebook/read", { name: b.dataset.read }));
     drawStocks();
     draw5y();
+    drawPacks();
     main.querySelectorAll("[data-rlive]").forEach((c) => c.onchange = async () => { try { await post(`/api/factory/rule/${c.dataset.rlive}`, { on: c.checked }); toast(c.checked ? "Rule live on paper" : "Rule switched off"); } catch (e) { toast(e.message); } });
   };
   let t5 = null;
+  const drawPacks = async () => {                // 2.43: strategy files (lab/packs.py)
+    const el = $("#lab-packs"); if (!el) return;
+    let x; try { x = await api("/api/packs"); } catch (e) { el.innerHTML = `<span class="muted small">${esc(e.message)}</span>`; return; }
+    const rs = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
+    const res = (L) => !L || !L.tested ? `<span class="muted">not tested yet</span>`
+      : `<span class="pill ${L.stage === "promoted" ? "p-up" : L.stage === "failed holdout" ? "p-down" : ""}">${L.stage === "promoted" ? "passed all 3" : esc(L.stage || "")}</span>
+         <br><small>${L.passed}/${L.of} versions passed · ${L.stage === "promoted" ? "best" : "best on train"}: train ${L.train && L.train.n ? `${L.train.n} trades, avg ${rs(L.train.avg)}` : "no trades"} · holdout ${L.hold && L.hold.n ? `${L.hold.n} trades, avg ${rs(L.hold.avg)}, t ${L.hold.t}` : "no trades"}</small>`;
+    const packs = (x.packs || []).map((p) => `<div class="pack-card${p.on ? "" : " off"}">
+        <div class="toolbar" style="margin:0"><div><b>${esc(p.name || p.id)}</b> <small class="muted">v${esc(String(p.version || 1))} · ${esc(p.id)} · ${p.n_rules} Lab rules${p.made ? " · made " + esc(p.made) : ""}</small>
+          ${p.source ? `<br><small class="muted">${esc(p.source)}</small>` : ""}</div>
+          <label class="check small"><input type="checkbox" data-pack="${esc(p.id)}" ${p.on ? "checked" : ""}><span>On (Lab + test bench)</span></label></div>
+        ${p.fatal ? `<p class="small down">${esc(p.fatal)}</p>` : ""}
+        <div class="table-wrap" style="margin-top:6px"><table class="mini"><thead><tr><th>Strategy</th><th>1-year Lab</th><th>5-year Lab</th></tr></thead><tbody>
+          ${(p.strategies || []).map((s) => `<tr><td class="small"><b>${esc(s.name)}</b>${s.status !== "ok" ? `<br><span class="${s.status === "cannot" ? "muted" : "down"}">${s.status === "cannot" ? "Can't test yet: " : ""}${esc(s.why)}</span>` : `<br><small class="muted">${s.rules} version(s)</small>`}</td>
+            <td class="small">${s.status === "ok" ? res((s.labs || {})["1y"]) : "–"}</td><td class="small">${s.status === "ok" ? res((s.labs || {})["5y"]) : "–"}</td></tr>`).join("")}
+        </tbody></table></div>
+        ${(p.cannot_test || []).length ? `<p class="small muted" style="margin:6px 0 0">Can't test yet: ${p.cannot_test.slice(0, 6).map((c) => esc(c.idea) + (c.needs ? ` (needs ${esc(c.needs)})` : "")).join("; ")}</p>` : ""}
+        ${(p.problems || []).length ? `<details class="small" style="margin-top:4px"><summary>${p.problems.length} note(s) from the check</summary><ul>${p.problems.map((q) => `<li>${esc(q)}</li>`).join("")}</ul></details>` : ""}
+      </div>`).join("");
+    el.innerHTML = `<div class="toolbar" style="margin:0"><div><h3 style="margin:0">Strategy files <span class="pill">no app update needed</span></h3>
+        <p class="small muted" style="margin:4px 0 0">Upload a strategy file (.json) made from a book, video, transcript or script. The app checks it against the facts and exits it knows, keeps every upload, tests each strategy in the 1-year and 5-year Lab on the next run (train / validation / holdout) and paper-tests it live on the test bench. It never goes on live paper or in your alerts by itself. Data only: nothing in a file is ever run as code, and there is no field for orders.</p></div>
+        <div class="btn-row" style="margin:0"><input type="file" id="pack-file" accept=".json,application/json"><button class="btn primary" id="pack-up">Upload</button></div></div>
+      <div style="margin-top:8px">${packs || `<p class="small muted">No strategy files yet.</p>`}</div>`;
+    $("#pack-up").onclick = async () => {
+      const fl = ($("#pack-file").files || [])[0]; if (!fl) { toast("Choose a .json strategy file first"); return; }
+      try { const r = await fetch(`/api/packs/upload?name=${encodeURIComponent(fl.name)}`, { method: "POST", body: fl });
+        const j = await r.json(); if (!r.ok) throw new Error(j.detail || "Upload failed");
+        toast(j.already ? `${j.name}: this exact file is already here` : `${j.name} v${j.version}: ${j.rules} Lab rules queued for the next run${(j.cannot_test || []).length ? `, ${j.cannot_test.length} can't be tested yet` : ""}`);
+      } catch (e) { toast(e.message); }
+      drawPacks(); };
+    el.querySelectorAll("[data-pack]").forEach((c) => c.onchange = async () => { try { await post(`/api/packs/${c.dataset.pack}/on`, { on: c.checked }); toast(c.checked ? "Strategy file on" : "Strategy file off (results kept)"); drawPacks(); } catch (e) { toast(e.message); } });
+  };
   const draw5y = async () => {
     const el = $("#lab-5y"); if (!el) return;
     let x; try { x = await api("/api/factory/lab5y"); } catch (e) { el.innerHTML = `<span class="muted small">${esc(e.message)}</span>`; return; }

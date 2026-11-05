@@ -37,7 +37,7 @@ def _model(kind):
 
 def matrix(feats: dict, d: np.ndarray) -> np.ndarray:
     """Model input: the Strategy Lab bar facts (same code live) plus the trade direction."""
-    cols = [np.asarray(feats[f], float) for f in F.FEATURES]
+    cols = [np.asarray(feats[f], float) for f in F.ML_FEATURES]      # 2.43: the 2.42 inputs (results don't move)
     return np.column_stack(cols + [np.asarray(d, float)])
 
 
@@ -46,8 +46,8 @@ def run(data_dir, book: F.Book | None = None, exits=None, log=print, should_stop
     if book is None:
         book = F.Book(F.load_or_build(data_dir, log=log))
     exits = exits or [e for e in ("std", "swing", "atr2r", "be3r") if e in book.pnl]
-    buy = np.nonzero(book.cols["dir"] != 0)[0]
-    X = matrix({f: book.cols[f][buy] for f in F.FEATURES}, book.cols["dir"][buy])
+    buy = np.nonzero((book.cols["dir"] != 0) & (book.cols["tod"] >= F.FIRST_ENTRY_TOD))[0]   # 2.43: not the 09:25 file-only rows
+    X = matrix({f: book.cols[f][buy] for f in F.ML_FEATURES}, book.cols["dir"][buy])
     part = book.part[buy]
     results = []
     for ex in exits:
@@ -144,5 +144,5 @@ def fires(data_dir, rule: dict, feats: dict, i: int | None = None) -> bool:
     if f not in _CACHE:
         import joblib
         _CACHE[f] = joblib.load(f)
-    x = matrix({k: [feats[k][i]] for k in F.FEATURES}, [rule["dir"]])
+    x = matrix({k: [feats[k][i]] for k in F.ML_FEATURES}, [rule["dir"]])
     return float(_CACHE[f].predict_proba(x)[0, 1]) > rule["thr"]

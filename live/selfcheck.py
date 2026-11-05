@@ -201,4 +201,15 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
     out.append(_c("scheduler", "Background scheduler alive (auto-renew, auto-resume)",
                   (sched is not None and sched < 180) if sched is not None else None,
                   f"last tick {int(sched)} s ago" if sched is not None else "starting"))
+    try:                                                   # 2.43: strategy files (lab/packs.py): data only, checked on upload
+        from lab import packs as _pk
+        cur = _pk.current(data_dir, only_on=False)
+        bad = [pid for pid, _e, res in cur if res.get("fatal")]
+        n_on = sum(1 for _pid, e, _r in cur if e.get("on", True))
+        out.append(_c("strategy_files", "Strategy files readable (uploaded on the Strategy Lab page; data only, never run as code)",
+                      not bad if cur else None,
+                      (f"{len(cur)} file(s), {n_on} on, {sum(len(r.get('rules', [])) for _p, _e, r in cur)} Lab rules"
+                       + (f"; can't read: {', '.join(bad)}" if bad else "")) if cur else "no strategy files yet"))
+    except Exception as e:
+        out.append(_c("strategy_files", "Strategy files readable", False, str(e)[:160]))
     return out

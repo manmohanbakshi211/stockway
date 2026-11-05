@@ -132,7 +132,12 @@ class ChartData:
             ctx = {"prev_close": pdc, "prev_high": ctx0.get("pdh"), "prev_low": ctx0.get("pdl"),
                    "gap": (o5[0] / pdc - 1) * 100 if pdc else None, "vix": getattr(vix, "cp", None) if vix else None,
                    "dte": dte, "dow": now.weekday(),
-                   "d_trend": dly.get("trend"), "d_vs_ema20": dly.get("vs_ema20_pct"), "d_pos20": dly.get("pos20")}
+                   "d_trend": dly.get("trend"), "d_vs_ema20": dly.get("vs_ema20_pct"), "d_pos20": dly.get("pos20"),
+                   "d_struct2": dly.get("struct2"), "d_struct3": dly.get("struct3")}            # 2.43
+            try:
+                ctx["hw"] = self._hw_live(sym, now)
+            except Exception:
+                ctx["hw"] = None
             ivs = [day_rec.get(i, (None, None))[0] for i in range(slot)]
             prem = [day_rec.get(i, (None, None))[1] for i in range(slot)]
             f = factory.bar_features(o5, h5, l5, c5, ctx, [np.nan if x is None else x for x in ivs],
@@ -198,7 +203,7 @@ class ChartData:
                     if len(fired) >= int(r.get("max_day") or 1):
                         continue
                     fired.append(now.timestamp())
-                    self.e.bench_signal(sym, "up" if r["dir"] > 0 else "down", now, "library", r["_variant"], r["_name"])
+                    self.e.bench_signal(sym, "up" if r["dir"] > 0 else "down", now, r.get("_kind", "library"), r["_variant"], r["_name"])
                 except Exception as ex:
                     if self._rate(f"bench_rule:{r.get('_variant')}", 3600):
                         self.e.log(f"Test bench rule {r.get('_name')} skipped: {ex}")
@@ -235,8 +240,50 @@ class ChartData:
         except Exception as ex:
             if self._rate("bench_rules", 3600):
                 self.e.log(f"Test bench: library rules not loaded: {ex}")
+        try:                                                   # 2.43: strategy files (lab/packs.py), switched-on ones
+            out += self._pack_rules()
+        except Exception as ex:
+            if self._rate("bench_packs", 3600):
+                self.e.log(f"Test bench: strategy files not loaded: {ex}")
         self._lib_cache = (time.time(), out)
         return out
+
+    def _pack_rules(self) -> list:
+        """One bench rule per strategy of each switched-on strategy file (exits aside: the bench uses its own styles)."""
+        import hashlib
+        import json as _json
+        from lab import packs
+        out, seen = [], set()
+        for pid, e, res in packs.current(self.e.data_dir):
+            if res.get("fatal"):
+                continue
+            for r in res["rules"]:
+                if not r.get("dir"):
+                    continue
+                sig = _json.dumps([pid, r["conds"], r["dir"], r.get("win"), r["syms"]], sort_keys=True)
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                v = dict(r)
+                v["_kind"] = "pack"
+                v["_variant"] = "P" + hashlib.sha1(sig.encode()).hexdigest()[:7]
+                v["_name"] = f"{e.get('name') or pid}: {r.get('name') or ''} ({'long' if r['dir'] > 0 else 'short'})"[:160]
+                out.append(v)
+        return out
+
+    def _hw_live(self, sym, now) -> dict | None:
+        """2.43: today's heavyweights of an index (rules/heavyweights.json) for the hw_open / hw_day facts."""
+        from lab.data import heavyweights
+        w = heavyweights(sym, now.date())
+        stocks = {}
+        for s in w:
+            fm = self.five_min(s, now.date())
+            ms = self.e.metrics.get(s) or {}
+            pc = ms.get("cp")
+            if not fm or not len(fm["c"]) or not pc:
+                continue
+            stocks[s] = (float(fm["o"][0]), float(pc), [float(x) for x in fm["c"]])
+        return {"weights": w, "stocks": stocks} if stocks else None
 
     def _bench_rules_stocks(self) -> list:
         """2.31: the same library / book setups on the stocks in play today (test bench only), kept apart on the board
@@ -246,7 +293,8 @@ class ChartData:
         hit = getattr(self, "_lib_stock_cache", None)
         if hit and hit[0] is base:
             return hit[1]
-        out = [dict(r, syms=[factory.STOCKS], _variant=r["_variant"] + "s", _name=(r["_name"] + " · stocks in play")[:180]) for r in base]
+        out = [dict(r, syms=[factory.STOCKS], _variant=r["_variant"] + "s", _name=(r["_name"] + " · stocks in play")[:180]) for r in base
+               if r.get("_kind") != "pack" or factory.STOCKS in r.get("syms", [])]     # file rules: only where the file says
         self._lib_stock_cache = (base, out)
         return out
 

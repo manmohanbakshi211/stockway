@@ -1,0 +1,6 @@
+{
+ "about": "Index heavyweights for the hw_open / hw_day facts (lab/factory.py hw_series, same code live and in the Lab). Each entry is valid from its 'since' date; when NSE rebalances, add a new entry with a new date and keep the old ones, so past backtests stay the same. Weights are approximate index weights (share of the index); only their relative size matters. Bank Nifty: the three banks Ghanshyam Tech (9:20 setup) trades by: HDFC Bank, ICICI Bank, Axis Bank.",
+ "BANKNIFTY": [
+  {"since": "2021-01-01", "weights": {"HDFCBANK": 0.28, "ICICIBANK": 0.25, "AXISBANK": 0.09}}
+ ]
+}

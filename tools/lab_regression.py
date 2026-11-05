@@ -16,6 +16,11 @@ from lab import factory as F  # noqa: E402
 def main(data_dir="data"):
     lab = Path(data_dir) / "lab"
     st = json.loads((lab / "factory.json").read_text())
+    try:                                                  # 2.43: exits defined in strategy files
+        from lab import packs
+        packs.activate(data_dir)
+    except Exception as e:
+        print("strategy-file exits not loaded:", e)
     book = F.Book(pd.read_parquet(lab / "factory_bars.parquet"))
     changed = []
     for k, r in st.get("rules", {}).items():

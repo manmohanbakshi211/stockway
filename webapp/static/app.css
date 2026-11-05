@@ -764,3 +764,7 @@ tr.best td { background: var(--up-soft); }
 /* 2.40.1: Fortune's own market: predicted up = blue, predicted down = orange */
 .fo-up { color: #2F6FDE; } .fo-dn { color: #E07B00; }
 .fo-cast { border-left: 3px solid #2F6FDE; padding: 2px 0 2px 10px; margin: 0 0 10px; overflow-wrap: anywhere; }
+
+/* 2.43 strategy files */
+.pack-card { border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); padding: 10px 12px; margin-top: 8px; }
+.pack-card.off { opacity: .6; }

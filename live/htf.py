@@ -59,6 +59,18 @@ def _supertrend_dir(h, l, c, n=10, mult=3.0) -> int | None:
     return d
 
 
+def struct(highs, lows, n: int) -> float | None:
+    """2.43 daily structure over the last n finished days (oldest first in the lists): +1 higher lows (each low above
+    the one before), -1 lower highs (each high below the one before), 0 neither or both, None if fewer than n days.
+    The same function feeds the Lab (lab/data.py day_table) and live (daily() below)."""
+    h, l = [float(x) for x in list(highs)[-n:]], [float(x) for x in list(lows)[-n:]]
+    if len(h) < n or len(l) < n or any(x != x for x in h + l):
+        return None
+    up = all(l[i] > l[i - 1] for i in range(1, n))
+    dn = all(h[i] < h[i - 1] for i in range(1, n))
+    return 1.0 if up and not dn else -1.0 if dn and not up else 0.0
+
+
 def daily(candles: list, today: dt.date | None = None) -> dict:
     """Facts from daily candles ([ts, o, h, l, c, vol, ...], any order), using only days before `today`."""
     today = today or dt.datetime.now(IST).date()
@@ -103,7 +115,8 @@ def daily(candles: list, today: dt.date | None = None) -> dict:
             "pos20": round((last - lo20) / (hi20 - lo20), 2) if hi20 > lo20 else None,
             "from_hi52_pct": round((last / float(yr.max()) - 1) * 100, 2), "from_lo52_pct": round((last / float(yr.min()) - 1) * 100, 2),
             "pwh": round(float(pwh), 2) if pwh else None, "pwl": round(float(pwl), 2) if pwl else None,
-            "prev_h": round(float(h[-1]), 2), "prev_l": round(float(l[-1]), 2), "prev_c": round(last, 2)}
+            "prev_h": round(float(h[-1]), 2), "prev_l": round(float(l[-1]), 2), "prev_c": round(last, 2),
+            "struct2": struct(h, l, 2), "struct3": struct(h, l, 3)}
 
 
 def aligned(f: dict, direction: str, spot: float | None) -> dict:

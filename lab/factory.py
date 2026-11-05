@@ -30,13 +30,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .data import UNDERLYINGS, day_table, iter_days, register_stocks, vix_table
+from .data import UNDERLYINGS, day_table, heavyweights, iter_days, register_stocks, spot_map, vix_table
 from .engine import charges, slip
-from .exits import STYLES, atr14, first_exit, risk_pts
+from .exits import PACK_STYLES, STYLES, atr14, first_exit, momentum_k, risk_pts, spec_of
 
 M_EXIT = 360                 # 15:15
 LAST_ENTRY_TOD = 330         # no entries after 14:45 (minutes since 09:15)
 FIRST_ENTRY_TOD = 15         # bars closing at 09:30 or later
+EARLY_ENTRY_TOD = 10         # 2.43: strategy-file rules may ask for the 09:25 bar (the "9:20 setup"); search rules never do
 
 # exit rules on the option price: target %, stop %, max minutes held, trailing (start %, keep fraction)
 EXITS = {"quick": (15, 10, 30, None), "std": (20, 15, 60, None), "swing": (30, 20, 90, None),
@@ -84,6 +85,18 @@ FEATURES.update({
     "d_vs_ema20": ("yesterday's close vs its 20-day average", "%"),
     "d_pos20": ("yesterday's close in its 20-day range (0 = at the low, 1 = at the high)", ""),
     "lvl_touch": ("+1 the bar came down to a key level and closed above it (support), -1 went up to one and closed below (resistance)", ""),
+})
+ML_FEATURES = list(FEATURES)  # the model strategies (lab/mlstrat.py) keep the 2.42 inputs: their results don't move
+# 2.43 (gun pieces for the 9:20 setup and strategy files): first-candle facts, daily structure, index heavyweights
+FEATURES.update({
+    "d_struct2": ("daily structure, last 2 days: +1 higher low, -1 lower high, 0 neither", ""),
+    "d_struct3": ("daily structure, last 3 days: +1 higher lows, -1 lower highs, 0 neither", ""),
+    "fc_color": ("first 5-min candle's colour: +1 green, -1 red, 0 flat", ""),
+    "fc_range": ("first 5-min candle's size (high - low)", "%"),
+    "fc_pd": ("first 5-min candle went above yesterday's high (+1) / below yesterday's low (-1), 0 neither", ""),
+    "fc_run": ("5-min closes in a row beyond the first candle (+ above its high, - below its low, 0 inside)", ""),
+    "hw_open": ("index heavyweights since today's open, weighted (+1 all up, -1 all down; rules/heavyweights.json)", ""),
+    "hw_day": ("index heavyweights vs yesterday's close, weighted (+1 all up, -1 all down)", ""),
 })
 INDEX_SYMS = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX")
 STOCKS = "STOCKS"             # in a rule's syms: any F&O stock (tested on every stock with downloaded history)
@@ -306,7 +319,62 @@ def bar_features(o, h, l, c, ctx: dict, iv=None, prem=None) -> dict:
         f["lvl_touch"] = _C.level_touch(c, h, l, lv)
     except Exception:
         f["lvl_atr"], f["lvl_below"], f["lvl_touch"] = np.full(n, np.nan), np.full(n, np.nan), np.zeros(n)
+    # 2.43: first-candle facts, daily structure, index heavyweights (each isolated: a failure leaves only that fact NaN)
+    for k in ("d_struct2", "d_struct3"):
+        v = ctx.get(k)
+        f[k] = np.full(n, float(v) if v is not None and v == v else np.nan)
+    try:
+        f.update(first_candle_facts(o, h, l, c, ph, pl))
+    except Exception:
+        for k in ("fc_color", "fc_range", "fc_pd", "fc_run"):
+            f[k] = np.full(n, np.nan)
+    try:
+        f["hw_open"], f["hw_day"] = hw_series(ctx.get("hw"), n)
+    except Exception:
+        f["hw_open"], f["hw_day"] = np.full(n, np.nan), np.full(n, np.nan)
     return f
+
+
+def first_candle_facts(o, h, l, c, prev_high=None, prev_low=None) -> dict:
+    """The 9:15-9:20 candle: colour, size (% of its open), whether it took out yesterday's high / low, and how many 5-min
+    closes in a row (up to this bar) sit beyond it. Known from the close of bar 0 (fc_run from bar 1)."""
+    n = len(c)
+    out = {k: np.full(n, np.nan) for k in ("fc_color", "fc_range", "fc_pd", "fc_run")}
+    if not n:
+        return out
+    o0, h0, l0, c0 = float(o[0]), float(h[0]), float(l[0]), float(c[0])
+    out["fc_color"][:] = 1.0 if c0 > o0 else -1.0 if c0 < o0 else 0.0
+    out["fc_range"][:] = (h0 - l0) / o0 * 100 if o0 else np.nan
+    up = bool(prev_high) and h0 > prev_high
+    dn = bool(prev_low) and l0 < prev_low
+    out["fc_pd"][:] = np.nan if not (prev_high and prev_low) else (1.0 if up and not dn else -1.0 if dn and not up else 0.0)
+    run = 0.0
+    out["fc_run"][0] = np.nan
+    for i in range(1, n):
+        side = 1 if c[i] > h0 else -1 if c[i] < l0 else 0
+        run = 0.0 if side == 0 else (run + side if np.sign(run) == side else float(side))
+        out["fc_run"][i] = run
+    return out
+
+
+def hw_series(hw, n: int):
+    """Weighted direction of an index's heavyweights at each 5-min bar close: since today's open and vs yesterday's
+    close (+1 all up, -1 all down). hw = {"weights": {stock: w}, "stocks": {stock: (open, prev_close, closes)}}."""
+    a, b = np.full(n, np.nan), np.full(n, np.nan)
+    if not hw or not hw.get("weights") or not hw.get("stocks"):
+        return a, b
+    w = hw["weights"]
+    for i in range(n):
+        so = sd = wt = 0.0
+        for s, (op, pc, cl) in hw["stocks"].items():
+            if s not in w or i >= len(cl) or cl[i] is None or not np.isfinite(cl[i]) or not op or not pc:
+                continue
+            so += w[s] * np.sign(cl[i] - op)
+            sd += w[s] * np.sign(cl[i] - pc)
+            wt += w[s]
+        if wt > 0 and wt >= 0.5 * sum(w.values()):        # at least half the weight has a price: else unknown
+            a[i], b[i] = so / wt, sd / wt
+    return a, b
 
 
 # ------------------------------------------------------------------ outcomes
@@ -341,20 +409,34 @@ BUY_EXITS = list(EXITS) + list(STYLES)                  # premium-% exits (curre
 EXIT_WORDS.update({k: v["words"] for k, v in STYLES.items()})
 
 
+def all_exits() -> list:
+    """Every exit with a column in the bar table: the built-in ones plus strategy-file exits (lab/packs.py)."""
+    return ALL_EXITS + [k for k in PACK_STYLES if k not in ALL_EXITS]
+
+
+def exit_words(ex: str) -> str:
+    return EXIT_WORDS.get(ex) or (PACK_STYLES[ex]["words"] if ex in PACK_STYLES else ex)
+
+
 def hold_of(ex: str) -> int:
-    return EXITS[ex][2] if ex in EXITS else STYLES[ex]["max"] if ex in STYLES else 360
+    return EXITS[ex][2] if ex in EXITS else STYLES[ex]["max"] if ex in STYLES else \
+        PACK_STYLES[ex]["max"] if ex in PACK_STYLES else 360
 
 
-def _sim_lv(c, sp, m0, entry, sym, lot, d, style, atr, bar_lo, bar_hi):
-    """Option bought at m0, out when a chart level (lab/exits.py) is touched; the option's price at that minute."""
-    end = min(M_EXIT, m0 + STYLES[style]["max"])
+def _sim_lv(c, sp, m0, entry, sym, lot, d, style, atr, bar_lo, bar_hi, fc=None, bars=None, i=None):
+    """Option bought at m0, out when a chart level (lab/exits.py) is touched; the option's price at that minute.
+    2.43 (strategy-file exits only): fc = (first candle low, high) for a first-candle stop; bars = the day's 5-min
+    (o, h, l, c) and i = the signal bar, for a momentum exit."""
+    st = spec_of(style)
+    end = min(M_EXIT, m0 + st["max"])
     seg, sseg = c[m0 + 1:end + 1], sp[m0 + 1:end + 1]
     if not len(seg):
         return math.nan
-    R = risk_pts(style, sp[m0], d, atr, bar_lo, bar_hi)
+    R = risk_pts(style, sp[m0], d, atr, bar_lo, bar_hi, *(fc or (None, None)))
     if not math.isfinite(R):
         return math.nan
-    k, _ = first_exit(style, sseg, seg, sp[m0], entry, d, R)
+    mk = momentum_k(*bars, i, d, st.get("momentum"), m0, end) if st.get("momentum") and bars is not None else None
+    k, _ = first_exit(style, sseg, seg, sp[m0], entry, d, R, mom_k=mk)
     k = len(seg) - 1 if k is None else k
     x = seg[k]
     if math.isnan(x):
@@ -431,9 +513,19 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
     vix = vix_table(data_dir)
     vmap = dict(zip(pd.to_datetime(vix["date"]).dt.date, vix["vix_prev"])) if len(vix) else {}
     rows, chunks = [], []
+    pack_styles = _file_exits(data_dir)                          # 2.43: exits defined in this Lab's strategy files
     for sym in syms:
         lot = UNDERLYINGS[sym]["lot"]
         stock = bool(UNDERLYINGS[sym].get("stock"))
+        hw_maps = {}                                      # 2.43: the index's heavyweights, 1-minute spot by day
+        if not stock:
+            try:
+                for hs in heavyweights(sym, dt.date.today()):
+                    m_ = spot_map(data_dir, hs)
+                    if m_:
+                        hw_maps[hs] = (m_, sorted(m_))
+            except Exception as e:
+                log(f"  heavyweights for {sym} not loaded ({e})")
         if compact:                                       # two streaming passes instead of holding 5 years of minutes
             dtab = day_table(data_dir, sym)
             if dtab.empty:
@@ -470,10 +562,13 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
             ctx = {"prev_close": None if r is None else r["prev_close"], "prev_high": None if r is None else r["prev_high"],
                    "prev_low": None if r is None else r["prev_low"], "gap": None if r is None else r["gap_pct"],
                    "vix": vmap.get(day.date), "dte": None if r is None or pd.isna(r["dte"]) else r["dte"], "dow": day.date.weekday(),
-                   **{k: (None if r is None or k not in r or pd.isna(r[k]) else float(r[k])) for k in ("d_trend", "d_vs_ema20", "d_pos20")}}
+                   **{k: (None if r is None or k not in r or pd.isna(r[k]) else float(r[k]))
+                      for k in ("d_trend", "d_vs_ema20", "d_pos20", "d_struct2", "d_struct3")}}
             for key in ("prev_close", "prev_high", "prev_low", "gap"):
                 if ctx[key] is not None and (isinstance(ctx[key], float) and math.isnan(ctx[key])):
                     ctx[key] = None
+            if hw_maps:
+                ctx["hw"] = _hw_ctx(sym, day.date, hw_maps, nb)
             f = bar_features(o, h, l, c, ctx, ivs, prem)
             atr = atr14(h, l, c)
             for i in range(nb):
@@ -496,7 +591,7 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                         else:
                             row["pnl_" + rule] = _sim_short(legs, m0, sym, lot, sl)
                     rows.append(row)
-                if tod < FIRST_ENTRY_TOD:
+                if tod < EARLY_ENTRY_TOD:                 # 2.43: from the 09:25 bar (only file rules may ask before 09:30)
                     continue
                 if compact and stock and i % 3 != 2:
                     continue
@@ -513,6 +608,12 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                         row["pnl_" + rule] = _sim(px["c"], sp, m0, entry, sym, lot, rule)
                     for style in STYLES:
                         row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i])
+                    for style in pack_styles:             # a bad file exit is NaN for its own column, nothing else
+                        try:
+                            row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i],
+                                                          fc=(l[0], h[0]), bars=(o, h, l, c), i=i)
+                        except Exception:
+                            row["pnl_" + style] = math.nan
                     rows.append(row)
             if (di + 1) % 100 == 0:
                 log(f"  {sym}: {di + 1} of {n_days} days ({time.time() - t0:.0f}s)")
@@ -528,11 +629,38 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
     df = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
     if not df.empty:
         df = df.sort_values(["date", "sym", "bar", "dir"]).reset_index(drop=True)
-        for c_ in ["pnl_" + r for r in ALL_EXITS] + (list(FEATURES) if compact else []):
+        for c_ in ["pnl_" + r for r in all_exits()] + (list(FEATURES) if compact else []):
             if c_ not in df:
                 df[c_] = np.nan
             df[c_] = df[c_].astype("float32")
     return df
+
+
+def _file_exits(data_dir) -> list:
+    """2.43: the exits this Lab's strategy files define (lab/packs.py), registered; [] when there are none."""
+    try:
+        from . import packs
+        packs.activate(data_dir)
+        return [k for k in packs.load_index(data_dir)["exits"] if k in PACK_STYLES and k not in STYLES]
+    except Exception:
+        return []
+
+
+def _hw_ctx(index: str, day, hw_maps: dict, nb: int) -> dict | None:
+    """Heavyweights' open, yesterday's close and 5-min closes on `day` (the build's ctx["hw"])."""
+    import bisect
+    w = heavyweights(index, day)
+    stocks = {}
+    for s, (m_, dates) in hw_maps.items():
+        if s not in w or day not in m_:
+            continue
+        j = bisect.bisect_left(dates, day)
+        if j == 0:
+            continue
+        sp, prev = m_[day], m_[dates[j - 1]]
+        closes = [float(sp[5 * i + 4]) for i in range(nb)]
+        stocks[s] = (float(sp[0]), float(prev[-1]), closes)
+    return {"weights": w, "stocks": stocks} if stocks else None
 
 
 def cache_path(data_dir) -> Path:
@@ -546,7 +674,7 @@ def load_or_build(data_dir, log=print, should_stop=lambda: False, rebuild=False)
     if f.exists() and not rebuild and f.stat().st_mtime >= newest:
         df = pd.read_parquet(f)
         missing = [k for k in FEATURES if k not in df.columns]
-        if all("pnl_" + s in df.columns for s in STYLES) and not missing:
+        if all("pnl_" + s in df.columns for s in list(STYLES) + _file_exits(data_dir)) and not missing:
             return df
         log(f"New facts to test ({', '.join(missing[:6])}{'…' if len(missing) > 6 else ''}): rebuilding the bar table once…"
             if missing else "New exit styles to test: rebuilding the bar table once…")
@@ -579,11 +707,12 @@ def words(s: dict) -> str:
     names = {"BANKNIFTY": "Bank Nifty", "NIFTY": "Nifty", STOCKS: "any F&O stock"}
     return (f"{side} on {' / '.join(names.get(x, x) for x in s['syms'])} "
             f"between {hm(s['win'][0])} and {hm(s['win'][1])} when " + " and ".join(cs) +
-            f". Exit {EXIT_WORDS[s['exit']]}. Max {s['max_day']} trade{'s' if s['max_day'] > 1 else ''} a day, none after a loss.")
+            f". Exit {exit_words(s['exit'])}. Max {s['max_day']} trade{'s' if s['max_day'] > 1 else ''} a day, none after a loss.")
 
 
-def validate(s: dict) -> dict | None:
-    """Clean a strategy coming from outside (ebook / Claude); None if it can't be tested."""
+def validate(s: dict, extra_exits=()) -> dict | None:
+    """Clean a strategy coming from outside (ebook / Claude / strategy file); None if it can't be tested.
+    extra_exits: exit keys a strategy file being checked defines (lab/packs.py), not registered yet."""
     try:
         conds = [[str(f), str(o), float(v)] for f, o, v in s.get("conds", [])]
         if not conds or len(conds) > 4 or any(f not in FEATURES or o not in (">", "<") for f, o, _ in conds):
@@ -591,18 +720,26 @@ def validate(s: dict) -> dict | None:
         d0 = int(s.get("dir", 1))
         d = 1 if d0 > 0 else -1 if d0 < 0 else 0
         w = [int(s.get("win", [15, 330])[0]), int(s.get("win", [15, 330])[1])]
-        w = [max(FIRST_ENTRY_TOD, min(w)), min(LAST_ENTRY_TOD, max(w))]
+        early = bool(s.get("early")) and str(s.get("source") or "").startswith("pack:")    # 2.43: file rules only
+        w = [max(EARLY_ENTRY_TOD if early else FIRST_ENTRY_TOD, min(w)), min(LAST_ENTRY_TOD, max(w))]
         ex = s.get("exit")
         if d == 0:
             ex = ex if ex in SELL_EXITS else "ss25"
             w = [max(SELL_FIRST_TOD, min(int(x) for x in s.get("win", [5, 330]))), w[1]]
+        elif (ex in PACK_STYLES or ex in extra_exits) and not str(s.get("source") or "").startswith("pack:"):
+            ex = "std"                                   # file exits belong to file rules (the search never picks them)
         else:
-            ex = ex if ex in EXITS or ex in STYLES else "std"
+            ex = ex if ex in EXITS or ex in STYLES or ex in PACK_STYLES or ex in extra_exits else "std"
         syms = [x for x in (s.get("syms") or ["NIFTY", "BANKNIFTY"]) if x in UNDERLYINGS or x == STOCKS] or ["NIFTY", "BANKNIFTY"]
         if d == 0:
             syms = [x for x in syms if x in ("NIFTY", "BANKNIFTY")] or ["NIFTY", "BANKNIFTY"]
         out = {"dir": d, "conds": conds, "win": w, "exit": ex, "max_day": 2 if int(s.get("max_day", 1)) > 1 else 1,
                "syms": sorted(syms), "source": str(s.get("source") or "manual")[:80], "note": str(s.get("note") or "")[:300]}
+        if early and d != 0 and w[0] < FIRST_ENTRY_TOD:
+            out["early"] = True
+        for k in ("pack", "pack_v", "name"):              # 2.43: which strategy file and strategy it came from
+            if s.get(k) is not None and str(s.get("source") or "").startswith("pack:"):
+                out[k] = s[k] if k == "pack_v" and isinstance(s[k], int) else str(s[k])[:80]
         out["id"] = sid(out)
         return out
     except Exception:
@@ -623,7 +760,7 @@ class Book:
         self.part = np.where(self.dix < a, 0, np.where(self.dix < b, 1, 2))
         # a bar table from before a fact existed: that fact is unknown (NaN), so rules using it simply can't fire there
         self.cols = {c: (df[c].to_numpy() if c in df else np.full(len(df), np.nan)) for c in list(FEATURES) + ["dir", "sym"]}
-        self.pnl = {r: df["pnl_" + r].to_numpy(dtype=float) for r in ALL_EXITS if "pnl_" + r in df}
+        self.pnl = {r: df["pnl_" + r].to_numpy(dtype=float) for r in all_exits() if "pnl_" + r in df}
         self.symcode = df["sym"].to_numpy()
         self.prem = df["premium"].to_numpy(dtype=float) if "premium" in df else np.zeros(len(df))
         names = sorted(set(self.symcode))
@@ -636,7 +773,8 @@ class Book:
         self.n_days = {0: a, 1: b - a, 2: len(dates) - b}
 
     def quantiles(self, feat, part=0):
-        x = self.cols[feat][self.part == part]
+        early = (self.cols["dir"] != 0) & (self.cols["tod"] < FIRST_ENTRY_TOD)     # 2.43: the 09:25 buy rows (file rules only)
+        x = self.cols[feat][(self.part == part) & ~early]
         x = x[~np.isnan(x)]
         return np.unique(np.round(np.quantile(x, [0.1, 0.25, 0.5, 0.75, 0.9]), 3)) if len(x) else np.array([])
 
@@ -714,6 +852,7 @@ def score(book: Book, s: dict) -> dict:
     tr = book.trades(s)
     out = {"id": s["id"], "rule": words(s), **{k: s[k] for k in ("dir", "conds", "win", "exit", "max_day", "syms")},
            "source": s.get("source", "generated"), "note": s.get("note", "")}
+    out.update({k: s[k] for k in ("early", "pack", "pack_v", "name") if k in s})      # 2.43: strategy-file rules
     for p, name in ((0, "train"), (1, "valid"), (2, "hold")):
         out[name] = stats(tr[tr["part"] == p], book.n_days[p])
     if not passes(out["train"], PASS["train"]):
@@ -957,6 +1096,13 @@ def run(data_dir, n_random=2000, n_mutate=1000, log=print, should_stop=lambda: F
 def _run(data_dir, n_random=2000, n_mutate=1000, log=print, should_stop=lambda: False, extra: list | None = None) -> dict:
     """One research round: (re)score known rules on all periods, search new ones, keep the honest tally."""
     t0 = time.time()
+    try:                                                  # 2.43: strategy files: their exits first, then untested rules
+        from . import packs
+        q = packs.queue(data_dir)
+        if q.get("queued"):
+            log(f"{q['queued']} untested strategy-file rules queued")
+    except Exception as e:
+        log(f"Strategy files not queued ({e})")
     df = load_or_build(data_dir, log=log, should_stop=should_stop)
     if df.empty:
         raise RuntimeError("No 1-minute option history yet: download it on the Strategy desk first.")
@@ -979,6 +1125,9 @@ def _run(data_dir, n_random=2000, n_mutate=1000, log=print, should_stop=lambda: 
             known[s["id"]] = score(book, s)
     for k in list(known):                                 # rescore everything on the current data
         r = known[k]
+        if r.get("exit") not in EXITS and r.get("exit") not in STYLES and r.get("exit") not in SELL_EXITS \
+                and r.get("exit") not in PACK_STYLES:
+            continue                                      # an exit this code doesn't know: keep its last result as it was
         s = validate({**r, "source": r.get("source")}) or r
         known[k] = {**score(book, {**s, "id": k}), "live": r.get("live"), "found": r.get("found") or dt.date.today().isoformat()}
     # the same trades under different wording count once: keep the simplest rule of each identical result
@@ -1081,8 +1230,11 @@ def queue_untested(data_dir, ideas: list, source: str) -> dict:
 
 
 def is_live(r: dict) -> bool:
-    """Promoted rules trade on paper when their holdout evidence is moderate or strong, or when you switched them on."""
+    """Promoted rules trade on paper when their holdout evidence is moderate or strong, or when you switched them on.
+    2.43: strategy-file rules never go live by themselves (test bench + Lab only until you say so)."""
     if r.get("stage") != "promoted" or r.get("live") == "off":
+        return False
+    if str(r.get("source", "")).startswith("pack:"):
         return False
     return r.get("live") == "on" or r.get("evidence") in ("strong", "moderate")
 
@@ -1170,6 +1322,9 @@ def set_live(data_dir, rule_id: str, on: bool) -> dict:
     r = st.get("rules", {}).get(rule_id)
     if not r:
         raise KeyError(rule_id)
+    if on and str(r.get("source", "")).startswith("pack:"):
+        raise PermissionError("Strategy-file rules stay on the test bench and in the Lab: live paper for them is a "
+                              "separate step (their exits need the live version first).")
     r["live"] = "on" if on else "off"
     save(data_dir, st)
     return r

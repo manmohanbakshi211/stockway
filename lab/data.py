@@ -247,6 +247,8 @@ def day_table(data_dir, sym: str, days: list[Day] | None = None) -> pd.DataFrame
         rows.append({"date": d.date, "open": d.spot[0], "close": d.spot[-1], "high": np.nanmax(d.spot),
                      "low": np.nanmin(d.spot), "spot_920": d.spot[5], "str_open": straddle(5), "str_close": straddle(N_MIN - 6),
                      "iv_open": np.nanmean(ivs) if not all(math.isnan(x) for x in ivs) else math.nan})
+    if not rows:                                           # 2.43: a symbol with no history (was a crash in the 5-year build)
+        return pd.DataFrame()
     t = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
     if t.empty:
         return t
@@ -278,7 +280,68 @@ def day_table(data_dir, sym: str, days: list[Day] | None = None) -> pd.DataFrame
     t["d_trend"] = pd.Series(np.where(warm, np.nan, tr)).shift(1).values
     t["d_vs_ema20"] = pd.Series(np.where(warm, np.nan, (c / e20 - 1) * 100)).shift(1).values
     t["d_pos20"] = ((c - lo20) / (hi20 - lo20)).where(hi20 > lo20).shift(1).values
+    # 2.43: daily structure before the day starts (live/htf.py struct: +1 higher lows, -1 lower highs, 0 neither)
+    from live.htf import struct
+    hs, ls = t["high"].astype(float).tolist(), t["low"].astype(float).tolist()
+    for n in (2, 3):
+        t[f"d_struct{n}"] = [np.nan if (v := struct(hs[max(0, i - n):i], ls[max(0, i - n):i], n)) is None else v
+                             for i in range(len(t))]
     return t
+
+
+# ---------------------------------------------------------------- 2.43: bank heavyweights (dated data, rules/heavyweights.json)
+HEAVY_FILE = Path(__file__).resolve().parents[1] / "rules" / "heavyweights.json"
+
+
+def heavyweights(index: str, day: dt.date | None = None) -> dict:
+    """{stock: weight} for an index on a day (the entry valid from the latest 'since' on or before the day); {} if none."""
+    try:
+        cfg = json.loads(HEAVY_FILE.read_text())
+    except Exception:
+        return {}
+    day = (day or dt.date.today()).isoformat()
+    best = None
+    for e in cfg.get(index, []) if isinstance(cfg.get(index), list) else []:
+        if str(e.get("since", "")) <= day and (best is None or str(e["since"]) > str(best["since"])):
+            best = e
+    w = (best or {}).get("weights") or {}
+    return {str(k): float(v) for k, v in w.items() if isinstance(v, (int, float)) and v > 0}
+
+
+_SPOT_CACHE: dict = {}
+
+
+def spot_map(data_dir, sym: str) -> dict:
+    """{date: 1-minute spot array (N_MIN)} of a symbol from its option history files (spot column only, same cleaning as
+    build_days); cached per process until a history file changes. {} when the symbol has no history."""
+    hd = hist_dir(data_dir) / sym
+    files = sorted(hd.glob("raw_*.parquet"))
+    if not files:
+        return {}
+    key = (str(hd.resolve()), len(files), max(f.stat().st_mtime for f in files))
+    hit = _SPOT_CACHE.get(sym)
+    if hit and hit[0] == key:
+        return hit[1]
+    out = {}
+    for f in files:
+        try:
+            raw = pd.read_parquet(f, columns=["ts", "spot"]).dropna()
+        except Exception:
+            continue
+        t = pd.to_datetime(raw["ts"] + IST_OFFSET, unit="s")
+        raw = raw.assign(date=t.dt.date, m=((t.dt.hour * 60 + t.dt.minute) - (9 * 60 + 15)).astype(int))
+        raw = raw[(raw["m"] >= 0) & (raw["m"] < N_MIN)]
+        for d, g in raw.groupby("date"):
+            if d in out:
+                continue
+            spot = np.full(N_MIN, np.nan)
+            sp = g.groupby("m")["spot"].median()
+            spot[sp.index.to_numpy()] = sp.to_numpy()
+            spot = pd.Series(spot).ffill().bfill().to_numpy()
+            if not np.isnan(spot).all():
+                out[d] = spot
+    _SPOT_CACHE[sym] = (key, out)
+    return out
 
 
 def vix_table(data_dir) -> pd.DataFrame:

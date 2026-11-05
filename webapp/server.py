@@ -799,9 +799,60 @@ async def factory_rule_live(rid: str, req: Request):
         r = factory.set_live(ROOT / "data", rid, bool(b.get("on")))
     except KeyError:
         raise HTTPException(404, "Unknown rule")
+    except PermissionError as ex:                          # 2.43: strategy-file rules stay on the bench
+        raise HTTPException(403, str(ex))
     from webapp.live_api import engine as _eng
     _eng()._fact_rules = (0.0, [])
     return {"ok": True, "live": r.get("live")}
+
+
+# ---- 2.43 strategy files (lab/packs.py): upload a .json, checked against a fixed vocabulary, data only
+@app.get("/api/packs")
+def packs_view():
+    from lab import packs
+    return clean(packs.view(ROOT / "data"))
+
+
+@app.get("/api/packs/vocabulary")
+def packs_vocabulary():
+    from lab import packs
+    return clean(packs.vocabulary())
+
+
+@app.post("/api/packs/upload")
+async def packs_upload(req: Request, name: str = ""):
+    from lab import packs
+    if not str(name).lower().endswith(".json"):
+        raise HTTPException(400, "A strategy file is a .json file.")
+    data = await req.body()
+    if len(data) > packs.MAX_BYTES:
+        raise HTTPException(400, f"File too large ({packs.MAX_BYTES // 1000} KB max).")
+    try:
+        out = packs.store(ROOT / "data", data, name)
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    try:                                                   # the test bench picks the new rules up at once
+        from webapp.live_api import engine as _eng
+        _eng().charts._lib_cache = None
+    except Exception:
+        pass
+    return clean(out)
+
+
+@app.post("/api/packs/{pack_id}/on")
+async def packs_on(pack_id: str, req: Request):
+    from lab import packs
+    b = await req.json()
+    try:
+        out = packs.set_on(ROOT / "data", pack_id, bool(b.get("on")))
+    except KeyError:
+        raise HTTPException(404, "Unknown strategy file")
+    try:
+        from webapp.live_api import engine as _eng
+        _eng().charts._lib_cache = None
+    except Exception:
+        pass
+    return out
 
 
 # ---- stock option history: its own background worker (hours long), so Lab runs and other jobs aren't blocked

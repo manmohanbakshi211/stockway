@@ -114,6 +114,50 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Strategy files: a new strategy is an upload, not an app update (2.43)
+
+- **Mandeep (5 Nov):** "mein tumhe different transcript ya stretegies dunga tum file do or vo mein upload karu …
+  kyuki baar baar version update nahi karna padega." So: you send a book, video, transcript, screenshot or script;
+  Claude reads it, splits gun vs bullets, checks it on the data, and gives you one **strategy file** (`.json`).
+  You upload it on **Strategy Lab → Strategy files**. No new version.
+- **What the app does with a file** (`lab/packs.py`): reads it as data only (JSON, 256 KB max, a fixed vocabulary;
+  nothing in it is ever run as code; there is no field for orders, brokers or accounts), keeps every upload (a new
+  version never overwrites an old one), and
+  1. queues each strategy for the next run of the 1-year **and** the 5-year Lab, one rule per strategy × exit, with the
+     same train / validation / holdout test and the same charges as every other rule;
+  2. runs each strategy live on the **test bench** (kind "Strategy file rule", paper-tested with the bench styles);
+  3. never puts it on live paper or in your alerts by itself: a file rule can't even be ticked "Live paper" yet
+     (its exits need their live version first). That stays your call.
+  A strategy that needs a fact the app doesn't have is listed as **can't test yet** with what it needs; the rest of
+  the file still loads. That missing fact is a gun piece: one app version, once; after that every file can use it.
+- **What a file can use:** every Lab fact (`/api/packs/vocabulary` lists them), the built-in exits, and its **own exits**
+  built from a fixed vocabulary (`lab/exits.py spec_check`): stop = ATR multiple / signal candle / **the other side of
+  the first 5-min candle** / % of price; target in R or none; breakeven; ATR trail; **momentum exit** (the first 5-min
+  candle that closes beyond the previous candle against the trade, or makes a new extreme against it and closes
+  against it); time limit. The same exit gets the same key in every file and Lab (a content hash), and every exit
+  ever uploaded stays known, so saved results can always be rescored. A file rule may start at the **09:25** bar (the
+  9:20 setup); search, library and ML rules still start at 09:30.
+- **Gun pieces added once (for the 9:20 setup, usable by any file):** `d_struct2` / `d_struct3` (daily structure:
+  higher lows / lower highs over the last 2 / 3 days, `live/htf.py struct`, same code in the Lab and live),
+  `fc_color`, `fc_range`, `fc_pd` (the first candle took out yesterday's high / low), `fc_run` (5-min closes in a row
+  beyond the first candle), `hw_open` / `hw_day` (index heavyweights, weighted; `rules/heavyweights.json` is dated
+  data: Bank Nifty = HDFC Bank, ICICI Bank, Axis Bank). The first-candle stop and the momentum exit.
+- **First file: `ghanshyam_920.json`** (Ghanshyam Tech's 9:20 setup): 20 strategies × 5 exits = 100 Lab rules.
+  Checked here on the real 5-year Bank Nifty history (Aug 2021 → Oct 2026, 1,273 days, real 1-minute option prices,
+  every charge and slippage; train → Sep 2024, validation → Oct 2025, holdout → Oct 2026): **0 of 100 passed**.
+  The plain first-candle break loses about ₹200-400 a trade in all three periods with every exit; the trend filter
+  (920-A), against-trend (920-B), gap-against-trend (920-C) and the three banks agreeing (920-D) do not fix it. His four
+  example days are found by the facts (23 Sep 2022: yesterday's low broken inside the first candle, 3-day downtrend,
+  all three banks down: +₹5,389 a lot with his momentum exit). The only one positive in all three periods is 920-E
+  call at 09:25 (yesterday's high taken out inside the first candle, 3-day uptrend) with the momentum exit:
+  +₹104 / +₹430 / +₹843 a trade, but on 65 / 16 / 9 trades (t 0.4 on train: not proof). They now run on the test
+  bench to build a live record; nothing is promoted.
+- **Results don't move:** Lab regression 103 of 103 identical on both saved sets; the synthetic bar table rebuilt with
+  2.43: its 101,268 old rows identical in every old column (1,044 new 09:25 rows) and 103 of 103 rules identical on
+  it. The model strategies keep their 2.42 inputs and rows; the search never uses the 09:25 rows or file exits.
+  The first Lab run after this update rebuilds each bar table once (new facts), 1-year and 5-year.
+- Also fixed: the 5-year bar table build crashed on a symbol with no history (`day_table` on no rows).
+
 ## Full audit: every day's data kept, connected and safe (2.42)
 
 - **Mandeep (5 Nov, 01:24):** ensure every piece of data strengthens the system, is connected and heads towards the

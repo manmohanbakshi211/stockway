@@ -13,6 +13,12 @@ option's price at the moment a level is touched. Every style also keeps a safety
     chand  Chuck LeBeau's Chandelier exit: stop 1.5 ATR, then trails the best price minus 2.5 ATR; no fixed target.
 
 ATR = Average True Range, 14 bars of 5 minutes (Wilder smoothing), in points. R = the distance from entry to the stop.
+
+2.43: strategy files (lab/packs.py) can define their own exits from a fixed vocabulary, checked by spec_check(): a stop
+(ATR multiple, the signal candle, the other side of the first 5-min candle, or a % of price), an optional target in R,
+breakeven, ATR trail, a momentum exit (the first 5-min candle that closes beyond the previous candle against the trade,
+or makes a new extreme against it and closes against it) and a time limit. Such an exit gets a key made from its
+content ("x" + hash), so the same exit is the same key in every file and every Lab; built-in styles never change.
 """
 from __future__ import annotations
 
@@ -53,12 +59,120 @@ def atr14(h, l, c) -> np.ndarray:
     return out
 
 
-def risk_pts(style: str, s0: float, d: int, atr: float, bar_lo: float | None = None, bar_hi: float | None = None) -> float:
+PACK_STYLES: dict = {}        # 2.43: exits defined in strategy files (key -> spec), registered by lab/packs.py
+STOP_KINDS = ("atr", "bar", "fc", "pct")
+MOMENTUM = ("close", "wick")
+SPEC_KEYS = {"stop", "target_r", "be_at", "trail_atr", "momentum", "max", "words"}
+
+
+def spec_of(style: str) -> dict:
+    """The exit spec of a built-in style or a strategy-file exit (KeyError if neither)."""
+    return STYLES[style] if style in STYLES else PACK_STYLES[style]
+
+
+def spec_words(sp: dict) -> str:
+    kind = sp["stop"][0]
+    k = sp["stop"][1] if len(sp["stop"]) > 1 else None
+    stop = (f"stop {k:g}×ATR" if kind == "atr" else f"stop {k:g}% away" if kind == "pct" else
+            "stop at the other side of the first 5-min candle" if kind == "fc" else "stop just beyond the signal candle (0.5-2 ATR)")
+    parts = [stop]
+    if sp.get("be_at"):
+        parts.append(f"at +{sp['be_at']:g}R stop to entry")
+    if sp.get("trail_atr"):
+        parts.append(f"trail best price − {sp['trail_atr']:g}×ATR")
+    parts.append(f"target {sp['target_r']:g}R" if sp.get("target_r") else "no fixed target")
+    if sp.get("momentum") == "close":
+        parts.append("out when a 5-min candle closes beyond the previous candle against the trade")
+    elif sp.get("momentum") == "wick":
+        parts.append("out when a 5-min candle makes a new extreme against the trade and closes against it")
+    mx = int(sp.get("max") or 375)
+    parts.append("out by 15:15" if mx >= 360 else f"max {mx} min")
+    return ", ".join(parts) + " (premium stop −40%)"
+
+
+def spec_check(raw) -> tuple[dict | None, str | None]:
+    """Clean an exit from a strategy file: (spec, None) or (None, why it can't be used). Data only, fixed vocabulary."""
+    if not isinstance(raw, dict):
+        return None, "an exit must be an object"
+    extra = set(raw) - SPEC_KEYS
+    if extra:
+        return None, f"unknown exit fields: {', '.join(sorted(map(str, extra)))[:80]}"
+    stop = raw.get("stop")
+    if not isinstance(stop, list) or not stop or stop[0] not in STOP_KINDS:
+        return None, f"stop must be one of {', '.join(STOP_KINDS)}"
+    kind = stop[0]
+    try:
+        if kind in ("atr", "pct"):
+            k = float(stop[1])
+            if not (0.05 <= k <= (5 if kind == "atr" else 3)):
+                return None, f"{kind} stop size out of range"
+            stop = [kind, round(k, 4)]
+        else:
+            stop = [kind]
+        def num(key, lo, hi):
+            v = raw.get(key)
+            if v in (None, 0, False):
+                return None
+            v = float(v)
+            if not (lo <= v <= hi):
+                raise ValueError(f"{key} out of range ({lo}-{hi})")
+            return round(v, 4)
+        sp = {"stop": stop, "target_r": num("target_r", 0.25, 20), "be_at": num("be_at", 0.25, 10),
+              "trail_atr": num("trail_atr", 0.25, 10), "momentum": raw.get("momentum") or None,
+              "max": int(min(375, max(5, int(raw.get("max") or 375))))}
+    except (TypeError, ValueError, IndexError) as e:
+        return None, str(e)[:120]
+    if sp["momentum"] is not None and sp["momentum"] not in MOMENTUM:
+        return None, f"momentum must be one of {', '.join(MOMENTUM)}"
+    if sp["trail_atr"] and kind != "atr":
+        return None, "an ATR trail needs an ATR stop"
+    sp["words"] = spec_words(sp)
+    sp["who"] = "strategy file"
+    return sp, None
+
+
+def spec_key(sp: dict) -> str:
+    """Same exit, same key, everywhere (content hash of the spec without its words)."""
+    import hashlib
+    import json
+    core = {k: sp.get(k) for k in ("stop", "target_r", "be_at", "trail_atr", "momentum", "max")}
+    return "x" + hashlib.sha1(json.dumps(core, sort_keys=True).encode()).hexdigest()[:7]
+
+
+def momentum_k(o, h, l, c, i: int, d: int, mode: str | None, m0: int, end: int) -> int | None:
+    """Index (in minutes after m0, as in first_exit's arrays) of a momentum exit: the first 5-min bar j > i that closes
+    beyond bar j-1 against the trade ("close") or makes a new extreme against it and closes against it ("wick").
+    Decided at bar j's close, filled at the next minute (5j + 5)."""
+    if not mode:
+        return None
+    for j in range(i + 1, len(c)):
+        mj = 5 * j + 5
+        if mj > end:
+            return None
+        if mode == "close":
+            hit = c[j] < l[j - 1] if d > 0 else c[j] > h[j - 1]
+        else:
+            hit = (l[j] < l[j - 1] and c[j] < o[j]) if d > 0 else (h[j] > h[j - 1] and c[j] > o[j])
+        if hit:
+            return mj - (m0 + 1)
+    return None
+
+
+def risk_pts(style: str, s0: float, d: int, atr: float, bar_lo: float | None = None, bar_hi: float | None = None,
+             fc_lo: float | None = None, fc_hi: float | None = None) -> float:
     """R: distance from entry to the initial stop, in points of the underlying."""
-    st = STYLES[style]
+    st = spec_of(style)
+    kind, k = st["stop"][0], (st["stop"][1] if len(st["stop"]) > 1 else None)
+    if kind == "fc":                                         # 2.43: the other side of the first 5-min candle (no ATR needed)
+        lvl = fc_lo if d > 0 else fc_hi
+        if lvl is None or not math.isfinite(lvl) or not math.isfinite(s0):
+            return math.nan
+        r = (s0 - lvl) * d
+        return float(r) if r > 0 else math.nan
+    if kind == "pct":
+        return float(s0 * k / 100) if math.isfinite(s0) and s0 > 0 else math.nan
     if not atr or not math.isfinite(atr) or atr <= 0:
         return math.nan
-    kind, k = st["stop"]
     if kind == "atr":
         return k * atr
     lvl = (bar_lo - 0.1 * atr) if d > 0 else (bar_hi + 0.1 * atr)
@@ -66,10 +180,10 @@ def risk_pts(style: str, s0: float, d: int, atr: float, bar_lo: float | None = N
     return float(min(2 * atr, max(0.5 * atr, r)))
 
 
-def first_exit(style: str, spot, opt, s0: float, entry: float, d: int, R: float):
+def first_exit(style: str, spot, opt, s0: float, entry: float, d: int, R: float, mom_k: int | None = None):
     """Backtest: index of the first minute an exit fires in spot/opt (minutes after entry), and why. (None, 'time')
-    if nothing fires. Same rule as LivePlan.check, minute by minute."""
-    st = STYLES[style]
+    if nothing fires. Same rule as LivePlan.check, minute by minute. mom_k: where a momentum exit fires (momentum_k)."""
+    st = spec_of(style)
     spot = np.asarray(spot, float)
     opt = np.asarray(opt, float)
     if not len(spot) or not math.isfinite(R) or R <= 0:
@@ -94,6 +208,8 @@ def first_exit(style: str, spot, opt, s0: float, entry: float, d: int, R: float)
             k = int(np.argmax(hit))
             if first is None or k < first:
                 first, why = k, name
+    if mom_k is not None and 0 <= mom_k < len(move) and (first is None or mom_k < first):
+        first, why = mom_k, "momentum"
     return first, why
 
 
@@ -111,7 +227,7 @@ class LivePlan:
         return cls(x["style"], x["s0"], x["d"], x["R"], x["entry"], x["t0"], x.get("best", 0.0))
 
     def stop_move(self) -> float:
-        st = STYLES[self.style]
+        st = spec_of(self.style)
         stop = -self.R
         if st["be_at"] and self.best >= st["be_at"] * self.R:
             stop = 0.0
@@ -120,7 +236,7 @@ class LivePlan:
         return stop
 
     def check(self, spot: float | None, opt: float | None, now_ts: float) -> str | None:
-        st = STYLES[self.style]
+        st = spec_of(self.style)
         why = None
         if opt and opt <= self.entry * (1 - PREM_STOP / 100):
             why = "premium stop"
@@ -136,7 +252,7 @@ class LivePlan:
         return why
 
     def levels(self) -> dict:
-        st = STYLES[self.style]
+        st = spec_of(self.style)
         d = self.d
         return {"stop": round(self.s0 + d * self.stop_move(), 2),
                 "target": round(self.s0 + d * st["target_r"] * self.R, 2) if st["target_r"] else None,
@@ -149,7 +265,7 @@ def plan(style: str, s0: float, d: int, atr: float, opt_ltp: float | None, delta
     R = risk_pts(style, s0, d, atr, bar_lo, bar_hi)
     if not math.isfinite(R) or R <= 0:
         return None
-    st = STYLES[style]
+    st = spec_of(style)
     out = {"style": style, "who": st["who"], "words": st["words"], "atr": round(atr, 2), "R_pts": round(R, 2),
            "und_entry": round(s0, 2), "und_stop": round(s0 - d * R, 2), "und_1r": round(s0 + d * R, 2),
            "und_target": round(s0 + d * st["target_r"] * R, 2) if st["target_r"] else None,

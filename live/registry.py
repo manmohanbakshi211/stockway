@@ -41,6 +41,7 @@ KINDS = {
     "factory": {"family": "lab", "label": "Strategy Lab rule", "paper": True},
     "lab5y": {"family": "lab", "label": "5-year Lab rule", "cooldown": 30, "shadow": True},
     "library": {"family": "lab", "label": "Library / book rule (test bench only)"},
+    "pack": {"family": "lab", "label": "Strategy file rule (test bench only)"},       # 2.43: lab/packs.py
     "mover": {"family": "bench", "label": "Mover test (test bench only)"},     # 2.31: the yardstick, live/movers.py
     "manual": {"family": "manual", "label": "By hand"},
     "paper": {"family": "manual", "label": "Paper"},
