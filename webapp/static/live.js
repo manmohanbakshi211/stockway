@@ -3228,7 +3228,7 @@ function qualityPanel(q) {
   if (!q) return "";
   const st = q.state || {}, c = q.counts || {}, n = (x) => (x || 0).toLocaleString("en-IN");
   const tm = (ts) => ts ? hm(ts) : "";
-  const list = (xs, f) => xs.length ? `<table class="mini"><tbody>${xs.map(f).join("")}</tbody></table>` : `<p class="small muted" style="margin:4px 0">None.</p>`;
+  const list = (xs, f) => xs.length ? `<div class="table-wrap"><table class="mini"><tbody>${xs.map(f).join("")}</tbody></table></div>` : `<p class="small muted" style="margin:4px 0">None.</p>`;
   return `<div class="panel tight" style="margin-top:12px"><h3>Data quality guard <span class="muted small">mode: ${esc(q.mode || "")} · ${n(st.checked)} prices checked every few seconds</span></h3>
     <div class="vault-grid">
       <div><table class="mini"><tbody>
@@ -3238,7 +3238,7 @@ function qualityPanel(q) {
         <tr><td>Big moves checked and confirmed</td><td class="r">${n(c.real_moves)}</td></tr>
         <tr><td>Alerts held on suspect data</td><td class="r">${n(c.alerts_held)}</td></tr></tbody></table>
         <p class="small muted" style="margin:6px 0 0">A sudden jump is held for a few seconds: if it snaps back it was a bad print and is never used; if it stays it was a real move. Test trades never fill on an old or suspect quote. Everything is saved with the day's data.</p></div>
-      <div><b class="small">Latest findings</b>${list((q.events || []).slice(0, 8), (e) => `<tr><td class="small">${tm(e.ts)}</td><td class="small">${esc(e.sym || e.key)} <span class="muted">${esc(e.kind)}</span></td><td class="small">${esc(e.what)}${e.a != null && e.b != null ? ` (${fx(e.a)} → ${fx(e.b)})` : ""}</td></tr>`)}
+      <div><b class="small">Latest findings</b>${list((q.events || []).slice(0, 8), (e) => `<tr><td class="small">${tm(e.ts)}</td><td class="small" style="word-break:break-all">${esc(e.sym || e.key)} <span class="muted">${esc(e.kind)}</span></td><td class="small">${esc(e.what)}${e.a != null && e.b != null ? ` (${fx(e.a)} → ${fx(e.b)})` : ""}</td></tr>`)}
         <b class="small" style="display:block;margin-top:8px">Alerts held</b>${list((q.held || []).slice(0, 6), (h) => `<tr><td class="small">${tm(h.ts)}</td><td class="small">${esc(h.title || h.sym)}</td><td class="small muted">${esc(h.why)}</td></tr>`)}</div>
     </div></div>`;
 }
