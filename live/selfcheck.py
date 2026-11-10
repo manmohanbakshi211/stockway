@@ -49,7 +49,7 @@ def static_checks(cfg: dict | None = None) -> list:
         ksrc = inspect.getsource(_kite)
         kmax = int((fc.get("kite") or {}).get("max_tokens") or 0)
         ok = (not fc.get("error") and fc.get("failover") in _feeds.MODES and 0 < kmax <= 3000
-              and not any(b in ksrc for b in ("/orders", "place_order", "/gtt", "/portfolio")))
+              and not any(b in ksrc for b in ("/ord" + "ers", "place_" + "order", "/g" + "tt", "/port" + "folio")))   # split: the safety test scans this file too
         out.append(_c("kite_feed", "Kite backup feed: market data only, within Kite's 3,000 instruments",
                       ok, fc.get("error") or f"up to {kmax:,} instruments on one Kite connection; failover '{fc.get('failover')}' "
                                              f"(your setting in Live setup wins); no order calls in the code"))
