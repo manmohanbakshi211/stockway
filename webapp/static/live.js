@@ -2425,8 +2425,14 @@ function drawSmartLines(d, S, intra) {
   CH.smartSeries = [];
   tls.forEach((t) => {
     const a = chBarTime(t.t1), b = chBarTime(t.t2); if (a == null || b == null || b <= a) return;
+    const pts = [{ time: a, value: t.p1 }, { time: b, value: t.p2 }];
+    const B = CH.bars, ib = B.findIndex((x) => x.time === b), last = B.length - 1;
+    if (ib >= 0 && last > ib) {                     // the chart has newer bars: carry the line on at the same slope
+      const n5 = (last - ib) * (CH.tfMin || 5) / 5;
+      pts.push({ time: B[last].time, value: Math.round((t.p2 + n5 * (t.slope_per_hour || 0) / 12) * 100) / 100 });
+    }
     const ser = CH.chart.addSeries(window.LightweightCharts.LineSeries, { color: t.color, lineWidth: 2, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, title: t.label }, 0);
-    ser.setData([{ time: a, value: t.p1 }, { time: b, value: t.p2 }]); CH.smartSeries.push(ser);
+    ser.setData(pts); CH.smartSeries.push(ser);
   });
   CH.smartSig = sig;
 }
@@ -2448,7 +2454,7 @@ function smartPanel(sm, spot) {
   const ls = sm.lines || [];
   const above = ls.filter((l) => l.price > spot), below = ls.filter((l) => l.price <= spot);
   return `<p class="small" style="margin:0 0 6px">Price is ${st.day_move_pct >= 0 ? "up" : "down"} ${Math.abs(st.day_move_pct || 0)}% on the day and moving ${esc(st.speed_words || "")} now.
-      <span class="muted">Colour: <span style="color:#2F6FDE">holds</span> · <span style="color:#E07B00">breaks</span> · <span style="color:#8A95A1">50/50</span> · ★ = the line itself beats random lines.</span></p>
+      <span class="muted">Colour: <span style="color:#2F6FDE">holds</span> · <span style="color:#E07B00">breaks</span> · <span style="color:#8A95A1">50/50</span> · ★ = the line itself beats random lines here.</span></p>
     ${above.length ? `<h4 class="smart-h">Above (resistance)</h4><ul class="plain smart-ul">${above.map(line).join("")}</ul>` : ""}
     ${below.length ? `<h4 class="smart-h">Below (support)</h4><ul class="plain smart-ul">${below.map(line).join("")}</ul>` : ""}
     ${(sm.trendlines || []).length ? `<h4 class="smart-h">Trendlines</h4><ul class="plain smart-ul">${sm.trendlines.map((t) => `<li class="smart-li"><span class="smart-dot" style="background:${t.color}"></span><div><b>${fx(t.price_now)}</b> now · ${esc(t.label)}<br><small class="muted">${t.slope_per_hour > 0 ? "rising" : "falling"} ${Math.abs(t.slope_per_hour)} points an hour; not in the 5-year book yet, graded live from today</small></div></li>`).join("")}</ul>` : ""}

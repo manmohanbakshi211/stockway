@@ -153,9 +153,12 @@ def compute(sym: str, today: list, prev_days: list, spot: float | None, extra: d
                                           if touched else None)})
     lines = _merge(out, spot, float(c.get("merge_pct") or 0.04))
     keep = int(c.get("max_lines_each_side") or 4)
-    sup = sorted((x for x in lines if x["side"] == "support"), key=lambda x: (-x["matters"], -x["price"]))
-    res = sorted((x for x in lines if x["side"] == "resistance"), key=lambda x: (-x["matters"], x["price"]))
-    chosen = sorted(sup[:keep] + res[:keep], key=lambda x: -x["price"])
+    chosen = []
+    for side in ("support", "resistance"):           # the nearest lines, plus up to 2 farther ones that beat random lines
+        xs = sorted((x for x in lines if x["side"] == side), key=lambda x: abs(x["price"] - spot))
+        near_, rest = xs[:max(1, keep - 1)], xs[max(1, keep - 1):]
+        chosen += near_ + [x for x in rest if x["matters"]][:2] + ([] if any(x["matters"] for x in rest) else rest[:1])
+    chosen = sorted(chosen, key=lambda x: -x["price"])
     tls = []
     for tl in trendlines(multi_rows or rows, spot):
         side = 1 if tl["price_now"] < spot else -1
@@ -185,7 +188,12 @@ def _verdict_short(v: str, ev: dict | None) -> str:
     if not ev or v == "not tested yet":
         return "new: graded live"
     h = ev.get("hold")
-    star = " ★" if ev.get("matters") else ""
+    edge = ev.get("edge") or 0
+    star = ""
+    if ev.get("matters"):                                  # the line itself beats random lines the way the verdict points
+        if v != "coin flip":
+            agrees = (v == "likely holds" and edge > 0) or (v == "likely breaks" and edge < 0)
+            star = " ★" if agrees else " (weaker than a random line)"
     return (f"holds {h:.0f}%" if v == "likely holds" else f"breaks {100 - h:.0f}%" if v == "likely breaks" else "50/50") + star
 
 

@@ -21,7 +21,7 @@
   "breaks_pct": 45,
   "max_lines_each_side": 4,
   "near_pct": 1.6,
-  "merge_pct": 0.04,
+  "merge_pct": 0.08,
   "rebuild_after_days": 7,
   "trendline": {"swing_k": 2, "days": 3, "min_touches": 2, "touch_atr": 0.35, "max_lines": 2},
   "types": {
