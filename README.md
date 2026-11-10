@@ -114,6 +114,32 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Trailing-exit paper account; the Daily Radar checked (2.56)
+
+Mandeep, 11 Nov 2026: "go ahead" on: selling stays off (focus on buying), the trailing exit as a separate paper account
+first, then strikes by premium / entries after 14:45 / per-strike OI. And: "how relevant is this section now ... check
+if it is not affecting the system smartness and accuracy" (Daily Radar).
+
+- **Selling** stays off (2.55 defaults): no paper straddles, one range-day signal per index a day below Focus.
+- **"Trailing exit" paper account** (`rules/paper_books.json` → `trail`): takes the **same alerts as the main account**
+  (`pick.same_as_main`: its alert types and strength, risk check PASS, lots from its own money) and differs only in the
+  exit (`exit_style: "chand"` from `lab/exits.py`): stop 1.5 × 5-minute ATR, then a stop trailing 2.5 × ATR behind the
+  best price, no fixed target, out by the day's exit time. Why: on 15,370 shadow-graded alerts it made +2.0% more on
+  the option per trade than the +30% / −20% premium exit, better on 5 of 6 days. Paper page → its own tab; Accounts
+  side by side compares it with the main account. Switching the main account stays Mandeep's call. Gun: books can give
+  an account its own chart exit (`exit_style`, checked against the exit registry; a bad one marks only that account);
+  the alert now carries the chart risk per exit style (`plan_R`).
+- **Daily Radar** (Tomorrow / History / Biggest days / What drives moves / Model check; Bank Nifty next-day model):
+  - It does **not** feed alerts, Focus, the risk check, paper trades or the Lab (only its own pages and the 18:30
+    forecast), so it cannot lower their accuracy.
+  - Its record (Mac, 1,936 test days): big-range days AUC 0.70 (0.61–0.80 every year); flagged days were big-range days
+    35% of the time vs 20% normally (1.8×), catching 56% of them. Direction AUC 0.54: a coin flip. Buying a straddle
+    every flagged day still lost after costs (−0.53% of spot a trade).
+  - Fixed: the forecast date skips NSE holidays (on 10 Nov, a holiday, it forecast "for" 10 Nov). The Tomorrow page says
+    how to use it (pick how to trade on flagged vs normal days, not a trade by itself).
+  - Its call for the day is now recorded with every test-bench signal (`radar_big`, `radar_flag`) so the credibility
+    check can show, after some days, whether trades on flagged days do better. Recorded only.
+
 ## No more naked straddle selling: one range-day sell signal, hedged versions tested first (2.55)
 
 Mandeep, 11 Nov 2026: sell only in sideways markets and risk-controlled; "i also checked system selling call and put at

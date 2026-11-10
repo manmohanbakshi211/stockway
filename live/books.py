@@ -68,6 +68,12 @@ class Books:
                 cap = float(mine.get("capital") or sp.get("capital") or main_cfg.get("capital") or 500000)
                 pc = {**main_cfg, **(sp.get("paper") or {}), "capital": cap, "aggressive": False, "kinds": "all",
                       "min_severity": int((sp.get("pick") or {}).get("min_severity") or 1)}
+                if (sp.get("pick") or {}).get("same_as_main"):    # 2.56: the main account's alerts, only the exit differs
+                    pc.update(kinds=main_cfg.get("kinds") or "all", min_severity=int(main_cfg.get("min_severity") or 2))
+                if sp.get("exit_style"):
+                    from lab.exits import STYLES
+                    if sp["exit_style"] not in STYLES:
+                        raise ValueError(f"unknown exit_style {sp['exit_style']!r}")
                 old = self.books.get(bid)
                 if old is not None:                       # keep today's skip counts across a settings reload
                     old.cfg = pc
@@ -149,8 +155,13 @@ class Books:
                         ((a.get("data") or {}).get("risk") or {})
                     if (sp.get("pick") or {}).get("risk_pass") and risk.get("verdict") != "PASS":
                         why = "risk check: " + "; ".join((risk.get("reasons") or ["not PASS"])[:1])
+                    elif sp.get("exit_style") and not ((a.get("data") or {}).get("plan_R") or {}).get(sp["exit_style"]):
+                        why = "no chart risk for this alert (trailing exit needs 5-minute bars)"
                     else:
                         a2 = {**a, "data": {**(a.get("data") or {}), "risk": risk}}
+                        if sp.get("exit_style"):              # 2.56: this account's own exit, the same for every alert
+                            st = sp["exit_style"]
+                            a2["data"]["factory"] = {"plan": {"style": st, "R": float(a["data"]["plan_R"][st])}}
                         before = dict(bk.skipped)
                         tid = bk.try_open(a2, state, now)
                         new = [k for k, v in bk.skipped.items() if v > before.get(k, 0)]

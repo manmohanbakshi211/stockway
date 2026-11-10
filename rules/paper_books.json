@@ -1,5 +1,5 @@
 {
-  "about": "2.49: extra paper accounts next to your main one (Mandeep, 10 Nov 2026, points 14 and 15). Each has its own money and its own trades (saved as source '<feed>#<id>', never mixed with the main account, the scorecard or the test bench). Paper only: nothing here can place a real order. 'pick' = which alerts the account takes; 'paper' = its account rules (same names as the main account's); capital null = the same as your main capital. Change the numbers here; old trades keep the rules they were taken with.",
+  "about": "2.49: extra paper accounts next to your main one (Mandeep, 10 Nov 2026, points 14 and 15). Each has its own money and its own trades (saved as source '<feed>#<id>', never mixed with the main account, the scorecard or the test bench). Paper only: nothing here can place a real order. 'pick' = which alerts the account takes; 'paper' = its account rules (same names as the main account's); capital null = the same as your main capital. Change the numbers here; old trades keep the rules they were taken with. 2.56: 'exit_style' (a chart exit from lab/exits.py STYLES) gives an account its own exit for every trade; pick.same_as_main takes the main account's alert types and strength.",
   "valid_from": "2026-11-11",
   "books": {
     "best": {
@@ -8,10 +8,24 @@
       "explain": "Takes an alert only when everything agrees: it is a Focus alert, strength 3, the risk check says PASS, the signal score is 70 or more, and that alert type has a good live record (20+ graded, 55%+ worked, option up on average after an hour) or it comes from a Strategy Lab rule that passed the strict out-of-sample bar. Few trades by design.",
       "on": true,
       "capital": null,
-      "pick": {"focus": true, "risk_pass": true, "min_severity": 3, "min_score": 70,
-               "record": {"min_decided": 20, "min_hit_rate": 55, "min_avg_o60": 0.0},
-               "proven_kinds": ["factory"]},
-      "paper": {"max_open": 2, "max_trades_day": 3}
+      "pick": {
+        "focus": true,
+        "risk_pass": true,
+        "min_severity": 3,
+        "min_score": 70,
+        "record": {
+          "min_decided": 20,
+          "min_hit_rate": 55,
+          "min_avg_o60": 0.0
+        },
+        "proven_kinds": [
+          "factory"
+        ]
+      },
+      "paper": {
+        "max_open": 2,
+        "max_trades_day": 3
+      }
     },
     "target3": {
       "name": "3% a day",
@@ -22,8 +36,31 @@
       "compound": true,
       "day_target_pct": 3.0,
       "day_stop_pct": 2.0,
-      "pick": {"focus": true, "risk_pass": true, "min_severity": 3, "min_score": 75},
-      "paper": {"max_open": 1, "max_trades_day": 3, "risk_pct": 2.0, "max_daily_loss_pct": 2.0}
+      "pick": {
+        "focus": true,
+        "risk_pass": true,
+        "min_severity": 3,
+        "min_score": 75
+      },
+      "paper": {
+        "max_open": 1,
+        "max_trades_day": 3,
+        "risk_pct": 2.0,
+        "max_daily_loss_pct": 2.0
+      }
+    },
+    "trail": {
+      "name": "Trailing exit",
+      "short": "Same trades as the main account, trailing exit",
+      "explain": "Takes the same alerts as the main account (same types, strength, risk check, lots sized from its own money) and differs only in how it exits: stop 1.5 x the 5-minute ATR of the index or stock, then a stop that trails 2.5 x ATR behind the best price, no fixed target, out by the day's exit time. Why: on 15,370 graded alerts (2-9 Nov) this exit made +2.0% more on the option per trade than the +30% / -20% premium exit, better on 5 of 6 days. Your call (11 Nov): test it here first; if it keeps beating the main account, switching the main account is your decision.",
+      "on": true,
+      "capital": null,
+      "pick": {
+        "same_as_main": true,
+        "risk_pass": true
+      },
+      "exit_style": "chand",
+      "paper": {}
     }
   }
 }
