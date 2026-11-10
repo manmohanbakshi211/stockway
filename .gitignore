@@ -19,6 +19,8 @@ data/live.db*
 data/bench.db*
 data/paths.db*
 data/upstox_token.json
+data/kite_token.json
+data/dhan_*.json
 data/instruments/
 data/recordings/
 data/ranker_*.joblib

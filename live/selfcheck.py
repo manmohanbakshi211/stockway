@@ -43,6 +43,18 @@ def static_checks(cfg: dict | None = None) -> list:
     out.append(_c("trials_isolated", "Ideas on trial never reach your alerts, Telegram or paper trades",
                   bool(first) and "is_shadow" in first[0] and "_trial" in first[1],
                   f"{len(registry.shadow_kinds())} idea(s) on trial: recorded and graded only (Scorecard, On trial)"))
+    try:                                             # 2.52: Kite next to Upstox, market data only
+        from live import feeds as _feeds, kite as _kite
+        fc = _feeds.cfg()
+        ksrc = inspect.getsource(_kite)
+        kmax = int((fc.get("kite") or {}).get("max_tokens") or 0)
+        ok = (not fc.get("error") and fc.get("failover") in _feeds.MODES and 0 < kmax <= 3000
+              and not any(b in ksrc for b in ("/orders", "place_order", "/gtt", "/portfolio")))
+        out.append(_c("kite_feed", "Kite backup feed: market data only, within Kite's 3,000 instruments",
+                      ok, fc.get("error") or f"up to {kmax:,} instruments on one Kite connection; failover '{fc.get('failover')}' "
+                                             f"(your setting in Live setup wins); no order calls in the code"))
+    except Exception as e:
+        out.append(_c("kite_feed", "Kite backup feed: market data only", False, f"could not load: {e}"))
     from lab import factory
     out.append(_c("lab_one_run", "Strategy Lab: one research round per Lab folder at a time",
                   hasattr(factory, "_RUN_LOCKS"), "a second run waits for the first instead of overwriting it"))

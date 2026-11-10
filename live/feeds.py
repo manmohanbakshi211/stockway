@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "feeds.json"
+MODES = ("on", "off", "shadow")    # failover: use Kite / do nothing / only record
 DEFAULTS = {"kite": {"enabled": True, "max_tokens": 2900, "mode": "full"}, "failover": "shadow", "failover_after_s": 8,
             "back_after_s": 3, "cross_check_every_s": 5, "same_moment_s": 2, "stale_s": 30,
             "tol_pct": {"index": 0.05, "future": 0.15, "stock": 0.15, "option": 2.0}, "index_map": {}}
@@ -231,7 +232,7 @@ class FeedRouter:
         except Exception:
             m = None
         m = m or cfg().get("failover", "shadow")
-        return m if m in ("on", "off", "shadow") else "shadow"
+        return m if m in MODES else "shadow"
 
     def tick_failover(self, now: float):
         c = cfg()

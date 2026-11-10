@@ -222,3 +222,5 @@ def test_kite_code_reads_prices_only():
         if p.name != "kite.py":
             t = p.read_text()
             assert "ws.kite.trade" not in t and "api.kite.trade" not in t, p.name   # one Kite connection point
+    ign = (ROOT / ".gitignore").read_text().split()
+    assert "data/kite_token.json" in ign and "data/upstox_token.json" in ign and "user_settings.json" in ign
