@@ -859,6 +859,30 @@ def packs_vocabulary():
     return clean(packs.vocabulary())
 
 
+@app.get("/api/lines/status")
+def lines_status():
+    """2.54 smart chart lines: which line book is in use and the live record (all symbols)."""
+    from lab import levelbook
+    out = levelbook.status(ROOT / "data")
+    try:
+        from webapp.live_api import engine as _eng
+        lg = getattr(_eng(), "linegrade", None)
+        out["live"] = lg.summary() if lg is not None else None
+    except Exception:
+        out["live"] = None
+    return clean(out)
+
+
+@app.post("/api/lines/rebuild")
+def lines_rebuild():
+    """Rebuild your own line book from the Mac's 1-minute history (background, one at a time)."""
+    from lab import levelbook
+    if not (ROOT / "data" / "history" / "NIFTY" / "minutes.parquet").exists():
+        raise HTTPException(400, "No Nifty 1-minute history on this Mac yet.")
+    started = levelbook.rebuild_async(ROOT / "data", log=lambda m: None)
+    return {"ok": True, "started": started, "note": None if started else "already rebuilding"}
+
+
 @app.post("/api/packs/upload")
 async def packs_upload(req: Request, name: str = ""):
     from lab import packs

@@ -1,0 +1,39 @@
+{
+  "about": "2.54 smart chart lines (Mandeep, 11 Nov 2026: 'make some smart system that can draw lines on the chart by itself analysing each and everything that matters'). Bullets for live/linesmith.py (the line finder) and lab/levelbook.py (the line book: how often each kind of line held or broke on your own 1-minute history, by how price came to it). A touch counts when price was at least away_pct from the line and then came within touch_pct of it; HOLD = it then moved move_pct back the way it came before closing brk_pct beyond the line; BREAK = it closed brk_pct beyond and then travelled move_pct beyond; within 60 minutes. Random lines are the baseline: a line only 'matters' when it holds or breaks clearly more often than random lines in the same situation, in both the older (train) and the newer (holdout) years.",
+  "valid_from": "2026-11-11",
+  "touch": {
+    "index_big": {"away_pct": 0.18, "touch_pct": 0.035, "move_pct": 0.30, "brk_pct": 0.12},
+    "index": {"away_pct": 0.15, "touch_pct": 0.03, "move_pct": 0.25, "brk_pct": 0.10},
+    "stock": {"away_pct": 0.35, "touch_pct": 0.07, "move_pct": 0.60, "brk_pct": 0.25}
+  },
+  "big_index": ["BANKNIFTY", "SENSEX"],
+  "window_min": 60,
+  "first_minute": 15,
+  "speed_lookback_min": 15,
+  "day_move_pct": 0.3,
+  "split_date": "2025-01-01",
+  "random_lines_per_day": 12,
+  "random_band_pct": 1.5,
+  "min_n": 60,
+  "matters_pts": 4.0,
+  "matters_each_half_pts": 2.0,
+  "holds_pct": 55,
+  "breaks_pct": 45,
+  "max_lines_each_side": 4,
+  "near_pct": 1.6,
+  "merge_pct": 0.04,
+  "rebuild_after_days": 7,
+  "trendline": {"swing_k": 2, "days": 3, "min_touches": 2, "touch_atr": 0.35, "max_lines": 2},
+  "types": {
+    "pdh": "Yesterday's high", "pdl": "Yesterday's low", "pdc": "Yesterday's close",
+    "pivot": "Pivot", "tc": "CPR top", "bc": "CPR bottom", "r1": "R1", "s1": "S1", "r2": "R2", "s2": "S2",
+    "wk_h": "Last 5 days' high", "wk_l": "Last 5 days' low", "d20_h": "20-day high", "d20_l": "20-day low",
+    "open": "Today's open", "round_s": "Round number", "round_b": "Big round number",
+    "or_h": "Opening range high (15 min)", "or_l": "Opening range low (15 min)",
+    "sw_h": "Swing high (5-min, today)", "sw_l": "Swing low (5-min, today)",
+    "oi_call": "Call OI wall", "oi_put": "Put OI wall", "max_pain": "Max pain",
+    "gamma_flip": "Gamma flip", "tl_up": "Rising trendline (5-min lows)", "tl_dn": "Falling trendline (5-min highs)",
+    "random": "Random line (baseline)"
+  },
+  "round_steps": {"NIFTY": [100, 500], "BANKNIFTY": [500, 1000], "FINNIFTY": [100, 500], "MIDCPNIFTY": [50, 250], "SENSEX": [500, 1000]}
+}
