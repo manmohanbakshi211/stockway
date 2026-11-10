@@ -226,4 +226,17 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
                        + (f"; can't read: {', '.join(bad)}" if bad else "")) if cur else "no strategy files yet"))
     except Exception as e:
         out.append(_c("strategy_files", "Strategy files readable", False, str(e)[:160]))
+    try:                                                   # 2.47: bigger-timeframe facts (lab/tfacts.py, rules/tf_facts.json)
+        from lab import factory as _F, tfacts as _T
+        cfg = _T.config()
+        unknown = [ind for inds in (cfg.get("tfs") or {}).values() for ind in inds if ind not in _T.IND]
+        cache = getattr(getattr(engine, "charts", None), "_tfh", {}) if engine is not None else {}
+        have = sum(1 for v in cache.values() if v[1])
+        out.append(_c("tf_facts", "Bigger-timeframe facts (15m / 30m / 1H, many days; history from Dhan 5-min bars, once a day per symbol)",
+                      not unknown and len(_F.TF_FACTS) > 0,
+                      f"{len(_F.TF_FACTS)} facts, {cfg.get('history_days')} days of history"
+                      + (f"; live history ready for {have} symbol(s) today" if cache else "; fetched when a rule needs them")
+                      + (f"; unknown indicators in rules/tf_facts.json: {', '.join(unknown)}" if unknown else "")))
+    except Exception as e:
+        out.append(_c("tf_facts", "Bigger-timeframe facts", False, str(e)[:160]))
     return out

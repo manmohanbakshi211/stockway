@@ -37,7 +37,7 @@ MAX_EXITS = 20
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 NAME_RE = re.compile(r"^[a-z0-9_]{1,24}$")
 TOP_KEYS = {"stockway_pack", "id", "name", "version", "made", "source", "about", "exits", "strategies", "cannot_test"}
-STRAT_KEYS = {"name", "dir", "conds", "win", "exit", "syms", "max_day", "note"}
+STRAT_KEYS = {"name", "dir", "conds", "win", "exit", "syms", "max_day", "note", "then"}     # 2.47: then
 _LOCK = threading.Lock()
 _CACHE: dict = {}
 
@@ -180,6 +180,14 @@ def check(raw: bytes) -> dict:
         if not conds or len(conds) > 4:
             rec.update(status="bad", why="1 to 4 conditions")
             continue
+        then = st.get("then")                              # 2.47: setup bar, then a trigger bar within N bars
+        if then is not None:
+            if not (isinstance(then, dict) and isinstance(then.get("conds"), list) and 1 <= len(then["conds"]) <= 3):
+                rec.update(status="bad", why="then must be {\"conds\": [1-3 conditions], \"within\": bars}")
+                continue
+            for c in then["conds"]:
+                if isinstance(c, list) and len(c) == 3 and c[0] not in F.FEATURES:
+                    needs.append(_txt(c[0], 40))
         if needs:
             rec.update(status="cannot", why="needs facts the app doesn't have yet: " + ", ".join(needs))
             out["cannot_test"].append({"idea": f"{pack['name']}: {name}", "needs": ", ".join(needs)})
@@ -213,6 +221,8 @@ def check(raw: bytes) -> dict:
             r = {"dir": dr, "conds": conds, "win": w, "exit": key, "max_day": 2 if int(st.get("max_day") or 1) > 1 else 1,
                  "syms": [str(x) for x in syms], "note": _txt(st.get("note"), 300) or pack["about"][:300],
                  "source": f"pack:{pid}:{name}"[:80], "pack": pid, "pack_v": ver, "name": name, "early": w[0] < F.FIRST_ENTRY_TOD}
+            if then is not None:
+                r["then"] = then
             v = _validate(r, out["exits"])
             if not v:
                 out["problems"].append(f"'{name}' with exit '{e}': not a testable rule")
@@ -388,6 +398,10 @@ def vocabulary() -> dict:
             "exits": {k: F.exit_words(k) for k in F.BUY_EXITS}, "sell_exits": {k: F.EXIT_WORDS.get(k, k) for k in F.SELL_EXITS},
             "exit_fields": {"stop": [list(X.STOP_KINDS), "atr k | bar | fc (other side of the first 5-min candle) | pct k"],
                             "target_r": "number or null", "be_at": "R or null", "trail_atr": "ATRs or null (atr stop only)",
-                            "momentum": list(X.MOMENTUM), "max": "minutes (375 = out by 15:15)"},
+                            "momentum": list(X.MOMENTUM), "max": "minutes (375 = out by 15:15)",
+                            "exit_if": "2.47: 1-3 [fact, '>' or '<', number]: out at the 5-min close where any holds",
+                            "opt_stop_pct": "2.47: stop on the option's own price, % against"},
+            "then": f"2.47: {{\"conds\": [1-3 conditions], \"within\": 1-{F.THEN_MAX}}}: the strategy's conds mark a setup bar; "
+                    "the entry is the first later bar (within N bars) where these hold",
             "windows": f"minutes since 09:15 at the bar's close: {F.EARLY_ENTRY_TOD} (09:25) to {F.LAST_ENTRY_TOD} (14:45)",
             "symbols": sorted(set(F.INDEX_SYMS) | {F.STOCKS})}

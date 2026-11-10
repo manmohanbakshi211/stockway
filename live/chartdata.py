@@ -142,6 +142,7 @@ class ChartData:
             prem = [day_rec.get(i, (None, None))[1] for i in range(slot)]
             f = factory.bar_features(o5, h5, l5, c5, ctx, [np.nan if x is None else x for x in ivs],
                                      [np.nan if x is None else x for x in prem])
+            self._add_new_facts(f, sym, now, slot, m, (o5, h5, l5, c5), prem, rules + lib)        # 2.47
             for r in rules:
                 try:                               # one broken rule or model file is skipped, the rest still run
                     if r.get("ml"):
@@ -287,6 +288,96 @@ class ChartData:
                 v["_variant"] = "F" + hashlib.sha1(sig.encode()).hexdigest()[:7]
                 v["_name"] = (str(r["source"])[7:] + f" ({'long' if r['dir'] > 0 else 'short'})")[:160]
                 out.append(v)
+        return out
+
+    # ------------------------------------------------------------ 2.47: bigger-timeframe / multi-day and option facts
+    def _add_new_facts(self, f: dict, sym, now, slot: int, m: dict, bars: tuple, prem: list, rules: list):
+        """Adds the 2.47 facts (lab/tfacts.py and the option momentum facts) to f, the same as the Lab's bar table.
+        Computed only when a rule here uses one (history is fetched once a day per symbol); NaN otherwise."""
+        from lab import factory, tfacts
+        new = set(factory.TF_FACTS) | set(factory.OPT_FACTS)
+        used = set()
+        for r in rules:
+            for c in list(r.get("conds") or []) + list((r.get("then") or {}).get("conds") or []):
+                if c and c[0] in new:
+                    used.add(c[0])
+        try:
+            if used & set(factory.TF_FACTS):
+                hist = self._tf_hist(sym, now.date())
+                if hist:
+                    f.update(tfacts.live(hist, *bars))
+            if used & set(factory.OPT_FACTS):
+                f.update(self._opt_live(sym, now, slot, m, prem))
+        except Exception as ex:
+            if self._rate(f"newfacts:{sym}", 1800):
+                self.e.log(f"Timeframe / option facts for {sym} not ready: {ex}")
+        for k in new:
+            if k not in f:
+                f[k] = np.full(slot, np.nan)
+
+    def _tf_hist(self, sym, day) -> list:
+        """Earlier days' 5-min bars [(o, h, l, c) per day, oldest first], cached for the day; retried every 30 min
+        when empty."""
+        from lab import tfacts
+        cache = self.__dict__.setdefault("_tfh", {})
+        hit = cache.get((sym, day))
+        if hit and (hit[1] or time.time() - hit[0] < 1800):
+            return hit[1]
+        rows = []
+        try:
+            mtf = getattr(self.e, "mtf", None)
+            if mtf is None:
+                from .mtf import MTF
+                mtf = self.e.mtf = MTF(self.e)
+            rows, _ = mtf.long_rows(sym, 5, 25)
+        except Exception:
+            rows = []
+        if not rows:
+            from .mtf import resample
+            rows = resample(sorted(self.history(sym) or [], key=lambda r: r[0]), 5)
+        by = {}
+        for r in rows or []:
+            d = dt.datetime.fromtimestamp(r[0], IST).date()
+            if d < day:
+                by.setdefault(d, []).append(r)
+        out = []
+        for d in sorted(by):
+            a = np.asarray(sorted(by[d], key=lambda r: r[0]), float)
+            if len(a) >= 10:
+                out.append((a[:, 1], a[:, 2], a[:, 3], a[:, 4]))
+        out = out[-int(tfacts.config().get("history_days") or 12):]
+        cache[(sym, day)] = (time.time(), out)
+        return out
+
+    def _opt_live(self, sym, now, slot: int, m: dict, prem: list) -> dict:
+        """The at-the-money call / put chosen at each reference bar and its premium change since, per closed bar of
+        today (kept per bar, so two-step rules see earlier bars too); the straddle vs its average so far."""
+        from lab import factory
+        st = self.__dict__.setdefault("_optref", {}).setdefault((sym, now.date()), {"refs": {}, "bars": {}})
+        o = m.get("opt") or {}
+        rows = {r["strike"]: r for r in (o.get("rows") or []) if r.get("strike") is not None}
+        spot, i = m.get("spot"), slot - 1
+        cur = {}
+        for key, tod in factory.OPT_REFS.items():
+            if i == tod // 5 - 1 and key not in st["refs"] and spot and rows:
+                k = min(rows, key=lambda s_: abs(s_ - spot))
+                st["refs"][key] = (k, (rows[k].get("CE") or {}).get("ltp"), (rows[k].get("PE") or {}).get("ltp"))
+            if key in st["refs"]:
+                k, c0, p0 = st["refs"][key]
+                row = rows.get(k) or {}
+                c1, p1 = (row.get("CE") or {}).get("ltp"), (row.get("PE") or {}).get("ltp")
+                cur[f"ce_m{key}"] = (c1 / c0 - 1) * 100 if c1 and c0 and c0 > 0.5 else np.nan
+                cur[f"pe_m{key}"] = (p1 / p0 - 1) * 100 if p1 and p0 and p0 > 0.5 else np.nan
+        st["bars"][i] = cur
+        out = {}
+        for key in factory.OPT_REFS:
+            for side in ("ce", "pe"):
+                name = f"{side}_m{key}"
+                out[name] = np.array([st["bars"].get(j, {}).get(name, np.nan) for j in range(slot)], float)
+        p = np.array([np.nan if x is None else x for x in prem], float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            import pandas as pd
+            out["strd_avg"] = (p / pd.Series(p).expanding(min_periods=1).mean().to_numpy() - 1) * 100
         return out
 
     def _pack_rules(self) -> list:
