@@ -380,8 +380,8 @@ class PaperBook:
             inst = state.get(t["opt_key"]) if state else None
             ltp = inst.ltp if inst and inst.ltp else t["last"] or t["entry"]
             if inst and inst.ltp:                       # 2.48: when this price is from (exchange trade time, else received)
-                t["px_ts"] = (inst.ltt / 1000) if getattr(inst, "ltt", None) else inst.t
-                t["px_rx"] = inst.t
+                t["px_ts"] = (inst.ltt / 1000) if getattr(inst, "ltt", None) else getattr(inst, "t", None)
+                t["px_rx"] = getattr(inst, "t", None)
             t["unreal"] = round((t.get("dir") or 1) * (ltp - t["entry"]) * t["lot"] * t["lots"], 2)
             t["last"] = ltp
             und = state.get(t["und_key"]) if state and t.get("und_key") else None

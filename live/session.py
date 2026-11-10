@@ -55,7 +55,7 @@ def is_holiday(day: dt.date) -> bool:
 
 
 def session(day: dt.date) -> dict | None:
-    """Today's session {"kind": "regular" | "special", "name", "start_scanner", "open", "close"} (datetimes, IST) or
+    """Today's session {kind (regular or special), "name", "start_scanner", "open", "close"} (datetimes, IST) or
     None when NSE F&O does not trade that day. A special session wins over a holiday / weekend."""
     c = cfg()
     for s in c.get("special_sessions") or []:
