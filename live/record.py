@@ -69,6 +69,7 @@ class Recorder:
         self.path = d / f"{source}_{day}.sqlite"
         self.window = None if source == "sim" else session_window(day)      # 2.42: no stale night / after-close prices
         self.db = sqlite3.connect(str(self.path), check_same_thread=False)
+        self.closed = False                       # 2.48: set by close()
         self.lock = threading.Lock()
         with self.lock:
             self.db.executescript("""
@@ -238,6 +239,7 @@ class Recorder:
     def close(self):
         with self.lock:
             self.db.close()
+            self.closed = True                    # 2.48: readers (Options lens) fall back to the saved Parquet files
 
 
 def size_mb(data_dir: Path) -> float:

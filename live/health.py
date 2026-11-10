@@ -156,8 +156,10 @@ class Health:
     def _scanner(self, now, t, c, trading, in_mkt):
         e = self.e
         lc = e.cfg().get("live") or {}
-        hm = now.strftime("%H:%M")
-        expected = (trading and "09:16" <= hm < "15:25" and lc.get("source", "upstox") == "upstox" and lc.get("auto_start", True)
+        from . import session as SESSION            # 2.48: the NSE calendar (special sessions such as the Muhurat too)
+        ses = SESSION.session(now.date())
+        expected = (ses is not None and ses["open"] + dt.timedelta(minutes=1) <= now < ses["close"] - dt.timedelta(minutes=5)
+                    and lc.get("source", "upstox") == "upstox" and lc.get("auto_start", True)
                     and getattr(e, "manual_stop_day", None) != now.date())
         if not expected or e.running:
             self.down_since = None
@@ -168,7 +170,7 @@ class Health:
         if t - self.down_since >= float(c["scanner_down_min"]) * 60:
             st = (e.status or {}).get("state")
             why = (e.status or {}).get("message") or st or "not started"
-            hint = "Log in with Upstox in the app (Live page)." if st == "login_needed" else "Open the app and press Start on the Live page."
+            hint = "Log in with Upstox in the app (Live page)." if st == "login_needed" else "Open the app: it starts by itself (press Resume on the Live page if you paused it)."
             self.notify("scanner_down", f"⚠️ Stockway: the live scanner is not running ({why}). {hint} Data is not being recorded.")
 
     def _recording(self, now, t, c, trading, in_mkt):

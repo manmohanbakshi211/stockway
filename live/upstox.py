@@ -164,6 +164,11 @@ def decode(msg_bytes: bytes, pb, meta: dict | None = None) -> tuple[str, list]:
     if meta is not None:
         meta["ts"] = getattr(fr, "currentTs", 0) or 0
     typ = pb.Type.Name(fr.type) if hasattr(pb, "Type") else str(fr.type)
+    if meta is not None and typ == "market_info":         # 2.48: the exchange's own segment status (NSE_FO: NORMAL_OPEN ...)
+        try:
+            meta["market"] = {k: pb.MarketStatus.Name(v) for k, v in fr.marketInfo.segmentStatus.items()}
+        except Exception:
+            pass
     ticks = []
     for key, feed in fr.feeds.items():
         which = feed.WhichOneof("FeedUnion")
@@ -222,6 +227,7 @@ class UpstoxFeed:
         self.last_msg = 0.0
         self.lag_ms = None
         self.lock = threading.Lock()
+        self.market_status: dict = {}                     # 2.48: segment -> status from the feed's market_info
 
     # public
     def start(self):
@@ -322,6 +328,8 @@ class UpstoxFeed:
             return
         self.msgs += 1
         self.last_msg = time.time()
+        if meta.get("market"):
+            self.market_status.update(meta["market"])
         if meta.get("ts"):
             lag = self.last_msg * 1000 - meta["ts"]          # Upstox server time -> our receive time
             if -5000 < lag < 120000:

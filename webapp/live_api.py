@@ -85,11 +85,12 @@ def upstox_callback(code: str | None = None, error: str | None = None):
     e.tokens.save(body)
     e.log(f"Logged in to Upstox as {body.get('user_name') or body.get('user_id')}")
     now = dt.datetime.now(IST)
-    if now.weekday() < 5 and dt.time(9, 0) <= now.time() < dt.time(15, 30) and not e.running:
+    from live import session as SESSION                # 2.48: the NSE calendar (holidays, special sessions)
+    if SESSION.scanner_window(now) and not e.running:
         e.manual_stop_day = None
         e.start("upstox")
     elif e.status["state"] == "login_needed":
-        e.status.update(state="stopped", message="Logged in. The scanner starts automatically at 9:00 on market days.")
+        e.status.update(state="stopped", message="Logged in. The scanner starts by itself before every NSE session.")
     return RedirectResponse("/#live")
 
 
@@ -285,14 +286,24 @@ def _lens():
 
 @router.get("/api/live/lens/{sym}")
 async def live_lens(sym: str):
-    """Options lens for one symbol: straddle, call vs put premium, IV, PCR, PE-CE OI change, OI by strike."""
-    return clean(await _run_blocking(_lens().symbol, sym.upper()))
+    """Options lens for one symbol: straddle, call vs put premium, IV, PCR, PE-CE OI change, OI by strike.
+    2.48: a failure is shown on the page as a message (was 'Request failed (500)')."""
+    try:
+        return clean(await _run_blocking(_lens().symbol, sym.upper()))
+    except Exception as ex:
+        engine().log(f"Options lens {sym}: {ex}")
+        return {"sym": sym.upper(), "series": {}, "strikes": [], "empty": f"Options lens could not read the recording: {ex}"}
 
 
 @router.get("/api/live/lens_market")
 async def live_lens_market():
     """Market lens: breadth through the day, futures buildup heatmap, IV grid, sectors, contributors, FII / DII."""
-    return clean(await _run_blocking(_lens().market))
+    try:
+        return clean(await _run_blocking(_lens().market))
+    except Exception as ex:
+        engine().log(f"Market lens: {ex}")
+        return {"session": None, "breadth": [], "buildup": {}, "iv_grid": [], "sectors": [], "contributors": {}, "flows": {},
+                "error": f"Market lens could not read the recording: {ex}"}
 
 
 @router.get("/api/live/alerts")
@@ -581,26 +592,6 @@ async def watchlist_change(request: Request):
     return {"manual": watchlist.change(e.store, add=sym or None, remove=b.get("remove"))}
 
 
-@router.post("/api/live/paper/preset")
-async def live_paper_preset(request: Request):
-    """'small': the ₹40K account (1 lot, 2 trades a day, stop after one loss, lock in a good day); 'normal': ₹5 lakh."""
-    from live.paper import DEFAULTS, SMALL_ACCOUNT
-    from radar.config import save_user_settings
-    b = await request.json()
-    if b.get("name") == "small":
-        p = SMALL_ACCOUNT
-    else:
-        p = {k: DEFAULTS[k] for k in SMALL_ACCOUNT if k != "aggressive"}
-        p.update(capital=500000, risk_pct=1.0, max_daily_loss_pct=3.0)
-    upd = {f"live.paper.{k}": v for k, v in p.items()}
-    upd["lab.capital"] = p["capital"]
-    save_user_settings(upd)
-    e = engine()
-    if e.paper:
-        e.paper.cfg.update(p)
-    return {"ok": True, "preset": b.get("name"), **p}
-
-
 @router.get("/api/live/paper/mini")
 def live_paper_mini():
     """For the side bar: today's net (booked + open) and the demo account."""
@@ -619,8 +610,11 @@ def live_paper(source: str | None = None):
     src = source or (e.source if e.paper else e.cfg()["live"]["source"])
     book = e.paper if e.paper and e.source == src else PaperBook(e.store, src, e.cfg()["live"].get("paper"))
     out = book.summary(e.state if e.paper is book else None)
+    seen = {}                                          # 2.48: one look-up per symbol (was one per trade: slow)
     for t in out["open"] + out["closed"]:              # the underlying's price and day move, for the tables
-        t["und_now"] = e.underlying_view(t["sym"])
+        if t["sym"] not in seen:
+            seen[t["sym"]] = e.underlying_view(t["sym"])
+        t["und_now"] = seen[t["sym"]]
     out["aggressive"] = bool(book.cfg.get("aggressive"))
     return clean({**out, "source": src})
 
@@ -711,12 +705,15 @@ def live_focus_shadow(days: int = 10, source: str | None = None):
 
 @router.get("/api/live/accounts")
 def live_accounts(days: int | None = None, source: str | None = None):
-    """2.31 capital test: virtual paper accounts at ₹40K / ₹1.5L / ₹3L / ₹5L (rules/capital.json), one per way of
-    trading (only buying, buying + selling, only selling), replaying the test bench with each tier's rules."""
+    """2.31 capital test: virtual paper accounts at your capital plus the levels in rules/capital.json, one per way of
+    trading (only buying, buying + selling, only selling), replaying the test bench with each tier's rules.
+    2.48: your own capital is always the first account (no fixed ₹40K level)."""
     from live import accounts
     e = engine()
     src = source or e.source or e.cfg()["live"].get("source") or "upstox"
-    return clean(accounts.grid(e.store, src, days=max(1, min(365, days)) if days else None, wait=False))
+    mine = float(((e.paper.cfg if e.paper else (e.cfg()["live"].get("paper") or {})) or {}).get("capital") or 500000)
+    lv = [mine] + [x for x in accounts.settings()["levels"] if abs(x - mine) > 1]
+    return clean(accounts.grid(e.store, src, levels=lv, days=max(1, min(365, days)) if days else None, wait=False))
 
 
 @router.get("/api/live/candles_now/{sym}")

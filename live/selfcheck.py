@@ -239,4 +239,23 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
                       + (f"; unknown indicators in rules/tf_facts.json: {', '.join(unknown)}" if unknown else "")))
     except Exception as e:
         out.append(_c("tf_facts", "Bigger-timeframe facts", False, str(e)[:160]))
+    try:                                                   # 2.48: the NSE calendar (live/session.py, rules/market_calendar.json)
+        import datetime as _dt
+        from . import session as _S
+        from .clock import IST as _IST
+        now = _dt.datetime.now(_IST)
+        v = _S.view(now)
+        yr, nxt_yr = _S.holidays(now.year), _S.holidays(now.year + 1)
+        late = now.month == 12 and not nxt_yr                 # next year's NSE holidays should be in by December
+        nx = v.get("next") or {}
+        out.append(_c("market_calendar", "NSE calendar: the scanner starts and stops by it; no alert or paper trade outside a session",
+                      not v.get("error") and bool(yr) and not late,
+                      (f"today: {v['today']['name']} {v['today']['open']}-{v['today']['close'][-5:]}" if v.get("today")
+                       else "no session today" + (" (NSE holiday)" if v.get("holiday") else ""))
+                      + (f"; next: {nx.get('open')}" if nx and not v.get("open_now") else "")
+                      + f"; {len(yr)} holidays in {now.year}"
+                      + (f"; add the {now.year + 1} NSE holidays to rules/health.json" if late else "")
+                      + (f"; calendar file error: {v['error']}" if v.get("error") else "")))
+    except Exception as e:
+        out.append(_c("market_calendar", "NSE calendar", False, str(e)[:160]))
     return out

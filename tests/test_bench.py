@@ -85,16 +85,17 @@ def test_board_ranks_by_money_after_costs_and_capital(tmp_path):
     assert g["today"]["n"] == 8 and g["regime"]["n"] == 8 and g["all"]["rank"] is not None
 
 
-def test_capital_reads_any_amount_and_keeps_the_40k_preset():
-    from live.paper import SMALL_ACCOUNT
+def test_capital_reads_any_amount_and_applies_its_tier():
     for t, v in (("40k", 40000), ("₹40,000", 40000), ("1.5 lakh", 150000), ("2,00,000", 200000), ("1.2 crores", 1.2e7),
                  ("Rs. 75,000", 75000), (500000, 500000)):
         assert capital.parse_amount(t) == v, t
     for bad in ("40", "abc", "5 bananas", "2000 cr", ""):
         with pytest.raises(ValueError):
             capital.parse_amount(bad)
-    s = capital.paper_settings(40000)
-    assert {k: s[k] for k in SMALL_ACCOUNT if k in s} == {k: v for k, v in SMALL_ACCOUNT.items() if k in s}
+    s = capital.paper_settings(40000)               # 2.48: no ₹40K preset button; a small capital still gets the small tier
+    assert {k: s[k] for k in ("capital", "risk_pct", "max_lots", "max_open", "max_trades_day", "max_daily_loss_pct", "profit_lock")} \
+        == {"capital": 40000, "risk_pct": 5.0, "max_lots": 1, "max_open": 1, "max_trades_day": 2, "max_daily_loss_pct": 4.0,
+            "profit_lock": 1200}
 
 
 def _trade(day, h, net, mode="auto"):
