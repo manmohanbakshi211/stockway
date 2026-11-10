@@ -144,14 +144,20 @@ class LineGrader:
         return out
 
     def maybe_rebuild(self, now: dt.datetime, market_open: bool):
-        """Outside market hours: rebuild your own line book when it is missing or older than rebuild_after_days."""
-        if market_open:
-            return
-        d = Path(self.e.data_dir)
-        if not (d / "history" / "NIFTY" / "minutes.parquet").exists():
-            return
-        f = d / "lab" / "level_book.json"
-        age_days = (time.time() - f.stat().st_mtime) / 86400 if f.exists() else 1e9
-        if age_days >= float(LB.cfg().get("rebuild_after_days") or 7):
-            if LB.rebuild_async(d, log=self.log):
-                self.log("Line book: rebuilding from your 1-minute history (smart chart lines)")
+        maybe_rebuild(self.e.data_dir, market_open, self.log)
+
+
+def maybe_rebuild(data_dir, market_open: bool, log=print) -> bool:
+    """Outside market hours: rebuild your own line book when it is missing or older than rebuild_after_days
+    (about 20 seconds of work in its own thread). Called by the app's watcher while the scanner is not running."""
+    if market_open:
+        return False
+    d = Path(data_dir)
+    if not (d / "history" / "NIFTY" / "minutes.parquet").exists():
+        return False
+    f = d / "lab" / "level_book.json"
+    age_days = (time.time() - f.stat().st_mtime) / 86400 if f.exists() else 1e9
+    if age_days >= float(LB.cfg().get("rebuild_after_days") or 7) and LB.rebuild_async(d, log=log):
+        log("Line book: rebuilding from your 1-minute history (smart chart lines)")
+        return True
+    return False

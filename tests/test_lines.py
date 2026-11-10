@@ -173,3 +173,19 @@ def test_lines_never_trade():
         assert "linesmith" not in t and "linegrade" not in t and "levelbook" not in t, f
     c = json.loads((ROOT / "rules" / "lines.json").read_text())
     assert c["valid_from"] and c["types"]["random"]
+
+
+def test_line_book_rebuilds_only_while_the_market_rests(tmp_path):
+    import time
+    from live.linegrade import maybe_rebuild
+    logs = []
+    assert maybe_rebuild(tmp_path, False, logs.append) is False             # no history yet
+    _history(tmp_path, days=24)
+    assert maybe_rebuild(tmp_path, True, logs.append) is False              # market open: never
+    assert maybe_rebuild(tmp_path, False, logs.append) is True
+    for _ in range(100):
+        if not LB._RUN["running"] and (tmp_path / "lab" / "level_book.json").exists():
+            break
+        time.sleep(0.1)
+    assert (tmp_path / "lab" / "level_book.json").exists() and LB.load(tmp_path)["_file"] == "yours"
+    assert maybe_rebuild(tmp_path, False, logs.append) is False             # fresh: not again for 7 days

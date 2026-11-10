@@ -765,11 +765,8 @@ class LiveEngine:
                     self.log(f"Expiry desk error: {e}")
             if open_:
                 self._guard("Big prints", self._big_prints, now, lc)
-            if self.linegrade is not None:               # 2.54: grade line touches; rebuild your line book after hours
-                if open_ and self._every("line_grade", 60):
-                    self._guard("Smart lines grading", self.linegrade.tick, now)
-                if self._every("line_book", 1800, clock_time=False):
-                    self._guard("Line book", self.linegrade.maybe_rebuild, now, bool(open_))
+            if self.linegrade is not None and open_ and self._every("line_grade", 60):   # 2.54: grade line touches
+                self._guard("Smart lines grading", self.linegrade.tick, now)
             self._guard("Alert tracker", self.tracker.update, self.state, self.clock.ts())
             if self.depth:
                 try:
@@ -2138,6 +2135,13 @@ class LiveEngine:
             except Exception as e:
                 if self._every("cast_ensure_err", 3600, clock_time=False):
                     self.log(f"Candle forecast training check: {e}")
+            try:                                     # 2.54: your line book (smart chart lines), rebuilt while the scanner rests
+                if not self.running and self._every("line_book_watch", 1800, clock_time=False):
+                    from .linegrade import maybe_rebuild as _line_book
+                    _line_book(self.data_dir, False, self.log)
+            except Exception as e:
+                if self._every("line_book_err", 3600, clock_time=False):
+                    self.log(f"Line book rebuild: {e}")
             try:                                     # 2.42: a safe copy of the databases once a day after the close
                 from . import backup
                 backup.tick(self)
