@@ -1792,14 +1792,14 @@ function drawDeskCharts(r) {
 
 /* ---------------- page: Pro chart (TradingView Lightweight Charts) */
 const CH = { chart: null, sym: null, tf: "5m", tfMin: 5, series: {}, lines: [], markers: null, sig: "", data: null, bars: [], more: false, loading: false };
-const CH_TOGGLES = [["scen", "Move prediction (scenarios)"], ["em", "Expected move (from options)"], ["vol", "Volume"],
+const CH_TOGGLES = [["smart", "Smart lines (drawn by the app, with their record)"], ["scen", "Move prediction (scenarios)"], ["em", "Expected move (from options)"], ["vol", "Volume"],
   ["vwap", "VWAP + bands"], ["ema", "EMA 9/21/50"], ["st", "Supertrend"], ["prev", "Yesterday H/L/C"], ["cpr", "CPR + pivots"],
   ["or", "Opening range"], ["oi", "OI walls + max pain"], ["gamma", "Gamma levels"], ["marks", "Alerts + trades"],
   ["rsi", "RSI"], ["macd", "MACD"], ["pat", "Chart patterns"], ["swing", "Swing labels (HH / HL / LH / LL)"]];
 const PAT_SHORT = { double_top: "DT", double_bottom: "DB", head_shoulders: "H&S", inv_hs: "iH&S", triangle: "Tri", flag: "Flag",
   breakout_retest: "Retest", rsi_divergence: "Div", candle_at_level: "Candle" };
 // 2.29: a clean chart by default (candles + the move prediction); every layer is one click away and remembered
-function chOn(k) { return LS.get("ch2_" + k, ["scen", "em"].includes(k)); }
+function chOn(k) { return LS.get("ch2_" + k, ["scen", "em", "smart"].includes(k)); }
 const CH_TFS = ["1m", "3m", "5m", "15m", "30m", "1H", "1D", "1W", "1M"];
 const CH_MIN = { "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60, "1D": 1440, "1W": 10080, "1M": 43200 };
 const CH_VIEW = { "1m": 150, "3m": 125, "5m": 150, "15m": 130, "30m": 130, "1H": 140, "1D": 130, "1W": 156, "1M": 120 };   // bars in view at first
@@ -1849,7 +1849,8 @@ async function pageChart() {
       <span class="btn-row" style="margin:0"><button class="btn buy" id="ch-buy" title="Paper: buy the at-the-money call, 1 lot">Paper BUY</button><button class="btn sell" id="ch-sell" title="Paper: buy the at-the-money put, 1 lot">Paper SELL</button></span>
     </div>
     <div class="ch-wrap"><div id="ch-chart" class="ch-chart"></div>
-      <aside class="ch-side"><div class="panel tight"><h3>Trade signals <span class="muted small">BUY / SELL marks on the chart</span></h3><div id="ch-sigs"><p class="muted small">Focus alerts on this symbol show here.</p></div></div>
+      <aside class="ch-side"><div class="panel tight" id="ch-smart-wrap"><h3>Smart lines <span class="pill p-amber">new</span> <span class="muted small">drawn by the app</span></h3><div id="ch-smart"><p class="muted small">Loading…</p></div></div>
+        <div class="panel tight"><h3>Trade signals <span class="muted small">BUY / SELL marks on the chart</span></h3><div id="ch-sigs"><p class="muted small">Focus alerts on this symbol show here.</p></div></div>
         <div class="panel tight"><h3>All timeframes read <span class="muted small">5m → daily</span></h3><div id="ch-mtfread"><p class="muted small">Loading…</p></div></div>
         <div class="panel tight"><h3>Candles on every timeframe <span class="muted small">on trial</span></h3><div id="ch-cdl"><p class="muted small">Loading…</p></div></div>
         <div class="panel tight"><h3>Chart read <span class="muted small">this chart</span></h3><div id="ch-read"><p class="muted">Loading…</p></div>
@@ -2288,7 +2289,7 @@ function buildChart() {
     lg.innerHTML = `<div><span>${t}</span><span>O <b>${fx(c.open)}</b></span><span>H <b>${fx(c.high)}</b></span><span>L <b>${fx(c.low)}</b></span><span>C <b class="${c.close >= c.open ? "up" : "down"}">${fx(c.close)}</b></span>${bits}</div>${ev}`;
   });
   chart.timeScale().subscribeVisibleLogicalRangeChange((r) => { if (r && r.from < 30) loadOlder(); });
-  CH.chart = chart; CH.series = S; CH.lines = []; CH.sig = ""; CH.patSeries = []; CH.psig = null;
+  CH.chart = chart; CH.series = S; CH.lines = []; CH.sig = ""; CH.patSeries = []; CH.psig = null; CH.smartLines = []; CH.smartSeries = []; CH.smartSig = null;
 }
 
 /* candles and the indicators computed from them (all loaded history) */
@@ -2371,6 +2372,7 @@ function drawChart(d, first) {
     CH.lines = want.map((l) => S.candle.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: l.style, axisLabelVisible: true, title: l.name }));
     CH.sig = sig;
   }
+  drawSmartLines(d, S, intra);
   const mk = [];
   const at = (m) => { const t = chBarTime(m.time); if (t != null) mk.push({ ...m, time: t }); };
   if (chOn("marks") && intra) d.markers.forEach(({ time, position, color, shape, text }) => at({ time, position, color, shape, text }));
@@ -2407,6 +2409,57 @@ function drawChart(d, first) {
   $("#ch-scen").innerHTML = scenarioCard(d.scenario, d.sym);
   const spot = d.spot;
   $("#ch-levels").innerHTML = `<ul class="plain lv">${d.levels.slice().sort((a, b) => b.price - a.price).map((l) => `<li class="${l.price > spot ? "abv" : "blw"}"><span><i style="background:${l.color}"></i>${esc(l.name)}</span><b>${fx(l.price)}</b><small>${((l.price / spot - 1) * 100).toFixed(2)}%</small></li>`).join("")}</ul>`;
+  const sm = $("#ch-smart"); if (sm) sm.innerHTML = smartPanel(d.smart, spot);
+}
+
+/* 2.54: smart lines (live/linesmith.py): the lines that matter, each with what it usually does in the situation now,
+   measured on 4.8 years of Nifty / Bank Nifty 1-minute bars against random lines. Display only. */
+function drawSmartLines(d, S, intra) {
+  const sm = (chOn("smart") && d.smart && !d.smart.error) ? d.smart : null;
+  const lines = sm ? sm.lines || [] : [], tls = sm && intra ? sm.trendlines || [] : [];
+  const sig = JSON.stringify([lines.map((l) => [l.label, l.price, l.color]), tls.map((t) => [t.t1, t.p1, t.t2, t.p2])]);
+  if (sig === CH.smartSig) return;
+  (CH.smartLines || []).forEach((pl) => { try { S.candle.removePriceLine(pl); } catch (_) {} });
+  (CH.smartSeries || []).forEach((x) => { try { CH.chart.removeSeries(x); } catch (_) {} });
+  CH.smartLines = lines.map((l) => S.candle.createPriceLine({ price: l.price, color: l.color, lineWidth: l.width || 1, lineStyle: l.style, axisLabelVisible: true, title: l.label }));
+  CH.smartSeries = [];
+  tls.forEach((t) => {
+    const a = chBarTime(t.t1), b = chBarTime(t.t2); if (a == null || b == null || b <= a) return;
+    const pts = [{ time: a, value: t.p1 }, { time: b, value: t.p2 }];
+    const B = CH.bars, ib = B.findIndex((x) => x.time === b), last = B.length - 1;
+    if (ib >= 0 && last > ib) {                     // the chart has newer bars: carry the line on at the same slope
+      const n5 = (last - ib) * (CH.tfMin || 5) / 5;
+      pts.push({ time: B[last].time, value: Math.round((t.p2 + n5 * (t.slope_per_hour || 0) / 12) * 100) / 100 });
+    }
+    const ser = CH.chart.addSeries(window.LightweightCharts.LineSeries, { color: t.color, lineWidth: 2, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, title: t.label }, 0);
+    ser.setData(pts); CH.smartSeries.push(ser);
+  });
+  CH.smartSig = sig;
+}
+
+function liveRecord(lv) {
+  if (!lv || !lv.decided) return `<p class="small muted" style="margin:6px 0 0"><b>Live record:</b> every touch of these lines is graded from the next market session (hold / break in 60 min).</p>`;
+  const v = lv.by_verdict || {}, b = v["likely breaks"], h = v["likely holds"], f = v["coin flip"];
+  return `<p class="small" style="margin:6px 0 0"><b>Live record</b> since ${esc(lv.since || "")}: ${lv.decided} touches graded${b ? ` · "breaks" lines broke <b>${b.right_pct}%</b> (${b.n})` : ""}${h ? ` · "holds" lines held <b>${h.right_pct}%</b> (${h.n})` : ""}${f ? ` · 50/50 lines held ${f.held_pct}% (${f.n})` : ""}.</p>`;
+}
+
+function smartPanel(sm, spot) {
+  if (!chOn("smart")) return `<p class="muted small">Switched off in Indicators &amp; levels.</p>`;
+  if (!sm) return `<p class="muted small">Draws after the first 15 minutes of the session.</p>`;
+  if (sm.error) return `<p class="small muted">Could not draw them right now: ${esc(sm.error)}</p>`;
+  const st = sm.situation || {}, bk = sm.book || {};
+  const line = (l) => { const ev = l.ev || {};
+    return `<li class="smart-li"><span class="smart-dot" style="background:${l.color}"></span><div><b>${fx(l.price)}</b> <small class="muted">${l.dist_pct > 0 ? "+" : ""}${l.dist_pct}%</small> · <b>${esc(l.label)}</b>
+      <br><small>${esc(ev.words || "")}</small><br><small class="smart-act">${esc(l.action || "")}</small></div></li>`; };
+  const ls = sm.lines || [];
+  const above = ls.filter((l) => l.price > spot), below = ls.filter((l) => l.price <= spot);
+  return `<p class="small" style="margin:0 0 6px">Price is ${st.day_move_pct >= 0 ? "up" : "down"} ${Math.abs(st.day_move_pct || 0)}% on the day and moving ${esc(st.speed_words || "")} now.
+      <span class="muted">Colour: <span style="color:#2F6FDE">holds</span> · <span style="color:#E07B00">breaks</span> · <span style="color:#8A95A1">50/50</span> · ★ = the line itself beats random lines here.</span></p>
+    ${above.length ? `<h4 class="smart-h">Above (resistance)</h4><ul class="plain smart-ul">${above.map(line).join("")}</ul>` : ""}
+    ${below.length ? `<h4 class="smart-h">Below (support)</h4><ul class="plain smart-ul">${below.map(line).join("")}</ul>` : ""}
+    ${(sm.trendlines || []).length ? `<h4 class="smart-h">Trendlines</h4><ul class="plain smart-ul">${sm.trendlines.map((t) => `<li class="smart-li"><span class="smart-dot" style="background:${t.color}"></span><div><b>${fx(t.price_now)}</b> now · ${esc(t.label)}<br><small class="muted">${t.slope_per_hour > 0 ? "rising" : "falling"} ${Math.abs(t.slope_per_hour)} points an hour; not in the 5-year book yet, graded live from today</small></div></li>`).join("")}</ul>` : ""}
+    ${liveRecord(sm.live)}
+    <p class="note" style="margin-top:6px">Tested on ${(bk.touches || 0).toLocaleString("en-IN")} line touches (${esc(Object.keys(bk.syms || {}).join(" + ") || "Nifty + Bank Nifty")}, ${bk.syms && bk.syms.NIFTY ? esc(bk.syms.NIFTY.from) + " → " + esc(bk.syms.NIFTY.to) : ""}; ${bk._file === "yours" ? "rebuilt from your Mac's history" : "book shipped with the app"}). Plain lines held about as often as random lines; how price comes to a line decides more. Words only: nothing is traded from these lines.</p>`;
 }
 
 

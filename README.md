@@ -114,6 +114,39 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Smart chart lines: the app draws the lines that matter, each with its record (2.54)
+
+Mandeep, 11 Nov 2026: "check whether we are marking and analysing good support, resistance, target and stop loss and
+what can be done better and also make some smart system that can draw lines on the chart by itself analysing each and
+everything that matters".
+
+- **What the check found** (4.8 years of Nifty + Bank Nifty 1-minute, 49,950 line touches; your Mac's live data):
+  - Plain lines (yesterday's high / low / close, pivots, R1 / S1, opening range, round numbers, today's swings) **held
+    about as often as random lines** (~50% vs 50.9%). How price comes to a line decides more: slow approaches held
+    56-58%, fast ones broke 56-59%; yesterday's low, the 20-day low and the opening-range low touched on a down day
+    broke 58-63% of the time.
+  - Alert stop / target (21,338 alerts): 22% had the target nearer than the stop; within 60 minutes the first target
+    was reached 19% of the time, the stop 31%. On 15,370 graded alerts a trailing exit (no fixed target) beat the
+    +30% / −20% premium exit by +2.0% option per trade, on 5 of 6 days (shadow exits; paper exits unchanged).
+- **The line book** (`lab/levelbook.py`, shipped as `rules/level_book.json`, rebuilt on your Mac from its own
+  1-minute history every 7 days outside market hours, or `POST /api/lines/rebuild`): for each kind of line and each
+  situation (how fast price came, with or against the day's move) how often it held or broke within 60 minutes, next to
+  random lines in the same situation, older years (train, to 2024) and newer (holdout, 2025-26) apart.
+- **The line finder** (`live/linesmith.py`): yesterday's lines, CPR and pivots, 5-day and 20-day highs / lows, today's
+  open, round numbers, opening range, today's 5-minute swings, call / put OI walls, max pain, gamma flip, and diagonal
+  trendlines through 5-minute swings of the last sessions (never broken by a 5-minute close). Lines closer than 0.08%
+  become one zone. It keeps the nearest lines on each side plus farther ones that beat random lines.
+- **On the chart** (Chart → Indicators & levels → "Smart lines", on by default; the old level layers are still there):
+  colour = what the line usually does now (blue holds, orange breaks, grey 50/50, purple not tested yet), ★ = the line
+  itself beats random lines in this situation (older and newer years agree), "(weaker than a random line)" when it
+  does worse. The Smart lines panel says, for each line, the record in words and what it means for a buyer (break →
+  calls / puts on a 5-minute close beyond it, stop back inside; hold → only after a rejection candle; 50/50 → no edge).
+- **Live grading** (`live/linegrade.py`, shadow): every first touch of every line on Nifty / Bank Nifty is recorded with
+  the situation and the book's call, then graded hold / break in 60 minutes; the panel shows the live record. OI walls,
+  max pain, gamma flip and trendlines have no history yet, so they start "not tested yet" and build their record live.
+- Bullets in `rules/lines.json` (touch distances, buckets, thresholds, how many lines, trendline settings, names).
+  System check `smart_lines`. Display and shadow grading only: alerts, paper trades and the Lab are unchanged.
+
 ## Strategy files open and close (2.53)
 
 Mandeep, 10 Nov 2026: "there is tab should also be expandable and contractable".

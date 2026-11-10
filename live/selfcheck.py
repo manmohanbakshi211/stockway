@@ -55,6 +55,17 @@ def static_checks(cfg: dict | None = None) -> list:
                                              f"(your setting in Live setup wins); no order calls in the code"))
     except Exception as e:
         out.append(_c("kite_feed", "Kite backup feed: market data only", False, f"could not load: {e}"))
+    try:                                             # 2.54: smart chart lines (display + shadow grading only)
+        from lab import levelbook as _lb
+        lc_ = _lb.cfg()
+        bk = _lb.load(Path(__file__).resolve().parents[1] / "data")
+        err = _lb._C.get("error")
+        ok = not err and bool(bk) and (bk.get("touches") or 0) > 1000 and "random" in (bk.get("cells") or {})
+        out.append(_c("smart_lines", "Smart chart lines: rules and line book load (display only)", ok,
+                      err or (f"{(bk or {}).get('touches', 0):,} line touches in the {'your' if (bk or {}).get('_file') == 'yours' else 'shipped'} "
+                                      f"book, {len(lc_.get('types') or {})} kinds of line; nothing trades from them")))
+    except Exception as e:
+        out.append(_c("smart_lines", "Smart chart lines", False, f"could not load: {e}"))
     from lab import factory
     out.append(_c("lab_one_run", "Strategy Lab: one research round per Lab folder at a time",
                   hasattr(factory, "_RUN_LOCKS"), "a second run waits for the first instead of overwriting it"))

@@ -658,6 +658,34 @@ class ChartData:
         self._pat_cache = {"key": key, "val": val}
         return val
 
+    def _smart_lines(self, sym, m, today, rows, dates, offline) -> dict | None:
+        """2.54: the lines that matter for this symbol now (live/linesmith.py), cached per symbol and minute.
+        Display only; a failure leaves the chart as it was."""
+        try:
+            from . import linesmith
+            if offline or not today:                       # market closed: the last session in the chart
+                last = dates[-1] if dates else None
+                today = [r for r in rows if last and linesmith.ist_day(r[0]) == last]
+            if not today:
+                return None
+            key = (sym, int(today[-1][0] // 60), round(float((m or {}).get("spot") or 0), 1))
+            c = getattr(self, "_smart_cache", None)
+            if c is None:
+                c = self._smart_cache = {}
+            if key in c:
+                return c[key]
+            multi = rows if len({linesmith.ist_day(r[0]) for r in rows[-1200:]}) > 1 else (
+                (self.history(sym) if not offline else []) + today)
+            out = linesmith.lines_from_engine(self.e, sym, m, today, multi[-3 * 375:])
+            if len(c) > 200:
+                c.clear()
+            c[key] = out
+            return out
+        except Exception as ex:
+            if self._rate(f"smart_err:{sym}", 600):
+                self.e.log(f"Smart lines for {sym} skipped: {ex}")
+            return {"error": str(ex)[:160]}
+
     def _scenario(self, sym, day, ctx, tf, last_bar_time):
         """Three projected paths (up / sideways / down) and the 80% range, as chart series in the future."""
         sc = getattr(self.e, "scenarios", None)
@@ -913,6 +941,7 @@ class ChartData:
                 hit_s = (px - s["stop"]) * d <= 0
                 live_setups.append({**s, "name": setups.NAMES[s["setup"]], "state": "target hit" if hit_t else "stopped" if hit_s else "active",
                                     "r_now": round((px - s["entry"]) * d / abs(s["entry"] - s["stop"]), 2)})
+        smart = self._smart_lines(sym, m, today, rows, dates, offline)      # 2.54: lines drawn by the app, with their record
         scen = self._scenario(sym, day, ctx, tf, int(T[-1]) if len(T) else None)
         try:
             pats = self._chart_patterns(sym, T, o, h, l, c, ctx)
@@ -932,5 +961,5 @@ class ChartData:
                            "rsi": line(r), "macd": line(mline), "macd_sig": line(msig),
                            "macd_hist": [{"time": int(a_), "value": round(float(x), 2), "color": "rgba(30,138,90,.6)" if x >= 0 else "rgba(194,59,50,.6)"}
                                          for a_, x in zip(T, mhist) if not math.isnan(x)]},
-                "levels": lv, "markers": mk, "read": read, "setups": live_setups, "ctx": {k: v for k, v in ctx.items() if k != "cpr"},
+                "levels": lv, "smart": smart, "markers": mk, "read": read, "setups": live_setups, "ctx": {k: v for k, v in ctx.items() if k != "cpr"},
                 "cpr": ctx.get("cpr"), "regime": e.regimes.get(sym), "updated": time.time()}

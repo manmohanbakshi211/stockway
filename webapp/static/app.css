@@ -795,3 +795,11 @@ details.lab-adv > summary { cursor: pointer; padding: 10px 0; }
 .ms-ind .ind-ins { display: block; margin-top: 2px; }        /* 2.50: insider trades on the indication tile */
 .ch-live { margin-left: 8px; }                            /* 2.51: the streamed price */
 .ch-live small { color: var(--up, #1E8A5A); }
+
+/* 2.54: smart lines panel */
+.smart-ul { margin: 2px 0 8px; }
+.smart-li { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; border-top: 1px solid var(--rule-soft); overflow-wrap: anywhere; }
+.smart-li:first-child { border-top: 0; }
+.smart-dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; }
+.smart-h { margin: 8px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.smart-act { color: var(--ink); }

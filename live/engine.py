@@ -151,6 +151,7 @@ class LiveEngine:
         self.recorder = None
         self.tracker = None
         self.shadow = None                           # exit styles graded in shadow on every alert (live/shadow.py)
+        self.linegrade = None                        # 2.54: smart chart lines graded on every touch (live/linegrade.py)
         self.trials = None                           # bullets on trial: recorded and graded only (live/trials.py)
         self.bench = None                            # an honest paper trade for every signal (live/bench.py)
         self.focuslab = None                         # 2.37: shadow Focus challengers, recorded only (live/focuslab.py)
@@ -329,6 +330,12 @@ class LiveEngine:
         self.tracker = Tracker(self.store, self.source)
         from .shadow import ShadowExits
         self.shadow = ShadowExits(self.store, self.source, self.log)
+        try:                                         # 2.54: smart chart lines, graded in shadow (display only)
+            from .linegrade import LineGrader
+            self.linegrade = LineGrader(self, self.store, self.source, self.log)
+        except Exception as e:
+            self.linegrade = None
+            self.log(f"Smart lines grading off: {e}")
         try:
             from .trials import Trials
             self.trials = Trials(self.store, self.source, self.log)
@@ -758,6 +765,8 @@ class LiveEngine:
                     self.log(f"Expiry desk error: {e}")
             if open_:
                 self._guard("Big prints", self._big_prints, now, lc)
+            if self.linegrade is not None and open_ and self._every("line_grade", 60):   # 2.54: grade line touches
+                self._guard("Smart lines grading", self.linegrade.tick, now)
             self._guard("Alert tracker", self.tracker.update, self.state, self.clock.ts())
             if self.depth:
                 try:
@@ -2126,6 +2135,13 @@ class LiveEngine:
             except Exception as e:
                 if self._every("cast_ensure_err", 3600, clock_time=False):
                     self.log(f"Candle forecast training check: {e}")
+            try:                                     # 2.54: your line book (smart chart lines), rebuilt while the scanner rests
+                if not self.running and self._every("line_book_watch", 1800, clock_time=False):
+                    from .linegrade import maybe_rebuild as _line_book
+                    _line_book(self.data_dir, False, self.log)
+            except Exception as e:
+                if self._every("line_book_err", 3600, clock_time=False):
+                    self.log(f"Line book rebuild: {e}")
             try:                                     # 2.42: a safe copy of the databases once a day after the close
                 from . import backup
                 backup.tick(self)
