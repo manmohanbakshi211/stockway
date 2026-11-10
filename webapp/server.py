@@ -1391,6 +1391,8 @@ ROLES = {
               "All-time and 52-week highs / lows of the indices; chart history when Dhan isn't available"],
     "official": ["RBI press releases and notifications, SEBI orders and circulars, Government (PIB) releases, NSE circulars, "
                  "BSE notices (free RSS feeds, no login)", "Event risk on every alert; a new high-impact item to Telegram"],
+    "stream": ["2.51: open charts get each new price from this app over a websocket (about 0.1 s), instead of asking every "
+               "2 seconds", "Reads the app's own prices: no new connection to any broker, no login"],
     "nse": ["Insider trades and company filings, F&O ban list, end-of-day files (free, no login)",
             "Upcoming results / board meetings (event calendar, every 6 hours): warnings on alerts"],
 }
@@ -1471,6 +1473,14 @@ def system_view():
                      (err if err else f"{ai.label()} ready") if on else "Not set: Data & settings → AI",
                      used=ai.used, provider=ai.provider()))
     # Telegram
+    try:                                                   # 2.51: the chart's live stream (inside the app)
+        from live import stream as _ST
+        sv = _ST.view()
+        svcs.append(_svc("stream", "Chart live stream (inside the app)", "ok" if e.running else "off",
+                         f"{sv['open']} chart(s) open · {sv['served']:,} prices sent · checks every {sv['every_ms']} ms"
+                         + ("" if e.running else " · starts with the live scanner"), **sv))
+    except Exception:
+        pass
     svcs.append(_svc("telegram", "Telegram", "ok" if e.telegram.enabled() else "off",
                      "Messages go to your phone" if e.telegram.enabled() else "Not set: Data & settings → Telegram"))
     # Yahoo / world

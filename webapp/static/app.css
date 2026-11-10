@@ -782,3 +782,5 @@ tr.exp > td { background: var(--paper-2, rgba(0, 0, 0, .02)); padding: 10px 12px
 details.lab-adv > summary { cursor: pointer; padding: 10px 0; }
 .lab-guide ol { margin: 6px 0 0; padding-left: 20px; }
 .ms-ind .ind-ins { display: block; margin-top: 2px; }        /* 2.50: insider trades on the indication tile */
+.ch-live { margin-left: 8px; }                            /* 2.51: the streamed price */
+.ch-live small { color: var(--up, #1E8A5A); }

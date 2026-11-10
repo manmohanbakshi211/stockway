@@ -8,7 +8,7 @@ import re
 import threading
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from live.clock import IST
@@ -261,6 +261,59 @@ async def live_candles(sym: str, tf: str = "5m", before: float | None = None, ta
     if not d["candles"] and not before and not tail:
         raise HTTPException(404, "No price history for this symbol yet (Dhan, Yahoo and the app's own history had none).")
     return clean(d)
+
+
+@router.websocket("/ws/ticks")
+async def ws_ticks(ws: WebSocket):
+    """2.51: an open chart's live stream (live/stream.py). The browser sends {"sym", "tf"} (again to switch); the app sends
+    each new price (with its exchange time and the forming candle) as soon as it has it. Reads the app's own prices only."""
+    import asyncio
+    import json as _json
+    import time as _t
+    from live import stream as ST
+    c = ST.cfg()
+    await ws.accept()
+    if ST.OPEN["n"] >= int(c["max_streams"]):
+        await ws.send_json({"error": f"too many open charts ({ST.OPEN['n']}); this one refreshes every few seconds instead"})
+        await ws.close()
+        return
+    ST.OPEN["n"] += 1
+    sub = {"sym": None, "tf": "5m"}
+
+    async def reader():
+        while True:
+            try:
+                m = _json.loads(await ws.receive_text())
+            except (ValueError, TypeError):
+                continue
+            if isinstance(m, dict):
+                sub["sym"] = str(m.get("sym") or "").upper()[:30] or None
+                sub["tf"] = str(m.get("tf") or "5m")[:4]
+    task = asyncio.create_task(reader())
+    last, beat = None, 0.0
+    try:
+        while not task.done():
+            await asyncio.sleep(max(0.05, float(c["every_ms"]) / 1000))
+            e = engine()
+            try:
+                f = ST.frame(e, sub["sym"], sub["tf"])
+            except Exception:
+                f = None
+            now = _t.time()
+            if f:
+                sig = (f["sym"], f["tf"], f["p"], f.get("tt"), _json.dumps(f.get("candle"), sort_keys=True))
+                if sig != last:
+                    await ws.send_json(f)
+                    ST.OPEN["served"] += 1
+                    last, beat = sig, now
+            if now - beat >= float(c["heartbeat_s"]):
+                await ws.send_json({"hb": now, "running": bool(getattr(e, "running", False)), "sym": sub["sym"]})
+                beat = now
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        task.cancel()
+        ST.OPEN["n"] = max(0, ST.OPEN["n"] - 1)
 
 
 @router.get("/api/live/mtf/{sym}/overlays")
