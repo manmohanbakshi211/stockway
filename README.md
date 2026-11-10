@@ -114,6 +114,34 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Best only, 3% a day, one Excel file, every stock behind a strategy (2.49)
+
+Mandeep's 10 Nov list, points 14, 15, 10, 12 and 9. Paper only, as always.
+
+- **Two more paper accounts** (`live/books.py`, rules in `rules/paper_books.json`), each with its own money and trades
+  (saved as `upstox#best`, `upstox#target3`), never mixed with the main account, the scorecard or the test bench:
+  - **Best only**: takes an alert only when it is Focus, strength 3, risk PASS, score 70+, and its type has a good
+    live record (20+ graded, 55%+ worked, option up on average after an hour) or it is a Strategy Lab rule that passed
+    the strict bar. Few trades by design.
+  - **3% a day**: your own capital (default ₹1 lakh), compounding day to day, top alerts only (score 75+), one trade at
+    a time. When the day's money (booked + open) reaches +3% of the morning's money it closes everything and stops; at
+    −2% the same. Honest note on the page: 3% a day compounds to ~1,600× a year; this account measures how often a day
+    gets there, it is not a promise.
+  - Paper page: tabs Main / Best only / 3% a day, each account's capital box, why alerts were not taken, and
+    **Accounts side by side** (trades, win rate, net, return, worst drop, green days, +3% days).
+  - A broken account entry is skipped and shown as failed; the main account keeps running. System check `paper_books`.
+- **Download Excel** (Strategy board): Alert check (every alert type: Working / Mixed / Not working / Not enough data,
+  from graded live alerts), Alert check by day (the daily validation), every test-bench strategy × exit style, by day,
+  exit styles (shadow), Strategy Lab 1 year and 5 years (train / validation / holdout: the historical test), paper
+  accounts, and the last days' alerts and bench trades. Read-only. Needs `openpyxl` (added to requirements; the app
+  installs it on the next start).
+- **Strategy Lab page**: a "Start here" guide for beginners; click any strategy (strategy files) or rule to see every
+  version and **every stock / index it was tested on**, with its result in train, validation and holdout. The split comes
+  from the rule's own trades (saved apart in `lab/factory_sym.json`, so `factory.json` stays small); it fills on the next
+  Lab run. Data downloads and the advanced tables (exit styles, ML, library, ebooks, runs) are folded away.
+- **A time on every changing price**: index cards, the scanner, the stock page and open paper trades show the exchange
+  time of their price.
+
 ## No trades on holidays, money that is really there, the scanner starts by itself (2.48)
 
 What went wrong on **10 Nov 2026 (an NSE holiday)**: the scanner was running, the Upstox feed reconnected at 09:59 and

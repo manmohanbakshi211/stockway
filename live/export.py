@@ -69,8 +69,10 @@ def alert_check(df: pd.DataFrame, by_day: bool = False) -> pd.DataFrame:
             r.update({"Days": g["day"].nunique(), "First": g["day"].min(), "Last": g["day"].max()})
         rows.append(r)
     out = pd.DataFrame(rows)
-    return out.sort_values(["Day", "Alerts"], ascending=[False, False]) if by_day else \
-        out.sort_values(["Verdict", "Alerts"], ascending=[True, False])
+    if by_day:
+        return out.sort_values(["Day", "Alerts"], ascending=[False, False])
+    order = {"Working": 0, "Mixed": 1, "Not working": 2, "Not enough data yet": 3}
+    return out.assign(_o=out["Verdict"].map(order)).sort_values(["_o", "Alerts"], ascending=[True, False]).drop(columns="_o")
 
 
 def bench_tables(store, source: str, days: int, capital: float, risk_pct: float, trades_days: int):
