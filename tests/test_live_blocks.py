@@ -69,7 +69,7 @@ def test_paper_bench_and_shadow_record_lot_qty_and_money(tmp_path):
     from live.paper import PaperBook
     from live.store import Store
     st = Store(tmp_path / "live.db")
-    book = PaperBook(st, "upstox", {"capital": 40000})
+    book = PaperBook(st, "upstox", {"capital": 300000})   # 2.48: the short's ₹2.34L margin must fit the free money
 
     class I:
         ltp, ask, bid = 100.0, 100.5, 99.5
@@ -79,7 +79,7 @@ def test_paper_bench_and_shadow_record_lot_qty_and_money(tmp_path):
     tid = book._open(state, now, sym="NIFTY", kind="orb", opt={"key": "K", "label": "NIFTY 24000 CE", "side": "CE", "lot": 65},
                      entry=100.5, ltp=100.0, lots=2, direction=1, manual=1, und_key="U")
     t = next(x for x in st.trades(source="upstox") if x["id"] == tid)
-    assert t["qty"] == 130 and t["capital"] == round(100.5 * 130, 2) and t["acct_capital"] == 40000
+    assert t["qty"] == 130 and t["capital"] == round(100.5 * 130, 2) and t["acct_capital"] == 300000
     sid = book._open(state, now, sym="NIFTY", kind="manual", opt={"key": "K", "label": "NIFTY 24000 PE", "side": "PE", "lot": 65},
                      entry=99.5, ltp=100.0, lots=1, direction=-1, manual=4, und_key="U")
     s = next(x for x in st.trades(source="upstox") if x["id"] == sid)

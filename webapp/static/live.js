@@ -128,6 +128,15 @@ function railLive() {
 }
 
 /* ---------------- shared pieces */
+/* 2.48: when the scanner starts next, from the NSE calendar (holidays, special sessions such as the Diwali Muhurat) */
+function nextSessionText(ses) {
+  ses = ses || {};
+  const nx = ses.next || {};
+  if (ses.open_now) return ses.paused_today ? "Paused by you for today: press Resume to start it again." : "It starts by itself in a moment.";
+  if (!nx.open) return "It starts by itself before every NSE session.";
+  return `${ses.holiday ? "NSE holiday today. " : ""}It starts by itself at ${esc((nx.start_scanner || "").slice(-5))} ${esc((nx.start_scanner || "").slice(0, 10))}${nx.kind === "special" ? ` (${esc(nx.name)}, ${esc(nx.open.slice(-5))}–${esc((nx.close || "").slice(-5))})` : ""}.`;
+}
+
 function statusBar() {
   const s = L.snap;
   if (!s) return `<div class="livebar"><span class="muted">Connecting…</span></div>`;
@@ -143,8 +152,7 @@ function statusBar() {
   // the Diwali Muhurat). Pause stops it for the rest of today; Resume brings it back.
   const ses = s.session || {}, nx = ses.next || {};
   const sesMsg = ses.today && ses.open_now ? (ses.paused_today ? "Paused by you for today." : "Starting by itself…")
-    : ses.holiday ? `NSE holiday today. Next session ${esc(nx.open || "–")}; the scanner starts by itself at ${esc((nx.start_scanner || "").slice(-5))}.`
-    : nx.open ? `Next session ${esc(nx.open)}${nx.kind === "special" ? ` (${esc(nx.name)})` : ""}; the scanner starts by itself at ${esc((nx.start_scanner || "").slice(-5))}.` : "";
+    : nx.open ? `${ses.holiday ? "NSE holiday today. " : ""}Next session ${esc(nx.open)}${nx.kind === "special" ? ` (${esc(nx.name)})` : ""}.` : "";
   const msg = st.state === "running" ? `${st.source === "sim" ? "Simulator" : "Upstox"} · ${subs} · ${lag}${speed}`
     : esc(st.message || "") + (st.logged_in && sesMsg ? ` <span class="muted">${sesMsg}</span>` : "");
   let btns = "";
@@ -482,7 +490,8 @@ function renderLive(force = false) {
     body.innerHTML = extraIdx(s.extra) + worldBoard(L.world) + setupCard();
     bindLiveButtons(body); return;
   }
-  const closedNote = !s.status.running && s.last_session && s.last_session.asof ? `<p class="banner small">Scanner off: showing the last session (${new Date(s.last_session.asof * 1000).toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}). It starts by itself at 9:00 AM on market days.</p>` : !s.status.running ? `<p class="banner small">Scanner off. It starts by itself at 9:00 AM on market days.</p>` : "";
+  const nx = (s.session || {}).next, autoTxt = nextSessionText(s.session);       // 2.48: by the NSE calendar
+  const closedNote = !s.status.running && s.last_session && s.last_session.asof ? `<p class="banner small">Scanner off: showing the last session (${new Date(s.last_session.asof * 1000).toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}). ${autoTxt}</p>` : !s.status.running ? `<p class="banner small">Scanner off. ${autoTxt}</p>` : "";
   const pulse = s.pulse || {};
   const pulseHTML = pulse.ai ? fmtAI(pulse.ai) + `<p class="muted small">AI pulse at ${hm(pulse.ts)}</p>` : (pulse.lines || []).map((l) => `<p>${esc(l)}</p>`).join("") || `<p class="muted">Building the picture…</p>`;
   const nFocus = L.alerts.filter(isFocus).length;
@@ -693,7 +702,7 @@ async function pageSym() {
       if (d && d.closed) throw new Error(d.message || "No live data yet.");
       drawSym(d, first);
     } catch (e) {
-      if (first) $("#sym-body").innerHTML = `<div class="empty"><h2>${esc(sym)}: option chain needs the live feed</h2><p>${esc(e.message)} The live scanner starts by itself at 9:00 AM on market days (or start it on the Live page). Meanwhile the chart shows the last session.</p><div class="btn-row"><a class="btn primary" href="#/chart?s=${encodeURIComponent(sym)}">Open last chart</a><a class="btn" href="#/live">Go to Live</a></div></div>`;
+      if (first) $("#sym-body").innerHTML = `<div class="empty"><h2>${esc(sym)}: option chain needs the live feed</h2><p>${esc(e.message)} The live scanner starts by itself before every NSE session. Meanwhile the chart shows the last session.</p><div class="btn-row"><a class="btn primary" href="#/chart?s=${encodeURIComponent(sym)}">Open last chart</a><a class="btn" href="#/live">Go to Live</a></div></div>`;
     }
     L.pageTimer = setTimeout(() => tick(false), $("#sym-body .empty") ? 20000 : 3000);
   };
@@ -2690,7 +2699,7 @@ function drawWatchlist(w) {
       <td class="nw"><span class="bs"><button class="b" data-wl="buy" data-sym="${esc(r.sym)}" title="Paper: buy ATM call">B</button><button class="s" data-wl="sell" data-sym="${esc(r.sym)}" title="Paper: buy ATM put">S</button></span> <a class="small" href="#/sym?s=${encodeURIComponent(r.sym)}">Chain</a> ${act}</td></tr>`;
   };
   const head = `<thead><tr><th>Symbol</th><th class="r">Price</th><th class="r">5 min</th><th class="r">VWAP</th><th class="r">Vol</th><th>Futures · options</th><th class="r">Range · S / R</th><th>Bias</th><th>Last alert</th><th></th></tr></thead>`;
-  el.innerHTML = `${w.running ? "" : `<div class="banner">Live scanner is off: prices fill in when it runs (it starts by itself at 9:00 on market days, or start it on Live).</div>`}
+  el.innerHTML = `${w.running ? "" : `<div class="banner">Live scanner is off: prices fill in when it runs (it starts by itself before every NSE session).</div>`}
     <h2>Your watchlist <span class="muted small">${w.manual.length}</span></h2>
     <div class="table-wrap"><table class="wl">${head}<tbody>${w.manual.map((r) => row(r, false)).join("") || `<tr><td colspan="10" class="muted">Add symbols above. They stay saved.</td></tr>`}</tbody></table></div>
     <h2>Smart picks <span class="muted small">Focus alerts in the last 90 min, then the most active F&amp;O stocks</span></h2>
