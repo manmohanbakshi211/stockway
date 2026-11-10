@@ -1202,9 +1202,12 @@ class LiveEngine:
                 out["dq_bad"] = int(bool(dg.symbol_problem(sym)))
             except Exception:
                 pass
-        rd = self._radar_today(now)                  # 2.56: the Daily Radar's call for today (recorded only)
-        if rd:
-            out.update(rd)
+        fn = getattr(self, "_radar_today", None)    # 2.56: the Daily Radar's call for today (recorded only)
+        if fn is not None:
+            try:
+                out.update(fn(now) or {})
+            except Exception:
+                pass
         return out
 
     def _radar_today(self, now) -> dict:
