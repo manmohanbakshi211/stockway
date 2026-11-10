@@ -127,9 +127,19 @@ same time i think it's not hedging"; then "yes go for it".
   index per day** (the others count as agreeing), marked with the day's regime (range / quiet = fits, trend = skip),
   severity 2 so it stays out of Focus and Telegram, recorded under All alerts. **No paper trade**: `paper: "off"`
   (the old naked behaviour only with `"naked"`, and then only on range days). System check `range_sell`.
-- The Lab's own iron fly (wings 4 strikes away, out at a 30% / 60% loss of the credit) was already tested on these
-  entries: 14 of 14 failed (−₹126 to −₹535 a trade). Hedged challengers are tested next (see below) before any
-  selling goes back on paper.
+- Hedged challengers (`tools/hedge_study.py`, the Mac's 1-year Lab data, the 109 promoted straddle rules, 2,247
+  holdout trades, ₹ per trade after costs, train / validation / holdout):
+
+  | Exit | Train | Validation | Holdout | Rules positive in all 3 |
+  |---|---|---|---|---|
+  | Naked, 25% stop per leg (today's) | +469 | +545 | +283 | 66 / 109 |
+  | + wings bought 10 strikes away | +35 | +444 | +13 | 22 / 109 |
+  | + wings 8 strikes away | −31 | +468 | −39 | 18 / 109 |
+  | + wings 4 strikes away | −94 | +447 | −152 | 14 / 109 |
+  | Iron fly, wings 4 / 8 / 10, out at 30–150% of the credit | −140 to −287 | −521 to −659 | −88 to −293 | 0 / 109 |
+
+  The wings cost about what the straddle earns in a day: no hedged version beats the naked one, so selling stays off
+  paper until Mandeep decides (naked with leg stops on range days only, or no selling).
 
 ## Smart chart lines: the app draws the lines that matter, each with its record (2.54)
 
