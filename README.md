@@ -114,6 +114,22 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## The chart moves with every price: a live stream to the browser (2.51)
+
+Mandeep, 10 Nov 2026: "what if we connect the websocket for charting because we need TBT and price at the same time".
+
+- The app already gets every price change Upstox sends on its one live feed (Upstox Market Data Feed V3, a websocket).
+  Before, the chart asked the app for its last bars every 2 seconds. Now an open chart keeps a websocket to the app
+  (`/ws/ticks`, `live/stream.py`) and gets each new price within about 0.1 s, with the forming candle of its timeframe
+  (aligned to 09:15 like the chart's own bars), so the price and the candle move together. The streamed price shows its
+  exchange time (● 09:22:59).
+- Nothing new connects to a broker: the stream only reads the app's own prices. It checks every 100 ms and sends only
+  when the price changed, at most 8 open charts (`rules/chart_stream.json`); every 10 s the chart still re-reads its last
+  bars (volume, a missed bar). If the stream drops, the chart goes back to asking every 2 s and reconnects by itself.
+- System & logins lists it ("Chart live stream (inside the app)": open charts, prices sent).
+- About "TBT": exchange tick-by-tick (every single trade) is an NSE co-location / vendor product; Upstox V3 sends each
+  price update as it has it, and the chart now shows every one of those.
+
 ## Credibility check, every stock and index, insiders in the indication, faster pages (2.50)
 
 Mandeep's 10 Nov list, points 11, 6, 4, 2 and 7.
