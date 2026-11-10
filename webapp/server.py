@@ -31,6 +31,11 @@ from radar.config import ROOT, SECRET_KEYS, editable_values, load_config, save_u
 
 STATIC = Path(__file__).resolve().parent / "static"
 app = FastAPI(title="Bank Nifty Radar", docs_url=None, redoc_url=None)
+try:                                    # 2.50 (Mandeep #7, speed): big JSON answers go compressed (the alerts list is
+    from starlette.middleware.gzip import GZipMiddleware      # ~2.7 MB plain, a few hundred KB zipped; phone / tunnel)
+    app.add_middleware(GZipMiddleware, minimum_size=4096, compresslevel=5)
+except Exception:
+    pass
 
 
 # ----------------------------------------------------------------- helpers

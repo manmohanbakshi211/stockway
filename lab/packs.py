@@ -76,11 +76,24 @@ def _txt(v, n: int) -> str:
 
 
 # ------------------------------------------------------------------ check (no side effects)
-def check(raw: bytes) -> dict:
+UNIVERSE = Path(__file__).resolve().parents[1] / "rules" / "lab_universe.json"
+
+
+def each_symbol_on() -> bool:
+    """2.50: rules/lab_universe.json each_symbol_version (a strategy file's rules also on every stock and index)."""
+    try:
+        return bool(json.loads(UNIVERSE.read_text()).get("each_symbol_version"))
+    except Exception:
+        return False
+
+
+def check(raw: bytes, each: bool | None = None) -> dict:
     """Read and check a strategy file. Returns {"fatal": str | None, "pack": {...}, "rules": [...], "exits": {key: spec},
-    "problems": [...], "cannot_test": [...]}. Rules are factory.validate()d Lab rules, one per strategy × exit."""
+    "problems": [...], "cannot_test": [...]}. Rules are factory.validate()d Lab rules, one per strategy × exit.
+    each: also a version of every directional rule on each index and each F&O stock (default: rules/lab_universe.json)."""
     from . import exits as X
     from . import factory as F
+    each = each_symbol_on() if each is None else each
     out = {"fatal": None, "pack": {}, "rules": [], "exits": {}, "problems": [], "cannot_test": [], "strategies": []}
     if len(raw) > MAX_BYTES:
         out["fatal"] = f"file too large ({len(raw) // 1000} KB; {MAX_BYTES // 1000} KB max)"
@@ -208,7 +221,7 @@ def check(raw: bytes) -> dict:
         syms = st.get("syms") or ["BANKNIFTY", "NIFTY"]
         if not isinstance(syms, list):
             syms = [syms]
-        known_syms = set(F.INDEX_SYMS) | {F.STOCKS} | set(F.UNDERLYINGS)
+        known_syms = set(F.INDEX_SYMS) | {F.STOCKS, F.EACH} | set(F.UNDERLYINGS)
         unknown = [str(x) for x in syms if str(x) not in known_syms]
         if unknown:
             out["problems"].append(f"'{name}': unknown symbols ignored: {', '.join(unknown)[:60]}")
@@ -234,6 +247,12 @@ def check(raw: bytes) -> dict:
                 out["problems"].append(f"'{name}': window kept inside 09:25-14:45")
             rec["rules"].append(v["id"])
             out["rules"].append(v)
+            if each and dr != 0 and F.EACH not in v["syms"]:      # 2.50: the same rule on every stock and index too
+                v2 = _validate({**r, "syms": [F.EACH]}, out["exits"])
+                if v2 and v2["id"] not in seen_ids:
+                    seen_ids.add(v2["id"])
+                    rec["rules"].append(v2["id"])
+                    out["rules"].append(v2)
             if len(out["rules"]) >= MAX_RULES:
                 break
         if not rec["rules"] and rec["status"] == "ok":
@@ -325,7 +344,7 @@ def current(data_dir, only_on: bool = True) -> list:
             continue
         f = root(data_dir) / "files" / str(e.get("current") or "")
         try:
-            key = (str(f), f.stat().st_mtime)
+            key = (str(f), f.stat().st_mtime, each_symbol_on())
         except OSError:
             continue
         hit = _CACHE.get(key)

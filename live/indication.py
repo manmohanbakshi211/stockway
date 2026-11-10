@@ -25,7 +25,7 @@ from .clock import IST
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "indication.json"
 DEFAULTS = {"start": "08:30", "end": "16:00", "every_min": 15, "ai": True, "max_ai_per_day": 32, "late_ok_min": 10,
-            "gap_pct": 0.35, "lean_pct": 0.12, "session_pct": 0.4, "headlines": 8}
+            "gap_pct": 0.35, "lean_pct": 0.12, "session_pct": 0.4, "headlines": 8, "insider_days": 5}
 INDICES = [("Nifty", "NIFTY", "^NSEI"), ("Bank Nifty", "BANKNIFTY", "^NSEBANK"), ("Fin Nifty", "FINNIFTY", "NIFTY_FIN_SERVICE.NS"),
            ("Midcap Select", "MIDCPNIFTY", "NIFTY_MID_SELECT.NS"), ("Sensex", "SENSEX", "^BSESN")]
 GLOBAL = [("S&P 500 fut", "ES=F"), ("Nasdaq fut", "NQ=F"), ("Dow fut", "YM=F"), ("Nikkei", "^N225"), ("Hang Seng", "^HSI"),
@@ -270,6 +270,12 @@ class Indication:
                 heads = heads[:int(c["headlines"]) + 4]
         except Exception:
             pass
+        ins = {}
+        try:                                         # 2.50 (Mandeep #2): insider / promoter trades, slow background
+            if getattr(e, "insiders", None) is not None:
+                ins = e.insiders.tilt(int(c.get("insider_days") or 5), weights=getattr(getattr(e, "context", None), "weights", None))
+        except Exception:
+            ins = {}
         mk = (getattr(e, "market", None) or {}) if getattr(e, "running", False) else {}
         br = mk.get("breadth") or {}
         return {"time": now.strftime("%H:%M"), "day": now.date().isoformat(), "phase": ph, "indices": idx,
@@ -278,7 +284,7 @@ class Indication:
                          "when": g.get("vs_nifty_when")} if g.get("spot") else {},
                 "pressure": {"implied_pct": pr.get("implied_pct"), "label": pr.get("label"),
                              "drivers": [f"{d['name']} {d['move']:+.1f}%" for d in (pr.get("drivers") or [])[:4]]} if pr else {},
-                "global": glob, "context": ctx, "events": ev, "headlines": heads,
+                "global": glob, "context": ctx, "events": ev, "headlines": heads, "insiders": ins,
                 "breadth": {"adv": br.get("adv"), "dec": br.get("dec")} if br else {},
                 "day_type": (mk.get("regime") or {}).get("label")}
 
@@ -299,7 +305,9 @@ class Indication:
                      else "into tomorrow (the market has closed)")
                   + f". Reply ONLY with JSON {{\"word\": one of {allowed}, \"line\": one or two short sentences, at most 25 words, "
                   f"plain {lang}, the main reasons with numbers}}. Gap up / Gap down only if a clear gap is likely. Be balanced; "
-                  "if signals conflict say Neutral.\n\nData: " + json.dumps(b, default=str))
+                  "if signals conflict say Neutral. 'insiders' = promoter / director market trades disclosed in the last days: "
+                  "slow background for single stocks, never a reason on its own for the whole market's next move."
+                  "\n\nData: " + json.dumps(b, default=str))
         try:
             text = ai.ask(prompt, 250, auto=True, budget=("indication", int(c["max_ai_per_day"])))
         except TypeError:                             # an AI client without separate allowances
@@ -320,7 +328,8 @@ class Indication:
                "word": (ai or rc)["word"], "line": (ai or rc)["line"], "by": "AI" if ai else "rules",
                "rules": rc, "avg_chg": b.get("avg_chg"), "gift_pct": (b.get("gift") or {}).get("chg_pct"),
                "global_pct": (b.get("pressure") or {}).get("implied_pct"), "error": None if ai else self.last_error,
-               "inputs": {k: b.get(k) for k in ("indices", "gift", "pressure", "events", "breadth", "day_type")}}
+               "inputs": {k: b.get(k) for k in ("indices", "gift", "pressure", "events", "breadth", "day_type")},
+               "insiders": b.get("insiders") or None}         # 2.50: recorded with every reading (graded later)
         day = rec["day"]
         try:
             hist = [x for x in (self.e.store.get(f"indication:{day}") or []) if x.get("at") != rec["at"]] + [rec]

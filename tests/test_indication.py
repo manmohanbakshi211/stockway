@@ -130,3 +130,35 @@ def test_grading_after_the_close():
     ind.run(_at("16:00"), now=_at("16:00"))
     rec = e.store["indication:record"]["days"][-1]
     assert rec["open"] == "Gap down" and rec["open_right"] and rec["close_right"] and ind.record()["open_n"] == 1
+
+
+def test_insider_trades_reach_the_ai_and_the_tile_but_not_the_rules_word():
+    """2.50 (Mandeep #2): the last days' promoter / director trades go to the AI as background and are shown on the
+    tile; the rules word ignores them (not tested yet)."""
+    from live.insiders import Insiders
+    now = dt.datetime.now(IST)
+    filed = (now - dt.timedelta(days=1)).isoformat(timespec="minutes")
+    ins = Insiders.__new__(Insiders)
+    ins.updated = 1.0
+    ins.rows = {
+        "a": {"pid": "a", "sym": "HDFCBANK", "side": "Buy", "value": 4e8, "filed": filed, "key": True, "market": True},
+        "b": {"pid": "b", "sym": "TCS", "side": "Sell", "value": 1e8, "filed": filed, "key": True, "market": True},
+        "c": {"pid": "c", "sym": "INFY", "side": "Buy", "value": 1e6, "filed": filed, "key": True, "market": True},     # too small
+        "d": {"pid": "d", "sym": "SBIN", "side": "Buy", "value": 9e8, "filed": "2020-01-01T10:00", "key": True, "market": True}}
+    t = ins.tilt(5, weights={"BANKNIFTY": {"HDFCBANK": 28.0}, "NIFTY": {"HDFCBANK": 12.8, "TCS": 2.9}})
+    assert t["n"] == 2 and t["buy_cr"] == 40.0 and t["sell_cr"] == 10.0 and t["net_cr"] == 30.0
+    assert t["in_index_net_cr"] == {"BANKNIFTY": 40.0, "NIFTY": 30.0} and t["top"][0] == {"sym": "HDFCBANK", "net_cr": 40.0}
+    ai = FakeAI('{"word": "Gap down", "line": "GIFT Nifty -0.5%."}')
+    e = _engine(ai)
+    e.insiders = ins
+    e.context.weights = {"NIFTY": {"HDFCBANK": 12.8}}
+    rec = I.Indication(e).run(_at("08:30"), now=_at("08:30"))
+    data = json.loads(ai.calls[0][0].split("Data: ", 1)[1])
+    assert data["insiders"]["net_cr"] == 30.0 and "slow background" in ai.calls[0][0]
+    assert rec["insiders"]["buy_cr"] == 40.0
+    e2 = _engine(None)
+    e2.insiders = ins
+    r2 = I.Indication(e2).run(_at("08:30"), now=_at("08:30"))
+    e3 = _engine(None)
+    r3 = I.Indication(e3).run(_at("08:30"), now=_at("08:30"))
+    assert r2["word"] == r3["word"] and r2["by"] == "rules"                  # the rules word doesn't move with insiders

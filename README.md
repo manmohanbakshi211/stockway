@@ -114,6 +114,34 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Credibility check, every stock and index, insiders in the indication, faster pages (2.50)
+
+Mandeep's 10 Nov list, points 11, 6, 4, 2 and 7.
+
+- **Credibility check** (`live/credibility.py`, Scorecard page, two Excel sheets). Read-only:
+  - Every graded alert grouped by what the app said about it: signal score, the conviction model's chance (AUC and
+    calibration), Focus, strength, risk check, time of day, day type, index / stock, direction, alert type.
+  - Every test-bench "Buy ATM" trade split by each of ~50 facts recorded at the signal (Nifty with / against, VWAP,
+    bigger timeframes, candles on each timeframe, news, VIX, IV, time...). A fact "helps" only with a clear gap that
+    points the same way in the older and the newer half of the days, and 10+ days of data; before that it can only "lean".
+  - First read on the Mac's data (30 Oct – 10 Nov; 21,338 alerts, 4,209 decided; 21,617 bench trades over 5 days):
+    the **signal score is credible** (under 40: 55% worked → 70-85: 77%), **Focus is credible** (81% vs 68%), strength is
+    credible; the **conviction model is weak** (AUC 0.56 on 7,253 alerts: stays hidden); mornings beat afternoons
+    (75% vs 64%). On the bench, trades on the right side of the daily EMA 20, with the week's candle, with Nifty and with
+    Nifty's VWAP lean better; an order book leaning the same way leans *worse*. Only 5 bench days: leads, not rules yet.
+- **Candles are chart reading** (#6): candle-pattern rows on the Strategy board are folded under "Chart reading"; the
+  credibility check shows whether a candle that agrees makes other signals better (so far: leans helpful, not proven).
+- **Every stock and index** (#4): new symbol option "each index and each F&O stock, each on its own"
+  (`factory.EACH`). With `rules/lab_universe.json` → `each_symbol_version` on, every directional strategy in every
+  strategy file also gets this version (no re-upload); the file's own version is untouched (same id, same results).
+  The Lab page shows each stock's result when you open a strategy. Straddle sells stay on Nifty / Bank Nifty; fusions
+  are unchanged.
+- **Insider trades in the indication** (#2): the last 5 days of promoter / director / key-manager market trades
+  (₹50 lakh+) go to the AI as slow background and show on the India market tile (bought / sold ₹ crore, biggest names).
+  The rules word doesn't use them (not tested yet); each reading records them for later grading.
+- **Speed** (#7): big answers are sent compressed (alerts list 2.5 MB → 0.33 MB, Strategy board 0.83 → 0.10 MB, chart
+  0.15 → 0.02 MB); the alerts list no longer carries the shadow Focus notes. The System page already lists slow calls.
+
 ## Best only, 3% a day, one Excel file, every stock behind a strategy (2.49)
 
 Mandeep's 10 Nov list, points 14, 15, 10, 12 and 9. Paper only, as always.
