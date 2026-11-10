@@ -768,3 +768,16 @@ tr.best td { background: var(--up-soft); }
 /* 2.43 strategy files */
 .pack-card { border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); padding: 10px 12px; margin-top: 8px; }
 .pack-card.off { opacity: .6; }
+
+/* 2.49: paper accounts (Main / Best only / 3% a day) */
+.pp-tabs { margin: 14px 0 0; flex-wrap: wrap; max-width: 100%; }
+.kpis.kpi3 { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 700px) { .kpis.kpi3 { grid-template-columns: 1fr; } .kpis.kpi3 .kpi { border-left: 0; } }
+tr.hl td { background: var(--accent-soft, rgba(80, 70, 200, .06)); }
+
+/* 2.49: Strategy Lab, opened strategies / rules and folded sections */
+tr.exp > td { background: var(--paper-2, rgba(0, 0, 0, .02)); padding: 10px 12px; }
+.lab-ver { border-top: 1px solid var(--rule-soft); padding: 6px 0 2px; }
+.lab-ver:first-of-type { border-top: 0; }
+details.lab-adv > summary { cursor: pointer; padding: 10px 0; }
+.lab-guide ol { margin: 6px 0 0; padding-left: 20px; }

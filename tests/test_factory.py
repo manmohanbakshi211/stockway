@@ -108,3 +108,25 @@ def test_selling_sims_and_library():
     assert any(r["dir"] == 0 and r["exit"].startswith("fly") for r in rs)
     s920 = F.validate({"dir": 0, "conds": [["tod", ">", 0]], "win": [5, 5], "exit": "ss25"})
     assert s920["win"] == [5, 5] and "straddle" in F.words(s920)
+
+
+def test_results_split_by_symbol_and_saved_apart(tmp_path):
+    """2.49 (Lab page, Mandeep #12): a rule opened shows every stock / index it traded, from the same trades."""
+    b1, b2 = _book(120, seed=5), _book(120, seed=6)
+    b2["sym"] = "BANKNIFTY"
+    b = F.Book(pd.concat([b1, b2], ignore_index=True))
+    r = F.score(b, {**F.validate({"dir": 1, "conds": [["ret_b3", ">", 1.0]], "win": [15, 330], "exit": "std", "max_day": 1,
+                                  "syms": ["NIFTY", "BANKNIFTY"]}), "id": "R1"})
+    assert set(r["by_sym"]) == {"NIFTY", "BANKNIFTY"}
+    for i, part in enumerate(("train", "valid", "hold")):
+        assert sum(v[i][0] for v in r["by_sym"].values()) == r[part]["n"]
+        assert abs(sum(v[i][1] for v in r["by_sym"].values()) - r[part]["total"]) <= 2
+    st = {"rules": {"R1": r}, "runs": []}
+    F.save(tmp_path, st)
+    saved = json.loads((tmp_path / "lab" / "factory.json").read_text())
+    assert "by_sym" not in saved["rules"]["R1"] and saved["rules"]["R1"]["hold"] == r["hold"]
+    assert F.load_by_sym(tmp_path)["R1"] == json.loads(json.dumps(r["by_sym"]))
+    F.save(tmp_path, {"rules": {"R1": saved["rules"]["R1"]}, "runs": []})   # saved again without a re-score: kept
+    assert "R1" in F.load_by_sym(tmp_path)
+    F.save(tmp_path, {"rules": {"R2": {**r, "id": "R2"}}, "runs": []})        # a rule no longer saved: dropped
+    assert set(F.load_by_sym(tmp_path)) == {"R2"}

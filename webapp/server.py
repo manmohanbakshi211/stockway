@@ -829,6 +829,25 @@ def packs_view():
     return clean(packs.view(ROOT / "data"))
 
 
+@app.get("/api/factory/rules_detail")
+def factory_rules_detail(ids: str = "", lab: str = "1y"):
+    """2.49 (Lab page): saved rules by id with their results split by stock / index (factory_sym.json). Read-only."""
+    from lab import factory as F
+    d = ROOT / "data" if lab != "5y" else ROOT / "data" / "lab5y"
+    rules = F.load(d).get("rules", {})
+    syms = F.load_by_sym(d)
+    out = {}
+    for i in [x for x in ids.split(",") if x][:60]:
+        r = rules.get(i)
+        if not r:
+            out[i] = {"id": i, "missing": True}
+            continue
+        out[i] = {"id": i, "name": r.get("name"), "rule": r.get("rule"), "stage": r.get("stage"), "evidence": r.get("evidence"),
+                  "exit": F.exit_words(r.get("exit", "")), "syms": r.get("syms"), "train": r.get("train"), "valid": r.get("valid"),
+                  "hold": r.get("hold"), "by_sym": syms.get(i)}
+    return clean({"lab": lab, "rules": out, "period": F.load(d).get("period")})
+
+
 @app.get("/api/packs/vocabulary")
 def packs_vocabulary():
     from lab import packs

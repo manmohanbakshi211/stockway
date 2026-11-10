@@ -367,7 +367,8 @@ def view(data_dir) -> dict:
     for pid, e, res in current(data_dir, only_on=False):
         strats = []
         for s in res.get("strategies", []):
-            item = {"name": s["name"], "status": s["status"], "why": s["why"], "rules": len(s["rules"]), "labs": {}}
+            item = {"name": s["name"], "status": s["status"], "why": s["why"], "rules": len(s["rules"]), "labs": {},
+                    "ids": list(s["rules"])}                     # 2.49: the Lab page opens each version, stock by stock
             for lab, known in labs.items():
                 got = [known[i] for i in s["rules"] if i in known]
                 if not got:

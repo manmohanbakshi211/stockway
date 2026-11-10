@@ -1060,6 +1060,20 @@ class Book:
         return pd.DataFrame({"day": self.dix[j], "sym": self.symcode[j], "tod": self.cols["tod"][j], "pnl": pnl[take], "part": self.part[j]})
 
 
+def by_sym(t: pd.DataFrame) -> dict:
+    """2.49 (Lab page): per symbol, [[trades, total ₹] train, [..] validation, [..] holdout]. Same trades as the
+    rule's own results (nothing re-run), only split by symbol."""
+    if t is None or not len(t):
+        return {}
+    g = t.groupby([t["sym"].astype(str), t["part"].astype(int)])["pnl"].agg(["count", "sum"])
+    out: dict = {}
+    for (sym, part), r in g.iterrows():
+        row = out.setdefault(sym, [[0, 0.0], [0, 0.0], [0, 0.0]])
+        if 0 <= part <= 2:
+            row[part] = [int(r["count"]), round(float(r["sum"]), 0)]
+    return out
+
+
 def stats(t: pd.DataFrame, n_days: int) -> dict:
     if t is None or not len(t):
         return {"n": 0}
@@ -1101,6 +1115,8 @@ def score(book: Book, s: dict) -> dict:
         out["stage"] = "promoted"
     t = out["hold"].get("t") or 0
     out["evidence"] = "strong" if t >= 2 else "moderate" if t >= 1 else "weak"
+    if out["stage"] != "failed train" or s.get("pack") or out["source"] != "generated":
+        out["by_sym"] = by_sym(tr)      # 2.49: every stock / index the rule traded (saved apart: factory_sym.json)
     return out
 
 
@@ -1299,12 +1315,40 @@ def load(data_dir) -> dict:
     return {"tried_total": 0, "runs": [], "rules": {}, "ideas": []}
 
 
+def sym_file(data_dir) -> Path:
+    return Path(data_dir) / "lab" / "factory_sym.json"
+
+
+def load_by_sym(data_dir) -> dict:
+    """2.49: rule id -> per-symbol results (see by_sym), kept apart so factory.json stays small."""
+    f = sym_file(data_dir)
+    try:
+        return json.loads(f.read_text()) if f.exists() else {}
+    except Exception:
+        return {}
+
+
 def save(data_dir, st: dict):
-    """Atomic: a crash or power cut mid-write leaves the previous results intact."""
+    """Atomic: a crash or power cut mid-write leaves the previous results intact. 2.49: each rule's per-symbol results
+    go to factory_sym.json (kept for rules not re-scored this time)."""
     f = lab_file(data_dir)
     f.parent.mkdir(parents=True, exist_ok=True)
+    syms = {k: r["by_sym"] for k, r in (st.get("rules") or {}).items() if isinstance(r, dict) and "by_sym" in r}
+    if syms:
+        try:
+            have = load_by_sym(data_dir)
+            have = {k: v for k, v in have.items() if k in (st.get("rules") or {})}
+            have.update(syms)
+            sf = sym_file(data_dir)
+            t2 = sf.with_name(sf.name + ".tmp")
+            t2.write_text(json.dumps(have, separators=(",", ":")))
+            os.replace(t2, sf)
+        except Exception:
+            pass
+    out = {**st, "rules": {k: ({kk: vv for kk, vv in r.items() if kk != "by_sym"} if isinstance(r, dict) else r)
+                           for k, r in (st.get("rules") or {}).items()}} if syms else st
     tmp = f.with_name(f.name + ".tmp")
-    tmp.write_text(json.dumps(st, default=str))
+    tmp.write_text(json.dumps(out, default=str))
     os.replace(tmp, f)
 
 
