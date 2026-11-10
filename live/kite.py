@@ -15,6 +15,7 @@ import gzip
 import hashlib
 import io
 import json
+import os
 import struct
 import threading
 import time
@@ -67,7 +68,9 @@ class KiteTokenStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         rec = {"access_token": data["access_token"], "user": data.get("user_name") or data.get("user_id"),
                "saved_at": dt.datetime.now(IST).isoformat(), "expires_at": token_expiry().isoformat()}
-        self.path.write_text(json.dumps(rec))
+        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # readable by you only, from the start
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(rec))
         try:
             self.path.chmod(0o600)
         except Exception:
