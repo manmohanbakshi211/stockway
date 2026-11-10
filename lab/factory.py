@@ -816,6 +816,8 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
             if c_ not in df:
                 df[c_] = np.nan
             df[c_] = df[c_].astype("float32")
+        for c_ in [c for c in df.columns if c.startswith("pnl_") and "@" in c]:     # 2.57: strike columns, small
+            df[c_] = df[c_].astype("float32")
     return df
 
 
@@ -923,10 +925,13 @@ def load_or_build(data_dir, log=print, should_stop=lambda: False, rebuild=False)
     if f.exists() and not rebuild and f.stat().st_mtime >= newest:
         df = pd.read_parquet(f)
         missing = [k for k in FEATURES if k not in df.columns]
-        if all("pnl_" + s in df.columns for s in list(STYLES) + _file_exits(data_dir)) and not missing:
+        stk = strikes_cfg()                               # 2.57: strike choices priced in the table
+        no_stk = [c for c in (f"pnl_{e}@{n}" for n in stk["choices"] for e in stk["exits"]) if c not in df.columns]
+        if all("pnl_" + s in df.columns for s in list(STYLES) + _file_exits(data_dir)) and not missing and not no_stk:
             return df
         log(f"New facts to test ({', '.join(missing[:6])}{'…' if len(missing) > 6 else ''}): rebuilding the bar table once…"
-            if missing else "New exit styles to test: rebuilding the bar table once…")
+            if missing else "New strike choices to test: rebuilding the bar table once…" if no_stk
+            else "New exit styles to test: rebuilding the bar table once…")
     log("Building the bar table from the option history (once; later runs reuse it)…")
     df = build(data_dir, log=log, should_stop=should_stop)
     if not df.empty:

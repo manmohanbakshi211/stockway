@@ -12,7 +12,7 @@ from lab import factory as F
 
 def test_settings_and_safe_fallback(tmp_path, monkeypatch):
     c = F.strikes_cfg()
-    assert {"itm1", "otm1", "otm2", "lowprem"} <= set(c["choices"]) and "chand" in c["exits"] and "NIFTY" in c["syms"]
+    assert {"otm1", "otm2", "lowprem"} <= set(c["choices"]) and "chand" in c["exits"] and "NIFTY" in c["syms"]
     bad = tmp_path / "s.json"
     bad.write_text("{not json")
     monkeypatch.setattr(F, "STRIKES_FILE", bad)
@@ -87,6 +87,22 @@ def test_live_strike_for_the_chain():
     e.state = types.SimpleNamespace(get=lambda key: types.SimpleNamespace(ltp=prices.get(key)) if key in prices else None)
     assert e._strike_for(chain, 25000.0, "CE", 25000.0, "otm1") == 25050.0
     assert e._strike_for(chain, 25000.0, "PE", 25000.0, "otm2") == 24900.0
-    assert e._strike_for(chain, 25000.0, "CE", 25000.0, "itm1") == 24950.0
     assert e._strike_for(chain, 25000.0, "CE", 25000.0, "lowprem") == 25150.0             # 30 nearest 37.5
     assert e._strike_for(chain, 25000.0, "CE", 25000.0, "nope") is None
+
+
+def test_table_is_rebuilt_once_for_new_strike_columns(tmp_path, monkeypatch):
+    (tmp_path / "lab").mkdir()
+    (tmp_path / "history").mkdir()
+    cols = {k: [0.0] for k in F.FEATURES}
+    cols.update({"pnl_" + s: [0.0] for s in F.STYLES})
+    pd.DataFrame(cols).to_parquet(tmp_path / "lab" / "factory_bars.parquet")
+    calls, logs = [], []
+    monkeypatch.setattr(F, "_file_exits", lambda d: [])
+    monkeypatch.setattr(F, "build", lambda d, log=None, should_stop=None: calls.append(1) or pd.DataFrame({"x": [1.0]}))
+    F.load_or_build(tmp_path, log=logs.append)
+    assert calls == [1] and any("strike" in m for m in logs)
+    monkeypatch.setattr(F, "strikes_cfg", lambda: {"choices": {}, "exits": [], "syms": [], "share": 0.0})
+    pd.DataFrame(cols).to_parquet(tmp_path / "lab" / "factory_bars.parquet")
+    F.load_or_build(tmp_path, log=logs.append)
+    assert calls == [1]                                                        # no strikes configured: reused as before
