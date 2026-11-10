@@ -263,3 +263,21 @@ def test_day_extreme_stop():
         assert X.risk_pts(k, 100.0, -1, math.nan, lv={"dayx": (97.0, 104.0)}) == 4.0
     finally:
         X.PACK_STYLES.pop(k, None)
+
+
+def test_lab_days_get_their_own_bars():
+    import datetime as dt
+    rng = np.random.default_rng(9)
+    sm = {}
+    for i in range(20):
+        d = dt.date(2026, 1, 1) + dt.timedelta(days=i)
+        sm[d] = 25000 + 50 * i + np.cumsum(rng.normal(0, 3, 375))
+    sm[dt.date(2026, 1, 5)][300:] = np.nan                           # a short day (60 bars)
+    o, h, l, c, dy, ps, starts = T.bars5(sm)
+    full = T.compute(o, h, l, c, dy, ps)
+    bd = T.by_day(sm)
+    for d, (s0, nb) in starts.items():
+        assert np.allclose(c[s0:s0 + nb], sm[d][4:5 * nb:5])              # the day's own closes
+        for k in ("bbp_30m", "sma50_5m", "pd_back"):
+            assert np.array_equal(np.nan_to_num(bd[d][k], nan=-9), np.nan_to_num(full[k][s0:s0 + nb], nan=-9))
+    assert starts[dt.date(2026, 1, 5)][1] == 60 and starts[dt.date(2026, 1, 6)][0] == 4 * 75 + 60

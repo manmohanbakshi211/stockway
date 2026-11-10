@@ -298,15 +298,29 @@ def ind_frac(o, h, l, c, n=4):
 
 
 def ind_fib(o, h, l, c):
-    """Retracement of the last swing (swings of 3 candles each side): in an up leg (low then high) how far price has
-    come back from the high, 0 = at the high, 0.5 = halfway, 1 = back at the low (fib_up); fib_dn the mirror."""
+    """Retracement of the last up leg and of the last down leg (swings of 3 candles each side).
+    fib_up: the latest swing high H and the swing low L before it: (H - close) / (H - L); 0 = at the high, 0.5 =
+    halfway back, 1 = back at L; it stays defined during the pullback (also after the pullback's own low is confirmed)
+    until a new swing high replaces H. fib_dn the mirror: (close - L') / (H' - L') for the latest swing low L' and the
+    swing high H' before it."""
     sh, sl, shi, sli = _swings(h, l, 3)
-    rng = sh - sl
-    up_leg = (sli < shi) & (sli >= 0) & (rng > 0)
-    dn_leg = (shi < sli) & (shi >= 0) & (rng > 0)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        fu = np.where(up_leg, (sh - c) / rng, np.nan)
-        fd = np.where(dn_leg, (c - sl) / rng, np.nan)
+    m = len(c)
+    fu, fd = np.full(m, np.nan), np.full(m, np.nan)
+    his, los = [], []                                       # confirmed swings in order: (index, value)
+    for t in range(m):
+        if shi[t] >= 0 and (not his or his[-1][0] != shi[t]):
+            his.append((int(shi[t]), sh[t]))
+        if sli[t] >= 0 and (not los or los[-1][0] != sli[t]):
+            los.append((int(sli[t]), sl[t]))
+        if his and los:
+            ih, H = his[-1]
+            before = [v for i, v in los if i < ih]
+            if before and H > before[-1]:
+                fu[t] = (H - c[t]) / (H - before[-1])
+            il, L = los[-1]
+            before = [v for i, v in his if i < il]
+            if before and before[-1] > L:
+                fd[t] = (c[t] - L) / (before[-1] - L)
     return {"fib_up": fu, "fib_dn": fd}
 
 
@@ -785,13 +799,15 @@ def bars5(spot_by_day: dict):
     """{date: 1-minute spot array} -> 5-min o/h/l/c of all days joined, with day number and bar position; and the
     dates in order with each day's first index. Same bars as the Lab's build (nb = whole 5-min bars present)."""
     o, h, l, c, dy, ps, starts = [], [], [], [], [], [], {}
+    n = 0                                                    # 5-min bars so far (each day's first index)
     for di, d in enumerate(sorted(spot_by_day)):
         sp = np.asarray(spot_by_day[d], float)
         nb = int(np.sum(~np.isnan(sp)) // 5)
         if nb < 10:
             continue
         seg = sp[:5 * nb].reshape(nb, 5)
-        starts[d] = (len(c), nb)
+        starts[d] = (n, nb)
+        n += nb
         o.append(seg[:, 0]), h.append(seg.max(1)), l.append(seg.min(1)), c.append(seg[:, -1])
         dy.append(np.full(nb, di)), ps.append(np.arange(nb))
     if not c:
