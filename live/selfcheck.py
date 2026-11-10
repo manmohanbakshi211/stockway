@@ -270,4 +270,24 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
                       + (f"; file error: {_B._C['error']}" if _B._C.get("error") else "")))
     except Exception as e:
         out.append(_c("paper_books", "Extra paper accounts", False, str(e)[:160]))
+    try:                                                   # 2.52: the feed router (Upstox main, Kite backup + cross-check)
+        from . import feeds as _F
+        fc = _F.cfg()
+        lc = ((engine.cfg() if engine is not None and hasattr(engine, "cfg") else {}) or {}).get("live") or {}
+        mode = lc.get("feeds_failover") or fc.get("failover")
+        rv = engine.feed.view() if engine is not None and getattr(engine, "feed", None) is not None and hasattr(engine.feed, "view") else None
+        if _F._C.get("error") or mode not in ("on", "off", "shadow"):
+            ok, det = False, f"rules/feeds.json: {_F._C.get('error') or 'failover must be on, off or shadow'}"
+        elif not lc.get("kite_api_key"):
+            ok, det = None, "Kite not set up (optional): Upstox alone, as before"
+        elif rv is None:
+            ok, det = None, f"Kite keys saved; failover {mode}; starts with the live scanner"
+        else:
+            b, cr = rv.get("backup") or {}, rv.get("cross") or {}
+            ok = True if b.get("connected") else None
+            det = (f"{b.get('message')}; failover {mode}"
+                   + (f"; cross-check {cr.get('match_pct')}% of {cr.get('compared')} agree" if cr.get("compared") else ""))
+        out.append(_c("feeds", "Live feeds: Upstox main, Kite backup and cross-check (market data only)", ok, det))
+    except Exception as e:
+        out.append(_c("feeds", "Live feeds", False, str(e)[:160]))
     return out

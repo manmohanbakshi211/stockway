@@ -114,6 +114,9 @@ live:
   upstox_api_key: ""
   upstox_api_secret: ""
   redirect_uri: "http://127.0.0.1:8765/upstox/callback"
+  kite_api_key: ""                         # 2.52: Zerodha Kite Connect (market data only: backup + cross-check)
+  kite_api_secret: ""
+  kite_redirect_uri: "http://127.0.0.1:8765/kite/callback"
   auto_start: true             # start at 9:00 on market days when logged in
   sim_speed: 10                # simulator: 10 = a full trading day in ~38 minutes
   option_budget: 1900          # options streamed live (Upstox limit is 2000 with greeks)

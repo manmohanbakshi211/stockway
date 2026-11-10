@@ -25,6 +25,9 @@ EDITABLE = {
     "live.source": str,
     "live.upstox_api_key": str,
     "live.upstox_api_secret": str,
+    "live.kite_api_key": str,                  # 2.52: Kite Connect (market data only)
+    "live.kite_api_secret": str,
+    "live.feeds_failover": str,                # 2.52: shadow | on | off (Kite takes over when Upstox goes quiet)
     "live.auto_start": bool,
     "live.sim_speed": float,
     "live.telegram_min_severity": int,
@@ -66,7 +69,7 @@ EDITABLE = {
     "ai.daily_limit": int,
     "ai.language": str,
 }
-SECRET_KEYS = {"telegram.bot_token", "live.upstox_api_secret", "ai.api_key", "lab.dhan_token", "lab.dhan_api_secret"}
+SECRET_KEYS = {"telegram.bot_token", "live.upstox_api_secret", "live.kite_api_secret", "ai.api_key", "lab.dhan_token", "lab.dhan_api_secret"}
 
 
 def _set(d: dict, dotted: str, value):

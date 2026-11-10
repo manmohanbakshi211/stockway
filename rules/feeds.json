@@ -1,0 +1,16 @@
+{
+  "about": "2.52 (Mandeep, 10 Nov 2026: 'let's do it' - Kite with Upstox and Dhan): the live price feeds. Upstox stays the main feed. Kite (Zerodha Kite Connect, market data only, never orders) runs next to it as a backup and a cross-check: the same instruments, compared every few seconds. failover: 'shadow' = Kite never feeds the app, the app only records when it would have switched and for how long (start here); 'on' = when Upstox goes quiet in market hours for failover_after_s seconds, Kite's prices feed the app until Upstox is back; 'off' = no switching. Mandeep turns it 'on' after the cross-check shows the two agree. tol_pct: how far apart the two prices may be at the same moment before it counts as a mismatch. stale_s: one feed's last trade this much older than the other's = that feed is behind. index_map: Upstox index key -> Kite exchange:tradingsymbol (others: the name in capitals). max_tokens: Kite allows 3,000 instruments per connection.",
+  "valid_from": "2026-11-11",
+  "kite": {"enabled": true, "max_tokens": 2900, "mode": "full"},
+  "failover": "shadow",
+  "failover_after_s": 8,
+  "back_after_s": 3,
+  "cross_check_every_s": 5,
+  "same_moment_s": 2,
+  "stale_s": 30,
+  "tol_pct": {"index": 0.05, "future": 0.15, "stock": 0.15, "option": 2.0},
+  "index_map": {"NSE_INDEX|Nifty 50": "NSE:NIFTY 50", "NSE_INDEX|Nifty Bank": "NSE:NIFTY BANK",
+                "NSE_INDEX|Nifty Fin Service": "NSE:NIFTY FIN SERVICE", "NSE_INDEX|NIFTY MID SELECT": "NSE:NIFTY MID SELECT",
+                "NSE_INDEX|Nifty Next 50": "NSE:NIFTY NEXT 50", "NSE_INDEX|India VIX": "NSE:INDIA VIX",
+                "BSE_INDEX|SENSEX": "BSE:SENSEX"}
+}

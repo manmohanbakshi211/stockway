@@ -61,6 +61,7 @@ class Universe:
     by_key: dict                      # instrument key -> ("UND"|"FUT"|"OPT", symbol, Option|None)
     vix_key: str = VIX_KEY
     built: str = ""
+    ex_tok: dict = field(default_factory=dict)   # 2.52: instrument key -> NSE exchange token (to match Kite's list)
 
     @property
     def indices(self):
@@ -79,6 +80,8 @@ def build(rows: list, today: dt.date | None = None) -> Universe:
     today = today or dt.datetime.now(IST).date()
     names = {r["instrument_key"]: (r.get("short_name") or r.get("name") or r.get("trading_symbol"))
              for r in rows if r.get("segment") in ("NSE_EQ", "NSE_INDEX")}
+    ex_tok = {r["instrument_key"]: str(r["exchange_token"]) for r in rows
+              if r.get("exchange_token") and r.get("segment") in ("NSE_EQ", "NSE_FO")}
     fo = [r for r in rows if r.get("segment") == "NSE_FO"]
     unds: dict[str, Underlying] = {}
     futs: dict[str, list] = {}
@@ -116,7 +119,9 @@ def build(rows: list, today: dt.date | None = None) -> Universe:
     by_key[VIX_KEY] = ("VIX", "INDIAVIX", None)
     # keep only underlyings that actually have options
     unds = {s: u for s, u in unds.items() if u.expiries}
-    return Universe(underlyings=unds, by_key=by_key, built=today.isoformat())
+    keep = set(by_key) | {u.key for u in unds.values()}
+    return Universe(underlyings=unds, by_key=by_key, built=today.isoformat(),
+                    ex_tok={k: v for k, v in ex_tok.items() if k in keep})
 
 
 def load(cache_dir: str, fetch=True, log=print) -> Universe:

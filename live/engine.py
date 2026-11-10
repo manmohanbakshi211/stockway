@@ -66,6 +66,8 @@ class LiveEngine:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.store = Store(self.data_dir / "live.db")
         self.tokens = TokenStore(self.data_dir / "upstox_token.json")
+        from .kite import KiteTokenStore
+        self.kite_tokens = KiteTokenStore(self.data_dir / "kite_token.json")     # 2.52: Kite backup feed (market data only)
         self.logs = collections.deque(maxlen=400)
         self.lock = threading.RLock()
         self.telegram = Telegram(get_cfg, self.log)
@@ -309,7 +311,7 @@ class LiveEngine:
             self.rest = UpstoxREST(tok["access_token"])
             prof = self.rest.profile() or {}
             self.status["user"] = prof.get("user_name") or tok.get("user")
-            make_feed = lambda: UpstoxFeed(tok["access_token"], self._on_ticks, self._feed_status)
+            make_feed = lambda: self._make_router(tok)       # 2.52: Upstox main + Kite backup / cross-check
         day = self.clock.now().date().isoformat()
         self.paper = PaperBook(self.store, self.source, lc.get("paper"), self.log, on_open=self._keep_live)
         try:                                         # 2.49: extra paper accounts (Best only, 3% a day); never block the main one
@@ -490,6 +492,36 @@ class LiveEngine:
                 rows = [r for r in hist.get(sym, []) if r[0] != day] + [[day, round(iv, 2)]]
                 hist[sym] = rows[-300:]
         self.store.put(f"ivhist:{self.source}", hist)
+
+    def _make_router(self, tok):
+        """2.52: the Upstox feed inside the feed router (live/feeds.py). Kite is the backup and the cross-check; without
+        Kite keys or today's Kite login the router is the Upstox feed exactly as before."""
+        from .feeds import FeedRouter
+        up = UpstoxFeed(tok["access_token"], self._on_ticks, self._feed_status)
+        return FeedRouter(up, self._on_ticks, self.log, backup_factory=self._kite_backup,
+                          state_get=lambda k: self.state.get(k) if self.state is not None else None,
+                          is_open=lambda: SESSION.is_open(dt.datetime.now(IST)),
+                          by_key=self.uni.by_key if self.uni else {},
+                          mode_fn=lambda: (self.cfg().get("live") or {}).get("feeds_failover"))
+
+    def _kite_backup(self, on_ticks, on_status):
+        """The Kite feed and the Upstox key -> Kite token map (called in the router's own thread). Market data only."""
+        from . import kite as K
+        from .feeds import BackupNotReady, cfg as fcfg
+        lc = self.cfg()["live"]
+        if not lc.get("kite_api_key"):
+            raise BackupNotReady("off", "Kite not set up: add the Kite Connect API key in Live setup (optional)")
+        tok = self.kite_tokens.load()
+        if not tok:
+            raise BackupNotReady("login_needed", "Log in with Kite (once a day, Live setup) to start the backup feed")
+        idx = K.kite_index(lc["kite_api_key"], tok["access_token"], self.data_dir)
+        keys = list(self.uni.by_key) + [SENSEX_KEY]
+        mapping = K.build_map(keys, self.uni.ex_tok, idx, fcfg().get("index_map"))
+        if not mapping:
+            raise RuntimeError("no instrument matched between Upstox and Kite")
+        self.log(f"Kite backup: {len(mapping):,} instruments matched (market data only)")
+        return K.KiteFeed(lc["kite_api_key"], tok["access_token"], on_ticks, on_status,
+                          mode=(fcfg().get("kite") or {}).get("mode", "full")), mapping
 
     def _feed_status(self, msg):
         self.log(msg)
@@ -2279,6 +2311,11 @@ class LiveEngine:
             feed = {"connected": self.feed.connected, "msgs": self.feed.msgs,
                     "last_msg_age": round(time.time() - self.feed.last_msg, 1) if self.feed.last_msg else None,
                     "subs": self.feed.counts(), "lag_ms": round(getattr(self.feed, "lag_ms", None) or 0) if getattr(self.feed, "lag_ms", None) is not None else None}
+            if hasattr(self.feed, "view"):                # 2.52: the backup feed (Kite) and the cross-check
+                try:
+                    feed["router"] = self.feed.view()
+                except Exception:
+                    pass
         new = [a for a in self.alerts_mem if a["id"] > since_id][:100]
         ps = self.paper.summary(self.state) if self.paper else None
         cv = self.context.view()
