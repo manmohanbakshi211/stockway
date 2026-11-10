@@ -504,6 +504,50 @@ def _sim(c, sp, m0, entry, sym, lot, rule):
 SELL_FIRST_TOD = 5            # the straddle can be sold from 09:20 (the famous 9:20 straddle)
 ALL_EXITS = list(EXITS) + list(SELL_EXITS) + list(STYLES)
 BUY_EXITS = list(EXITS) + list(STYLES)                  # premium-% exits (current) + chart-level exits (challengers)
+
+
+# 2.57 strike choice for buy rules (rules/strikes.json): a rule may name a strike; without one it buys ATM as before
+STRIKES_FILE = Path(__file__).resolve().parents[1] / "rules" / "strikes.json"
+
+
+def strikes_cfg() -> dict:
+    """{choices, exits, syms, share}; a missing or broken file = no strike choice (ATM only, as before 2.57)."""
+    try:
+        c = json.loads(STRIKES_FILE.read_text())
+        ch = {k: v for k, v in (c.get("choices") or {}).items()
+              if isinstance(v, dict) and (isinstance(v.get("steps"), int) and v["steps"] != 0 or
+                                          isinstance(v.get("premium_pct"), (int, float)) and v["premium_pct"] > 0)}
+        return {"choices": ch, "exits": [e for e in (c.get("exits") or []) if e in EXITS or e in STYLES],
+                "syms": list(c.get("syms") or []), "share": float(c.get("share") or 0)}
+    except Exception:
+        return {"choices": {}, "exits": [], "syms": [], "share": 0.0}
+
+
+def pnl_key(s: dict) -> str:
+    """The bar-table column a rule reads: its exit, or exit@strike for a non-ATM strike (2.57)."""
+    return s["exit"] + ("@" + s["strike"] if s.get("strike") else "")
+
+
+def pick_strike(day, k: float, side: str, m0: int, spot: float, choice: dict):
+    """The strike a choice means at minute m0 (k = ATM strike): n steps away (+ = out of the money) or the
+    out-of-the-money strike priced nearest premium_pct of the index. None if that strike has no prices."""
+    step = day.step
+    sgn = 1 if side == "CE" else -1
+    if choice.get("steps"):
+        kk = float(k + sgn * int(choice["steps"]) * step)
+        return kk if (kk, side) in day.px else None
+    want = spot * float(choice["premium_pct"]) / 100
+    best, err = None, None
+    for (kk, sd), px in day.px.items():
+        if sd != side or (kk - k) * sgn <= 0:
+            continue
+        x = px["c"][m0]
+        if math.isnan(x) or x <= 0.5:
+            continue
+        e = abs(x - want)
+        if err is None or e < err:
+            best, err = kk, e
+    return best
 EXIT_WORDS.update({k: v["words"] for k, v in STYLES.items()})
 
 
@@ -625,6 +669,8 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
     vmap = dict(zip(pd.to_datetime(vix["date"]).dt.date, vix["vix_prev"])) if len(vix) else {}
     rows, chunks = [], []
     pack_styles = _file_exits(data_dir)                          # 2.43: exits defined in this Lab's strategy files
+    stk = strikes_cfg()                                        # 2.57: other strikes for buy rows
+    stk_on = bool(stk["choices"] and stk["exits"])
     for sym in syms:
         lot = UNDERLYINGS[sym]["lot"]
         stock = bool(UNDERLYINGS[sym].get("stock"))
@@ -726,6 +772,21 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                         row["pnl_" + rule] = _sim(px["c"], sp, m0, entry, sym, lot, rule)
                     for style in STYLES:
                         row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i])
+                    if stk_on and sym in stk["syms"]:     # 2.57: the same trade on other strikes (rules/strikes.json)
+                        for cname, ch in stk["choices"].items():
+                            kk = pick_strike(day, k, side, m0, sp[m0], ch)
+                            px2 = day.px.get((float(kk), side)) if kk is not None else None
+                            e2 = px2["c"][m0] if px2 is not None else math.nan
+                            ok2 = not (math.isnan(e2) or e2 <= 0.5)
+                            en2 = e2 + slip(sym, e2) if ok2 else math.nan
+                            for ex in stk["exits"]:
+                                col = f"pnl_{ex}@{cname}"
+                                if not ok2:
+                                    row[col] = math.nan
+                                elif ex in EXITS:
+                                    row[col] = _sim(px2["c"], sp, m0, en2, sym, lot, ex)
+                                else:
+                                    row[col] = _sim_lv(px2["c"], sp, m0, en2, sym, lot, d, ex, atr[i], l[i], h[i])
                     if pack_styles:                       # 2.44: levels for file exits, the opposite option for sells
                         lv = {"fc": (l[0], h[0]), "or15": (l[:3].min(), h[:3].max()) if i >= 2 else (None, None),
                               "or30": (l[:6].min(), h[:6].max()) if i >= 5 else (None, None),
@@ -881,6 +942,8 @@ def sid(s: dict) -> str:
     core = {k: s[k] for k in ("dir", "conds", "win", "exit", "max_day", "syms")}
     if s.get("then"):                                    # 2.47: two-step entries only (older ids unchanged)
         core["then"] = s["then"]
+    if s.get("strike"):                                  # 2.57: non-ATM strikes only (older ids unchanged)
+        core["strike"] = s["strike"]
     key = json.dumps(core, sort_keys=True)
     return "S" + hashlib.sha1(key.encode()).hexdigest()[:8]
 
@@ -905,7 +968,9 @@ def words(s: dict) -> str:
         name, unit = FEATURES.get(feat, (feat, ""))
         cs.append(f"{name} {ops.get(op, op)} {v:g}{unit if unit in ('%', '×', 'min', 'd', 'pts') else ''}")
     hm = lambda t: (dt.datetime(2000, 1, 1, 9, 15) + dt.timedelta(minutes=t)).strftime("%H:%M")
-    side = ("Buy the ATM call" if s["dir"] > 0 else "Buy the ATM put" if s["dir"] < 0 else
+    stw = ((strikes_cfg()["choices"].get(s.get("strike")) or {}).get("words") or s.get("strike")) if s.get("strike") else None
+    side = ((f"Buy the call {stw}" if s["dir"] > 0 else f"Buy the put {stw}") if stw and s["dir"] else
+            "Buy the ATM call" if s["dir"] > 0 else "Buy the ATM put" if s["dir"] < 0 else
             "Sell an iron fly (margin ~₹40-60K)" if s["exit"].startswith("fly") else "Sell the ATM straddle (needs ~₹1-2 lakh margin)")
     if s["dir"] and (PACK_STYLES.get(s["exit"]) or {}).get("sell"):                 # 2.44: directional option selling
         side = "Sell the ATM put (bullish view; margin ~₹1 lakh+)" if s["dir"] > 0 else "Sell the ATM call (bearish view; margin ~₹1 lakh+)"
@@ -956,6 +1021,9 @@ def validate(s: dict, extra_exits=()) -> dict | None:
             if not tc or len(tc) > 3 or any(f not in FEATURES or o not in (">", "<") or not math.isfinite(v) for f, o, v in tc):
                 return None
             out["then"] = {"conds": tc, "within": int(min(THEN_MAX, max(1, int(th.get("within") or 1))))}
+        stc = s.get("strike")                              # 2.57: a non-ATM strike (rules/strikes.json); unknown = ATM
+        if stc and stc != "atm" and d != 0 and stc in strikes_cfg()["choices"]:
+            out["strike"] = str(stc)
         out["id"] = sid(out)
         return out
     except Exception:
@@ -977,6 +1045,8 @@ class Book:
         # a bar table from before a fact existed: that fact is unknown (NaN), so rules using it simply can't fire there
         self.cols = {c: (df[c].to_numpy() if c in df else np.full(len(df), np.nan)) for c in list(FEATURES) + ["dir", "sym"]}
         self.pnl = {r: df["pnl_" + r].to_numpy(dtype=float) for r in all_exits() if "pnl_" + r in df}
+        self.pnl.update({c[4:]: df[c].to_numpy(dtype=float) for c in df.columns if c.startswith("pnl_") and "@" in c})
+        self.strike_choices = sorted({c.split("@", 1)[1] for c in self.pnl if "@" in c})     # 2.57
         self.symcode = df["sym"].to_numpy()
         self.prem = df["premium"].to_numpy(dtype=float) if "premium" in df else np.zeros(len(df))
         names = sorted(set(self.symcode))
@@ -1034,9 +1104,10 @@ class Book:
                 x = self.cols[feat]
                 m &= (x > v) if op == ">" else (x < v)
         idx = np.nonzero(m)[0]
-        if s["exit"] not in self.pnl:
+        key = pnl_key(s)                                    # 2.57: exit@strike for a non-ATM strike
+        if key not in self.pnl:
             return pd.DataFrame(columns=["day", "sym", "tod", "pnl", "part"])
-        pnl = self.pnl[s["exit"]][idx]
+        pnl = self.pnl[key][idx]
         ok = ~np.isnan(pnl)
         idx, pnl = idx[ok], pnl[ok]
         if not len(idx):
@@ -1108,7 +1179,7 @@ def score(book: Book, s: dict) -> dict:
     tr = book.trades(s)
     out = {"id": s["id"], "rule": words(s), **{k: s[k] for k in ("dir", "conds", "win", "exit", "max_day", "syms")},
            "source": s.get("source", "generated"), "note": s.get("note", "")}
-    out.update({k: s[k] for k in ("early", "pack", "pack_v", "name", "then") if k in s})   # 2.43 file rules; 2.47 then
+    out.update({k: s[k] for k in ("early", "pack", "pack_v", "name", "then", "strike") if k in s})   # 2.43 / 2.47 / 2.57 strike
     for p, name in ((0, "train"), (1, "valid"), (2, "hold")):
         out[name] = stats(tr[tr["part"] == p], book.n_days[p])
     if not passes(out["train"], PASS["train"]):
@@ -1238,13 +1309,34 @@ def random_rule(book: Book, rng: random.Random) -> dict:
          "max_day": rng.choice([1, 1, 2]), "syms": rng.choice(book.sym_choices), "source": "generated"}
     if d == 0:
         s["syms"] = rng.choice(book.sym_choices[:3])
+    _maybe_strike(book, s, rng)
     s["id"] = sid(s)
     return s
 
 
+def _maybe_strike(book: Book, s: dict, rng: random.Random, force: bool = False):
+    """2.57: sometimes try a non-ATM strike on a buy rule (only where the bar table priced it: indices, some exits)."""
+    ch = getattr(book, "strike_choices", None) or []
+    if s["dir"] == 0 or not ch:
+        return
+    if not force and rng.random() >= strikes_cfg()["share"]:
+        return
+    st = rng.choice(ch)
+    exits = [e for e in BUY_EXITS if f"{e}@{st}" in book.pnl]
+    if not exits:
+        return
+    s["strike"] = st
+    if s["exit"] not in exits:
+        s["exit"] = rng.choice(exits)
+    if STOCKS in s["syms"] or EACH in s["syms"]:
+        s["syms"] = rng.choice(book.sym_choices[:3])
+
+
 def mutate(book: Book, s: dict, rng: random.Random) -> dict:
     m = json.loads(json.dumps({k: s[k] for k in ("dir", "conds", "win", "exit", "max_day", "syms")}))
-    what = rng.choice(["thr", "thr", "exit", "win", "add", "drop", "syms"])
+    if s.get("strike"):
+        m["strike"] = s["strike"]
+    what = rng.choice(["thr", "thr", "exit", "win", "add", "drop", "syms", "strike"])
     if what == "thr" and m["conds"]:
         c = rng.choice(m["conds"])
         q = list(book.quantiles(c[0]))
@@ -1263,6 +1355,15 @@ def mutate(book: Book, s: dict, rng: random.Random) -> dict:
         m["conds"].pop(rng.randrange(len(m["conds"])))
     elif what == "syms":
         m["syms"] = rng.choice(book.sym_choices[:3] if m["dir"] == 0 else book.sym_choices)
+    elif what == "strike":                             # 2.57: the same idea on another strike (or back to ATM)
+        if m.get("strike") and rng.random() < 0.5:
+            m.pop("strike")
+        else:
+            _maybe_strike(book, m, rng, force=True)
+    if m.get("strike") and f"{m['exit']}@{m['strike']}" not in book.pnl:
+        m.pop("strike")                                  # that exit is not priced on other strikes: back to ATM
+    if m.get("strike") and (STOCKS in m["syms"] or EACH in m["syms"]):
+        m["syms"] = rng.choice(book.sym_choices[:3])
     m["source"] = s.get("source", "generated") if s.get("source", "").startswith(("ebook", "claude")) else "mutation"
     m["note"] = s.get("note", "")
     m["id"] = sid(m)
