@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import collections
 import datetime as dt
+import json
 import threading
 import time
 import traceback
@@ -1201,7 +1202,32 @@ class LiveEngine:
                 out["dq_bad"] = int(bool(dg.symbol_problem(sym)))
             except Exception:
                 pass
+        rd = self._radar_today(now)                  # 2.56: the Daily Radar's call for today (recorded only)
+        if rd:
+            out.update(rd)
         return out
+
+    def _radar_today(self, now) -> dict:
+        """2.56: the Daily Radar (Bank Nifty big-move model) forecast for today, if it was made for today:
+        radar_big = its chance of a big-range day (0-1), radar_flag = 1 when it flagged the day. Recorded with bench
+        signals so the credibility check can show whether trades on flagged days do better; decides nothing."""
+        c = getattr(self, "_radar_c", None)
+        if c is None or time.time() - c[0] > 600:
+            fc = {}
+            try:
+                f = Path(self.data_dir).parent / (self.cfg().get("output_dir") or "output") / "forecast_latest.json"
+                if f.exists():
+                    fc = json.loads(f.read_text())
+            except Exception:
+                fc = {}
+            c = self._radar_c = (time.time(), fc)
+        fc = c[1]
+        if not fc or str(fc.get("for_date") or "")[:10] != now.date().isoformat() or fc.get("demo"):
+            return {}
+        try:
+            return {"radar_big": round(float(fc["prob_big"]), 3), "radar_flag": int(bool(fc.get("flag")))}
+        except Exception:
+            return {}
 
     def _mover_sweep(self, now):
         """2.31: every few minutes the F&O stocks (and indices) moving most get an honest paper test on the bench in
@@ -1617,6 +1643,7 @@ class LiveEngine:
                      **({"focus_ch": fch} if fch else {}),
                      "conviction": conv, "regime": (reg or {}).get("label"),
                      "plan": tp_plan,
+                     "plan_R": {k: round(float(v), 2) for k, v in (tp_R or {}).items()} or None,   # 2.56: risk per chart exit
                      "bigger": big or None,
                      "event_risk": {k: evr.get(k) for k in ("level", "line", "items", "warnings")} if evr and evr.get("items") else None,
                      "fits_small": bool(a.get("option") and (a["option"].get("cost_per_lot") or 1e9) <= float(lc.get("small_lot_max") or 10000)),

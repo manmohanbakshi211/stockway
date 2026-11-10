@@ -39,8 +39,15 @@ def _streak(ret: pd.Series) -> pd.Series:
 
 
 def next_session(last: pd.Timestamp) -> pd.Timestamp:
+    """The next regular NSE session after `last` (2.56: NSE holidays skipped too; on 10 Nov 2026, a holiday, the radar
+    forecast "for" 10 Nov). Only the forecast row's date uses this; past rows and training are unchanged."""
+    try:
+        from live.session import is_holiday
+    except Exception:                                   # the radar works without the live app
+        def is_holiday(_d):
+            return False
     d = last + pd.Timedelta(days=1)
-    while d.weekday() >= 5:
+    while d.weekday() >= 5 or is_holiday(d.date()):
         d += pd.Timedelta(days=1)
     return d
 

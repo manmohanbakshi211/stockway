@@ -281,6 +281,8 @@ async function pageTomorrow() {
       </div>
     </div>
 
+    <p class="note">How to use it (2.56): on past days the flag was right about 1.8× as often as chance, but buying a straddle on flagged days still lost money after costs, and the direction lean is close to a coin flip. Use the flag to choose how to trade tomorrow (breakout buying on flagged days, smaller or no trades on normal days), not as a trade by itself. It does not feed alerts, Focus or paper trades; the test bench records it with every signal so its value can be measured.</p>
+
     <h2>Why the model thinks so</h2>
     ${driversHTML(fc.drivers)}
     <p class="note">Each bar shows how many percentage points the factor moved tomorrow's big-move chance, compared with a typical day.</p>
