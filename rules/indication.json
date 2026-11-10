@@ -10,5 +10,7 @@
  "lean_pct": 0.12,
  "session_pct": 0.4,
  "headlines": 8,
- "valid_from": "2026-11-04"
+ "valid_from": "2026-11-04",
+ "insider_days": 5,
+ "insider_note": "2.50 (Mandeep, 10 Nov: add insider trades): the last insider_days days of promoter / director / key-manager market trades in F&O stocks (SEBI disclosures, ₹50 lakh+) go to the AI as slow background, and the tile shows them. The rules word does not use them (not tested yet)."
 }

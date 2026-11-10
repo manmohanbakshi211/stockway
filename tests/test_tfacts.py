@@ -154,7 +154,7 @@ def test_strategy_file_with_two_step_entry_and_signal_exit():
              {"name": "BB support then break", "dir": 1, "conds": [["new_30m", ">", 0.5], ["bbp_30m", "<", 0.15], ["green_30m", ">", 0.5]],
               "then": {"conds": [["ph_brk_30m", ">", 0.5]], "within": 6}, "exit": ["st_out", "std"], "syms": ["NIFTY"]},
              {"name": "Unknown", "dir": 1, "conds": [["tod", ">", 20]], "then": {"conds": [["zz_fact", ">", 0]], "within": 2}}]}
-    r = packs.check(json.dumps(d).encode())
+    r = packs.check(json.dumps(d).encode(), each=False)       # the file's own versions (2.50 every-stock ones: test_packs)
     assert r["fatal"] is None and len(r["rules"]) == 2 and all(x["then"]["within"] == 6 for x in r["rules"])
     assert any("zz_fact" in c["needs"] for c in r["cannot_test"])
 

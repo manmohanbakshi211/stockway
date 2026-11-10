@@ -1,0 +1,5 @@
+{
+  "about": "2.50 (Mandeep, 10 Nov 2026: 'check the strategies on all the stocks and indices'): which symbols the Strategy Lab tests strategy-file rules on. each_symbol_version: every strategy in a strategy file also gets a version tested on each index and each F&O stock with downloaded history, each on its own (its own trades and day limit); the file's own version stays as it was, so old results never change. Option-selling straddles stay on Nifty / Bank Nifty. Click a strategy on the Strategy Lab page to see every stock / index and its result.",
+  "valid_from": "2026-11-11",
+  "each_symbol_version": true
+}

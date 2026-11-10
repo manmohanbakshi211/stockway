@@ -220,6 +220,28 @@ class Insiders:
                 "running": self.running,
                 "note": "Disclosures under SEBI's insider-trading rules: filed after the trade (usually within 2 trading days). Public information, not a tip."}
 
+    def tilt(self, days: int = 5, weights: dict | None = None) -> dict:
+        """2.50 (Mandeep #2, for the market indication): the last `days` days of meaningful insider market trades
+        (promoters, directors, key managers; ₹50 lakh+) in F&O stocks: bought vs sold in ₹ crore, the biggest names,
+        and how much of it is in Nifty / Bank Nifty stocks. Public disclosures filed after the trade: background only."""
+        cut = (dt.datetime.now(IST) - dt.timedelta(days=days)).date().isoformat()
+        rows = [x for x in self.rows.values() if (x.get("filed") or "") >= cut and meaningful(x)]
+        buy = sum(x["value"] for x in rows if x["side"] == "Buy")
+        sell = sum(x["value"] for x in rows if x["side"] == "Sell")
+        by: dict = {}
+        for x in rows:
+            b = by.setdefault(x["sym"], [0.0, 0.0])
+            b[0 if x["side"] == "Buy" else 1] += x["value"]
+        top = sorted(by.items(), key=lambda kv: -abs(kv[1][0] - kv[1][1]))[:5]
+        idx = {}
+        for name, w in (weights or {}).items():
+            net = sum(by[s][0] - by[s][1] for s in by if s in (w or {}))
+            if net:
+                idx[name] = round(net / 1e7, 1)
+        return {"days": days, "n": len(rows), "buy_cr": round(buy / 1e7, 1), "sell_cr": round(sell / 1e7, 1),
+                "net_cr": round((buy - sell) / 1e7, 1), "in_index_net_cr": idx,
+                "top": [{"sym": s, "net_cr": round((v[0] - v[1]) / 1e7, 1)} for s, v in top], "updated": self.updated}
+
     def for_symbol(self, sym, days=365) -> list:
         cut = (dt.datetime.now(IST) - dt.timedelta(days=days)).date().isoformat()
         return sorted((x for x in self.rows.values() if x["sym"] == sym and (x["filed"] or "") >= cut and x["key"]),

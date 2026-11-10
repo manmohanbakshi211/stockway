@@ -132,10 +132,11 @@ OPT_FACTS["strd_avg"] = ("ATM straddle premium vs its average so far today (belo
 FEATURES.update(OPT_FACTS)
 INDEX_SYMS =("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX")
 STOCKS = "STOCKS"             # in a rule's syms: any F&O stock (tested on every stock with downloaded history)
+EACH = "EACH"                 # 2.50: every index and every F&O stock, each on its own (its own trades and day limit)
 
 
 def sym_ok(syms, sym) -> bool:
-    return sym in syms or (STOCKS in syms and sym not in INDEX_SYMS)
+    return sym in syms or (STOCKS in syms and sym not in INDEX_SYMS) or EACH in syms
 
 
 def lab_syms(data_dir) -> list:
@@ -908,7 +909,8 @@ def words(s: dict) -> str:
             "Sell an iron fly (margin ~₹40-60K)" if s["exit"].startswith("fly") else "Sell the ATM straddle (needs ~₹1-2 lakh margin)")
     if s["dir"] and (PACK_STYLES.get(s["exit"]) or {}).get("sell"):                 # 2.44: directional option selling
         side = "Sell the ATM put (bullish view; margin ~₹1 lakh+)" if s["dir"] > 0 else "Sell the ATM call (bearish view; margin ~₹1 lakh+)"
-    names = {"BANKNIFTY": "Bank Nifty", "NIFTY": "Nifty", STOCKS: "any F&O stock"}
+    names = {"BANKNIFTY": "Bank Nifty", "NIFTY": "Nifty", STOCKS: "any F&O stock",
+             EACH: "each index and each F&O stock (each on its own)"}
     then = (f"; then, within {s['then']['within']} bar{'s' if s['then']['within'] > 1 else ''} of that bar, enter when "
             + _cond_txt(s["then"]["conds"])) if s.get("then") else ""        # 2.47: two-step entries
     return (f"{side} on {' / '.join(names.get(x, x) for x in s['syms'])} "
@@ -936,7 +938,9 @@ def validate(s: dict, extra_exits=()) -> dict | None:
             ex = "std"                                   # file exits belong to file rules (the search never picks them)
         else:
             ex = ex if ex in EXITS or ex in STYLES or ex in PACK_STYLES or ex in extra_exits else "std"
-        syms = [x for x in (s.get("syms") or ["NIFTY", "BANKNIFTY"]) if x in UNDERLYINGS or x == STOCKS] or ["NIFTY", "BANKNIFTY"]
+        syms = [x for x in (s.get("syms") or ["NIFTY", "BANKNIFTY"]) if x in UNDERLYINGS or x in (STOCKS, EACH)] or ["NIFTY", "BANKNIFTY"]
+        if EACH in syms:
+            syms = [EACH]                                  # 2.50: EACH already covers every symbol
         if d == 0:
             syms = [x for x in syms if x in ("NIFTY", "BANKNIFTY")] or ["NIFTY", "BANKNIFTY"]
         out = {"dir": d, "conds": conds, "win": w, "exit": ex, "max_day": 2 if int(s.get("max_day", 1)) > 1 else 1,
@@ -1016,6 +1020,8 @@ class Book:
         sm = np.isin(self.symcode, s["syms"])
         if STOCKS in s["syms"]:
             sm |= self.is_stock
+        if EACH in s["syms"]:                               # 2.50: every symbol the Lab has, each its own slot
+            sm = np.ones(len(self.symcode), bool)
         m &= sm
         if part is not None:
             m &= self.part == part

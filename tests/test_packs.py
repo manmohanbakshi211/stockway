@@ -11,6 +11,13 @@ from lab import exits as X, factory as F, packs as P
 from live import htf
 
 
+@pytest.fixture(autouse=True)
+def _file_versions_only(monkeypatch, request):
+    """These tests describe a file's own versions; the 2.50 every-stock versions are tested on their own below."""
+    if "each_symbol" not in request.node.name:
+        monkeypatch.setattr(P, "each_symbol_on", lambda: False)
+
+
 def _file(**kw):
     d = {"stockway_pack": 1, "id": "ghanshyam_920", "name": "9:20 setup", "version": 1, "source": "test",
          "exits": {"fc_mom": {"stop": ["fc"], "momentum": "close", "max": 375},
@@ -181,3 +188,35 @@ def test_file_strategies_run_on_the_test_bench_once_each(tmp_path):
     assert not F.signal_now(pk[0], {"tod": [5.0, 10.0], "fc_pos": [np.nan, -0.8], "d_struct3": [-1.0, -1.0]}, "NIFTY")
     from live import registry
     assert registry.KINDS["pack"]["family"] == "lab" and not registry.KINDS["pack"].get("paper")
+
+
+def test_each_symbol_version_tests_every_stock_and_index():
+    """2.50 (Mandeep #4): every directional strategy in a file also runs on each index and each F&O stock, each on its
+    own; the file's own version is unchanged (same id, same results)."""
+    own = P.check(_file(), each=False)
+    both = P.check(_file(), each=True)
+    ids_own = {r["id"] for r in own["rules"]}
+    assert ids_own <= {r["id"] for r in both["rules"]}                      # the file's versions are untouched
+    each = [r for r in both["rules"] if r["syms"] == [F.EACH]]
+    assert len(each) == len(own["rules"]) and all("each index and each F&O stock" in F.words(r) for r in each)
+    st = next(x for x in both["strategies"] if x["name"] == "920-A put")
+    assert len(st["rules"]) == 6                                             # 3 exits x (own + every stock)
+    assert F.sym_ok([F.EACH], "RELIANCE") and F.sym_ok([F.EACH], "NIFTY")
+    assert F.validate({"dir": 0, "conds": [["rsi", ">", 0]], "syms": [F.EACH], "exit": "ss25"})["syms"] == ["BANKNIFTY", "NIFTY"]
+
+
+def test_each_symbol_book_gives_every_symbol_its_own_slot():
+    import pandas as pd
+    rows = []
+    for sym in ("NIFTY", "BANKNIFTY", "RELIANCE", "SBIN"):
+        for k in range(20):
+            for bar in (3, 4):
+                rows.append({"sym": sym, "date": dt.date(2025, 1, 1) + dt.timedelta(days=k), "bar": bar,
+                             **{f: 1.0 for f in F.FEATURES}, "tod": (bar + 1) * 5.0, "dir": 1, "premium": 8000,
+                             **{"pnl_" + e: 100.0 for e in F.EXITS}})
+    b = F.Book(pd.DataFrame(rows))
+    r = F.validate({"dir": 1, "conds": [["ret_b3", ">", 0]], "win": [15, 330], "exit": "std", "syms": [F.EACH]})
+    t = b.trades(r)
+    assert set(t["sym"]) == {"NIFTY", "BANKNIFTY", "RELIANCE", "SBIN"} and len(t) == 4 * 20    # one a day on each symbol
+    s = F.validate({"dir": 1, "conds": [["ret_b3", ">", 0]], "win": [15, 330], "exit": "std", "syms": [F.STOCKS]})
+    assert len(b.trades(s)) == 20                                              # STOCKS: all stocks share one slot

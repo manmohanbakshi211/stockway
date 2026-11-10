@@ -445,6 +445,7 @@ function indTile(v) {
   const tag = x ? (x.by === "AI" ? `<em class="ind-tag">AI suggestion</em>` : `<em class="ind-tag rules" title="${esc(x.error || "AI off")}">rules</em>`) : "";
   return `<div class="ms-item ms-ind"><span>India market ${tag}</span>
     ${x ? `<b class="ind-word ${col(x.word)}">${esc(x.word)}</b><small class="ind-line">${esc(x.line)}</small>
+      ${x.insiders && x.insiders.n ? `<small class="ind-ins" title="Promoters, directors and key managers trading in the market (SEBI disclosures, ₹50 lakh+), last ${x.insiders.days} days. Background only."><a href="#/insiders">Insiders ${x.insiders.days}d</a>: bought ₹${x.insiders.buy_cr} cr · sold ₹${x.insiders.sell_cr} cr${(x.insiders.top || []).length ? ` · ${x.insiders.top.slice(0, 2).map((t) => `${esc(t.sym)} ${t.net_cr >= 0 ? "+" : ""}${t.net_cr}`).join(", ")}` : ""}</small>` : ""}
       <small>${esc(ph)} · ${esc(x.day === new Date().toLocaleDateString("en-CA") ? x.at : `${x.day.slice(5)} ${x.at}`)}${v.busy ? " · updating…" : nextTxt ? ` · next ${esc(nextTxt)}` : ""}${rec.open_n ? ` · open call right ${rec.open_right} of ${rec.open_n} days` : ""}</small>`
       : `<b class="ind-word">–</b><small>${v.busy ? "Reading the market…" : `First reading at ${esc(nextTxt || "8:30")}.`}</small>`}</div>`;
 }
@@ -1242,6 +1243,30 @@ function scoreBuckets(sc) {
     <p class="small muted" style="margin:8px 0 0">${early ? `${early} alert type${early > 1 ? "s have" : " has"} fewer than 10 decided alerts: too early to judge. ` : ""}"Decided" = the option went +20% or −20% within an hour (the rest stayed flat). About 50% is break-even before costs. Real-market results count; simulator results don't.</p></div>`;
 }
 
+/* 2.50 (#11): is the score / conviction model / Focus credible, and which facts make a trade better? */
+async function credBox(src) {
+  const el = $("#cred-box"); if (!el) return;
+  let r; try { r = await api(`/api/live/credibility${src ? `?source=${src}` : ""}`); } catch (e) { el.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; return; }
+  const A = r.alerts || {}, P = r.params || {};
+  const show = ["Signal score", "Model chance (conviction model)", "Focus alert", "Strength (1 watch, 2 important, 3 act now)", "Risk check", "Time of day"];
+  const nice = { True: "yes", False: "no" };
+  const grp = show.map((g) => { const rows = (A.groups || []).filter((x) => x.group === g); if (!rows.length) return "";
+    return `<tr><td colspan="4" class="small"><b>${esc(g)}</b></td></tr>` + rows.map((x) => `<tr><td class="small">${esc(nice[x.value] || x.value)}</td><td class="r small">${x.decided}</td>
+      <td class="r small"><b class="${x.worked_pct >= 70 ? "up" : x.worked_pct < 55 ? "down" : ""}">${x.worked_pct != null ? x.worked_pct + "%" : "–"}</b>${x.enough ? "" : ` <small class="muted">few</small>`}</td><td class="r small">${fpc(x.o60, 1)}</td></tr>`).join(""); }).join("");
+  const vcls = (v) => v.startsWith("helps") || v.startsWith("leans helpful") ? "up" : v.startsWith("hurts") || v.startsWith("leans harmful") ? "down" : "muted";
+  const facts = (P.rows || []).slice(0, 24).map((x) => `<tr${x.candle ? ` class="hl"` : ""}><td class="small">${esc(x.name)}${x.candle ? ` <span class="pill">candle</span>` : ""}</td>
+      <td class="r small">${esc(x.a_label)}<br>${x.a.n.toLocaleString("en-IN")} · ${rupees(x.a.avg_net)}</td><td class="r small">${esc(x.b_label)}<br>${x.b.n.toLocaleString("en-IN")} · ${rupees(x.b.avg_net)}</td>
+      <td class="r small"><b class="${x.gap >= 0 ? "up" : "down"}">${rupees(x.gap)}</b></td><td class="small ${vcls(x.verdict)}">${esc(x.verdict)}</td></tr>`).join("");
+  el.innerHTML = `<h3 style="margin-top:0">Credibility check <span class="muted small">${A.n ? `${A.decided.toLocaleString("en-IN")} decided alerts, ${A.first} → ${A.last}` : ""}</span></h3>
+    <ul class="small">${(A.verdicts || []).map((v) => `<li><b>${esc(v.what)}:</b> ${esc(v.verdict)}</li>`).join("")}
+      ${P.candles ? `<li><b>Candles as chart reading:</b> ${esc(P.candles)}</li>` : ""}</ul>
+    <details><summary class="small">Alerts by what the app said about them</summary>
+      <div class="table-wrap"><table class="mini"><thead><tr><th></th><th class="r">Decided</th><th class="r">Worked</th><th class="r">Option 60 min</th></tr></thead><tbody>${grp}</tbody></table></div></details>
+    <details><summary class="small">Which facts make a trade better <span class="muted">(test bench, Buy ATM 1 lot after charges: ${(P.n || 0).toLocaleString("en-IN")} trades over ${P.days || 0} days, average ${rupees((P.base || {}).avg_net)})</span></summary>
+      <div class="table-wrap"><table class="mini"><thead><tr><th>Fact at the signal</th><th class="r">With / high</th><th class="r">Against / low</th><th class="r">Gap a trade</th><th>Verdict</th></tr></thead><tbody>${facts || `<tr><td colspan="5" class="muted">No test-bench trades yet.</td></tr>`}</tbody></table></div>
+      <p class="small muted">"Helps" needs a clear gap that points the same way in the older and the newer half of the days, and 10+ days of data. Before that it can only "lean". Information only: nothing changes by itself.</p></details>`;
+}
+
 async function pageScorecard() {
   stopPageTimer();
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
@@ -1260,6 +1285,7 @@ async function pageScorecard() {
     <p class="lede">Every alert is followed for 60 minutes and graded. This is how you know which signals deserve real money. ${sc.source === "sim" ? "<b>Showing simulator results (random market, not evidence).</b>" : ""}
       <a href="#/scorecard?src=${sc.source === "sim" ? "upstox" : "sim"}">Show ${sc.source === "sim" ? "real market" : "simulator"} results</a></p>
     ${scoreBuckets(sc)}
+    <div class="panel tight" id="cred-box" style="margin-top:14px"><p class="small muted">Credibility check: loading…</p></div>
     ${aiReviewBox("scorecard", "Claude's read on your alerts")}
     <div class="kpis"><div class="kpi"><b>${sc.graded}</b><span>Alerts graded (recent)</span></div>
       <div class="kpi"><b>${sc.overall != null ? sc.overall + "%" : "–"}</b><span>Worked overall</span></div>
@@ -1282,6 +1308,7 @@ async function pageScorecard() {
     <div class="table-wrap"><table><thead><tr><th>When</th><th>Alert</th><th>Result</th><th class="r" title="Price move in the alert's favour">In favour 5m</th><th class="r">15m</th><th class="r">60m</th><th class="r">Option best / worst</th></tr></thead><tbody>${recent || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>`;
   bindAIReview(main);
   api(`/api/live/trials${sc.source ? `?source=${sc.source}` : ""}`).then((t) => { const el = $("#trials-box"); if (el) el.innerHTML = trialsBox(t); }).catch(() => {});
+  credBox(sc.source);
   api(`/api/live/focus_shadow?days=10${sc.source ? `&source=${sc.source}` : ""}`).then((f) => { const el = $("#focus-shadow-box"); if (el) el.innerHTML = focusShadowBox(f); }).catch(() => {});
 }
 
@@ -3380,14 +3407,19 @@ async function pageBoard() {
   if (style !== "all" && !styles.some((x) => x.style === style)) style = "all";
   const go = (p) => { const q = new URLSearchParams({ regime: reg, fit: fitOnly ? "1" : "0", fam, style, ...p }); location.hash = `#/board?${q}`; };
   const S = (x) => x && x.n ? `<b class="${x.avg >= 0 ? "up" : "down"}">${rupees(x.avg)}</b> <small class="muted">× ${x.n}</small><br><small class="muted">${x.win_pct}% won${x.pf != null ? ` · PF ${x.pf}` : ""}</small>` : `<span class="muted small">–</span>`;
-  const rows = b.rows.filter((r) => (!fitOnly || r.fits) && (style === "all" || r.style === style));
+  const rowsAll = b.rows.filter((r) => (!fitOnly || r.fits) && (style === "all" || r.style === style));
+  // 2.50 (Mandeep #6): candle patterns are chart reading, not strategies of their own: kept apart, folded
+  const isCdl = (r) => String(r.kind || "").startsWith("candle_");
+  const rows = rowsAll.filter((r) => !isCdl(r)), cdlRows = rowsAll.filter(isCdl);
   const keyed = reg !== "all" && b.regime;
   const needs = (r) => r.family === "buy" || r.need_lot == null ? `${rupees(r.cost_lot)}` : `${rupees(r.need_lot)} <span class="muted">blocked</span>`;
   const when = (ts) => ts ? new Date(ts * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }) : "";
-  const tr = rows.slice(0, 150).map((r) => `<tr class="click" data-bk="${esc(r.kind)}" data-bv="${esc(r.variant || "")}" data-bs="${esc(r.style)}" title="Show this strategy's trades"><td><b>${esc(r.label)}</b> <small class="muted">▸</small><br><small class="muted">${esc(r.style_label)} · ${esc((b.family_labels || {})[r.family] || "")} · ${r.days} day${r.days === 1 ? "" : "s"}${r.fits ? "" : ` · <span class="down">needs more capital</span>`}</small>${r.last_ts ? `<br><small class="muted">first ${when(r.first_ts)} · last ${when(r.last_ts)}</small>` : ""}</td>
+  const rowHtml = (list) => list.slice(0, 150).map((r) => `<tr class="click" data-bk="${esc(r.kind)}" data-bv="${esc(r.variant || "")}" data-bs="${esc(r.style)}" title="Show this strategy's trades"><td><b>${esc(r.label)}</b> <small class="muted">▸</small><br><small class="muted">${esc(r.style_label)} · ${esc((b.family_labels || {})[r.family] || "")} · ${r.days} day${r.days === 1 ? "" : "s"}${r.fits ? "" : ` · <span class="down">needs more capital</span>`}</small>${r.last_ts ? `<br><small class="muted">first ${when(r.first_ts)} · last ${when(r.last_ts)}</small>` : ""}</td>
       <td class="r">${S(r.all)}</td>${keyed ? `<td class="r">${S(r.regime)}</td>` : ""}<td class="r">${S(r.today)}</td>
       <td class="r small">${needs(r)}<br><span class="muted">risk ${rupees(r.risk_lot)}</span></td>
       <td class="r">${(keyed ? r.regime.rank : r.all.rank) != null ? `<b class="${(keyed ? r.regime.rank : r.all.rank) > 0 ? "up" : "down"}">${rupees(keyed ? r.regime.rank : r.all.rank)}</b>` : `<span class="muted small">collecting</span>`}</td></tr>`).join("");
+  const tr = rowHtml(rows), cdlTr = rowHtml(cdlRows);
+  const cdlTot = cdlRows.reduce((a, r) => ({ n: a.n + (r.all.n || 0), s: a.s + (r.all.total || 0) }), { n: 0, s: 0 });
   const best = (b.best || []).map((r) => `<li><b>${esc(r.label)}</b> <span class="muted small">${esc(r.style_label)}</span> · <b class="up">${rupees((keyed ? r.regime : r.all).avg)}</b> a trade over ${(keyed ? r.regime : r.all).n} trades, ${(keyed ? r.regime : r.all).win_pct}% won</li>`).join("");
   const famChips = [["all", "All ways"], ["buy", "Only buying"], ["mixed", "Buying + selling"], ["sell", "Only selling"]]
     .map(([v, l]) => `<button class="chip" data-fam="${v}" aria-pressed="${fam === v}">${l}</button>`).join("");
@@ -3407,6 +3439,9 @@ async function pageBoard() {
       <label class="check small"><input type="checkbox" id="bd-fit" ${fitOnly ? "checked" : ""}><span>Only what fits my capital</span></label></div></div>
     <div class="table-wrap"><table><thead><tr><th>Strategy</th><th class="r">All days<br><small class="muted">₹ a trade × trades</small></th>${keyed ? `<th class="r">This day type</th>` : ""}<th class="r">Today</th><th class="r">1 lot needs</th><th class="r" title="Average minus its uncertainty: what you can count on">Rank</th></tr></thead>
       <tbody>${tr || `<tr><td colspan="6" class="muted">No bench trades ${fam !== "all" ? "in this way of trading " : ""}yet: they start with the next scanner session (every directional alert, every idea on trial, every Lab library / book setup and every mover test).</td></tr>`}</tbody></table></div>
+    ${cdlRows.length ? `<details class="lab-adv" style="margin-top:14px"><summary><b>Chart reading: candle patterns</b> <span class="muted small">${cdlRows.length} rows · ${cdlTot.n.toLocaleString("en-IN")} trades · ${rupees(cdlTot.n ? cdlTot.s / cdlTot.n : null)} a trade</span></summary>
+      <p class="small muted">Candles read the chart: their job is to confirm (or warn against) other strategies, so they are not in the list above. Each one is still paper-tested on its own here to measure it. Whether a candle that agrees makes other signals better: Scorecard → Credibility check.</p>
+      <div class="table-wrap"><table><thead><tr><th>Candle pattern</th><th class="r">All days</th>${keyed ? `<th class="r">This day type</th>` : ""}<th class="r">Today</th><th class="r">1 lot needs</th><th class="r">Rank</th></tr></thead><tbody>${cdlTr}</tbody></table></div></details>` : ""}
     <p class="note">${esc(b.note)} Last ${b.days} days.</p>`;
   bindCapitalBox(() => pageBoard());
   drawJourneys();

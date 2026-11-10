@@ -101,7 +101,7 @@ class ChartData:
             pass
         rec = self.e.fact_bars
         syms = ["NIFTY", "BANKNIFTY"]
-        if any(factory.STOCKS in r["syms"] for r in rules) and self.e.uni:   # stock rules: scan every F&O stock
+        if any(factory.STOCKS in r["syms"] or factory.EACH in r["syms"] for r in rules) and self.e.uni:   # stock rules: every F&O stock
             syms += [u.symbol for u in self.e.uni.stocks]
         in_play = set(getattr(self.e, "in_play", None) or ())    # 2.31: library rules also on the stocks moving today
         syms += sorted(in_play - set(syms))
@@ -186,7 +186,7 @@ class ChartData:
                 else:
                     fac = {"id": r["id"], "exit": list(factory.EXITS[r["exit"]][:3]) +
                            (list(factory.EXITS[r["exit"]][3]) if factory.EXITS[r["exit"]][3] else [])}
-                untested = is_stock and factory.STOCKS in r["syms"] and sym not in self._tested_stocks()
+                untested = is_stock and (factory.STOCKS in r["syms"] or factory.EACH in r["syms"]) and sym not in self._tested_stocks()
                 if untested and (self.e.cfg().get("lab") or {}).get("stock_rules_tested_only"):
                     continue                       # setting: "any F&O stock" rules only on stocks the Lab tested them on
                 if untested:

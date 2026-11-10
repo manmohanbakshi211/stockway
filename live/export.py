@@ -191,6 +191,23 @@ def build(engine, source: str | None = None, days: int = 60, trades_days: int = 
     else:
         sheets["Alerts (last days)"] = pd.DataFrame(columns=["day"])
     sheets["Test bench trades"] = tr
+    try:                                             # 2.50 (#11): the credibility check
+        from . import credibility as CR
+        al_c = CR.alerts_check(e.store, src, days)
+        sheets["Credibility - alerts"] = pd.DataFrame([{"What": g["group"], "Value": g["value"], "Alerts": g["alerts"],
+                                                        "Decided": g["decided"], "Worked %": g["worked_pct"],
+                                                        "Option after 60 min %": g["o60"], "Enough data": "yes" if g["enough"] else "no"}
+                                                       for g in al_c.get("groups", [])])
+        pr = CR.params_check(e.store, src, days)
+        sheets["Credibility - facts"] = pd.DataFrame([{"Fact": r["name"], "code": r["fact"], "Split": r["kind"],
+                                                       "With / high": r["a_label"], "Trades A": r["a"]["n"], "Avg ₹ A": r["a"]["avg_net"],
+                                                       "Win % A": r["a"]["win_pct"], "Against / low": r["b_label"],
+                                                       "Trades B": r["b"]["n"], "Avg ₹ B": r["b"]["avg_net"], "Win % B": r["b"]["win_pct"],
+                                                       "Gap ₹": r["gap"], "t": r["t"], "Older half gap": r["halves"][0],
+                                                       "Newer half gap": r["halves"][1], "Verdict": r["verdict"]}
+                                                      for r in pr.get("rows", [])])
+    except Exception as ex:
+        sheets["Credibility - alerts"] = pd.DataFrame({"error": [str(ex)]})
     readme = [
         ("Made", now.strftime("%d %b %Y %H:%M") + " IST"), ("Data", f"{src}: last {days} days (trade lists: last {trades_days} days)"),
         ("Paper only", "Every number here is a test: no order ever reaches a broker."),
@@ -205,6 +222,10 @@ def build(engine, source: str | None = None, days: int = 60, trades_days: int = 
         ("Strategy Lab 1 year / 5 years", "The historical test: each rule scored on train days, then judged on validation and holdout "
                                           "days it never saw. Promoted = passed the strict bar. 'Positive in all three' is a lead, not proof."),
         ("Paper accounts", "Main account vs Best only vs 3% a day, on their own money."),
+        ("Credibility - alerts", "Graded alerts by what the app said about them (score, conviction model, Focus, strength, risk "
+                                "check, time, day type). A credible score: higher score, more alerts worked."),
+        ("Credibility - facts", "Test-bench 'Buy ATM' trades split by each fact at the signal (with vs against, or high vs low). "
+                               "'Helps' needs a clear gap in both halves of the days and 10+ days of data."),
     ]
     out = {"Read me": pd.DataFrame(readme, columns=["Sheet / item", "What it means"])}
     for k, v in sheets.items():
@@ -228,7 +249,7 @@ def to_xlsx(sheets: dict) -> tuple[bytes, str, str]:
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         for name, df in sheets.items():
-            sn = name[:31]
+            sn = "".join(" " if ch in '[]:*?/\\' else ch for ch in name)[:31]      # Excel forbids these in sheet names
             df.to_excel(w, sheet_name=sn, index=False)
             ws = w.sheets[sn]
             ws.freeze_panes = "A2"

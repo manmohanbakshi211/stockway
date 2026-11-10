@@ -338,6 +338,9 @@ def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1
             view = "focus"
         counts = {k: sum(1 for a in al if f(a)) for k, f in pick.items()}
         out = [a for a in al if pick[view](a)][:max(1, min(int(limit), 2000))]
+        for a in out:                              # 2.50 (speed): the shadow Focus challengers' notes are read by nothing here
+            if isinstance(a.get("data"), dict) and "focus_ch" in a["data"]:
+                a["data"] = {k: v for k, v in a["data"].items() if k != "focus_ch"}
         return clean({"day": day, "alerts": out, "total": len(al), "counts": counts, "view": view, "days": e.store.alert_days(60),
                       "shadow": shadow})
     al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=min_sev, source=source,
@@ -808,6 +811,25 @@ async def live_export(days: int = 60, trades_days: int = 5, source: str | None =
     data, ext, media = await _run_blocking(X.to_xlsx, sheets)
     name = f"stockway_tests_{dt.datetime.now(IST).strftime('%Y-%m-%d_%H%M')}.{ext}"
     return Response(data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+_CRED: dict = {}
+
+
+@router.get("/api/live/credibility")
+async def live_credibility(days: int = 60, source: str | None = None, fresh: bool = False):
+    """2.50 (#11): does a higher score / conviction / Focus really mean better alerts, and which facts make a test-bench
+    trade better (with vs against, both halves of the days)? Read-only; kept 10 minutes."""
+    import time as _t
+    from live import credibility as CR
+    e = engine()
+    key = (source or e.source or "", int(days))
+    hit = _CRED.get(key)
+    if hit and not fresh and _t.time() - hit[0] < 600:
+        return hit[1]
+    out = clean(await _run_blocking(CR.report, e, source, max(1, min(365, days))))
+    _CRED[key] = (_t.time(), out)
+    return out
 
 
 @router.get("/api/live/paper/books")
