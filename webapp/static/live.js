@@ -38,7 +38,7 @@ const asOf = (ts, what = "Data fetched at") => ts ? `<small class="asof" title="
 const mkPill = (m) => !m ? "" : `<span class="mk ${m.open && !m.stale ? "mk-open" : (m.label === "Break" || m.stale) ? "mk-pause" : "mk-closed"}" title="${esc((m.session || "") + " market: " + m.label)}">${esc(m.label)}</span>`;
 const arrow = (d) => (d === "up" ? `<span class="up" aria-label="up">▲</span>` : d === "down" ? `<span class="down" aria-label="down">▼</span>` : `<span class="amber" aria-label="watch">●</span>`);
 const SEV = { 1: "Watch", 2: "Important", 3: "Act now" };
-const KIND = { manual: "By hand",
+const KIND = { manual: "By hand", range_sell: "Range-day sell (Lab)",
   sharp_move: "Sharp move", orb: "Opening-range breakout", day_high: "New day high", day_low: "New day low",
   vwap_cross: "VWAP cross", volume_surge: "Volume surge", oi_buildup: "Futures OI buildup", unusual_options: "Unusual options",
   oi_wall: "OI wall shift", pcr_shift: "PCR shift", iv_spike: "IV spike", beyond_priced: "Bigger than priced",
@@ -2983,7 +2983,7 @@ async function pageLab() {
           <div class="table-wrap" style="margin-top:10px"><table><tbody>${books || `<tr><td class="muted">No books yet.</td></tr>`}</tbody></table></div>
           ${f.pending_ideas ? `<p class="note">${f.pending_ideas} rules from books / Claude are waiting: they are tested on the next run.</p>` : ""}</div>
         <div><h2 style="margin-top:0">Research runs</h2><div class="table-wrap"><table class="mini"><thead><tr><th>When</th><th class="r">Tried</th><th class="r">Train pass</th><th class="r">Promoted</th><th class="r">Luck</th><th class="r">Time</th></tr></thead><tbody>${runs || `<tr><td colspan="6" class="muted">None yet.</td></tr>`}</tbody></table></div></div></div></details>
-      <p class="note">Paper only. Promoted rules with moderate or strong holdout evidence (or ones you tick) fire as "Strategy Lab" alerts and are paper-traded with their own exit (straddle sells only when the paper account is ₹1.5 lakh or more); a rule that loses money over 15 live paper trades is switched off automatically.</p>`;
+      <p class="note">Paper only. Promoted rules with moderate or strong holdout evidence (or ones you tick) fire as "Strategy Lab" alerts and are paper-traded with their own exit; a rule that loses money over 15 live paper trades is switched off automatically. Straddle-selling rules (2.55): one range-day sell signal per index per day, recorded below Focus, no paper trade: naked selling is off while hedged versions are tested.</p>`;
     const job = async (path, body = {}) => { try { await post(path, body); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
     $("#lab-run").onclick = () => job("/api/factory/run", { n: 8000 });
     $("#lab-40").onchange = (e) => { LS.set("lab40", e.target.checked); draw(); };

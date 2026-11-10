@@ -55,6 +55,15 @@ def static_checks(cfg: dict | None = None) -> list:
                                              f"(your setting in Live setup wins); no order calls in the code"))
     except Exception as e:
         out.append(_c("kite_feed", "Kite backup feed: market data only", False, f"could not load: {e}"))
+    try:                                             # 2.55: straddle-selling rules: one signal a day, no naked paper
+        from live.chartdata import range_sell_cfg
+        rc = range_sell_cfg()
+        out.append(_c("range_sell", "Lab straddle-selling rules: one range-day signal per index a day, below Focus",
+                      rc.get("paper") in ("off", "naked") and int(rc.get("severity") or 2) < 3,
+                      "naked paper selling is off (hedged versions are tested first)" if rc.get("paper") == "off"
+                      else "naked paper selling switched on in rules/range_sell.json (range days only)"))
+    except Exception as e:
+        out.append(_c("range_sell", "Lab straddle-selling rules", False, f"could not load: {e}"))
     try:                                             # 2.54: smart chart lines (display + shadow grading only)
         from lab import levelbook as _lb
         lc_ = _lb.cfg()

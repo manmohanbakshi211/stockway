@@ -114,6 +114,33 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## No more naked straddle selling: one range-day sell signal, hedged versions tested first (2.55)
+
+Mandeep, 11 Nov 2026: sell only in sideways markets and risk-controlled; "i also checked system selling call and put at
+same time i think it's not hedging"; then "yes go for it".
+
+- What was happening: 83 promoted Strategy Lab rules were live on his Mac and every one was "sell the ATM straddle"
+  (near-copies of one idea: different time windows and stops). Each fired on its own, paper-sold the ATM call and put
+  with no wings bought, and raised an "act now" alert (in Focus, so on Telegram). 11 such pairs, net −₹5,052; on 9 Nov
+  (expiry) 6 straddles were open on Nifty at once.
+- Now (`rules/range_sell.json`): the first of those rules to fire on an index raises **one "Range-day sell" signal per
+  index per day** (the others count as agreeing), marked with the day's regime (range / quiet = fits, trend = skip),
+  severity 2 so it stays out of Focus and Telegram, recorded under All alerts. **No paper trade**: `paper: "off"`
+  (the old naked behaviour only with `"naked"`, and then only on range days). System check `range_sell`.
+- Hedged challengers (`tools/hedge_study.py`, the Mac's 1-year Lab data, the 109 promoted straddle rules, 2,247
+  holdout trades, ₹ per trade after costs, train / validation / holdout):
+
+  | Exit | Train | Validation | Holdout | Rules positive in all 3 |
+  |---|---|---|---|---|
+  | Naked, 25% stop per leg (today's) | +469 | +545 | +283 | 66 / 109 |
+  | + wings bought 10 strikes away | +35 | +444 | +13 | 22 / 109 |
+  | + wings 8 strikes away | −31 | +468 | −39 | 18 / 109 |
+  | + wings 4 strikes away | −94 | +447 | −152 | 14 / 109 |
+  | Iron fly, wings 4 / 8 / 10, out at 30–150% of the credit | −140 to −287 | −521 to −659 | −88 to −293 | 0 / 109 |
+
+  The wings cost about what the straddle earns in a day: no hedged version beats the naked one, so selling stays off
+  paper until Mandeep decides (naked with leg stops on range days only, or no selling).
+
 ## Smart chart lines: the app draws the lines that matter, each with its record (2.54)
 
 Mandeep, 11 Nov 2026: "check whether we are marking and analysing good support, resistance, target and stop loss and

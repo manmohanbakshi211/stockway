@@ -40,6 +40,7 @@ KINDS = {
     "news": {"family": "info", "label": "News", "cooldown": 60},
     "factory": {"family": "lab", "label": "Strategy Lab rule", "paper": True},
     "lab5y": {"family": "lab", "label": "5-year Lab rule", "cooldown": 30, "shadow": True},
+    "range_sell": {"family": "lab", "label": "Range-day sell (Lab straddle rules)"},   # 2.55: one a day per index (rules/range_sell.json), no paper
     "library": {"family": "lab", "label": "Library / book rule (test bench only)"},
     "pack": {"family": "lab", "label": "Strategy file rule (test bench only)"},       # 2.43: lab/packs.py
     "fusion": {"family": "lab", "label": "Fusion of two strategies (test bench only)"},  # 2.46: lab/fusions.py
