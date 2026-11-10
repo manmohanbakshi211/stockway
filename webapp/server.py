@@ -1391,6 +1391,10 @@ ROLES = {
               "All-time and 52-week highs / lows of the indices; chart history when Dhan isn't available"],
     "official": ["RBI press releases and notifications, SEBI orders and circulars, Government (PIB) releases, NSE circulars, "
                  "BSE notices (free RSS feeds, no login)", "Event risk on every alert; a new high-impact item to Telegram"],
+    "kite": ["2.52: backup live feed and cross-check for Upstox: the same instruments, compared every few seconds; takes over "
+             "when Upstox goes quiet only if you switch failover on (Live setup)", "Market data only: never orders",
+             "Limits: 3,000 instruments per connection, 3 connections; Kite Connect ₹500 / month",
+             "Login: once a day (Zerodha ends it at 6:00 AM)"],
     "stream": ["2.51: open charts get each new price from this app over a websocket (about 0.1 s), instead of asking every "
                "2 seconds", "Reads the app's own prices: no new connection to any broker, no login"],
     "nse": ["Insider trades and company filings, F&O ban list, end-of-day files (free, no login)",
@@ -1473,6 +1477,27 @@ def system_view():
                      (err if err else f"{ai.label()} ready") if on else "Not set: Data & settings → AI",
                      used=ai.used, provider=ai.provider()))
     # Telegram
+    try:                                                   # 2.52: Kite backup feed + cross-check
+        lc_ = e.cfg()["live"]
+        ktok = e.kite_tokens.load()
+        rv = e.feed.view() if getattr(e, "feed", None) is not None and hasattr(e.feed, "view") else None
+        kb = (rv or {}).get("backup") or {}
+        cr = (rv or {}).get("cross") or {}
+        if not lc_.get("kite_api_key"):
+            kst, kmsg = "off", "Not set up (optional): Live setup → Kite"
+        elif not ktok:
+            kst, kmsg = "warn", "Log in with Kite today (Live setup) to start the backup feed"
+        elif rv is None:
+            kst, kmsg = "ok", f"Logged in as {ktok.get('user')}; starts with the live scanner"
+        else:
+            kst = "ok" if kb.get("connected") else "warn"
+            kmsg = (f"{kb.get('message') or ''}"
+                    + (f" · cross-check: {cr.get('match_pct')}% of {cr.get('compared')} prices agree, "
+                       f"Upstox behind on {cr.get('upstox_behind')}" if cr.get("compared") else "")
+                    + f" · failover {rv.get('failover')}" + (f" · now from {rv.get('active')}" if rv.get("active") == "Kite" else ""))
+        svcs.append(_svc("kite", "Kite (Zerodha) backup feed", kst, kmsg, logged_in=bool(ktok)))
+    except Exception:
+        pass
     try:                                                   # 2.51: the chart's live stream (inside the app)
         from live import stream as _ST
         sv = _ST.view()

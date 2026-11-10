@@ -45,9 +45,14 @@ def test_token_changes_go_through_the_keeper():
 
 
 def test_one_live_price_feed():
-    """Live prices come only from Upstox (or the simulator): no Dhan market feed in the scanner."""
+    """Live prices come only from Upstox (or the simulator): no Dhan market feed in the scanner. 2.52: Kite joins only
+    through the one feed router (live/feeds.py) as a backup / cross-check, and only live/kite.py talks to Kite."""
     s = (ROOT / "live" / "engine.py").read_text()
     assert "api-feed.dhan.co" not in s and "DhanFeed" not in s
+    assert s.count("FeedRouter(") == 1 and s.count("UpstoxFeed(") == 1 and "KiteFeed(" in s
+    assert "ws.kite.trade" not in s and "api.kite.trade" not in s
+    offenders = [p.name for p, t in _code() if ("ws.kite.trade" in t or "api.kite.trade" in t) and p.name != "kite.py"]
+    assert not offenders, offenders
 
 
 def test_system_page_endpoint(tmp_path, monkeypatch):
@@ -55,7 +60,7 @@ def test_system_page_endpoint(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     with TestClient(srv.app) as c:
         j = c.get("/api/system").json()
-        assert {s["id"] for s in j["services"]} >= {"upstox", "dhan", "claude", "telegram", "yahoo", "nse"}
+        assert {s["id"] for s in j["services"]} >= {"upstox", "dhan", "claude", "telegram", "yahoo", "nse", "kite"}
         assert all(s["roles"] for s in j["services"])
         assert not [x for x in j["checks"] if x["ok"] is False and x["id"] != "disk"]
 

@@ -1106,9 +1106,39 @@ function drawPaper(p, first) {
 }
 
 /* ---------------- page: Connect / live settings */
+/* 2.52: Kite (Zerodha) as the backup live feed and cross-check for Upstox. Market data only, never orders. */
+function kitePanel(kf, s, q) {
+  kf = kf || {};
+  const r = kf.router || {}, b = r.backup || {}, c = r.cross || {};
+  const pill = kf.kite_logged_in ? `<span class="pill p-up">Logged in${kf.kite_user ? " as " + esc(kf.kite_user) : ""}</span>` : kf.kite_keys ? `<span class="pill p-amber">Keys saved, log in needed</span>` : `<span class="pill">optional</span>`;
+  const fo = s["live.feeds_failover"] || kf.failover || "shadow";
+  const now = kf.running && kf.router ? `<p class="small" style="margin:10px 0 0"><b>Now:</b> ${esc(b.message || b.status || "")}${b.connected ? ` · ${(b.instruments || 0).toLocaleString("en-IN")} instruments streaming` : ""}${c.compared ? ` · cross-check: <b>${c.match_pct}%</b> of ${c.compared} prices agree, Upstox behind on ${c.upstox_behind}, Kite behind on ${c.kite_behind}` : ""}${r.active === "Kite" ? ` · <span class="amber">prices from Kite now</span>` : ""}${(r.would_switch || []).length ? ` · would have switched ${r.would_switch.length} time(s) today` : ""}</p>` : "";
+  return `<div class="panel" style="margin-top:18px"><h2 style="margin-top:0">1b. Kite (Zerodha): backup feed ${pill}</h2>
+    <p class="muted" style="margin-top:0">A second live feed next to Upstox: the same prices, compared every few seconds (bad or frozen prices get caught), and a backup if Upstox goes quiet. Market data only: no order is ever placed.</p>
+    <ol class="steps">
+      <li>Open <a href="https://developers.kite.trade" target="_blank" rel="noopener">developers.kite.trade</a>, log in with your Zerodha account and create a <b>Kite Connect</b> app (₹500 / month; live prices and history are included).</li>
+      <li>Set its <b>Redirect URL</b> to exactly:<div class="copy"><code>${esc(kf.kite_redirect_uri || "http://127.0.0.1:8765/kite/callback")}</code><button class="link-btn" id="copy-kredir" type="button">Copy</button></div></li>
+      <li>Copy the app's <b>API key</b> and <b>API secret</b> into the boxes below and save.</li>
+      <li>Click <b>Log in with Kite</b> once a day (Zerodha ends every login at 6:00 AM).</li></ol>
+    <form class="form-grid" style="margin-top:14px" onsubmit="return false">
+      <label class="field">Kite API key<input type="text" id="s-kkey" value="${q(s["live.kite_api_key"])}" autocomplete="off"></label>
+      <label class="field">Kite API secret<input type="password" id="s-ksec" value="${q(s["live.kite_api_secret"])}" autocomplete="off"></label>
+      <label class="field">When Upstox goes quiet<select id="s-kfo">
+        <option value="shadow" ${fo === "shadow" ? "selected" : ""}>Only record (start here)</option>
+        <option value="on" ${fo === "on" ? "selected" : ""}>Use Kite's prices until Upstox is back</option>
+        <option value="off" ${fo === "off" ? "selected" : ""}>Do nothing</option></select>
+        <small>Start with "Only record": after a few market days, if the cross-check shows the two agree, switch to "Use Kite".</small></label>
+    </form>
+    <div class="btn-row" style="margin-top:16px"><button class="btn" id="kt-save" type="button">Save</button>
+      <a class="btn primary" href="/kite/login">${kf.kite_logged_in ? "Log in again" : "Log in with Kite"}</a>
+      ${kf.kite_logged_in ? `<button class="btn" id="kt-logout" type="button">Log out</button>` : ""}</div>
+    ${now}
+    <p class="note">Your Kite keys and login stay on this Mac only. Upstox stays the main feed; without Kite everything works exactly as before.</p></div>`;
+}
+
 async function pageConnect() {
   stopPageTimer();
-  const [info, s] = await Promise.all([api("/api/live/info"), api("/api/settings")]);
+  const [info, s, kf] = await Promise.all([api("/api/live/info"), api("/api/settings"), api("/api/live/feeds").catch(() => ({}))]);
   const q = (v) => (v == null ? "" : esc(v));
   const perm = "Notification" in window ? Notification.permission : "unsupported";
   main.innerHTML = `<h1 class="page-title">Live setup</h1>
@@ -1128,6 +1158,7 @@ async function pageConnect() {
         <a class="btn primary" href="/upstox/login">${info.logged_in ? "Log in again" : "Log in with Upstox"}</a>
         ${info.logged_in ? `<button class="btn" id="up-logout" type="button">Log out</button>` : ""}</div>
       <p class="note">Your keys and login stay on this Mac only. Live data is free with an Upstox account. Orders are never placed: this app only reads prices.</p></div>
+    ${kitePanel(kf, s, q)}
 
     <div class="panel" style="margin-top:18px"><h2 style="margin-top:0">2. Scanner</h2><div class="form-grid">
       <label class="check"><input type="checkbox" id="s-auto" ${s["live.auto_start"] !== false ? "checked" : ""}><span>Start by itself at 9:00 AM<small>On market days, when you're logged in and this app is open.</small></span></label>
@@ -1176,6 +1207,7 @@ async function pageConnect() {
     <div class="btn-row" style="margin-top:18px"><button class="btn primary" id="all-save" type="button">Save all</button></div>`;
   const collect = () => ({
     "live.upstox_api_key": $("#s-ukey").value.trim(), "live.upstox_api_secret": $("#s-usec").value.trim(),
+    "live.kite_api_key": $("#s-kkey").value.trim(), "live.kite_api_secret": $("#s-ksec").value.trim(), "live.feeds_failover": $("#s-kfo").value,
     "live.auto_start": $("#s-auto").checked, "live.source": $("#s-src").value, "live.news": $("#s-news").checked,
     "live.sim_speed": Number($("#s-speed").value), "live.telegram_min_severity": Number($("#s-tsev").value),
     "ai.provider": $("#s-aip").value, "ai.api_key": $("#s-aik").value.trim(), "ai.explain_min_severity": Number($("#s-aisev").value),
@@ -1192,6 +1224,9 @@ async function pageConnect() {
   };
   $("#all-save").onclick = save;
   $("#up-save").onclick = async () => { if (await save()) pageConnect(); };
+  $("#kt-save").onclick = async () => { if (await save()) pageConnect(); };
+  { const b = $("#copy-kredir"); if (b) b.onclick = async () => { try { await navigator.clipboard.writeText(kf.kite_redirect_uri); toast("Copied"); } catch (_) { toast(kf.kite_redirect_uri); } }; }
+  if ($("#kt-logout")) $("#kt-logout").onclick = async () => { await post("/api/kite/logout", {}); toast("Logged out of Kite"); pageConnect(); };
   $("#copy-redir").onclick = async () => { try { await navigator.clipboard.writeText(info.redirect_uri); toast("Copied"); } catch (_) { toast(info.redirect_uri); } };
   if ($("#up-logout")) $("#up-logout").onclick = async () => { await post("/api/live/logout", {}); toast("Logged out"); pageConnect(); };
   $("#np-btn").onclick = async () => { const r = await Notification.requestPermission(); toast(r === "granted" ? "Pop-up alerts on" : "Not allowed"); pageConnect(); };

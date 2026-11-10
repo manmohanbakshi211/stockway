@@ -114,6 +114,29 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Kite (Zerodha) next to Upstox: a backup feed and a price cross-check (2.52)
+
+Mandeep, 10 Nov 2026: "what if we can add kite to our platform ... using kite, dhan and upstox with their best potential",
+then "okay let's do it" (step 1 of 3: the feed router; next: more strikes through Kite, then Kite's long history in the Lab).
+
+- **Market data only.** `live/kite.py` reads Kite Connect's live price websocket (and its daily instrument list); it
+  sends only subscribe / mode messages. No order, GTT, holdings, positions or funds call exists in the code
+  (`tests/test_kite_feeds.py` checks this, and that Kite is reached from `live/kite.py` only).
+- **The feed router** (`live/feeds.py`) sits between the live feeds and the app. Upstox stays the main feed. Kite gets the
+  same instruments (matched by NSE exchange token; indices by name, `rules/feeds.json` → `index_map`; up to 2,900).
+  - **Cross-check** every 5 s: each price seen by both feeds within 2 s of each other is compared (index 0.05%,
+    future / stock 0.15%, option 2%). It counts agree / differ, and which feed is behind (last trade 30 s+ older).
+  - **Failover**, setting "When Upstox goes quiet" (Live setup): **Only record** (default, shadow: Kite never feeds the
+    app; it notes when it would have switched and for how long), **Use Kite's prices until Upstox is back** (Upstox
+    quiet 8 s in market hours → Kite's prices go to the app; the first Upstox price switches back), **Do nothing**.
+    Mandeep turns it on after a few market days of cross-check.
+  - Without Kite keys or today's Kite login, or if Kite fails, the router is the Upstox feed exactly as before.
+- **Setup** (Live setup → "1b. Kite"): a Kite Connect app at developers.kite.trade (₹500 / month), redirect URL
+  `http://127.0.0.1:8765/kite/callback`, API key and secret typed into the app on the Mac (the secret is masked;
+  the day's login is kept in `data/kite_token.json`, readable by you only, and ends at 6:00 AM). Log in once a day.
+- System & logins shows the Kite row (off / login needed / running, the cross-check) and the self-check "feeds".
+- Nothing in alerts, paper trades or the Lab changes: Lab regression identical.
+
 ## The chart moves with every price: a live stream to the browser (2.51)
 
 Mandeep, 10 Nov 2026: "what if we connect the websocket for charting because we need TBT and price at the same time".

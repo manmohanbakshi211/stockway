@@ -94,6 +94,70 @@ def upstox_callback(code: str | None = None, error: str | None = None):
     return RedirectResponse("/#live")
 
 
+# ----------------------------------------------------------------- Kite login (2.52: market data only, backup feed)
+@router.get("/kite/login")
+def kite_login():
+    from live.kite import login_url
+    c = engine().cfg()["live"]
+    if not c.get("kite_api_key") or not c.get("kite_api_secret"):
+        return _page("Add your Kite API key first",
+                     "Open Live setup → Kite and paste the API key and secret from your Kite Connect app.", ok=False)
+    return RedirectResponse(login_url(c["kite_api_key"]))
+
+
+@router.get("/kite/callback")
+def kite_callback(request_token: str | None = None, status: str | None = None, action: str | None = None):
+    from live.kite import exchange_token
+    e = engine()
+    if status != "success" or not request_token:
+        return _page("Kite login was cancelled", html.escape(status or "No login token came back."), ok=False)
+    c = e.cfg()["live"]
+    try:
+        data = exchange_token(request_token, c["kite_api_key"], c["kite_api_secret"])
+    except Exception as ex:
+        msg = str(ex)
+        hint = ("Check the API key and secret in Live setup (copy them again from developers.kite.trade), and that your "
+                f"Kite app's redirect URL is exactly <code>{html.escape(c.get('kite_redirect_uri') or '')}</code>. "
+                "Kite Connect needs the paid plan (₹500 / month) for live prices.")
+        return _page("Kite login failed", html.escape(msg) + "<br><br>" + hint, ok=False)
+    e.kite_tokens.save(data)
+    e.log(f"Logged in to Kite as {data.get('user_name') or data.get('user_id')} (market data only: backup + cross-check)")
+    if e.running and hasattr(e.feed, "_start_backup") and getattr(e.feed, "backup", None) is None:
+        import threading
+        threading.Thread(target=e.feed._start_backup, daemon=True, name="kite-start").start()
+    return RedirectResponse("/#/connect")
+
+
+@router.post("/api/kite/logout")
+def kite_logout():
+    e = engine()
+    e.kite_tokens.clear()
+    if getattr(e, "feed", None) is not None and getattr(e.feed, "backup", None) is not None:
+        try:
+            e.feed.backup.stop()
+        except Exception:
+            pass
+        e.feed.backup = None
+        e.feed.backup_status, e.feed.backup_msg = "login_needed", "Logged out of Kite"
+    return {"ok": True}
+
+
+@router.get("/api/live/feeds")
+def live_feeds():
+    """2.52: the main feed, the Kite backup, failover and the cross-check."""
+    from live import feeds as F
+    e = engine()
+    lc = e.cfg()["live"]
+    tok = e.kite_tokens.load()
+    out = {"kite_keys": bool(lc.get("kite_api_key") and lc.get("kite_api_secret")), "kite_logged_in": bool(tok),
+           "kite_user": tok.get("user") if tok else None, "kite_expires": tok.get("expires_at") if tok else None,
+           "kite_redirect_uri": lc.get("kite_redirect_uri"), "failover": lc.get("feeds_failover") or F.cfg().get("failover"),
+           "running": e.running}
+    if getattr(e, "feed", None) is not None and hasattr(e.feed, "view"):
+        out["router"] = e.feed.view()
+    return clean(out)
+
+
 @router.post("/api/live/logout")
 def upstox_logout():
     e = engine()

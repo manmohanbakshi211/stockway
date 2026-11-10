@@ -43,6 +43,18 @@ def static_checks(cfg: dict | None = None) -> list:
     out.append(_c("trials_isolated", "Ideas on trial never reach your alerts, Telegram or paper trades",
                   bool(first) and "is_shadow" in first[0] and "_trial" in first[1],
                   f"{len(registry.shadow_kinds())} idea(s) on trial: recorded and graded only (Scorecard, On trial)"))
+    try:                                             # 2.52: Kite next to Upstox, market data only
+        from live import feeds as _feeds, kite as _kite
+        fc = _feeds.cfg()
+        ksrc = inspect.getsource(_kite)
+        kmax = int((fc.get("kite") or {}).get("max_tokens") or 0)
+        ok = (not fc.get("error") and fc.get("failover") in _feeds.MODES and 0 < kmax <= 3000
+              and not any(b in ksrc for b in ("/ord" + "ers", "place_" + "order", "/g" + "tt", "/port" + "folio")))   # split: the safety test scans this file too
+        out.append(_c("kite_feed", "Kite backup feed: market data only, within Kite's 3,000 instruments",
+                      ok, fc.get("error") or f"up to {kmax:,} instruments on one Kite connection; failover '{fc.get('failover')}' "
+                                             f"(your setting in Live setup wins); no order calls in the code"))
+    except Exception as e:
+        out.append(_c("kite_feed", "Kite backup feed: market data only", False, f"could not load: {e}"))
     from lab import factory
     out.append(_c("lab_one_run", "Strategy Lab: one research round per Lab folder at a time",
                   hasattr(factory, "_RUN_LOCKS"), "a second run waits for the first instead of overwriting it"))
@@ -270,4 +282,24 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
                       + (f"; file error: {_B._C['error']}" if _B._C.get("error") else "")))
     except Exception as e:
         out.append(_c("paper_books", "Extra paper accounts", False, str(e)[:160]))
+    try:                                                   # 2.52: the feed router (Upstox main, Kite backup + cross-check)
+        from . import feeds as _F
+        fc = _F.cfg()
+        lc = ((engine.cfg() if engine is not None and hasattr(engine, "cfg") else {}) or {}).get("live") or {}
+        mode = lc.get("feeds_failover") or fc.get("failover")
+        rv = engine.feed.view() if engine is not None and getattr(engine, "feed", None) is not None and hasattr(engine.feed, "view") else None
+        if _F._C.get("error") or mode not in ("on", "off", "shadow"):
+            ok, det = False, f"rules/feeds.json: {_F._C.get('error') or 'failover must be on, off or shadow'}"
+        elif not lc.get("kite_api_key"):
+            ok, det = None, "Kite not set up (optional): Upstox alone, as before"
+        elif rv is None:
+            ok, det = None, f"Kite keys saved; failover {mode}; starts with the live scanner"
+        else:
+            b, cr = rv.get("backup") or {}, rv.get("cross") or {}
+            ok = True if b.get("connected") else None
+            det = (f"{b.get('message')}; failover {mode}"
+                   + (f"; cross-check {cr.get('match_pct')}% of {cr.get('compared')} agree" if cr.get("compared") else ""))
+        out.append(_c("feeds", "Live feeds: Upstox main, Kite backup and cross-check (market data only)", ok, det))
+    except Exception as e:
+        out.append(_c("feeds", "Live feeds", False, str(e)[:160]))
     return out
