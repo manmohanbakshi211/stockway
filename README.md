@@ -114,6 +114,16 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Strategy files open and close (2.53)
+
+Mandeep, 10 Nov 2026: "there is tab should also be expandable and contractable".
+
+- Strategy Lab → Strategy files: each file is a card that is **closed by default**: its name, source and a one-line
+  summary (strategies, how many can't be tested yet, how many passed all 3 in the 1-year and 5-year Lab). Click the
+  card (or Tab + Enter) to open its strategy table; click again to close. The "On" tick does not open or close it.
+- **Open all / Close all** above the cards. Which files you left open is remembered on that browser; a file you just
+  uploaded opens by itself. Display only: nothing in the Lab, the test bench or the results changes.
+
 ## Kite (Zerodha) next to Upstox: a backup feed and a price cross-check (2.52)
 
 Mandeep, 10 Nov 2026: "what if we can add kite to our platform ... using kite, dhan and upstox with their best potential",
