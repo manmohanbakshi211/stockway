@@ -1,0 +1,125 @@
+{
+  "about": "2.47: which indicators run on which timeframe for the Lab and live facts (lab/tfacts.py). Each output becomes the fact <output>_<tf>. Adding an output here (from lab/tfacts.py IND) needs no engine edit; the Lab rebuilds its bar table once when a new fact appears. Removing one makes rules that use it untestable (they show as 'needs facts').",
+  "valid_from": "2026-11-10",
+  "history_days": 12,
+  "tfs": {
+    "5m": {
+      "sma": [
+        "sma50",
+        "sma200",
+        "sma200_up"
+      ],
+      "psar": [
+        "psar"
+      ],
+      "ha": [
+        "ha"
+      ],
+      "don": [
+        "don_pos",
+        "don_pb"
+      ],
+      "rsi": [
+        "rsi_div",
+        "rsi"
+      ],
+      "frac": [
+        "frac_brk"
+      ],
+      "fib": [
+        "fib_up",
+        "fib_dn"
+      ],
+      "ema921": [
+        "e921_x",
+        "e921_age"
+      ],
+      "emad": [
+        "ema5_side",
+        "ema14_atr"
+      ],
+      "cons": [
+        "cons_brk"
+      ],
+      "retest": [
+        "retest"
+      ],
+      "legs": [
+        "leg2"
+      ],
+      "st": [
+        "st73",
+        "st73_x"
+      ]
+    },
+    "15m": {
+      "candle": [
+        "pin",
+        "green"
+      ],
+      "renko": [
+        "rk_turn",
+        "rk_dir"
+      ],
+      "rsi": [
+        "rsi"
+      ],
+      "srsi": [
+        "srsi"
+      ]
+    },
+    "30m": {
+      "ema9": [
+        "ema9",
+        "ema9_up"
+      ],
+      "sma": [
+        "sma14"
+      ],
+      "bb": [
+        "bbp",
+        "bbw_up",
+        "bb_sq"
+      ],
+      "wr": [
+        "wr",
+        "wr_pull"
+      ],
+      "macd": [
+        "macd_x",
+        "macd_age"
+      ],
+      "fib": [
+        "fib_up",
+        "fib_dn"
+      ],
+      "candle": [
+        "green",
+        "pin"
+      ]
+    },
+    "1H": {
+      "ichi": [
+        "tk_x",
+        "tk_age",
+        "cloud",
+        "cloud_x",
+        "span_a"
+      ],
+      "rsi": [
+        "rsi"
+      ],
+      "frac": [
+        "frac_brk"
+      ],
+      "sma": [
+        "sma50"
+      ]
+    }
+  },
+  "day": [
+    "piv_pos",
+    "piv_x",
+    "piv_rt"
+  ]
+}

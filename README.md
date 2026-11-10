@@ -114,6 +114,32 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Bigger timeframes, many days, "buy above the candle": the 51-strategy book (2.47)
+
+- **Input (Mandeep, 10 Nov):** Aseem Singhal's "51 Trading Strategies" (e-book screenshots). Read in full; the
+  gun-vs-bullet split was sent first. Extract: project doc `aseem_51.md`.
+- **Gun (`lab/tfacts.py`, same code in the Lab and live):** 5-min bars of many days joined and resampled into 15m / 30m /
+  1H candles (aligned to 09:15); a 5-min bar sees only the last *closed* candle (tests: identical on every cut, no
+  look-ahead; live with 12 days of history = the Lab's facts). Indicators are a registry (Williams %R, MACD cross,
+  Ichimoku, Parabolic SAR, Heikin Ashi, Donchian, Fibonacci retracement of the last swing, RSI divergence, fractals 4/4,
+  Stochastic RSI, EMA 9/21, EMA 5/14 distance, Renko, consolidation breakout, retest, two-legged pullback, candle colour /
+  pin bar, SMA 14/50/200, Supertrend 7,3, Bollinger squeeze / width); `rules/tf_facts.json` says which output runs on
+  which timeframe (fact = `<output>_<tf>`, e.g. `wr_pull_30m`, `tk_age_1H`, `sma200_up_5m`). Also `new_<tf>` (this
+  5-min bar closes a candle), `ph_brk_<tf>` (5-min close beyond the last closed candle's high / low) and yesterday's
+  floor pivots (`piv_pos`, `piv_x`, `piv_rt`). A failing indicator leaves only its own facts empty.
+- **Two-step entries** (`then`): the conditions mark a setup bar; the entry is the first later bar (within N bars)
+  where the trigger holds: "green candle at the band, buy above its high". Older rules and ids unchanged.
+- **Exits on a fact** (`exit_if`: out at the 5-min close where e.g. Supertrend flips, RSI reaches 70, price reaches
+  VWAP / the upper band) and **on the option's own price** (`opt_stop_pct`).
+- **Option momentum facts:** the ATM call / put chosen at 9:30 and 10:00, their premium change since
+  (`ce_m0930`, `pe_m1000`...), and the straddle vs its average so far (`strd_avg`).
+- **Live:** computed only when a rule uses them; history = Dhan 5-min bars (once a day per symbol). System page check
+  `tf_facts`. The Lab's build makes its table every 40K rows (memory with the bigger table).
+- **Bullets:** six strategy files (197 rules): `aseem_swing`, `aseem_intraday`, `aseem_advanced`, `aseem_scalp`,
+  `aseem_options`, `aseem_price_action`. Not testable yet (listed in the files): positional / daily holds (chapter 4,
+  1.4, 1.5, 7.2, 7.5, 7.6), Elliott and Gann (hand-drawn), volume oscillator (no index volume), calendar / expiry decay /
+  BTST / swing buying (overnight), 3 PM strategy (after 14:45), OI strikes and OTM-by-premium selling, Martingale (sizing).
+
 ## Fusions: the best strategies mixed, and how many agree at once (2.46)
 
 - **Mandeep (6 Nov):** "system should prepare the list of all the fusion strategies like mixing the strategies and all

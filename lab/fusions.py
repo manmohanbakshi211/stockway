@@ -37,7 +37,7 @@ def named_entries(data_dir) -> list:
     except Exception:
         pass
     for r in srcs:
-        if not r.get("dir"):
+        if not r.get("dir") or r.get("then"):           # 2.47: two-step rules aren't paired (their bars differ)
             continue
         key = json.dumps([r["dir"], r["conds"], r.get("win"), sorted(r.get("syms") or [])], sort_keys=True)
         if key in seen:

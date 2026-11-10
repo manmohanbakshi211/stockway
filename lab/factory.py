@@ -32,7 +32,7 @@ import pandas as pd
 
 from .data import UNDERLYINGS, day_table, heavyweights, iter_days, register_stocks, spot_map, vix_table
 from .engine import charges, slip
-from .exits import PACK_STYLES, STYLES, atr14, first_exit, momentum_k, risk_pts, spec_of
+from .exits import PACK_STYLES, STYLES, atr14, first_exit, momentum_k, risk_pts, signal_k, spec_of
 from live.smc import last_swings  # noqa: E402  (2.44: same code live and in the Lab)
 
 M_EXIT = 360                 # 15:15
@@ -117,7 +117,20 @@ FEATURES.update({
     "smc_fvg": ("bar dipped into a bullish fair value gap and held (+1) / bearish (-1)", ""),
     "smc_sweep": ("liquidity sweep: took out the last swing low / yesterday's low and closed back above (+1), mirror (-1)", ""),
 })
-INDEX_SYMS = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX")
+# 2.47 (gun pieces for the 51-strategy book): bigger-timeframe and multi-day facts (lab/tfacts.py, rules/tf_facts.json)
+# and the at-the-money options' own momentum since a fixed time (the book's option momentum buying / selling)
+from . import tfacts as TF  # noqa: E402
+
+TF_FACTS = TF.fact_names()
+FEATURES.update(TF_FACTS)
+OPT_REFS = {"0930": 15, "1000": 45}          # reference bars (minutes since 09:15 at the bar's close)
+OPT_FACTS = {}
+for _k in OPT_REFS:
+    OPT_FACTS[f"ce_m{_k}"] = (f"the call that was at the money at {_k[:2]}:{_k[2:]}: premium change since then", "%")
+    OPT_FACTS[f"pe_m{_k}"] = (f"the put that was at the money at {_k[:2]}:{_k[2:]}: premium change since then", "%")
+OPT_FACTS["strd_avg"] = ("ATM straddle premium vs its average so far today (below 0 = under its day average)", "%")
+FEATURES.update(OPT_FACTS)
+INDEX_SYMS =("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX")
 STOCKS = "STOCKS"             # in a rule's syms: any F&O stock (tested on every stock with downloaded history)
 
 
@@ -507,11 +520,13 @@ def hold_of(ex: str) -> int:
         PACK_STYLES[ex]["max"] if ex in PACK_STYLES else 360
 
 
-def _sim_lv(c, sp, m0, entry, sym, lot, d, style, atr, bar_lo, bar_hi, fc=None, bars=None, i=None, lv=None, opp=None):
+def _sim_lv(c, sp, m0, entry, sym, lot, d, style, atr, bar_lo, bar_hi, fc=None, bars=None, i=None, lv=None, opp=None,
+            fx=None):
     """Option bought at m0, out when a chart level (lab/exits.py) is touched; the option's price at that minute.
     2.43 (strategy-file exits only): fc = (first candle low, high) for a first-candle stop; bars = the day's 5-min
     (o, h, l, c) and i = the signal bar, for a momentum exit. 2.44: lv = level pairs for or15 / or30 / swing stops;
-    opp = the opposite at-the-money option's prices, for exits that SELL it (the same view: a bullish rule sells the put)."""
+    opp = the opposite at-the-money option's prices, for exits that SELL it (the same view: a bullish rule sells the put).
+    2.47: fx = the day's facts, for exits that leave when a fact turns (exit_if)."""
     st = spec_of(style)
     end = min(M_EXIT, m0 + st["max"])
     sell = bool(st.get("sell"))
@@ -527,7 +542,8 @@ def _sim_lv(c, sp, m0, entry, sym, lot, d, style, atr, bar_lo, bar_hi, fc=None, 
     if not math.isfinite(R):
         return math.nan
     mk = momentum_k(*bars, i, d, st.get("momentum"), m0, end) if st.get("momentum") and bars is not None else None
-    k, _ = first_exit(style, sseg, seg, sp[m0], entry, d, R, mom_k=mk)
+    sk = signal_k(fx, st.get("exit_if"), i, m0, end) if st.get("exit_if") and fx is not None and i is not None else None
+    k, _ = first_exit(style, sseg, seg, sp[m0], entry, d, R, mom_k=mk, sig_k=sk)
     k = len(seg) - 1 if k is None else k
     x = seg[k]
     if math.isnan(x):
@@ -620,6 +636,7 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                         hw_maps[hs] = (m_, sorted(m_))
             except Exception as e:
                 log(f"  heavyweights for {sym} not loaded ({e})")
+        tfd = _tf_days(data_dir, sym, keep=bool(hw_maps) or sym in _HW_SYMS(), log=log)    # 2.47
         if compact:                                       # two streaming passes instead of holding 5 years of minutes
             dtab = day_table(data_dir, sym)
             if dtab.empty:
@@ -664,6 +681,11 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
             if hw_maps:
                 ctx["hw"] = _hw_ctx(sym, day.date, hw_maps, nb)
             f = bar_features(o, h, l, c, ctx, ivs, prem)
+            tf_day = tfd.get(day.date) or {}                    # 2.47: bigger timeframes, many days (lab/tfacts.py)
+            for k_ in TF_FACTS:
+                v_ = tf_day.get(k_)
+                f[k_] = v_[:nb] if v_ is not None and len(v_) >= nb else np.full(nb, np.nan)
+            f.update(opt_facts(day, nb, prem))
             atr = atr14(h, l, c)
             sw_lo, sw_hi = last_swings(h, l)                  # 2.44: the swing stop of file exits
             for i in range(nb):
@@ -712,20 +734,18 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                         try:
                             row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i],
                                                           fc=(l[0], h[0]), bars=(o, h, l, c), i=i, lv=lv,
-                                                          opp=oppx["c"] if oppx is not None else None)
+                                                          opp=oppx["c"] if oppx is not None else None, fx=f)
                         except Exception:
                             row["pnl_" + style] = math.nan
                     rows.append(row)
             if (di + 1) % 100 == 0:
                 log(f"  {sym}: {di + 1} of {n_days} days ({time.time() - t0:.0f}s)")
+            if len(rows) >= BUILD_CHUNK:                  # 2.47: rows as Python dicts are big; make a table every ~40K
+                chunks.append(_part(rows, compact))
+                rows = []
         log(f"{sym}: {n_days} days ready")
         if rows:                                          # one table per symbol keeps memory low with many stocks
-            part = pd.DataFrame(rows)
-            if compact:
-                for c_ in part.columns:
-                    if part[c_].dtype == np.float64:
-                        part[c_] = part[c_].astype("float32")
-            chunks.append(part)
+            chunks.append(_part(rows, compact))
             rows = []
     df = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
     if not df.empty:
@@ -737,6 +757,18 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
     return df
 
 
+BUILD_CHUNK = 40_000
+
+
+def _part(rows: list, compact: bool) -> pd.DataFrame:
+    part = pd.DataFrame(rows)
+    if compact:
+        for c_ in part.columns:
+            if part[c_].dtype == np.float64:
+                part[c_] = part[c_].astype("float32")
+    return part
+
+
 def _file_exits(data_dir) -> list:
     """2.43: the exits this Lab's strategy files define (lab/packs.py), registered; [] when there are none."""
     try:
@@ -745,6 +777,60 @@ def _file_exits(data_dir) -> list:
         return [k for k in packs.load_index(data_dir)["exits"] if k in PACK_STYLES and k not in STYLES]
     except Exception:
         return []
+
+
+def _HW_SYMS() -> set:
+    """Stocks used as index heavyweights (their 1-minute spot stays cached for the index builds)."""
+    try:
+        return {s for ix in ("NIFTY", "BANKNIFTY") for s in heavyweights(ix, dt.date.today())}
+    except Exception:
+        return set()
+
+
+def _tf_days(data_dir, sym: str, keep: bool = False, log=print) -> dict:
+    """2.47: the bigger-timeframe / multi-day facts of every day of `sym` (lab/tfacts.py), computed once over its whole
+    history. {} when they can't be built (the facts are then unknown: rules using them don't fire on that symbol)."""
+    try:
+        sm = spot_map(data_dir, sym)
+        out = TF.by_day(sm)
+    except Exception as e:
+        log(f"  timeframe facts for {sym} not built ({e})")
+        out = {}
+    if not keep:                                           # memory: the spot map of a stock is not needed again
+        try:
+            from .data import _SPOT_CACHE
+            _SPOT_CACHE.pop(sym, None)
+        except Exception:
+            pass
+    return out
+
+
+def opt_facts(day, nb: int, prem) -> dict:
+    """2.47: the at-the-money call / put chosen at a reference bar (OPT_REFS), its premium change since then at each
+    later bar's close (%), and the ATM straddle (as % of price) vs its average so far today (%)."""
+    out = {}
+    for key, tod in OPT_REFS.items():
+        ce, pe = np.full(nb, np.nan), np.full(nb, np.nan)
+        r = tod // 5 - 1
+        try:
+            if r < nb:
+                m_ref = 5 * r + 4
+                k = day.atm(m_ref)
+                c0, p0 = day.price(k, "CE", m_ref), day.price(k, "PE", m_ref)
+                for i in range(r, nb):
+                    m = 5 * i + 4
+                    if c0 and c0 > 0.5:
+                        ce[i] = (day.price(k, "CE", m) / c0 - 1) * 100
+                    if p0 and p0 > 0.5:
+                        pe[i] = (day.price(k, "PE", m) / p0 - 1) * 100
+        except Exception:
+            pass
+        out[f"ce_m{key}"], out[f"pe_m{key}"] = ce, pe
+    p = np.asarray(prem, float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        avg = pd.Series(p).expanding(min_periods=1).mean().to_numpy()
+        out["strd_avg"] = (p / avg - 1) * 100
+    return out
 
 
 def _hw_ctx(index: str, day, hw_maps: dict, nb: int) -> dict | None:
@@ -791,8 +877,23 @@ def load_or_build(data_dir, log=print, should_stop=lambda: False, rebuild=False)
 
 # ------------------------------------------------------------------ strategies
 def sid(s: dict) -> str:
-    key = json.dumps({k: s[k] for k in ("dir", "conds", "win", "exit", "max_day", "syms")}, sort_keys=True)
+    core = {k: s[k] for k in ("dir", "conds", "win", "exit", "max_day", "syms")}
+    if s.get("then"):                                    # 2.47: two-step entries only (older ids unchanged)
+        core["then"] = s["then"]
+    key = json.dumps(core, sort_keys=True)
     return "S" + hashlib.sha1(key.encode()).hexdigest()[:8]
+
+
+THEN_MAX = 12                # 2.47: a trigger may come up to 12 bars (1 hour) after its setup bar
+
+
+def _cond_txt(conds) -> str:
+    ops = {">": "above", "<": "below"}
+    cs = []
+    for feat, op, v in conds:
+        name, unit = FEATURES.get(feat, (feat, ""))
+        cs.append(f"{name} {ops.get(op, op)} {v:g}{unit if unit in ('%', '×', 'min', 'd', 'pts') else ''}")
+    return " and ".join(cs)
 
 
 def words(s: dict) -> str:
@@ -808,8 +909,10 @@ def words(s: dict) -> str:
     if s["dir"] and (PACK_STYLES.get(s["exit"]) or {}).get("sell"):                 # 2.44: directional option selling
         side = "Sell the ATM put (bullish view; margin ~₹1 lakh+)" if s["dir"] > 0 else "Sell the ATM call (bearish view; margin ~₹1 lakh+)"
     names = {"BANKNIFTY": "Bank Nifty", "NIFTY": "Nifty", STOCKS: "any F&O stock"}
+    then = (f"; then, within {s['then']['within']} bar{'s' if s['then']['within'] > 1 else ''} of that bar, enter when "
+            + _cond_txt(s["then"]["conds"])) if s.get("then") else ""        # 2.47: two-step entries
     return (f"{side} on {' / '.join(names.get(x, x) for x in s['syms'])} "
-            f"between {hm(s['win'][0])} and {hm(s['win'][1])} when " + " and ".join(cs) +
+            f"between {hm(s['win'][0])} and {hm(s['win'][1])} when " + " and ".join(cs) + then +
             f". Exit {exit_words(s['exit'])}. Max {s['max_day']} trade{'s' if s['max_day'] > 1 else ''} a day, none after a loss.")
 
 
@@ -843,6 +946,12 @@ def validate(s: dict, extra_exits=()) -> dict | None:
         for k in ("pack", "pack_v", "name"):              # 2.43: which strategy file and strategy it came from
             if s.get(k) is not None and str(s.get("source") or "").startswith("pack:"):
                 out[k] = s[k] if k == "pack_v" and isinstance(s[k], int) else str(s[k])[:80]
+        th = s.get("then")
+        if th and d != 0:                                  # 2.47: setup bar (conds), then a trigger bar (then.conds)
+            tc = [[str(f), str(o), float(v)] for f, o, v in th.get("conds", [])]
+            if not tc or len(tc) > 3 or any(f not in FEATURES or o not in (">", "<") or not math.isfinite(v) for f, o, v in tc):
+                return None
+            out["then"] = {"conds": tc, "within": int(min(THEN_MAX, max(1, int(th.get("within") or 1))))}
         out["id"] = sid(out)
         return out
     except Exception:
@@ -881,6 +990,27 @@ class Book:
         x = x[~np.isnan(x)]
         return np.unique(np.round(np.quantile(x, [0.1, 0.25, 0.5, 0.75, 0.9]), 3)) if len(x) else np.array([])
 
+    def _then_ok(self, s: dict, sm) -> np.ndarray:
+        """2.47: rows whose trigger conditions hold and whose setup conditions held on one of the `within` bars before,
+        same day, symbol and direction. The setup bar may be before the time window; the entry bar is inside it."""
+        dmask = self.cols["dir"] == s["dir"]
+        ms = dmask & sm
+        for feat, op, v in s["conds"]:
+            x = self.cols[feat]
+            ms &= (x > v) if op == ">" else (x < v)
+        mt = dmask & sm
+        for feat, op, v in s["then"]["conds"]:
+            x = self.cols[feat]
+            mt &= (x > v) if op == ">" else (x < v)
+        bar = np.round(self.cols["tod"] / 5).astype(np.int64)
+        code = (self.dix.astype(np.int64) * (self.n_sym + 1) + self.symi) * 512 + bar
+        setups = np.unique(code[ms])
+        ok = np.zeros(len(mt), bool)
+        ti = np.nonzero(mt)[0]
+        for k in range(1, int(s["then"]["within"]) + 1):
+            ok[ti] |= np.isin(code[ti] - k, setups, assume_unique=False)
+        return ok
+
     def trades(self, s: dict, part: int | None = None, max_premium: float | None = None) -> pd.DataFrame:
         m = (self.cols["dir"] == s["dir"]) & (self.cols["tod"] >= s["win"][0]) & (self.cols["tod"] <= s["win"][1])
         sm = np.isin(self.symcode, s["syms"])
@@ -891,9 +1021,12 @@ class Book:
             m &= self.part == part
         if max_premium:                                     # only options whose lot the account can pay for
             m &= self.prem <= max_premium
-        for feat, op, v in s["conds"]:
-            x = self.cols[feat]
-            m &= (x > v) if op == ">" else (x < v)
+        if s.get("then"):                                  # 2.47: enter on a trigger bar after a setup bar
+            m &= self._then_ok(s, sm)
+        else:
+            for feat, op, v in s["conds"]:
+                x = self.cols[feat]
+                m &= (x > v) if op == ">" else (x < v)
         idx = np.nonzero(m)[0]
         if s["exit"] not in self.pnl:
             return pd.DataFrame(columns=["day", "sym", "tod", "pnl", "part"])
@@ -1365,13 +1498,21 @@ def signal_now(rule: dict, feats: dict, sym: str, i: int | None = None) -> bool:
     tod = feats["tod"][i]
     if not (rule["win"][0] <= tod <= rule["win"][1]):
         return False
-    for feat, op, v in rule["conds"]:
-        x = feats[feat][i]
-        if x is None or (isinstance(x, float) and math.isnan(x)):
-            return False
-        if not ((x > v) if op == ">" else (x < v)):
-            return False
-    return True
+    def ok(conds, j):
+        for feat, op, v in conds:
+            arr = feats.get(feat)
+            if arr is None:                                # a fact this screen doesn't compute: the rule can't fire here
+                return False
+            x = arr[j]
+            if x is None or (isinstance(x, float) and math.isnan(x)):
+                return False
+            if not ((x > v) if op == ">" else (x < v)):
+                return False
+        return True
+    if rule.get("then"):                                   # 2.47: trigger now, setup on one of the bars before
+        th = rule["then"]
+        return ok(th["conds"], i) and any(ok(rule["conds"], j) for j in range(max(0, i - int(th["within"])), i))
+    return ok(rule["conds"], i)
 
 
 # ------------------------------------------------------------------ Claude as a researcher
