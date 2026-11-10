@@ -217,3 +217,49 @@ def test_live_screen_adds_the_new_facts_only_when_a_rule_uses_them():
     a, b = full["bbp_30m"][-40:], f2["bbp_30m"]
     assert np.allclose(a[~np.isnan(a)], b[~np.isnan(a)]) and not logs
     assert "ce_m0930" in f2 and len(f2["ce_m0930"]) == 40
+
+
+def test_sweep_of_yesterdays_low_back_inside_and_retest():
+    nb = 75
+    y = np.linspace(100, 110, nb)                                    # yesterday: low 99.9, high 110.1
+    t = np.full(nb, 104.0)
+    t[10:13] = [101.0, 100.4, 99.0]                                  # bar 12 closes below yesterday's low (swept)
+    t[13:20] = [100.6, 101.2, 101.6, 100.9, 101.4, 101.8, 102.2]   # back inside; bar 16 dips to the level
+    c = np.r_[y, t]
+    o = np.r_[c[0], c[:-1]]
+    h, l = np.maximum(o, c) + 0.1, np.minimum(o, c) - 0.1
+    l[nb + 17] = 99.95                                               # bar 17 retests the low and closes green
+    o[nb + 17] = 100.5
+    day, pos = np.repeat([0, 1], nb), np.tile(np.arange(nb), 2)
+    f = T.sweep_facts(o, h, l, c, day, pos, tol_atr=0.5)
+    b = f["pd_back"][nb:]
+    assert b[12] == 0 and b[13] == 1 and b[14] == 2 and b[16] == 4
+    assert f["pd_rt"][nb + 17] == 1 and (f["pd_rt"][nb:] == 1).sum() == 1 and np.isnan(f["pd_back"][:nb]).all()
+
+
+def test_bigger_chart_level_break_and_retest():
+    nb = 75
+    days = 4
+    rng = np.random.default_rng(2)
+    base = np.r_[np.linspace(110, 100, nb), np.linspace(100, 112, nb), np.linspace(112, 104, nb)]   # 4H swing low ~100
+    d4 = np.r_[np.linspace(104, 97, 30), np.linspace(97, 99.8, 12), np.linspace(99.8, 95, 33)]      # break, retest, fall
+    c = np.r_[base, d4] + rng.normal(0, 0.02, nb * days)
+    o = np.r_[c[0], c[:-1]]
+    h, l = np.maximum(o, c) + 0.05, np.minimum(o, c) - 0.05
+    day, pos = np.repeat(np.arange(days), nb), np.tile(np.arange(nb), days)
+    x = T.xretest(o, h, l, c, day, pos, 12, 6)                       # 1H levels, 30M execution (enough candles here)
+    assert (x[3 * nb:] == -1).any() and not (x == 1).any()
+    first = 3 * nb + int(np.argmax(x[3 * nb:] == -1))
+    assert c[first] < 100 and (pos[first] + 1) % 6 == 0 or x[first - 1] != -1
+
+
+def test_day_extreme_stop():
+    sp, why = X.spec_check({"stop": ["dayx"], "target_r": 2})
+    assert why is None and "today's low" in sp["words"]
+    k = X.spec_key(sp)
+    X.PACK_STYLES[k] = sp
+    try:
+        assert X.risk_pts(k, 100.0, 1, math.nan, lv={"dayx": (97.0, 104.0)}) == 3.0
+        assert X.risk_pts(k, 100.0, -1, math.nan, lv={"dayx": (97.0, 104.0)}) == 4.0
+    finally:
+        X.PACK_STYLES.pop(k, None)

@@ -135,8 +135,12 @@ Costs: Upstox data is free with an account. Claude uses the plan you already hav
   (`ce_m0930`, `pe_m1000`...), and the straddle vs its average so far (`strd_avg`).
 - **Live:** computed only when a rule uses them; history = Dhan 5-min bars (once a day per symbol). System page check
   `tf_facts`. The Lab's build makes its table every 40K rows (memory with the bigger table).
-- **Bullets:** six strategy files (197 rules): `aseem_swing`, `aseem_intraday`, `aseem_advanced`, `aseem_scalp`,
-  `aseem_options`, `aseem_price_action`. Not testable yet (listed in the files): positional / daily holds (chapter 4,
+- **Also from three PDFs (10 Nov, 15:05):** liquidity-sweep facts (`pd_back`: closes back inside yesterday's range after
+  a sweep of its high / low, counted; `pd_rt`: the swept level retested with a rejection candle; `eq_rt`: the same at
+  equal highs / lows), 4-hour candles (09:15-13:15, 13:15-15:30) with a bigger-chart level broken and retested on a
+  smaller chart (`xrt_4H_30m`, `xrt_1H_15m`), and a stop at the sweep's extreme (`dayx`: today's low / high so far).
+- **Bullets:** nine strategy files (239 rules): `aseem_swing`, `aseem_intraday`, `aseem_advanced`, `aseem_scalp`,
+  `aseem_options`, `aseem_price_action`, `daily_candle_sweep`, `james_berry_4h30m`, `nifty_liquidity_sweep`. Not testable yet (listed in the files): positional / daily holds (chapter 4,
   1.4, 1.5, 7.2, 7.5, 7.6), Elliott and Gann (hand-drawn), volume oscillator (no index volume), calendar / expiry decay /
   BTST / swing buying (overnight), 3 PM strategy (after 14:45), OI strikes and OTM-by-premium selling, Martingale (sizing).
 

@@ -120,6 +120,19 @@
   "day": [
     "piv_pos",
     "piv_x",
-    "piv_rt"
+    "piv_rt",
+    "pd_back",
+    "pd_rt",
+    "eq_rt"
+  ],
+  "xretest": [
+    {
+      "level_tf": "4H",
+      "exec_tf": "30m"
+    },
+    {
+      "level_tf": "1H",
+      "exec_tf": "15m"
+    }
   ]
 }

@@ -728,7 +728,7 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                     if pack_styles:                       # 2.44: levels for file exits, the opposite option for sells
                         lv = {"fc": (l[0], h[0]), "or15": (l[:3].min(), h[:3].max()) if i >= 2 else (None, None),
                               "or30": (l[:6].min(), h[:6].max()) if i >= 5 else (None, None),
-                              "swing": (sw_lo[i], sw_hi[i])}
+                              "swing": (sw_lo[i], sw_hi[i]), "dayx": (float(l[:i + 1].min()), float(h[:i + 1].max()))}
                         oppx = day.px.get((float(k), "PE" if side == "CE" else "CE"))
                     for style in pack_styles:             # a bad file exit is NaN for its own column, nothing else
                         try:

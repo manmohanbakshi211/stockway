@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 RULES = Path(__file__).resolve().parent.parent / "rules" / "tf_facts.json"
-TF_BARS = {"5m": 1, "15m": 3, "30m": 6, "1H": 12}
+TF_BARS = {"5m": 1, "15m": 3, "30m": 6, "1H": 12, "4H": 48}        # 4H: 09:15-13:15 and 13:15-15:30
 
 
 # ------------------------------------------------------------------ small tools (numpy, causal)
@@ -484,7 +484,12 @@ WORDS = {
     "piv_pos": ("price vs yesterday's pivots: 0 = P, +1 = R1, +2 = R2, -1 = S1, -2 = S2", ""),
     "piv_x": ("5-min close crossed a pivot level (P, R1, R2, S1, S2) up (+1) / down (-1)", ""),
     "piv_rt": ("broke a pivot level earlier today, came back to it and held (+1 above, -1 below)", ""),
+    "pd_back": ("after a sweep of yesterday's low, closes back inside for N bars (+N); after a sweep of yesterday's high (-N)", ""),
+    "pd_rt": ("yesterday's low swept, closed back inside, retested and a bullish rejection candle (+1); mirror at the high (-1)", ""),
+    "eq_rt": ("equal lows swept, closed back above, retested and a bullish rejection candle (+1); mirror at equal highs (-1)", ""),
+    "xrt": ("a level of the bigger chart broke on the smaller chart, then a retest held: +1 resistance broken up, -1 support broken down", ""),
 }
+DAY_FACTS = {"pivot": ("piv_pos", "piv_x", "piv_rt"), "sweep": ("pd_back", "pd_rt", "eq_rt")}
 
 
 def config() -> dict:
@@ -501,7 +506,7 @@ def fact_names(cfg: dict | None = None) -> dict:
     for tf, inds in (cfg.get("tfs") or {}).items():
         if tf not in TF_BARS:
             continue
-        lab = {"5m": "5-min", "15m": "15-min", "30m": "30-min", "1H": "1-hour"}[tf]
+        lab = {"5m": "5-min", "15m": "15-min", "30m": "30-min", "1H": "1-hour", "4H": "4-hour"}[tf]
         for ind, outs in inds.items():
             for o_ in outs:
                 w, u = WORDS.get(o_, (o_, ""))
@@ -512,6 +517,11 @@ def fact_names(cfg: dict | None = None) -> dict:
     for k in (cfg.get("day") or []):
         if k in WORDS:
             out[k] = WORDS[k]
+    for x in (cfg.get("xretest") or []):
+        lt, et = x.get("level_tf"), x.get("exec_tf")
+        if lt in TF_BARS and et in TF_BARS:
+            out[f"xrt_{lt}_{et}"] = (f"the last {lt} swing high / low broke on the {et} chart, then a retest held "
+                                     "(+1 resistance broken up, -1 support broken down)", "")
     return out
 
 
@@ -571,12 +581,162 @@ def compute(o, h, l, c, day, pos, cfg: dict | None = None) -> dict:
         hi, lo = np.full(N, np.nan), np.full(N, np.nan)
         hi[ok], lo[ok] = ch[at_open[ok]], cl_[at_open[ok]]
         out[f"ph_brk_{tf}"] = np.where(np.isnan(hi), np.nan, np.where(c > hi, 1.0, np.where(c < lo, -1.0, 0.0)))
-    if cfg.get("day"):
+    want = set(cfg.get("day") or [])
+    for name, fn in (("pivot", pivot_facts), ("sweep", sweep_facts)):
+        keys = [k for k in DAY_FACTS[name] if k in want]
+        if not keys:
+            continue
         try:
-            out.update(pivot_facts(o, h, l, c, day, pos))
+            res = fn(o, h, l, c, day, pos)
+            out.update({k: res[k] for k in keys})
         except Exception:
-            for k in ("piv_pos", "piv_x", "piv_rt"):
+            for k in keys:
                 out[k] = np.full(N, np.nan)
+    for x in (cfg.get("xretest") or []):                  # 2.47: James Berry: 4H level, 30m break and retest
+        lt, et = x.get("level_tf"), x.get("exec_tf")
+        if lt not in TF_BARS or et not in TF_BARS:
+            continue
+        try:
+            out[f"xrt_{lt}_{et}"] = xretest(o, h, l, c, day, pos, TF_BARS[lt], TF_BARS[et])
+        except Exception:
+            out[f"xrt_{lt}_{et}"] = np.full(N, np.nan)
+    return out
+
+
+def sweep_facts(o, h, l, c, day, pos, tol_atr=0.15) -> dict:
+    """Liquidity sweeps of yesterday's high / low and of equal highs / lows (5-min bars).
+    pd_back: price went below yesterday's low and a later close came back above it: +1 on that bar, +2 the next bar
+    while every close stays above, ...; a close below again ends it (a new sweep can start). Mirror (-N) at the high.
+    pd_rt / eq_rt: after such a sweep and return, the level is retested (the bar dips to within tol_atr ATR of it or
+    beyond, without closing beyond) and the bar is a bullish rejection (green, closes above the previous bar's
+    close): +1. Mirror -1. Equal lows = the last two confirmed swing lows (2 bars each side) within tol_atr ATR."""
+    N = len(c)
+    back, prt, ert = np.full(N, np.nan), np.zeros(N), np.zeros(N)
+    atr = _atr(h, l, c)
+    sh, sl, shi, sli = _swings(h, l, 2)
+    prev = None
+    lows, highs = [], []
+    used = {"lo": set(), "hi": set()}                       # equal-level pairs already traded
+    for d in np.unique(day):
+        ix = np.nonzero(day == d)[0]
+        if prev is not None:
+            H, L = h[prev].max(), l[prev].min()
+            st = {"lo": [False, 0, False], "hi": [False, 0, False]}      # swept, bars back inside, retest done
+            eqs = {"lo": None, "hi": None}
+            for t_, g in enumerate(ix):
+                a = atr[g] if not math.isnan(atr[g]) else 0.0
+                green, red = c[g] > o[g] and c[g] > c[g - 1], c[g] < o[g] and c[g] < c[g - 1]
+                # yesterday's low
+                s_ = st["lo"]
+                if l[g] < L and c[g] < L:
+                    s_[:] = [True, 0, False]
+                elif l[g] < L:
+                    s_[0] = True
+                    s_[1] = 1 if c[g] > L else s_[1]
+                elif s_[0] and c[g] > L:
+                    s_[1] = s_[1] + 1 if s_[1] else 1
+                    if s_[1] >= 2 and l[g] <= L + tol_atr * a and green and not s_[2]:
+                        prt[g], s_[2] = 1.0, True
+                s_ = st["hi"]
+                if h[g] > H and c[g] > H:
+                    s_[:] = [True, 0, False]
+                elif h[g] > H:
+                    s_[0] = True
+                    s_[1] = 1 if c[g] < H else s_[1]
+                elif s_[0] and c[g] < H:
+                    s_[1] = s_[1] + 1 if s_[1] else 1
+                    if s_[1] >= 2 and h[g] >= H - tol_atr * a and red and not s_[2]:
+                        prt[g], s_[2] = -1.0, True
+                lo_b, hi_b = st["lo"][1] if st["lo"][0] else 0, st["hi"][1] if st["hi"][0] else 0
+                if lo_b and (not hi_b or lo_b <= hi_b):
+                    back[g] = float(lo_b)
+                elif hi_b:
+                    back[g] = -float(hi_b)
+                else:
+                    back[g] = 0.0
+                # equal lows / highs from confirmed swings
+                if sli[g] >= 0 and (not lows or lows[-1][0] != sli[g]):
+                    lows.append((int(sli[g]), sl[g]))
+                if shi[g] >= 0 and (not highs or highs[-1][0] != shi[g]):
+                    highs.append((int(shi[g]), sh[g]))
+                if (len(lows) >= 2 and a and abs(lows[-1][1] - lows[-2][1]) <= tol_atr * a and lows[-1][0] not in used["lo"]
+                        and (eqs["lo"] is None or eqs["lo"][0] != lows[-1][0])):
+                    eqs["lo"] = [lows[-1][0], min(lows[-1][1], lows[-2][1]), 0]
+                if (len(highs) >= 2 and a and abs(highs[-1][1] - highs[-2][1]) <= tol_atr * a and highs[-1][0] not in used["hi"]
+                        and (eqs["hi"] is None or eqs["hi"][0] != highs[-1][0])):
+                    eqs["hi"] = [highs[-1][0], max(highs[-1][1], highs[-2][1]), 0]
+                e = eqs["lo"]                                # [swing index, level, state 0 armed / 1 swept / 2 back]
+                if e is not None:
+                    lv_ = e[1]
+                    if e[2] == 0 and l[g] < lv_:
+                        e[2] = 2 if c[g] > lv_ else 1
+                    elif e[2] == 1 and c[g] > lv_:
+                        e[2] = 2
+                    elif e[2] == 2 and c[g] < lv_:
+                        e[2] = 1
+                    elif e[2] == 2 and l[g] <= lv_ + tol_atr * a and green:
+                        ert[g], eqs["lo"] = 1.0, None
+                        used["lo"].add(e[0])
+                e = eqs["hi"]
+                if e is not None:
+                    lv_ = e[1]
+                    if e[2] == 0 and h[g] > lv_:
+                        e[2] = 2 if c[g] < lv_ else 1
+                    elif e[2] == 1 and c[g] < lv_:
+                        e[2] = 2
+                    elif e[2] == 2 and c[g] > lv_:
+                        e[2] = 1
+                    elif e[2] == 2 and h[g] >= lv_ - tol_atr * a and red:
+                        ert[g], eqs["hi"] = -1.0, None
+                        used["hi"].add(e[0])
+        prev = ix
+    have = ~np.isnan(back)
+    return {"pd_back": back, "pd_rt": np.where(have, prt, np.nan), "eq_rt": np.where(np.isnan(atr), np.nan, ert)}
+
+
+def xretest(o, h, l, c, day, pos, n_lv: int, n_ex: int, k_max: int = 12) -> np.ndarray:
+    """Bigger-chart level, smaller-chart break and retest (James Berry): levels = the last confirmed swing high / low
+    (2 candles each side) of the n_lv-bar chart, known at that chart's last closed candle; on the n_ex-bar chart a close
+    beyond the level marks the break; within k_max candles a candle that comes back to within 0.25 ATR of the level
+    and closes on the break side = the retest held (-1 support broken down, +1 resistance broken up). Per 5-min bar:
+    the value of the last closed n_ex candle."""
+    N = len(c)
+    (lo_, lh, ll, lc), lv_close, _ = _candles(o, h, l, c, day, pos, n_lv)
+    sh, sl, _shi, _sli = _swings(lh, ll, 2)
+    (eo, eh, el, ec), ex_close, _ = _candles(o, h, l, c, day, pos, n_ex)
+    # for each execution candle: the level candle closed at its last 5-min bar
+    ex_idx = np.full(len(ec), -1)
+    lv_at = np.full(len(ec), -1)
+    for b in range(N):                                    # the 5-min bar that closes each execution candle
+        j = ex_close[b]
+        if j >= 0:
+            ex_idx[j] = b
+    for j in range(len(ec)):
+        b = ex_idx[j]
+        lv_at[j] = lv_close[b] if b >= 0 else -1
+    atr = _atr(eh, el, ec)
+    sig = np.zeros(len(ec))
+    brk_dn = brk_up = None                                # (level, candle index of the break)
+    for j in range(1, len(ec)):
+        q = lv_at[j]
+        if q < 0 or math.isnan(atr[j]):
+            continue
+        sup, res = sl[q], sh[q]
+        if not math.isnan(sup) and ec[j] < sup <= ec[j - 1]:
+            brk_dn = (sup, j)
+        if not math.isnan(res) and ec[j] > res >= ec[j - 1]:
+            brk_up = (res, j)
+        if brk_dn and 1 <= j - brk_dn[1] <= k_max and eh[j] >= brk_dn[0] - 0.25 * atr[j] and ec[j] < brk_dn[0]:
+            sig[j], brk_dn = -1.0, None
+        elif brk_up and 1 <= j - brk_up[1] <= k_max and el[j] <= brk_up[0] + 0.25 * atr[j] and ec[j] > brk_up[0]:
+            sig[j], brk_up = 1.0, None
+        if brk_dn and j - brk_dn[1] > k_max:
+            brk_dn = None
+        if brk_up and j - brk_up[1] > k_max:
+            brk_up = None
+    out = np.full(N, np.nan)
+    ok = ex_close >= 0
+    out[ok] = sig[ex_close[ok]]
     return out
 
 
