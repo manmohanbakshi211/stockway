@@ -114,6 +114,23 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## No more naked straddle selling: one range-day sell signal, hedged versions tested first (2.55)
+
+Mandeep, 11 Nov 2026: sell only in sideways markets and risk-controlled; "i also checked system selling call and put at
+same time i think it's not hedging"; then "yes go for it".
+
+- What was happening: 83 promoted Strategy Lab rules were live on his Mac and every one was "sell the ATM straddle"
+  (near-copies of one idea: different time windows and stops). Each fired on its own, paper-sold the ATM call and put
+  with no wings bought, and raised an "act now" alert (in Focus, so on Telegram). 11 such pairs, net −₹5,052; on 9 Nov
+  (expiry) 6 straddles were open on Nifty at once.
+- Now (`rules/range_sell.json`): the first of those rules to fire on an index raises **one "Range-day sell" signal per
+  index per day** (the others count as agreeing), marked with the day's regime (range / quiet = fits, trend = skip),
+  severity 2 so it stays out of Focus and Telegram, recorded under All alerts. **No paper trade**: `paper: "off"`
+  (the old naked behaviour only with `"naked"`, and then only on range days). System check `range_sell`.
+- The Lab's own iron fly (wings 4 strikes away, out at a 30% / 60% loss of the credit) was already tested on these
+  entries: 14 of 14 failed (−₹126 to −₹535 a trade). Hedged challengers are tested next (see below) before any
+  selling goes back on paper.
+
 ## Smart chart lines: the app draws the lines that matter, each with its record (2.54)
 
 Mandeep, 11 Nov 2026: "check whether we are marking and analysing good support, resistance, target and stop loss and
