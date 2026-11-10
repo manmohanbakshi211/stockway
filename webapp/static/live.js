@@ -2958,10 +2958,22 @@ async function pageLab() {
     const res = (L) => !L || !L.tested ? `<span class="muted">not tested yet</span>`
       : `<span class="pill ${L.stage === "promoted" ? "p-up" : L.stage === "failed holdout" ? "p-down" : ""}">${L.stage === "promoted" ? "passed all 3" : esc(L.stage || "")}</span>
          <br><small>${L.passed}/${L.of} versions passed · ${L.stage === "promoted" ? "best" : "best on train"}: train ${L.train && L.train.n ? `${L.train.n} trades, avg ${rs(L.train.avg)}` : "no trades"} · holdout ${L.hold && L.hold.n ? `${L.hold.n} trades, avg ${rs(L.hold.avg)}, t ${L.hold.t}` : "no trades"}</small>`;
-    const packs = (x.packs || []).map((p) => `<div class="pack-card${p.on ? "" : " off"}">
-        <div class="toolbar" style="margin:0"><div><b>${esc(p.name || p.id)}</b> <small class="muted">v${esc(String(p.version || 1))} · ${esc(p.id)} · ${p.n_rules} Lab rules${p.made ? " · made " + esc(p.made) : ""}</small>
-          ${p.source ? `<br><small class="muted">${esc(p.source)}</small>` : ""}</div>
+    const openPk = LS.get("packOpen", {});            // 2.53: each file opens / closes; remembered on this browser
+    const labSum = (p, lab) => {                       // one line per Lab for a closed card
+      const ok = (p.strategies || []).filter((s) => s.status === "ok"), t = ok.filter((s) => ((s.labs || {})[lab] || {}).tested);
+      if (!t.length) return `not tested yet`;
+      const pass = t.filter((s) => s.labs[lab].stage === "promoted").length;
+      return `<b class="${pass ? "up" : ""}">${pass}</b> of ${t.length} passed all 3`;
+    };
+    const packs = (x.packs || []).map((p) => { const op = !!openPk[p.id], ss = p.strategies || [];
+      const nOk = ss.filter((s) => s.status === "ok").length, nNo = ss.length - nOk;
+      return `<div class="pack-card${p.on ? "" : " off"}${op ? " open" : ""}" data-pk="${esc(p.id)}">
+        <div class="toolbar pack-head" style="margin:0"><div class="pack-tg" role="button" tabindex="0" aria-expanded="${op}" title="${op ? "Close" : "Open"} this file">
+          <span class="pack-car" aria-hidden="true">▸</span> <b>${esc(p.name || p.id)}</b> <small class="muted">v${esc(String(p.version || 1))} · ${esc(p.id)} · ${p.n_rules} Lab rules${p.made ? " · made " + esc(p.made) : ""}</small>
+          ${p.source ? `<br><small class="muted">${esc(p.source)}</small>` : ""}
+          <div class="small pack-sum">${ss.length} strateg${ss.length === 1 ? "y" : "ies"}${nNo ? ` (${nNo} can't be tested yet)` : ""} · 1-year Lab: ${labSum(p, "1y")} · 5-year Lab: ${labSum(p, "5y")}${p.fatal ? ` · <span class="down">problem: open to see</span>` : ""}</div></div>
           <label class="check small"><input type="checkbox" data-pack="${esc(p.id)}" ${p.on ? "checked" : ""}><span>On (Lab + test bench)</span></label></div>
+        <div class="pack-body"${op ? "" : " hidden"}>
         ${p.fatal ? `<p class="small down">${esc(p.fatal)}</p>` : ""}
         <div class="table-wrap" style="margin-top:6px"><table class="mini"><thead><tr><th>Strategy</th><th>1-year Lab</th><th>5-year Lab</th></tr></thead><tbody>
           ${(p.strategies || []).map((s) => `<tr${s.status === "ok" && (s.ids || []).length ? ` class="click" data-sexp="${esc((s.ids || []).join(","))}" title="Show every version and every stock / index it was tested on"` : ""}><td class="small"><b>${esc(s.name)}</b>${s.status === "ok" ? ` <small class="muted">▸</small>` : ""}${s.status !== "ok" ? `<br><span class="${s.status === "cannot" ? "muted" : "down"}">${s.status === "cannot" ? "Can't test yet: " : ""}${esc(s.why)}</span>` : `<br><small class="muted">${s.rules} version(s)</small>`}</td>
@@ -2969,15 +2981,29 @@ async function pageLab() {
         </tbody></table></div>
         ${(p.cannot_test || []).length ? `<p class="small muted" style="margin:6px 0 0">Can't test yet: ${p.cannot_test.slice(0, 6).map((c) => esc(c.idea) + (c.needs ? ` (needs ${esc(c.needs)})` : "")).join("; ")}</p>` : ""}
         ${(p.problems || []).length ? `<details class="small" style="margin-top:4px"><summary>${p.problems.length} note(s) from the check</summary><ul>${p.problems.map((q) => `<li>${esc(q)}</li>`).join("")}</ul></details>` : ""}
-      </div>`).join("");
+      </div></div>`; }).join("");
+    const nPk = (x.packs || []).length, allOpen = nPk && (x.packs || []).every((p) => openPk[p.id]);
     el.innerHTML = `<div class="toolbar" style="margin:0"><div><h3 style="margin:0">Strategy files <span class="pill">no app update needed</span></h3>
         <p class="small muted" style="margin:4px 0 0">Upload a strategy file (.json) made from a book, video, transcript or script. The app checks it against the facts and exits it knows, keeps every upload, tests each strategy in the 1-year and 5-year Lab on the next run (train / validation / holdout) and paper-tests it live on the test bench. It never goes on live paper or in your alerts by itself. Data only: nothing in a file is ever run as code, and there is no field for orders.</p></div>
         <div class="btn-row" style="margin:0"><input type="file" id="pack-file" accept=".json,application/json"><button class="btn primary" id="pack-up">Upload</button></div></div>
+      ${nPk > 1 ? `<div class="toolbar" style="margin:10px 0 0"><span class="small muted">${nPk} files · click a file to open or close it</span>
+        <button class="link-btn" id="pack-all" type="button">${allOpen ? "Close all" : "Open all"}</button></div>` : ""}
       <div style="margin-top:8px">${packs || `<p class="small muted">No strategy files yet.</p>`}</div>`;
+    const setOpen = (card, op) => { const id = card.dataset.pk, st = LS.get("packOpen", {});
+      if (op) st[id] = 1; else delete st[id]; LS.set("packOpen", st);
+      card.classList.toggle("open", op); card.querySelector(".pack-body").hidden = !op;
+      const tg = card.querySelector(".pack-tg"); tg.setAttribute("aria-expanded", String(op)); tg.title = `${op ? "Close" : "Open"} this file`;
+      const all = $("#pack-all"); if (all) all.textContent = [...el.querySelectorAll(".pack-card")].every((c) => c.classList.contains("open")) ? "Close all" : "Open all"; };
+    el.querySelectorAll(".pack-card").forEach((card) => { const tg = card.querySelector(".pack-tg");
+      tg.onclick = (ev) => { if (ev.target.closest("a")) return; setOpen(card, !card.classList.contains("open")); };
+      tg.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setOpen(card, !card.classList.contains("open")); } }; });
+    const all = $("#pack-all");
+    if (all) all.onclick = () => { const op = all.textContent === "Open all"; el.querySelectorAll(".pack-card").forEach((c) => setOpen(c, op)); };
     $("#pack-up").onclick = async () => {
       const fl = ($("#pack-file").files || [])[0]; if (!fl) { toast("Choose a .json strategy file first"); return; }
       try { const r = await fetch(`/api/packs/upload?name=${encodeURIComponent(fl.name)}`, { method: "POST", body: fl });
         const j = await r.json(); if (!r.ok) throw new Error(j.detail || "Upload failed");
+        if (j.id) { const st = LS.get("packOpen", {}); st[j.id] = 1; LS.set("packOpen", st); }   // the file you just added opens
         toast(j.already ? `${j.name}: this exact file is already here` : `${j.name} v${j.version}: ${j.rules} Lab rules queued for the next run${(j.cannot_test || []).length ? `, ${j.cannot_test.length} can't be tested yet` : ""}`);
       } catch (e) { toast(e.message); }
       drawPacks(); };

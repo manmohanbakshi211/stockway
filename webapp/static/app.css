@@ -768,6 +768,17 @@ tr.best td { background: var(--up-soft); }
 /* 2.43 strategy files */
 .pack-card { border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); padding: 10px 12px; margin-top: 8px; }
 .pack-card.off { opacity: .6; }
+.pack-head { align-items: flex-start; flex-wrap: nowrap; gap: 12px; }   /* 2.53: each file opens / closes */
+.pack-head > label { flex: 0 0 auto; white-space: nowrap; }
+@media (max-width: 700px) { .pack-head { flex-wrap: wrap; } }
+.pack-tg { cursor: pointer; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; border-radius: 6px; }
+.pack-tg:hover b { text-decoration: underline; }
+.pack-tg:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.pack-car { display: inline-block; width: 1em; color: var(--muted); transition: transform .15s ease; }
+.pack-card.open .pack-car { transform: rotate(90deg); }
+.pack-sum { margin-top: 4px; color: var(--muted); }
+.pack-card.open .pack-sum { display: none; }
+@media (prefers-reduced-motion: reduce) { .pack-car { transition: none; } }
 
 /* 2.49: paper accounts (Main / Best only / 3% a day) */
 .pp-tabs { margin: 14px 0 0; flex-wrap: wrap; max-width: 100%; }
