@@ -33,6 +33,7 @@ const hms = (ts) => new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-d
 const hm = (ts) => new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
 /* 2.38: when a block's data was fetched, and whether its market is trading now (rules/market_hours.json) */
 const clockTs = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "";
+const pxTime = (m) => { const t = m && (m.px_ts || (m.ltt ? m.ltt / 1000 : m.t)); return t ? `<small class="asof" title="Time of this price (exchange trade time when known)">${clockTs(t)}</small>` : ""; };
 const asOf = (ts, what = "Data fetched at") => ts ? `<small class="asof" title="${esc(what)}">⟳ ${clockTs(ts)}</small>` : "";
 const mkPill = (m) => !m ? "" : `<span class="mk ${m.open && !m.stale ? "mk-open" : (m.label === "Break" || m.stale) ? "mk-pause" : "mk-closed"}" title="${esc((m.session || "") + " market: " + m.label)}">${esc(m.label)}</span>`;
 const arrow = (d) => (d === "up" ? `<span class="up" aria-label="up">▲</span>` : d === "down" ? `<span class="down" aria-label="down">▼</span>` : `<span class="amber" aria-label="watch">●</span>`);
@@ -218,7 +219,7 @@ function indexCard(m) {
   const bu = f.buildup_label ? `<span class="pill ${f.buildup_sign > 0 ? "p-up" : "p-down"}">${esc(f.buildup_label)}</span>` : "";
   return `<a class="icard" href="#/sym?s=${encodeURIComponent(m.sym)}">
     <div class="ic-head"><b>${esc(m.name)} ${mkPill(L.snap && L.snap.nse)}</b>${bu}</div>
-    <div class="ic-price">${fx(m.spot)} ${fpc(m.chg_pct)}</div>
+    <div class="ic-price">${fx(m.spot)} ${fpc(m.chg_pct)} ${pxTime(m)}</div>
     ${rangeBar(m)}
     <dl class="ic-grid">
       <div><dt>PCR</dt><dd>${o.pcr != null ? o.pcr.toFixed(2) : "–"}</dd></div>
@@ -560,7 +561,7 @@ function renderLive(force = false) {
 /* ---------------- page: Scanner */
 const SCAN_COLS = [
   ["sym", "Symbol", (m) => `<b>${esc(m.sym)}</b>${m.is_index ? ` <span class="pill p-idx">Index</span>` : ""}`, false],
-  ["spot", "Price", (m) => fx(m.spot), true],
+  ["spot", "Price", (m) => `${fx(m.spot)}${m.px_ts ? `<br>${pxTime(m)}` : ""}`, true],
   ["chg_pct", "Day", (m) => fpc(m.chg_pct), true],
   ["ret_5m", "5 min", (m) => fpc(m.ret_5m), true],
   ["vs_vwap_pct", "vs VWAP", (m) => fpc(m.vs_vwap_pct), true],
@@ -661,7 +662,7 @@ function drawScanner() {
   const cols = simple ? 5 : SCAN_COLS.length;
   tb.innerHTML = (simple
     ? rows.slice(0, 150).map((m) => `<tr class="click" data-sym="${esc(m.sym)}"><td><b>${esc(m.sym)}</b><br><small class="muted">${esc(m.name || "")}</small></td>
-        <td class="r"><b>${fx(m.spot)}</b><br><small class="${(m.chg_pct || 0) >= 0 ? "up" : "down"}">${(m.chg_pct || 0) >= 0 ? "+" : ""}${(m.chg_pct || 0).toFixed(2)}%</small></td>
+        <td class="r"><b>${fx(m.spot)}</b> ${pxTime(m)}<br><small class="${(m.chg_pct || 0) >= 0 ? "up" : "down"}">${(m.chg_pct || 0) >= 0 ? "+" : ""}${(m.chg_pct || 0).toFixed(2)}%</small></td>
         <td>${scanRead(m.score)}</td><td class="small">${esc(scanWords(m)) || "<span class='muted'>quiet</span>"}</td>
         <td class="nw small"><a href="#/chart?s=${encodeURIComponent(m.sym)}">Chart</a> · <a href="#/sym?s=${encodeURIComponent(m.sym)}">Chain</a> · <a href="#" data-watch="${esc(m.sym)}">+ Watch</a></td></tr>`).join("")
     : rows.map((m) => `<tr class="click" data-sym="${esc(m.sym)}">${SCAN_COLS.map(([k, , fn, r]) => `<td class="${r ? "r" : ""}">${fn(m)}</td>`).join("")}</tr>`).join("")) ||
@@ -734,7 +735,7 @@ function drawSym(d, first) {
   body.innerHTML = `
     <div class="sym-head"><div><a class="small" href="#/scanner">← Scanner</a> · <a class="small" href="#/chart?s=${encodeURIComponent(m.sym)}">Open chart</a>
       <h1 class="page-title">${esc(m.name)} <span class="muted" style="font-weight:500">${esc(m.sym)}</span></h1>
-      <div class="sym-price">${fx(m.spot)} ${fpc(m.chg_pct)} ${f.buildup_label ? `<span class="pill ${f.buildup_sign > 0 ? "p-up" : "p-down"}">${esc(f.buildup_label)}</span>` : ""}</div></div>
+      <div class="sym-price">${fx(m.spot)} ${fpc(m.chg_pct)} ${pxTime(m)} ${f.buildup_label ? `<span class="pill ${f.buildup_sign > 0 ? "p-up" : "p-down"}">${esc(f.buildup_label)}</span>` : ""}</div></div>
       <div class="sym-bias">${biasMeter(m.score)}${m.reasons && m.reasons.length ? `<p class="ic-why">${esc(m.reasons.join(" · "))}</p>` : ""}</div></div>
     <div class="statgrid">
       ${[["VWAP", fx(m.vwap)], ["Day range", `${fx(m.day_l)} – ${fx(m.day_h)}`], ["Opening range", m.or_low ? `${fx(m.or_low)} – ${fx(m.or_high)}` : "after 9:30"],
@@ -912,14 +913,60 @@ function sizeLine(t) {
 /* ---------------- page: Paper trades */
 async function pagePaper() {
   stopPageTimer();
+  { const b = new URLSearchParams(location.hash.split("?")[1] || "").get("b"); if (b) L.paperBook = b; }
+  L.paperBook = L.paperBook || "main";
   main.innerHTML = `<div id="pp-main"></div><div id="pp-top"></div>`;     // the top (capital, challenge) is not redrawn every 3 s
+  let lastBooks = 0;
   const tick = async (first) => {
     if (state.page !== "paper") return;
     let busy = false;
-    try { const p = await api("/api/live/paper"); busy = (p.open || []).length > 0; drawPaper(p, first); } catch (e) { if (first) main.innerHTML = `<div class="empty"><h2>Paper trading</h2><p>${esc(e.message)}</p></div>`; }
+    try {
+      if (first || Date.now() - lastBooks > 15000) {                     // 2.49: the accounts + their comparison
+        lastBooks = Date.now(); L.books = await api("/api/live/paper/books").catch(() => L.books || null);
+      }
+      const bk = L.paperBook;
+      if (bk !== "main" && !((L.books || {}).books || []).some((b) => b.id === bk)) L.paperBook = "main";
+      const p = await api(L.paperBook === "main" ? "/api/live/paper" : `/api/live/paper?book=${encodeURIComponent(L.paperBook)}`);
+      busy = (p.open || []).length > 0; drawPaper(p, first);
+    } catch (e) { if (first) main.innerHTML = `<div class="empty"><h2>Paper trading</h2><p>${esc(e.message)}</p></div>`; }
     L.pageTimer = setTimeout(() => tick(false), busy ? 1500 : 3000);     // 2.48: open trades refresh every 1.5 s
   };
   tick(true);
+}
+
+/* 2.49: the paper accounts (main + Best only + 3% a day) as tabs, and how they compare on the same days */
+function bookTabs() {
+  const bs = (L.books || {}).books || [];
+  if (!bs.length) return "";
+  const all = [{ id: "main", name: "Main account" }, ...bs.filter((b) => !b.error || b.name)];
+  return `<div class="seg pp-tabs" role="group" aria-label="Paper account">${all.map((b) => `<button data-book="${esc(b.id)}" aria-pressed="${L.paperBook === b.id}">${esc(b.name)}</button>`).join("")}</div>`;
+}
+
+function bookCompare() {
+  const rows = (L.books || {}).compare || [];
+  if (rows.length < 2) return "";
+  const pc = (v) => v == null ? "–" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+  return `<h2>Accounts side by side</h2>
+    <p class="muted small" style="margin-top:-6px">Each account has its own money and trades; none of them mixes with another. After a month this shows whether picking only the best alerts beats taking them all.</p>
+    <div class="table-wrap"><table><thead><tr><th>Account</th><th class="r">Trades</th><th class="r">Won</th><th class="r">Net</th><th class="r">Return</th><th class="r">Avg / trade</th><th class="r">Worst drop</th><th class="r">Green days</th><th class="r">+3% days</th><th>Since</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr${r.id === L.paperBook ? ` class="hl"` : ""}><td><b>${esc(r.name)}</b>${r.open ? ` <small class="muted">${r.open} open</small>` : ""}</td><td class="r">${r.trades}</td><td class="r">${r.won_pct != null ? r.won_pct + "%" : "–"}</td>
+      <td class="r ${(r.net || 0) >= 0 ? "up" : "down"}"><b>${rupees(r.net)}</b></td><td class="r">${pc(r.return_pct)}</td><td class="r">${r.avg != null ? rupees(r.avg) : "–"}</td>
+      <td class="r down">${r.max_drop ? rupees(r.max_drop) : "–"}</td><td class="r">${r.days ? `${r.green_days} of ${r.days}` : "–"}</td><td class="r">${r.target_days != null ? `${r.target_days} of ${r.days}` : "–"}</td><td class="nw">${esc(r.since || "–")}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function bookHead(p) {
+  const d = p.day || {}, why = Object.entries(p.today_why || {});
+  const prog = d.target != null ? `<div class="kpis kpi3" style="margin-top:12px">
+      <div class="kpi"><b>${rupees(d.start)}</b><span>Money this morning${p.compound ? " (yesterday's result added)" : ""}</span></div>
+      <div class="kpi"><b class="${(d.now || 0) >= 0 ? "up" : "down"}">${rupees(d.now)} <small>${d.pct != null ? (d.pct >= 0 ? "+" : "") + d.pct.toFixed(2) + "%" : ""}</small></b><span>Today so far (booked + open)</span></div>
+      <div class="kpi"><b>${rupees(d.target)}</b><span>Day target +${d.target_pct}% · stop −${d.stop_pct}% (${rupees(-d.stop)})</span></div></div>` : "";
+  return `<div class="panel tight" style="margin-top:12px"><b>${esc(p.name)}</b>: ${esc(p.explain || p.short || "")}
+      <form class="btn-row" id="bk-cap-form" style="margin:10px 0 0;align-items:center"><label class="small" for="bk-cap">Capital for this account</label>
+        <input id="bk-cap" inputmode="text" autocomplete="off" style="max-width:160px" placeholder="${esc(String(p.account && p.account.capital || ""))}">
+        <button class="btn" type="submit">Save</button><small class="muted">Now ${rupees((p.account || {}).capital)}. Type 1 lakh, 2,00,000 or 5L.</small></form></div>
+    ${prog}
+    <p class="note">Alerts looked at today: <b>${p.today_seen || 0}</b>, taken: <b>${p.today_taken || 0}</b>${why.length ? `. Not taken: ${why.map(([k, n]) => `${n} × ${esc(k)}`).join(" · ")}` : ""}. Paper only.</p>
+    ${p.error ? `<div class="banner">This account had an error and was skipped: ${esc(p.error)}</div>` : ""}`;
 }
 
 /* 2.48: why paper trades were not taken today (no free money, market closed, old quote) */
@@ -948,7 +995,7 @@ function drawPaper(p, first) {
   const open = p.open.map((t) => {
     const chg = t.last && t.entry ? (t.last / t.entry - 1) * 100 : null;
     return `<tr><td>${sideTag(t)} <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${sizeLine(t)}${links(t)}</td><td>${stockNow(t)}</td><td>${esc((t.day || "").slice(5))} ${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r">${fx(t.last)} ${fpc(chg, 1)}${t.px_ts ? `<br><small class="muted" title="Exchange time of this price">at ${hms(t.px_ts)}</small>` : ""}</td>
-      <td class="r">${fx(t.target)} / ${fx(t.stop)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}"><b>${rupees(t.unreal)}</b></td><td><button class="link-btn" data-close="${t.id}">Exit</button></td></tr>`;
+      <td class="r">${fx(t.target)} / ${fx(t.stop)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}"><b>${rupees(t.unreal)}</b></td><td>${p.book ? "" : `<button class="link-btn" data-close="${t.id}">Exit</button>`}</td></tr>`;
   }).join("");
   // 2.40: the latest 25 closed trades (the rest one tap away), dates short and on one line
   const shortDay = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" }); } catch (_) { return d; } };
@@ -959,9 +1006,12 @@ function drawPaper(p, first) {
   const cls = (v) => v >= 0 ? "up" : "down";
   const keepTop = $("#pp-top"); if (keepTop) main.appendChild(keepTop);       // out of the way while the rest redraws
   if (!$("#pp-main")) main.insertAdjacentHTML("afterbegin", `<div id="pp-main"></div>`);
+  const isMain = !p.book;                                      // 2.49: Main account or an extra one (Best only, 3% a day)
   $("#pp-main").innerHTML = `<div class="toolbar"><h1 class="page-title" style="margin:0">Paper trading</h1>
-      <div class="btn-row" style="margin:0">${p.open.length ? `<button class="btn danger" id="pp-closeall">Close all (${p.open.length})</button>` : ""}
+      <div class="btn-row" style="margin:0">${isMain && p.open.length ? `<button class="btn danger" id="pp-closeall">Close all (${p.open.length})</button>` : ""}
         <a class="btn" href="#/briefs">Day report</a></div></div>
+    ${bookTabs()}
+    ${isMain ? "" : bookHead(p)}
     ${skippedLine(p.skipped_today)}
     <div class="kpis kpi6 acct">
       <div class="kpi"><b>${rupees(A.equity)}</b><span>Account value now <small class="${cls(A.return_pct || 0)}">${A.return_pct >= 0 ? "+" : ""}${(A.return_pct || 0).toFixed(2)}%</small></span></div>
@@ -971,7 +1021,8 @@ function drawPaper(p, first) {
       <div class="kpi"><b class="${cls(A.realised || 0)}">${rupees(A.realised)}</b><span>All booked P&amp;L (${p.n} trades, ${p.win_rate != null ? p.win_rate + "% won" : "–"})</span></div>
       <div class="kpi"><b>${rupees(A.capital)}</b><span>Starting capital</span></div></div>
     <div id="pp-slot"></div>
-    <div class="panel tight agg ${p.aggressive ? "on" : ""}" style="margin-top:14px"><label class="check"><input type="checkbox" id="pp-agg" ${p.aggressive ? "checked" : ""}>
+    ${isMain ? "" : bookCompare()}
+    <div class="panel tight agg ${p.aggressive ? "on" : ""}" style="margin-top:14px;${isMain ? "" : "display:none"}"><label class="check"><input type="checkbox" id="pp-agg" ${p.aggressive ? "checked" : ""}>
       <span><b>Aggressive auto trading</b> ${p.aggressive ? `<span class="pill p-amber">ON</span>` : ""}<small>Paper only. The system takes every up/down idea automatically (Important and Act-now), even when the risk check says BLOCK; up to ${s.aggressive_max_open || 15} open at once, between 09:16 and ${esc(s.exit_time || "15:15")}. Tagged "aggressive" so the Day report shows what it earns apart. Day 1 data: trades against the risk check lost money, so watch this record before trusting it.</small></span></label></div>
     ${p.guard ? `<div class="${p.guard.blocked ? "banner" : "note"}" style="${p.guard.blocked ? "margin-top:14px" : ""}">${p.guard.blocked ? "⛔ " + esc(p.guard.why) + (p.aggressive ? " (aggressive mode keeps trading)" : "") : `Risk guard: ₹${fk(p.guard.risk_per_trade)} at risk per trade, stops new trades after a ₹${fk(Math.abs(p.guard.loss_limit))} loss or ${s.max_trades_day} trades in a day. Today: ${p.guard.trades_today} trades.`}</div>` : ""}
     <h2>Open positions</h2>
@@ -982,8 +1033,14 @@ function drawPaper(p, first) {
     <h2>Closed trades <span class="muted small">${p.closed.length.toLocaleString("en-IN")}</span></h2>
     <div class="table-wrap"><table class="pp-closed"><thead><tr><th>Option</th><th>Stock</th><th>When</th><th class="r">Price</th><th>Exit</th><th class="r">Charges</th><th class="r">Net</th></tr></thead><tbody>${closed || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>
     ${p.closed.length > nShow ? `<p style="margin:8px 0 0"><button class="btn" id="pp-all">${allClosed ? `Show the latest ${nShow} only` : `Show all ${p.closed.length.toLocaleString("en-IN")} closed trades`}</button></p>` : ""}
+    ${isMain ? bookCompare() : ""}
     <p class="note">Paper only: no order ever reaches a broker. Charges are real (brokerage, STT, exchange, GST, stamp). Target +${s.target_pct}% / stop −${s.stop_pct}% on the option; alert trades exit after ${s.max_hold_min} min, all by ${esc(s.exit_time)}. ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : ""}</p>`;
   main.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => { try { await post(`/api/live/paper/${b.dataset.close}/close`, {}); toast("Closed"); pagePaper(); } catch (e) { toast(e.message); } });
+  main.querySelectorAll("[data-book]").forEach((b) => b.onclick = () => { L.paperBook = b.dataset.book; L.paperAll = false;
+    location.hash = L.paperBook === "main" ? "#/paper" : `#/paper?b=${encodeURIComponent(L.paperBook)}`; });
+  { const f = $("#bk-cap-form"); if (f) f.onsubmit = async (ev) => { ev.preventDefault();
+      const v = ($("#bk-cap").value || "").trim(); if (!v) return;
+      try { const r = await post(`/api/live/paper/books/${encodeURIComponent(p.book)}`, { amount: v }); toast(`${p.name}: capital ${rupees(r.capital)}`); L.books = null; pagePaper(); } catch (e) { toast(e.message); } }; }
   { const b = $("#pp-all"); if (b) b.onclick = () => { L.paperAll = !L.paperAll; pagePaper(); }; }
   // capital box + challenge + patterns: built once, then moved into place on every redraw (typing is never reset)
   let top = $("#pp-top");
@@ -995,7 +1052,7 @@ function drawPaper(p, first) {
       const b = $("#ch-new"); if (b) b.onclick = async () => { if (!window.confirm("Start a new challenge from today? Earlier trades stop counting for it.")) return;
         try { await post("/api/live/coach/challenge", {}); toast("New challenge started today"); pagePaper(); } catch (e) { toast(e.message); } }; } }).catch(() => {});
   }
-  const slot = $("#pp-slot"); if (slot && top) slot.appendChild(top);
+  const slot = $("#pp-slot"); if (slot && top) { slot.appendChild(top); top.style.display = isMain ? "" : "none"; }
   const ca = $("#pp-closeall");
   if (ca) ca.onclick = async () => { if (!window.confirm(`Close all ${p.open.length} open paper positions at the live price?`)) return;
     ca.disabled = true; try { const r = await post("/api/live/paper/close_all", {}); toast(`Closed ${r.closed} · net ${rupees(r.net)}`); pagePaper(); } catch (e) { toast(e.message); ca.disabled = false; } };
@@ -2720,11 +2777,12 @@ async function pageLab() {
     const src = (s) => s === "generated" || s === "mutation" ? "search" : s.startsWith("pack:") ? "🗂 " + esc(s.slice(5)) : s.startsWith("fusion:") ? "🔗 " + esc(s.slice(7)) : s.startsWith("ebook:") ? "📕 " + esc(s.slice(6)) : s.startsWith("library:") ? "📚 " + esc(s.slice(8)) : s.startsWith("book:") ? "📗 " + esc(s.slice(5)) : s === "claude" ? "Claude" : esc(s);
     const fits = (r) => r.dir !== 0 || String(r.exit || "").startsWith("fly");
     const only40 = LS.get("lab40", false);
-    const rows = (f.rules || []).filter((r) => r.stage !== "failed train" && r.stage !== "duplicate" && (!only40 || fits(r))).slice(0, 60).map((r) => `<tr>
+    const rows = (f.rules || []).filter((r) => r.stage !== "failed train" && r.stage !== "duplicate" && (!only40 || fits(r))).slice(0, 60).map((r) => `<tr class="click" data-rexp="${esc(r.id)}" title="Show every stock / index this rule traded">
         <td><span class="pill ${stage[r.stage] ? stage[r.stage][0] : ""}">${stage[r.stage] ? stage[r.stage][1] : esc(r.stage)}</span>${r.stage === "promoted" ? ` <span class="pill ${r.evidence === "strong" ? "p-up" : r.evidence === "moderate" ? "p-amber" : ""}" title="Holdout t-stat: strong ≥ 2, moderate ≥ 1">evidence: ${esc(r.evidence || "weak")}</span>` : ""}<br><small class="muted">${r.id} · ${src(r.source || "")}</small></td>
         <td class="small">${esc(r.rule)}${r.note ? `<br><span class="muted">${esc(r.note)}</span>` : ""}${r.live_record ? `<br><b>Live paper:</b> ${r.live_record.n} trades, ${rs(r.live_record.net)}` : ""}</td>
         <td class="small">${st(r.train)}</td><td class="small">${st(r.valid)}</td><td class="small"><b>${st(r.hold)}</b>${r.hold && r.hold.n ? `<br>worst day ${rs(r.hold.worst_day)}` : ""}</td>
-        <td>${r.stage === "promoted" ? `<label class="check small"><input type="checkbox" data-rlive="${r.id}" ${r.is_live ? "checked" : ""}><span>Live paper</span></label>` : ""}</td></tr>`).join("");
+        <td>${r.stage === "promoted" ? `<label class="check small"><input type="checkbox" data-rlive="${r.id}" ${r.is_live ? "checked" : ""}><span>Live paper</span></label>` : ""}<small class="muted">stocks ▸</small></td></tr>
+        <tr class="exp" data-rrow="${esc(r.id)}" hidden><td colspan="6"></td></tr>`).join("");
     const books = (f.books || []).map((b) => `<tr><td>📕 ${esc(b.name)} <small class="muted">${b.mb} MB</small></td>
         <td class="small">${b.error ? `<span class="down">${esc(b.error)}</span>` : b.done ? `${b.rules} rules found (${esc(b.at)})${b.cannot.length ? `<br><span class="muted">Can't test yet: ${b.cannot.slice(0, 4).map((c) => esc(c.idea || "") + (c.needs ? ` (needs ${esc(c.needs)})` : "")).join("; ")}</span>` : ""}` : `<span class="muted">not read yet</span>`}</td>
         <td><button class="btn" data-read="${esc(b.name)}" ${f.ai ? "" : "disabled title='Connect Claude in Live setup first'"}>${b.done ? "Read again" : "Read with Claude"}</button></td></tr>`).join("");
@@ -2732,8 +2790,13 @@ async function pageLab() {
     main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Strategy Lab</h1><p class="lede" style="margin-bottom:0">Thousands of intraday option rules tested at once on 2 years of real 1-minute option prices, from a search, your ebooks and Claude. A rule must win on three separate periods before it trades live (on paper). Every evening it runs again by itself.</p></div>
         <div class="btn-row" style="margin:0"><button class="btn primary" id="lab-run" ${f.has_history ? "" : "disabled"}>Run research now</button><button class="btn" id="lab-lib">Test the strategy library</button><button class="btn" id="lab-ideas" ${f.ai ? "" : "disabled title='Connect Claude in Live setup first'"}>Ask Claude for new ideas</button></div></div>
       ${f.has_history ? "" : `<div class="banner">Download the 1-minute option history first: Strategy desk → Download history (Upstox Plus).</div>`}
-      <div class="panel tight" id="lab-stocks" style="margin-top:14px"></div>
-      <div class="panel tight" id="lab-5y" style="margin-top:14px"></div>
+      <div class="panel tight lab-guide" style="margin-top:14px"><h3 style="margin-top:0">Start here</h3>
+        <ol class="small">
+          <li><b>What it does:</b> tests trading rules on years of real 1-minute option prices, with real charges. Nothing here trades real money.</li>
+          <li><b>Three exams:</b> <b>Train</b> is where a rule is found, <b>Validation</b> checks it on later days, <b>Holdout</b> is days never used to choose anything: the honest test.</li>
+          <li><b>Green "Passed all 3"</b> = good enough to paper-trade live. Most rules fail; that is normal and saves money.</li>
+          <li><b>Click any strategy or rule</b> to see every stock and index it was tested on, with its result in each exam.</li>
+          <li><b>The numbers:</b> trades · average ₹ per trade after charges · <b>t</b> = how sure (2+ strong, 1–2 some, below 1 could be luck) · green = % of days that ended in profit.</li></ol></div>
       <div class="panel tight" id="lab-packs" style="margin-top:14px"></div>
       <div class="kpis kpi6" style="margin-top:16px">
         <div class="kpi"><b>${(f.tried_total || 0).toLocaleString("en-IN")}</b><span>Rules tried so far</span></div>
@@ -2744,24 +2807,29 @@ async function pageLab() {
         <div class="kpi"><b>${f.n_days || "–"}</b><span>Days of history</span></div></div>
       <div class="panel tight" style="margin-top:14px"><h3>How to read this</h3><ul class="small">
         <li><b>Train</b> ${f.period ? `(${esc(f.period.train[0])} → ${esc(f.period.train[1])})` : ""} finds a rule; <b>Validation</b> ${f.period ? `(→ ${esc(f.period.valid[1])})` : ""} confirms it; <b>Holdout</b> ${f.period ? `(${esc(f.period.hold[0])} → ${esc(f.period.hold[1])})` : ""} was never used to choose anything: it is the honest test.</li>
-        <li>Each trade buys 1 lot of the at-the-money call or put, after real charges and slippage. A day stops after a losing trade (the small-account way), so "green" = % of trading days that ended in profit.</li>
+        <li>Each trade buys 1 lot of the at-the-money call or put, after real charges and slippage. A day stops after a losing trade (one loss ends the day), so "green" = % of trading days that ended in profit.</li>
         <li>If promoted ≈ the luck number, nothing real was found yet. ${prom > f.luck_expected ? "" : `<b>That is the case right now</b>: ${prom} promoted vs up to ${f.luck_expected} by luck, so even the promoted rules may be luck. They trade on paper only to build a live record, and switch off by themselves if they lose over 15 trades. The search keeps going every evening, with your ebooks and Claude's ideas.`}</li></ul></div>
+      <div class="toolbar" style="margin-top:28px"><h2 style="margin:0">Rules <span class="muted small">promoted first, then the closest misses</span></h2>
+        <label class="check small"><input type="checkbox" id="lab-40" ${only40 ? "checked" : ""}><span>Only option buying and iron fly (needs the least money)</span></label></div>
+      <div class="table-wrap"><table class="lab"><thead><tr><th>Result</th><th>Rule</th><th>Train<br><small class="muted">trades · avg · t · green</small></th><th>Validation</th><th>Holdout</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="muted">Run research to fill this.</td></tr>`}</tbody></table></div>
+      <details class="lab-adv" id="lab-data" style="margin-top:20px"><summary><b>Data on your Mac</b> <span class="muted small">stock options (1 year) and the 5-year archive: download status</span></summary>
+        <div class="panel tight" id="lab-stocks" style="margin-top:10px"></div>
+        <div class="panel tight" id="lab-5y" style="margin-top:14px"></div></details>
+      <details class="lab-adv" style="margin-top:10px"><summary><b>Advanced</b> <span class="muted small">exit styles, ML models, strategy library, ebooks, research runs</span></summary>
       ${labExits(f)}${labML(f)}
       ${(f.library || []).length ? `<h2>Strategy library <span class="muted small">famous setups from top traders and books (incl. your basics books, marked "book"), every exit and indicator setting tested</span></h2>
       <div class="table-wrap"><table class="lab"><thead><tr><th>Setup</th><th>Best version</th><th>Train</th><th>Validation</th><th>Holdout</th></tr></thead><tbody>
         ${f.library.map((x) => { const r = x.best; return `<tr><td><b>${esc(x.name)}</b><br><span class="pill ${stage[r.stage] ? stage[r.stage][0] : ""}">${stage[r.stage] ? stage[r.stage][1] : esc(r.stage)}</span> <small class="muted">${x.n_rules} versions</small></td>
           <td class="small">${esc(r.rule)}<br><span class="muted">${esc((r.note || "").split(". ").slice(1).join(". "))}</span></td><td class="small">${st(r.train)}</td><td class="small">${st(r.valid)}</td><td class="small"><b>${st(r.hold)}</b></td></tr>`; }).join("")}</tbody></table></div>` : ""}
-      <div class="toolbar" style="margin-top:28px"><h2 style="margin:0">Rules <span class="muted small">promoted first, then the closest misses</span></h2>
-        <label class="check small"><input type="checkbox" id="lab-40" ${only40 ? "checked" : ""}><span>Only option buying and iron fly (needs the least money)</span></label></div>
-      <div class="table-wrap"><table class="lab"><thead><tr><th>Result</th><th>Rule</th><th>Train<br><small class="muted">trades · avg · t · green</small></th><th>Validation</th><th>Holdout</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="muted">Run research to fill this.</td></tr>`}</tbody></table></div>
+
       <div class="split" style="margin-top:24px">
         <div><h2 style="margin-top:0">Your ebooks</h2>
           <p class="small muted">Upload trading-strategy books (PDF, EPUB, TXT). Claude reads the rule-heavy passages, turns each concrete rule into a testable one, and lists what it can't test yet. They face the same 3-period test. The book stays on your Mac.</p>
           <div class="btn-row"><input type="file" id="lab-file" accept=".pdf,.epub,.txt,.md" multiple><button class="btn" id="lab-up">Upload</button></div>
           <div class="table-wrap" style="margin-top:10px"><table><tbody>${books || `<tr><td class="muted">No books yet.</td></tr>`}</tbody></table></div>
           ${f.pending_ideas ? `<p class="note">${f.pending_ideas} rules from books / Claude are waiting: they are tested on the next run.</p>` : ""}</div>
-        <div><h2 style="margin-top:0">Research runs</h2><div class="table-wrap"><table class="mini"><thead><tr><th>When</th><th class="r">Tried</th><th class="r">Train pass</th><th class="r">Promoted</th><th class="r">Luck</th><th class="r">Time</th></tr></thead><tbody>${runs || `<tr><td colspan="6" class="muted">None yet.</td></tr>`}</tbody></table></div></div></div>
+        <div><h2 style="margin-top:0">Research runs</h2><div class="table-wrap"><table class="mini"><thead><tr><th>When</th><th class="r">Tried</th><th class="r">Train pass</th><th class="r">Promoted</th><th class="r">Luck</th><th class="r">Time</th></tr></thead><tbody>${runs || `<tr><td colspan="6" class="muted">None yet.</td></tr>`}</tbody></table></div></div></div></details>
       <p class="note">Paper only. Promoted rules with moderate or strong holdout evidence (or ones you tick) fire as "Strategy Lab" alerts and are paper-traded with their own exit (straddle sells only when the paper account is ₹1.5 lakh or more); a rule that loses money over 15 live paper trades is switched off automatically.</p>`;
     const job = async (path, body = {}) => { try { await post(path, body); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
     $("#lab-run").onclick = () => job("/api/factory/run", { n: 8000 });
@@ -2777,6 +2845,9 @@ async function pageLab() {
     drawStocks();
     draw5y();
     drawPacks();
+    main.querySelectorAll("[data-rexp]").forEach((tr) => tr.onclick = (ev) => { if (ev.target.closest("input,label,a,button")) return;
+      const row = main.querySelector(`[data-rrow="${CSS.escape(tr.dataset.rexp)}"]`); if (!row) return;
+      row.hidden = !row.hidden; if (!row.hidden && !row.dataset.done) { row.dataset.done = "1"; labRuleDetail(row.firstElementChild, [tr.dataset.rexp], ["1y"]); } });
     main.querySelectorAll("[data-rlive]").forEach((c) => c.onchange = async () => { try { await post(`/api/factory/rule/${c.dataset.rlive}`, { on: c.checked }); toast(c.checked ? "Rule live on paper" : "Rule switched off"); } catch (e) { toast(e.message); } });
   };
   let t5 = null;
@@ -2793,8 +2864,8 @@ async function pageLab() {
           <label class="check small"><input type="checkbox" data-pack="${esc(p.id)}" ${p.on ? "checked" : ""}><span>On (Lab + test bench)</span></label></div>
         ${p.fatal ? `<p class="small down">${esc(p.fatal)}</p>` : ""}
         <div class="table-wrap" style="margin-top:6px"><table class="mini"><thead><tr><th>Strategy</th><th>1-year Lab</th><th>5-year Lab</th></tr></thead><tbody>
-          ${(p.strategies || []).map((s) => `<tr><td class="small"><b>${esc(s.name)}</b>${s.status !== "ok" ? `<br><span class="${s.status === "cannot" ? "muted" : "down"}">${s.status === "cannot" ? "Can't test yet: " : ""}${esc(s.why)}</span>` : `<br><small class="muted">${s.rules} version(s)</small>`}</td>
-            <td class="small">${s.status === "ok" ? res((s.labs || {})["1y"]) : "–"}</td><td class="small">${s.status === "ok" ? res((s.labs || {})["5y"]) : "–"}</td></tr>`).join("")}
+          ${(p.strategies || []).map((s) => `<tr${s.status === "ok" && (s.ids || []).length ? ` class="click" data-sexp="${esc((s.ids || []).join(","))}" title="Show every version and every stock / index it was tested on"` : ""}><td class="small"><b>${esc(s.name)}</b>${s.status === "ok" ? ` <small class="muted">▸</small>` : ""}${s.status !== "ok" ? `<br><span class="${s.status === "cannot" ? "muted" : "down"}">${s.status === "cannot" ? "Can't test yet: " : ""}${esc(s.why)}</span>` : `<br><small class="muted">${s.rules} version(s)</small>`}</td>
+            <td class="small">${s.status === "ok" ? res((s.labs || {})["1y"]) : "–"}</td><td class="small">${s.status === "ok" ? res((s.labs || {})["5y"]) : "–"}</td></tr>${s.status === "ok" ? `<tr class="exp" hidden><td colspan="3"></td></tr>` : ""}`).join("")}
         </tbody></table></div>
         ${(p.cannot_test || []).length ? `<p class="small muted" style="margin:6px 0 0">Can't test yet: ${p.cannot_test.slice(0, 6).map((c) => esc(c.idea) + (c.needs ? ` (needs ${esc(c.needs)})` : "")).join("; ")}</p>` : ""}
         ${(p.problems || []).length ? `<details class="small" style="margin-top:4px"><summary>${p.problems.length} note(s) from the check</summary><ul>${p.problems.map((q) => `<li>${esc(q)}</li>`).join("")}</ul></details>` : ""}
@@ -2810,6 +2881,8 @@ async function pageLab() {
         toast(j.already ? `${j.name}: this exact file is already here` : `${j.name} v${j.version}: ${j.rules} Lab rules queued for the next run${(j.cannot_test || []).length ? `, ${j.cannot_test.length} can't be tested yet` : ""}`);
       } catch (e) { toast(e.message); }
       drawPacks(); };
+    el.querySelectorAll("[data-sexp]").forEach((tr) => tr.onclick = () => { const row = tr.nextElementSibling; if (!row || !row.classList.contains("exp")) return;
+      row.hidden = !row.hidden; if (!row.hidden && !row.dataset.done) { row.dataset.done = "1"; labRuleDetail(row.firstElementChild, tr.dataset.sexp.split(","), ["1y", "5y"]); } });
     el.querySelectorAll("[data-pack]").forEach((c) => c.onchange = async () => { try { await post(`/api/packs/${c.dataset.pack}/on`, { on: c.checked }); toast(c.checked ? "Strategy file on" : "Strategy file off (results kept)"); drawPacks(); } catch (e) { toast(e.message); } });
   };
   const draw5y = async () => {
@@ -2867,6 +2940,35 @@ async function pageLab() {
     if (x.running) stTimer = setTimeout(() => { if (document.getElementById("lab-stocks")) drawStocks(); }, 5000);
   };
   draw();
+}
+
+/* 2.49 (Mandeep, 10 Nov #12): a strategy / rule opened: every version, and every stock / index it was tested on, in
+   each exam (train, validation, holdout). Read from the Lab's saved results (no re-run). */
+async function labRuleDetail(el, ids, labs) {
+  el.innerHTML = `<p class="small muted">Loading…</p>`;
+  const got = await Promise.all(labs.map((l) => api(`/api/factory/rules_detail?lab=${l}&ids=${encodeURIComponent(ids.slice(0, 60).join(","))}`).catch(() => null)));
+  const rs = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
+  const ex = (x) => x && x.n ? `${x.n} · ${rs(x.avg)}${x.t != null ? ` · t ${x.t}` : ""}` : `<span class="muted">no trades</span>`;
+  const cell = (c) => c && c[0] ? `${c[0]} · ${rs(c[1])}` : `<span class="muted">–</span>`;
+  const stg = { promoted: ["p-up", "Passed all 3"], "failed holdout": ["p-down", "Failed holdout"], "failed validation": ["", "Failed validation"], "failed train": ["", "Failed train"], duplicate: ["", "Same as another rule"] };
+  const parts = [];
+  labs.forEach((lab, i) => {
+    const d = got[i]; if (!d) return;
+    const rules = Object.values(d.rules || {}).filter((r) => !r.missing);
+    if (!rules.length) { parts.push(`<p class="small muted">${lab === "5y" ? "5-year" : "1-year"} Lab: not tested yet (on the next run).</p>`); return; }
+    const per = d.period ? ` <span class="muted small">train ${esc(d.period.train[0])} → ${esc(d.period.train[1])} · holdout ${esc(d.period.hold[0])} → ${esc(d.period.hold[1])}</span>` : "";
+    parts.push(`<h4 style="margin:10px 0 4px">${lab === "5y" ? "5-year Lab" : "1-year Lab"}${per}</h4>` + rules.map((r) => {
+      const bs = Object.entries(r.by_sym || {}).sort((a, b) => (b[1][2][1] || 0) - (a[1][2][1] || 0));
+      const pos = bs.filter(([, v]) => v[0][1] > 0 && v[1][1] > 0 && v[2][1] > 0).length;
+      const symT = bs.length ? `<details style="margin:4px 0 8px"><summary class="small">${bs.length} stock${bs.length === 1 ? "" : "s"} / indices · positive in all three exams: <b>${pos}</b></summary>
+        <div class="table-wrap"><table class="mini"><thead><tr><th>Stock / index</th><th class="r">Train<br><small class="muted">trades · ₹ total</small></th><th class="r">Validation</th><th class="r">Holdout</th><th>All 3 positive</th></tr></thead><tbody>
+        ${bs.map(([sym, v]) => `<tr><td><b>${esc(sym)}</b></td><td class="r">${cell(v[0])}</td><td class="r">${cell(v[1])}</td><td class="r"><b>${cell(v[2])}</b></td><td>${v[0][1] > 0 && v[1][1] > 0 && v[2][1] > 0 ? `<span class="up">yes</span>` : `<span class="muted">no</span>`}</td></tr>`).join("")}</tbody></table></div></details>`
+        : `<p class="small muted" style="margin:2px 0 8px">Stock-by-stock results appear after the next Lab run.</p>`;
+      return `<div class="lab-ver"><span class="pill ${(stg[r.stage] || [""])[0]}">${(stg[r.stage] || ["", esc(r.stage || "")])[1]}</span> <small>${esc(r.rule || r.id)}</small>
+        <div class="small" style="margin-top:2px">Train ${ex(r.train)} · Validation ${ex(r.valid)} · <b>Holdout ${ex(r.hold)}</b></div>${symT}</div>`;
+    }).join(""));
+  });
+  el.innerHTML = parts.join("") || `<p class="small muted">No Lab results yet.</p>`;
 }
 
 const rsL = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
@@ -3289,7 +3391,8 @@ async function pageBoard() {
   const best = (b.best || []).map((r) => `<li><b>${esc(r.label)}</b> <span class="muted small">${esc(r.style_label)}</span> · <b class="up">${rupees((keyed ? r.regime : r.all).avg)}</b> a trade over ${(keyed ? r.regime : r.all).n} trades, ${(keyed ? r.regime : r.all).win_pct}% won</li>`).join("");
   const famChips = [["all", "All ways"], ["buy", "Only buying"], ["mixed", "Buying + selling"], ["sell", "Only selling"]]
     .map(([v, l]) => `<button class="chip" data-fam="${v}" aria-pressed="${fam === v}">${l}</button>`).join("");
-  main.innerHTML = `<h1 class="page-title">Strategy board</h1>
+  main.innerHTML = `<div class="toolbar"><h1 class="page-title" style="margin:0">Strategy board</h1>
+      <div class="btn-row" style="margin:0"><a class="btn" href="/api/live/export.xlsx" download title="Alert check (working / not working), daily validation, every strategy on the test bench, exit styles, Strategy Lab results and the paper accounts">Download Excel</a></div></div>
     <p class="lede">Every strategy paper-traded on every signal in ${(b.styles || []).length} styles (only buying, buying + selling, only selling), 1 lot each, like the real paper account (ask in, bid out, all charges), ranked for ${keyed ? `<b>${esc((REGIMES.find((x) => x[0] === b.regime) || [0, b.regime])[1])}</b> days` : "all days"} and your capital ${rupees(b.capital)}.
       ${b.day_type ? `Today so far: <b>${esc(b.day_type)}</b>.` : ""}</p>
     ${capitalBox(cap.capital)}

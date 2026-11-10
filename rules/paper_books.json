@@ -1,0 +1,29 @@
+{
+  "about": "2.49: extra paper accounts next to your main one (Mandeep, 10 Nov 2026, points 14 and 15). Each has its own money and its own trades (saved as source '<feed>#<id>', never mixed with the main account, the scorecard or the test bench). Paper only: nothing here can place a real order. 'pick' = which alerts the account takes; 'paper' = its account rules (same names as the main account's); capital null = the same as your main capital. Change the numbers here; old trades keep the rules they were taken with.",
+  "valid_from": "2026-11-11",
+  "books": {
+    "best": {
+      "name": "Best only",
+      "short": "Only the highest-rated alerts",
+      "explain": "Takes an alert only when everything agrees: it is a Focus alert, strength 3, the risk check says PASS, the signal score is 70 or more, and that alert type has a good live record (20+ graded, 55%+ worked, option up on average after an hour) or it comes from a Strategy Lab rule that passed the strict out-of-sample bar. Few trades by design.",
+      "on": true,
+      "capital": null,
+      "pick": {"focus": true, "risk_pass": true, "min_severity": 3, "min_score": 70,
+               "record": {"min_decided": 20, "min_hit_rate": 55, "min_avg_o60": 0.0},
+               "proven_kinds": ["factory"]},
+      "paper": {"max_open": 2, "max_trades_day": 3}
+    },
+    "target3": {
+      "name": "3% a day",
+      "short": "Aims for +3% of the account a day, top alerts only",
+      "explain": "Starts from the capital you type, adds every day's result to the next day (compounding). Takes only top alerts (Focus, strength 3, risk PASS, score 75+), one trade at a time. When the day's profit (booked + open) reaches 3% of the morning's money, it closes everything and stops for the day; at -2% it does the same. Honest note: 3% every day compounds to about 1,600 times in a year; no strategy tested so far does that, so this account measures how often a day reaches +3%, not a promise.",
+      "on": true,
+      "capital": 100000,
+      "compound": true,
+      "day_target_pct": 3.0,
+      "day_stop_pct": 2.0,
+      "pick": {"focus": true, "risk_pass": true, "min_severity": 3, "min_score": 75},
+      "paper": {"max_open": 1, "max_trades_day": 3, "risk_pct": 2.0, "max_daily_loss_pct": 2.0}
+    }
+  }
+}

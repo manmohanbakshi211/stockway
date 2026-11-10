@@ -9,7 +9,7 @@ import threading
 import time
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from live.clock import IST
 from radar.config import ROOT, load_config
@@ -603,11 +603,35 @@ def live_paper_mini():
     return clean({"running": True, "today": a["today"], "equity": a["equity"], "free": a["free"], "open": len(p["open"])})
 
 
+def _books(src: str):
+    """2.49: the extra paper accounts (live/books.py): the running ones, or read-only copies when the scanner is off."""
+    from live.books import Books
+    from live.paper import DEFAULTS, PaperBook
+    e = engine()
+    if getattr(e, "books", None) is not None and e.source == src:
+        return e.books, True
+    lc = e.cfg()["live"]
+    main = e.paper.cfg if e.paper else PaperBook(e.store, src, lc.get("paper")).cfg if lc.get("paper") else dict(DEFAULTS)
+    return Books(src, e.store, main, lc.get("books"), log=lambda m: None), False
+
+
 @router.get("/api/live/paper")
-def live_paper(source: str | None = None):
+def live_paper(source: str | None = None, book: str | None = None):
     from live.paper import PaperBook
     e = engine()
     src = source or (e.source if e.paper else e.cfg()["live"]["source"])
+    if book and book != "main":                        # 2.49: Best only / 3% a day
+        bs, live_ = _books(src)
+        if book not in bs.books:
+            raise HTTPException(404, f"No paper account '{book}'")
+        out = bs.summary(book, e.state if live_ else None)
+        seen = {}
+        for t in out["open"] + out["closed"]:
+            if t["sym"] not in seen:
+                seen[t["sym"]] = e.underlying_view(t["sym"])
+            t["und_now"] = seen[t["sym"]]
+        out["aggressive"] = False
+        return clean({**out, "source": src})
     book = e.paper if e.paper and e.source == src else PaperBook(e.store, src, e.cfg()["live"].get("paper"))
     out = book.summary(e.state if e.paper is book else None)
     seen = {}                                          # 2.48: one look-up per symbol (was one per trade: slow)
@@ -772,6 +796,50 @@ async def live_capital_set(request: Request):
     if e.paper:
         e.paper.cfg.update(p)
     return clean({"ok": True, "capital": v, "applied": p, "tier": capital.tier(v)})
+
+
+@router.get("/api/live/export.xlsx")
+async def live_export(days: int = 60, trades_days: int = 5, source: str | None = None):
+    """2.49: everything the app tests in one Excel file (alert check, daily validation, test bench, exit styles,
+    Strategy Lab 1 / 5 years, paper accounts). Read-only."""
+    from live import export as X
+    e = engine()
+    sheets = await _run_blocking(X.build, e, source, max(1, min(365, days)), max(1, min(30, trades_days)))
+    data, ext, media = await _run_blocking(X.to_xlsx, sheets)
+    name = f"stockway_tests_{dt.datetime.now(IST).strftime('%Y-%m-%d_%H%M')}.{ext}"
+    return Response(data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.get("/api/live/paper/books")
+def live_paper_books(source: str | None = None, days: int | None = None):
+    """2.49: the extra paper accounts and how each compares with the main account on the same days."""
+    from live import books as B
+    e = engine()
+    src = source or (e.source if e.paper else e.cfg()["live"]["source"])
+    bs, _ = _books(src)
+    main = (e.paper.cfg if e.paper else (e.cfg()["live"].get("paper") or {})) or {}
+    return clean({"books": bs.list(), "compare": B.compare(e.store, src, main, bs, days=days), "days": days,
+                  "file_error": B._C.get("error")})
+
+
+@router.post("/api/live/paper/books/{bid}")
+async def live_paper_book_set(bid: str, request: Request):
+    """2.49: set an extra paper account's capital (Mandeep: "capital can be set manual"). Paper only."""
+    from live import books as B
+    from live import capital
+    from radar.config import save_user_settings
+    if bid not in (B.cfg().get("books") or {}):
+        raise HTTPException(404, f"No paper account '{bid}'")
+    b = await request.json()
+    try:
+        v = capital.parse_amount(b.get("amount"))
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    save_user_settings({f"live.books.{bid}.capital": v})
+    e = engine()
+    if getattr(e, "books", None) is not None and e.paper:
+        e.books.load(e.paper.cfg, e.cfg()["live"].get("books"))
+    return {"ok": True, "book": bid, "capital": v}
 
 
 @router.get("/api/live/coach")

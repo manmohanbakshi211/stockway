@@ -16,3 +16,4 @@ websocket-client>=1.8
 protobuf>=4.25
 pypdf>=4.0
 keyring>=24
+openpyxl>=3.1

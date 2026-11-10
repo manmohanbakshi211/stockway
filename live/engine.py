@@ -144,6 +144,7 @@ class LiveEngine:
         self.rest = None
         self.feed = None
         self.paper = None
+        self.books = None
         self.source = None
         self.recorder = None
         self.tracker = None
@@ -311,6 +312,13 @@ class LiveEngine:
             make_feed = lambda: UpstoxFeed(tok["access_token"], self._on_ticks, self._feed_status)
         day = self.clock.now().date().isoformat()
         self.paper = PaperBook(self.store, self.source, lc.get("paper"), self.log, on_open=self._keep_live)
+        try:                                         # 2.49: extra paper accounts (Best only, 3% a day); never block the main one
+            from .books import Books
+            self.books = Books(self.source, self.store, self.paper.cfg, lc.get("books"), self.log, on_open=self._keep_live,
+                               risk_for=self.risk_for)
+        except Exception as e:
+            self.books = None
+            self.log(f"Extra paper accounts not loaded: {e}")
         self.state = MarketState()
         self.state.clock = self.clock
         self.state.und_keys = {u.key: s for s, u in self.uni.underlyings.items()}
@@ -533,6 +541,8 @@ class LiveEngine:
             want |= self.expiry.needed_keys()
         if self.paper:                                   # open paper positions always keep a live price
             want |= {t["opt_key"] for t in self.paper.open_trades()}
+        if getattr(self, "books", None) is not None:     # 2.49: and the extra paper accounts' positions
+            want |= self.books.open_keys()
         want |= self.pinned
         for sym, (exp, ks) in plan.items():
             u = self.uni.underlyings[sym]
@@ -663,6 +673,8 @@ class LiveEngine:
                 lc = self.cfg()["live"]       # pick up settings changes once a minute
                 if self.paper:
                     self.paper.cfg.update(lc.get("paper") or {})
+                if getattr(self, "books", None) is not None and self.paper:
+                    self.books.load(self.paper.cfg, lc.get("books"))
             if self._every("recenter", 120):
                 try:
                     self._recenter()
@@ -726,6 +738,8 @@ class LiveEngine:
                 if self._every("shadow_err", 300, clock_time=False):
                     self.log(f"Shadow exits error: {e}")
             self._guard("Paper trades", self.paper.update, self.state, now)
+            if self.books is not None:
+                self._guard("Extra paper accounts", self.books.update, self.state, now)
             if self.trials is not None:
                 self._guard("Trial alerts", self.trials.update, self.state, self.clock.ts())
             if self.bench is not None:
@@ -761,6 +775,11 @@ class LiveEngine:
     def _end_of_day(self, now, mins):
         self._run_token = None                       # stops the data-vault chain sweep before the recording is closed
         self.paper.update(self.state, now, force_close=True)
+        if getattr(self, "books", None) is not None:
+            try:
+                self.books.update(self.state, now, force_close=True)
+            except Exception as e:
+                self.log(f"Extra paper accounts end of day: {e}")
         try:
             self.save_last_session()
         except Exception:
@@ -1601,6 +1620,12 @@ class LiveEngine:
                 self.paper.try_open(a, self.state, now)
             except Exception as e:
                 self.log(f"Paper trade failed: {e}")
+        if getattr(self, "books", None) is not None:   # 2.49: Best only / 3% a day look at the same alert
+            try:
+                self.books.consider(a, self.state, now)
+            except Exception as e:
+                if self._every("books_err", 600, clock_time=False):
+                    self.log(f"Extra paper accounts skipped an alert: {e}")
         if self.bench is not None:                   # every directional alert, Focus or not, demoted or not
             try:
                 self.bench.add(a, self, now, self.paper.cfg if self.paper else {})
@@ -1658,8 +1683,10 @@ class LiveEngine:
         out["facts"] = facts
         return out
 
-    def risk_for(self, a: dict, now) -> dict:
-        """The risk gate on an idea with live option prices, today's paper book and the ban list, right now."""
+    def risk_for(self, a: dict, now, book=None, capital=None) -> dict:
+        """The risk gate on an idea with live option prices, today's paper book and the ban list, right now.
+        2.49: book / capital = an extra paper account (live/books.py) judged with its own money and open trades."""
+        book = book or self.paper
         opt = dict(a.get("option") or {}) or None
         if opt:
             inst = self.state.get(opt["key"])
@@ -1668,8 +1695,9 @@ class LiveEngine:
                 opt["ltp"] = inst.ltp or opt.get("ltp")
         ban = (self.context.view().get("ban") or []) if self.context else []
         lc = self.cfg().get("live") or {}
-        out = riskgate.check(a, opt, now=now, paper_cfg=self.paper.cfg, guard=self.paper.guard(now),
-                             open_syms={t["sym"] for t in self.paper.open_trades()}, ban=ban, cfg=(lc.get("risk") or {}),
+        pcfg = {**book.cfg, "capital": float(capital)} if capital else book.cfg
+        out = riskgate.check(a, opt, now=now, paper_cfg=pcfg, guard=book.guard(now),
+                             open_syms={t["sym"] for t in book.open_trades()}, ban=ban, cfg=(lc.get("risk") or {}),
                              sim=self.source == "sim", bigger=(a.get("data") or {}).get("bigger"))
         er = (a.get("data") or {}).get("event_risk") or {}
         if er.get("warnings"):                       # 2.35: event risk, warnings only
@@ -2226,7 +2254,8 @@ class LiveEngine:
                 "buildup": f.get("buildup_label"), "buildup_sign": f.get("buildup_sign"), "fut_oi_chg": f.get("oi_chg_pct"),
                 "atm_iv": o.get("atm_iv"), "iv_chg_15m": o.get("iv_chg_15m"), "pcr": o.get("pcr"),
                 "iv_hv": v.get("iv_hv"), "flow": fl.get("delta_pct_5m"),
-                "unusual": len(o.get("unusual") or []), "score": m.get("score"), "heat": m.get("heat"), "lot": m.get("lot")}
+                "unusual": len(o.get("unusual") or []), "score": m.get("score"), "heat": m.get("heat"), "lot": m.get("lot"),
+                "px_ts": (m["ltt"] / 1000) if m.get("ltt") else m.get("t")}   # 2.49: when this price was traded
 
     def record_view(self, m) -> dict:
         x = self.slim(m)

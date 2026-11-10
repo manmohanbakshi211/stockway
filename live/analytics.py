@@ -84,7 +84,8 @@ def compute(u, state, now: dt.datetime, window: list, full_chain: dict | None, a
         return None
     mins = minutes_since_open(now)
     m = {"sym": u.symbol, "name": u.name, "is_index": u.is_index, "spot": spot, "lot": u.lot,
-         "cp": und.cp if und else None, "t": und.t if und else None}
+         "cp": und.cp if und else None, "t": und.t if und else None,
+         "ltt": getattr(und, "ltt", None) if und else None}          # 2.48/2.49: exchange time of this price (ms)
     m["chg_pct"] = pct(spot, m["cp"])
     m["day_o"], m["day_h"], m["day_l"] = (und.day_o, und.day_h, und.day_l) if und else (None, None, None)
     vwap = (und.atp if und and und.atp else None) or (fut.atp if fut and fut.atp else None)

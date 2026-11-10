@@ -95,7 +95,7 @@ class PaperBook:
             if c.get("aggressive") and alert.get("direction") in ("up", "down") \
                     and alert["severity"] >= int(c.get("aggressive_min_severity") or 2):
                 aggressive = True
-            elif alert["severity"] < c["min_severity"] or alert["kind"] not in c["kinds"]:
+            elif alert["severity"] < c["min_severity"] or (c["kinds"] != "all" and alert["kind"] not in c["kinds"]):
                 return None
             hm = now.strftime("%H:%M")
             if hm < "09:16" or hm >= (c["exit_time"] if aggressive else c["no_entry_after"]):
@@ -324,14 +324,14 @@ class PaperBook:
                 self.store.update_trade(t["id"], **upd)
         return closed
 
-    def close_manual(self, tid, state, now):
+    def close_manual(self, tid, state, now, reason: str = "closed by you"):
         for t in self.open_trades():
             if t["id"] == tid:
                 inst = state.get(t["opt_key"])
                 d = t.get("dir") or 1
                 px = ((inst.bid if d > 0 else inst.ask) or inst.ltp) if inst and inst.ltp else (t["last"] or t["entry"])
                 und = state.get(t["und_key"]) if t.get("und_key") else None
-                return self._close(t, px, now, "closed by you", und)
+                return self._close(t, px, now, reason, und)
         return None
 
     def close_all(self, state, now) -> list:

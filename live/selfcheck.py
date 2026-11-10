@@ -258,4 +258,16 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
                       + (f"; calendar file error: {v['error']}" if v.get("error") else "")))
     except Exception as e:
         out.append(_c("market_calendar", "NSE calendar", False, str(e)[:160]))
+    try:                                                   # 2.49: extra paper accounts (live/books.py, rules/paper_books.json)
+        from . import books as _B
+        c = _B.cfg()
+        bk = {k: v for k, v in (c.get("books") or {}).items() if v.get("on", True)}
+        bad = [k for k, v in bk.items() if not isinstance(v.get("pick"), dict)
+               or (v.get("capital") is not None and not isinstance(v.get("capital"), (int, float)))]
+        out.append(_c("paper_books", "Extra paper accounts (Best only, 3% a day): own money, own trades, paper only",
+                      not _B._C.get("error") and not bad,
+                      ", ".join(v.get("name") or k for k, v in bk.items()) + (f"; bad entries: {', '.join(bad)}" if bad else "")
+                      + (f"; file error: {_B._C['error']}" if _B._C.get("error") else "")))
+    except Exception as e:
+        out.append(_c("paper_books", "Extra paper accounts", False, str(e)[:160]))
     return out

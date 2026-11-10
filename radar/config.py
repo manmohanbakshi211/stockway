@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
 import yaml
@@ -90,12 +91,27 @@ def read_user_settings() -> dict:
     return {}
 
 
+# 2.49: settings whose names come from a bullet file (an extra paper account's capital, rules/paper_books.json), so a
+# new account needs no edit here
+EDITABLE_PATTERNS = [(re.compile(r"^live\.books\.[a-z0-9_]{1,24}\.capital$"), float)]
+
+
+def _caster(k: str):
+    if k in EDITABLE:
+        return EDITABLE[k]
+    for rx, f in EDITABLE_PATTERNS:
+        if rx.match(k):
+            return f
+    return None
+
+
 def save_user_settings(changes: dict) -> dict:
     current = read_user_settings()
     for k, v in changes.items():
-        if k not in EDITABLE:
+        f = _caster(k)
+        if f is None:
             raise ValueError(f"Setting '{k}' can't be changed from the app")
-        current[k] = EDITABLE[k](v) if v is not None else v
+        current[k] = f(v) if v is not None else v
     USER_SETTINGS.write_text(json.dumps(current, indent=2))
     return current
 
@@ -140,7 +156,7 @@ def load_config(path: str | None = None) -> dict:
     if cfg is None:
         raise FileNotFoundError(str(cfg_path))
     for k, v in copy.deepcopy(_user_settings_cached()).items():
-        if k in EDITABLE:
+        if _caster(k) is not None:
             _set(cfg, k, v)
     for key in ("cache_dir", "output_dir", "model_dir"):
         p = ROOT / cfg[key]
