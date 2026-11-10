@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import math
 import time
 import urllib.parse
@@ -25,6 +26,25 @@ def _num(x):
     except (TypeError, ValueError):
         return None
     return None if math.isnan(x) or math.isinf(x) else x
+
+
+_RS = {"mtime": None, "cfg": {"paper": "off", "max_signals_per_day": 1, "regimes": ["range", "quiet"], "severity": 2}}
+
+
+def range_sell_cfg() -> dict:
+    """rules/range_sell.json (2.55), re-read when it changes; a broken file keeps the safe defaults (paper off)."""
+    from pathlib import Path
+    f = Path(__file__).resolve().parents[1] / "rules" / "range_sell.json"
+    try:
+        mt = f.stat().st_mtime
+        if _RS["mtime"] != mt:
+            c = json.loads(f.read_text())
+            if c.get("paper") not in ("off", "naked"):
+                c["paper"] = "off"
+            _RS.update(mtime=mt, cfg={**_RS["cfg"], **c})
+    except Exception:
+        pass
+    return _RS["cfg"]
 
 
 class ChartData:
@@ -169,13 +189,8 @@ class ChartData:
                         continue                             # option selling on trial: nothing to grade on the price yet
                     self._trial_rule(sym, m, r, d, h5, l5, c5, emit)
                     continue
-                if d == 0:                                   # straddle selling: alert + paper-sell both legs (when margin allows)
-                    took = self._paper_straddle(sym, m, r, now)
-                    emit({"sym": sym, "kind": "factory", "direction": "neutral", "severity": 3,
-                          "title": f"{sym} Strategy Lab rule {r['id']}: SELL the ATM straddle",
-                          "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%. "
-                                    + (f"Paper-sold both legs ({took})." if took else "Not paper-traded: the paper account is too small for straddle margin or the day is stopped."),
-                          "price": m.get("spot"), "data": {"factory": {"id": r["id"], "sell": True}}})
+                if d == 0:                                   # 2.55: one range-day sell signal per index per day (rules/range_sell.json)
+                    self._range_sell(sym, m, r, h, now, emit)
                     continue
                 if r["exit"] in factory.STYLES:              # chart-level exit: risk in points from today's 5-min ATR
                     from lab import exits as X
@@ -457,6 +472,37 @@ class ChartData:
             hd = Path(self.e.data_dir) / "history"
             self._tested = t = (time.time(), {p.parent.name for p in hd.glob("*/meta.json")})
         return t[1]
+
+    def _range_sell(self, sym, m, r, h, now, emit):
+        """2.55 (Mandeep, 11 Nov: sell only sideways and risk-controlled; "not hedging"): the promoted straddle rules are
+        near-copies of one idea, so they raise ONE signal per index per day (the rest count as agreeing), marked with the
+        day's regime, below Focus (not on Telegram). Paper: off by default (naked selling stopped); 'naked' only on request."""
+        cfg = range_sell_cfg()
+        key = (sym, now.date())
+        day = self.__dict__.setdefault("_rs_day", {})
+        if len(day) > 50:
+            for k in [k for k in day if k[1] != now.date()]:
+                day.pop(k, None)
+        rec = day.setdefault(key, {"ids": set(), "signals": 0})
+        rec["ids"].add(r["id"])
+        if rec["signals"] >= int(cfg.get("max_signals_per_day") or 1):
+            return
+        rec["signals"] += 1
+        reg = (self.e.regimes or {}).get(sym) or {}
+        fits = reg.get("code") in (cfg.get("regimes") or ["range", "quiet"])
+        took = None
+        if cfg.get("paper") == "naked" and fits:
+            took = self._paper_straddle(sym, m, r, now)
+        emit({"sym": sym, "kind": "range_sell", "direction": "neutral", "severity": int(cfg.get("severity") or 2),
+              "title": f"{sym} range-day sell setup (Strategy Lab straddle rules) · on trial",
+              "detail": (f"Market now: {reg.get('label') or 'not read yet'}. "
+                         + ("Range day: fits the sell playbook. " if fits else "Not a range day: the playbook says skip. ")
+                         + f"First rule: {r['rule']} Holdout {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}. "
+                         + (f"Paper-sold both legs ({took}). " if took else
+                            "No paper trade: naked selling is off; hedged versions are being tested first. ")
+                         + "Recorded only, not in Focus or Telegram."),
+              "price": m.get("spot"), "data": {"factory": {"id": r["id"], "sell": True}, "playbook": "range_sell",
+                                               "regime": reg.get("code"), "fits": bool(fits)}})
 
     def _paper_straddle(self, sym, m, r, now) -> str | None:
         """Paper-sell the ATM call and put of the nearest expiry, each with the rule's stop, held to 15:15."""

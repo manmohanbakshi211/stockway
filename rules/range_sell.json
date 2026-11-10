@@ -1,0 +1,8 @@
+{
+  "about": "2.55 range-day sell playbook (Mandeep, 11 Nov 2026: sell only in sideways markets and risk-controlled; 'i think it's not hedging'; then 'yes go for it'). The promoted Strategy Lab straddle rules (83 near-copies of one idea on his Mac) become ONE signal per index per day: the first rule that fires raises it, the others are counted as agreeing. paper: 'off' = no paper trade (default: naked selling stopped); 'naked' = the old 2.18 behaviour (ATM call + put sold without wings), only for a test you ask for. regimes: the app's regime codes that count as a range day (live/learn.py). severity 2 keeps it out of Focus and Telegram while hedged versions are tested (lab hedged challengers); recorded in All alerts.",
+  "valid_from": "2026-11-11",
+  "paper": "off",
+  "max_signals_per_day": 1,
+  "regimes": ["range", "quiet"],
+  "severity": 2
+}
