@@ -114,6 +114,39 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## No trades on holidays, money that is really there, the scanner starts by itself (2.48)
+
+What went wrong on **10 Nov 2026 (an NSE holiday)**: the scanner was running, the Upstox feed reconnected at 09:59 and
+sent its last known prices again; the app read the jump as fresh activity, made alerts and opened **30 paper trades at
+09:59:18** using **about ₹8.5 lakh in a ₹5 lakh account**. They closed on the time limit at 11:10 for **−₹22,753**.
+Separately, on the **Diwali Muhurat session (Sun 8 Nov, 14:20–15:40)** the scanner would not start because it only
+knew Monday–Friday.
+
+- **NSE calendar** (`live/session.py`, dated data in `rules/market_calendar.json` + the holiday list in
+  `rules/health.json`): regular hours, holidays and special sessions with the exchange circular (Muhurat: NSE
+  FAOP76940, F&O 14:20–15:40). Nothing (alert, paper trade, test-bench fill, strategy desk) is made outside an open
+  session; the exchange's own "market closed" message on the feed also stops it.
+- **Prices judged by exchange time**: every quote keeps the exchange's last-trade time. A paper trade needs the
+  option's last trade inside today's session and the underlying traded in the last 2 minutes, so a reconnect's old
+  snapshot or a frozen feed never opens anything.
+- **No Start button**: the scanner starts by itself before every session (09:00, or 14:00 on a Muhurat day) and stops at
+  the close. The Live bar says when the next session is. "Pause for today" stops it; "Resume" brings it back. A day that
+  ended no longer blocks the next day's auto-start when the app stays open overnight.
+- **Paper money is real money**: a trade never uses more than the account's free money (capital + booked + open P&L −
+  money in open positions). Lots are cut to fit; if one lot doesn't fit there is no trade, and the Paper page says how
+  many were skipped and why. Aggressive mode is capped the same way.
+- **Open trades update at once**: a new paper trade's option is streamed from the first second (before, it could wait
+  for the next strike-window refresh), the Paper page refreshes every 1.5 s while trades are open, and each price shows
+  its exchange time.
+- **Your capital everywhere, no ₹40K presets**: the "Small account (₹40K)" button, the Lab's "Start with ₹40K" section,
+  the ₹40K pill on alerts and the ₹40K columns are gone. Type your capital on the Paper page; the account rules of its
+  size come from `rules/capital.json`; the alert plan and the capital test use your capital (the capital test adds it
+  as its first account).
+- **Options lens "Request failed (500)"**: after the day's recording was compressed and closed, the lens still read the
+  closed file. It now reads the saved day, and any error shows as a message on the page.
+- New check on System & logins: the NSE calendar (today's session, the next one, this year's holidays; asks for next
+  year's list in December).
+
 ## Bigger timeframes, many days, "buy above the candle": the 51-strategy book (2.47)
 
 - **Input (Mandeep, 10 Nov):** Aseem Singhal's "51 Trading Strategies" (e-book screenshots). Read in full; the

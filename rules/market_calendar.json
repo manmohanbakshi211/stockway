@@ -1,0 +1,11 @@
+{
+  "about": "2.48: when NSE F&O trades (bullets, dated). regular = a normal day's session; holidays come from rules/health.json plus extra_holidays here; special_sessions = extra sessions on non-trading days (Diwali Muhurat) or changed timings, with the exchange circular. live/session.py reads this: the live scanner starts and stops by it, and no alert or paper trade is made outside a session. paper_in_special: paper trades during special sessions (off: a one-hour symbolic session, thin and unusual).",
+  "valid_from": "2026-11-10",
+  "regular": {"start_scanner": "09:00", "open": "09:15", "close": "15:30", "weekdays": [0, 1, 2, 3, 4]},
+  "extra_holidays": {},
+  "special_sessions": [
+    {"date": "2026-11-08", "name": "Diwali Muhurat trading", "start_scanner": "14:00", "open": "14:20", "close": "15:40",
+     "source": "NSE circular FAOP76940 (142/2026): F&O pre-open 14:05, normal market 14:20-15:40"}
+  ],
+  "paper_in_special": false
+}

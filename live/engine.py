@@ -11,6 +11,7 @@ import numpy as np
 from pathlib import Path
 
 from . import briefs, dayreport, detectors, htf, registry
+from . import session as SESSION                  # 2.48: the NSE calendar
 from .giftnifty import GiftNifty
 from .analytics import compute, norm_iv, pct
 from .clock import IST, Clock, SimClock, is_market_hours, minutes_since_open
@@ -80,6 +81,7 @@ class LiveEngine:
         self.thread = None
         self.stop_evt = threading.Event()
         self.manual_stop_day = None
+        self.closed_day = None                       # 2.48: the day the session ended (yesterday's 'closed' never blocks today)
         self.reminded_day = None
         self.brief_done = set()
         self.status = {"state": "stopped", "message": "Not started", "source": None, "since": time.time()}
@@ -135,6 +137,7 @@ class LiveEngine:
         self.log(message)
 
     def _reset(self):
+        self.trading_open = False                        # 2.48: set by the loop from the NSE calendar
         self.clock = Clock()
         self.state = None
         self.uni = None
@@ -290,6 +293,16 @@ class LiveEngine:
             if not tok:
                 self.set_status("login_needed", "Log in with Upstox to start (needed once a day)")
                 return
+            n0 = dt.datetime.now(IST)                # 2.48: no NSE session today (holiday / weekend) or it is over
+            ses = SESSION.session(n0.date())
+            if ses is None or n0 >= ses["close"]:
+                nxt = SESSION.next_session(n0 + dt.timedelta(minutes=1))
+                self.closed_day = n0.date()
+                why = "NSE holiday today" if SESSION.is_holiday(n0.date()) else "No NSE session today" if ses is None \
+                    else "Today's session is over"
+                self.set_status("closed", why + (f". Next: {nxt['name'].lower()} {nxt['open']:%a %d %b %H:%M}, the scanner "
+                                                 f"starts by itself at {nxt['start_scanner']:%H:%M}." if nxt else "."))
+                return
             self.clock = Clock()
             self.uni = universe.load(str(self.data_dir), log=self.log)
             self.rest = UpstoxREST(tok["access_token"])
@@ -297,7 +310,7 @@ class LiveEngine:
             self.status["user"] = prof.get("user_name") or tok.get("user")
             make_feed = lambda: UpstoxFeed(tok["access_token"], self._on_ticks, self._feed_status)
         day = self.clock.now().date().isoformat()
-        self.paper = PaperBook(self.store, self.source, lc.get("paper"), self.log)
+        self.paper = PaperBook(self.store, self.source, lc.get("paper"), self.log, on_open=self._keep_live)
         self.state = MarketState()
         self.state.clock = self.clock
         self.state.und_keys = {u.key: s for s, u in self.uni.underlyings.items()}
@@ -382,6 +395,9 @@ class LiveEngine:
             o = q.get("ohlc") or {}
             t = {"key": k, "ltp": q.get("last_price"), "cp": cp, "vol": q.get("volume"), "oi": q.get("oi") or None,
                  "atp": q.get("average_price") or None}
+            ltt = str(q.get("last_trade_time") or "")
+            if ltt.isdigit():                            # 2.48: the exchange's last-trade time (ms)
+                t["ltt"] = int(ltt)
             if is_market_hours(self.clock.now()):
                 t.update(day_o=o.get("open"), day_h=o.get("high"), day_l=o.get("low"))
             ticks.append(t)
@@ -626,8 +642,12 @@ class LiveEngine:
             t0 = time.time()
             now = self.clock.now()
             mins = minutes_since_open(now)
-            ended = (self.source == "sim" and mins >= 375) or (self.source != "sim" and (
-                now.time() >= dt.time(15, 31) or now.weekday() >= 5))
+            if self.source == "sim":
+                ended = mins >= 375
+            else:                                        # 2.48: by the NSE calendar (holidays, special sessions)
+                ses = SESSION.session(now.date())
+                ended = ses is None or now >= ses["close"] + dt.timedelta(minutes=1)
+            self.trading_open = self._trading_open(now)
             if ended:
                 self._end_of_day(now, mins)
                 return
@@ -668,28 +688,32 @@ class LiveEngine:
                         self.log(f"Next-expiry chain {sym} failed: {e}")
             if self.dguard is not None:              # before the alerts: a suspect price holds its symbol's alerts
                 self._guard("Data quality guard", self.dguard.check, now)
-            self._compute_all(now, mins, emit=True, lc=lc)
-            try:
-                self.charts.scan(now, lambda a, now=now, lc=lc: self._emit_safe(a, now, lc))
-            except Exception as e:
-                if self._every("setup_err", 300, clock_time=False):
-                    self.log(f"Setup scan error: {e}")
-            if self.cdl is not None:
+            open_ = self.trading_open                # 2.48: no alert, paper or bench trade outside an open session
+            self._compute_all(now, mins, emit=open_, lc=lc)
+            if open_:
+                try:
+                    self.charts.scan(now, lambda a, now=now, lc=lc: self._emit_safe(a, now, lc))
+                except Exception as e:
+                    if self._every("setup_err", 300, clock_time=False):
+                        self.log(f"Setup scan error: {e}")
+            if self.cdl is not None and open_:
                 self._guard("Candle scanner", self.cdl.tick, now)
             if self._every("vault_bars", 1800):
                 self._guard("Saving 1-minute candles", self._save_bars)
             try:
-                self.desk.tick(now)
+                if open_:
+                    self.desk.tick(now)
             except Exception as e:
                 if self._every("desk_err", 300, clock_time=False):
                     self.log(f"Strategy desk error: {e}")
             try:
-                if self._every("expiry_desk", 10, clock_time=False):
+                if open_ and self._every("expiry_desk", 10, clock_time=False):
                     self.expiry.tick(now)
             except Exception as e:
                 if self._every("expiry_err", 300, clock_time=False):
                     self.log(f"Expiry desk error: {e}")
-            self._guard("Big prints", self._big_prints, now, lc)
+            if open_:
+                self._guard("Big prints", self._big_prints, now, lc)
             self._guard("Alert tracker", self.tracker.update, self.state, self.clock.ts())
             if self.depth:
                 try:
@@ -782,6 +806,8 @@ class LiveEngine:
                 self.make_brief("post", send=self.source != "sim")
             except Exception as e:
                 self.log(f"Post-market review failed: {e}")
+        if self.source != "sim":
+            self.closed_day = now.date()
         self.set_status("closed", "Simulation day finished" if self.source == "sim" else "Market closed for today")
         if self.feed:
             self.feed.stop()
@@ -854,8 +880,20 @@ class LiveEngine:
         for a in sorted(new_alerts, key=lambda a: -a["severity"]):
             self._emit_safe(a, now, lc)
 
+    def _trading_open(self, now) -> bool:
+        """2.48: alerts and trades only while an NSE session is open (calendar: holidays, special sessions) and the
+        exchange has not told the feed that F&O is closed. The simulator always trades."""
+        if self.source == "sim":
+            return True
+        if not SESSION.is_open(now):
+            return False
+        st = (getattr(self.feed, "market_status", None) or {}).get("NSE_FO") if self.feed else None
+        return st not in ("NORMAL_CLOSE", "CLOSING_END")
+
     def _emit_safe(self, a, now, lc):
         """One alert that fails (a bad fact, a model, a plan) is skipped and logged; the scanner and the other alerts go on."""
+        if not getattr(self, "trading_open", True):
+            return                                       # 2.48: never an alert outside an open session
         try:
             self._emit(a, now, lc)
         except PermissionError:
@@ -941,8 +979,9 @@ class LiveEngine:
         R = {st: exits.risk_pts(st, s0, d, atr, l[-1], h[-1]) for st in exits.STYLES}
         o = a.get("option") or {}
         style = self.best_style()
+        pc = self.paper.cfg if self.paper else {}       # 2.48: your capital and risk (was a fixed ₹40K account)
         p = exits.plan(style, s0, d, atr, o.get("ask") or o.get("ltp"), o.get("delta"), o.get("lot"), l[-1], h[-1],
-                       capital=40000, risk_pct=5.0)          # always judged for the ₹40K account (small-account preset)
+                       capital=float(pc.get("capital") or 500000), risk_pct=float(pc.get("risk_pct") or 1.0))
         if p:
             p["status"] = "testing"
         return p, {k: v for k, v in R.items() if np.isfinite(v)}, s0
@@ -1293,10 +1332,22 @@ class LiveEngine:
         except Exception as e:
             self.log(f"Subscribe {key} failed: {e}")
 
+    def _keep_live(self, key: str, und_key: str | None = None):
+        """2.48: a new paper trade's option streams from the first second (before, it waited for the next strike-window
+        refresh, so an open trade's price could lag). Kept while the trade is open (the window adds open trades)."""
+        if not key or key in self.opt_subs or not self.feed:
+            return
+        try:
+            self._seed(self.rest.quotes([key]))
+        except Exception as e:
+            self.log(f"Quote for {key} failed: {e}")
+        self.feed.subscribe([key], "option_greeks")
+        self.opt_subs.add(key)
+
     def paper_open(self, key: str, direction: int, lots: int = 1) -> dict:
         """Paper Buy/Sell of one option from the option chain or the chart. Paper only: nothing reaches a broker."""
         if not self.running or not self.paper:
-            raise ValueError("Start the live scanner first.")
+            raise ValueError("The live scanner is not running (it starts by itself before every NSE session).")
         u, o = self.find_option(key)
         if not o:
             raise ValueError("Option not found in today's contracts.")
@@ -2038,14 +2089,15 @@ class LiveEngine:
                 if lab_on and now.time() >= dt.time(16, 15) and ("lab", today) not in self.brief_done and not self.running:
                     self.brief_done.add(("lab", today))
                     threading.Thread(target=self._nightly_lab, daemon=True).start()
-                if c["source"] != "upstox" or not c.get("auto_start") or now.weekday() >= 5:
+                if c["source"] != "upstox" or not c.get("auto_start"):
                     continue
-                if not (dt.time(9, 0) <= now.time() < dt.time(15, 25)) or self.running:
+                ses = SESSION.session(now.date())        # 2.48: the NSE calendar (special sessions too)
+                if not ses or not (ses["start_scanner"] <= now < ses["close"] - dt.timedelta(minutes=5)) or self.running:
                     continue
-                if self.manual_stop_day == now.date() or self.status["state"] == "closed":
+                if self.manual_stop_day == now.date() or self.closed_day == now.date():
                     continue
                 if self.tokens.load():
-                    self.log("Auto-starting live scanner for today's session")
+                    self.log(f"Auto-starting live scanner: {ses['name']} {ses['open']:%H:%M}-{ses['close']:%H:%M}")
                     self.start("upstox")
                 elif self.reminded_day != now.date():
                     self.reminded_day = now.date()
@@ -2204,6 +2256,8 @@ class LiveEngine:
         return {"status": {**self.status, "running": self.running, "logged_in": bool(self.tokens.load()),
                            "feed": feed, "ticks": self.state.tick_count if self.state else 0},
                 "clock": now.isoformat(), "mins": minutes_since_open(now), "fetched": time.time(),
+                "session": {**SESSION.view(), "paused_today": self.manual_stop_day == dt.datetime.now(IST).date(),
+                            "auto_start": bool(self.cfg()["live"].get("auto_start", True))},
                 "nse": self._nse_state(),
                 "indication": self.indication.view() if getattr(self, "indication", None) is not None else None,
                 "indices": self.index_cards(), "vix": self._vix(),

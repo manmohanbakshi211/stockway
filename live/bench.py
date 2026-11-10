@@ -234,6 +234,15 @@ class Bench:
         i1 = state.get(opt["key"]) if state is not None else None
         if not i1 or not (i1.ask or i1.ltp):
             return 0
+        if self.source != "sim":                       # 2.48: an open NSE session and today's prices only (exchange time)
+            from . import session as SESSION
+            if not SESSION.paper_ok(now):
+                return 0
+            ui = state.get(a.get("und_key")) if a.get("und_key") else None
+            if not SESSION.quote_fresh(getattr(i1, "ltt", None), now) or \
+                    (ui is not None and not SESSION.quote_fresh(getattr(ui, "ltt", None), now, 120)):
+                self.stale_skips["old quote"] = self.stale_skips.get("old quote", 0) + 1
+                return 0
         u = engine.uni.underlyings.get(a["sym"]) if engine.uni else None
         reg = (engine.regimes.get(a["sym"]) or engine.regimes.get("NIFTY") or {}).get("code")
         exp = None

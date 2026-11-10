@@ -46,12 +46,19 @@ class Lens:
         rec = getattr(self.e, "recorder", None)
         mq = "SELECT ts, sym, data FROM metrics" + ("" if all_metrics else " WHERE sym = ?")
         mp = () if all_metrics else (sym,)
-        if rec is not None and getattr(rec, "db", None) is not None:
-            with rec.lock:
-                met = pd.read_sql(mq, rec.db, params=mp)
-                mins = pd.read_sql(f"SELECT ts, key, ltp, oi, iv FROM minutes WHERE key IN ({','.join('?' * len(keys))})", rec.db,
-                                   params=tuple(keys)) if keys else pd.DataFrame(columns=["ts", "key", "ltp", "oi", "iv"])
-            return met, mins, "today"
+        if rec is not None and getattr(rec, "db", None) is not None and not getattr(rec, "closed", False):
+            try:
+                with rec.lock:
+                    met = pd.read_sql(mq, rec.db, params=mp)
+                    mins = pd.DataFrame(columns=["ts", "key", "ltp", "oi", "iv"])
+                    for i in range(0, len(keys or []), 500):  # 2.48: in chunks (SQLite's limit on ? per query)
+                        ch = keys[i:i + 500]
+                        part = pd.read_sql(f"SELECT ts, key, ltp, oi, iv FROM minutes WHERE key IN ({','.join('?' * len(ch))})",
+                                           rec.db, params=tuple(ch))
+                        mins = part if not len(mins) else pd.concat([mins, part], ignore_index=True)
+                return met, mins, "today"
+            except Exception:
+                pass          # 2.48: today's recording was closed (session over, compressed to Parquet): read the files below
         d = Path(self.e.data_dir) / "recordings"
         mf = sorted(d.glob("*_metrics.parquet"))
         if not mf:

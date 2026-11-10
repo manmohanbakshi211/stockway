@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from . import session as SESSION                     # 2.48: the NSE calendar
 from .clock import IST
 
 DEFAULTS = {
@@ -34,9 +35,10 @@ from .registry import paper_kinds as _pk  # noqa: E402
 
 DEFAULTS["kinds"] = _pk()
 
-# the small-account preset (Paper page): ₹40K, 1 lot, 2 trades a day, the day ends after one loss, lock in a good day
-SMALL_ACCOUNT = {"capital": 40000, "risk_pct": 5.0, "max_lots": 1, "max_open": 1, "max_trades_day": 2,
-                 "max_daily_loss_pct": 4.0, "profit_lock": 1200, "aggressive": False}
+# 2.48 (Mandeep, 10 Nov 2026): no fixed ₹40K preset any more. You type your capital on the Paper page and the account
+# rules of its size come from rules/capital.json (live/capital.py).
+
+UND_MAX_AGE_S = 120        # 2.48: the underlying must have traded in the last 2 minutes (a frozen feed opens nothing)
 
 MODES = {0: "auto", 1: "you", 2: "override", 3: "aggressive", 4: "you (chain/chart)"}
 
@@ -48,11 +50,33 @@ def costs(entry: float, exit: float, qty: int) -> float:
 
 
 class PaperBook:
-    def __init__(self, store, source: str, cfg: dict | None = None, log=print):
+    def __init__(self, store, source: str, cfg: dict | None = None, log=print, on_open=None):
         self.store = store
         self.source = source
         self.cfg = {**DEFAULTS, **(cfg or {})}
         self.log = log
+        self.on_open = on_open          # 2.48: the engine streams a new trade's option at once (live price from the first second)
+        self.skipped: dict = {}         # 2.48: why trades were not taken today (no money, closed market, old quote)
+
+    def _skip(self, why: str):
+        self.skipped[why] = self.skipped.get(why, 0) + 1
+        return None
+
+    def market_ok(self, state, now, opt_key=None, und_key=None) -> str | None:
+        """2.48: None when a paper trade may open now, else the reason. An open NSE session (rules/market_calendar.json
+        + holidays), the option's last trade inside today's session and the underlying traded in the last 2 minutes
+        (exchange time, not the time the app received it: a reconnect's old snapshot never opens a trade)."""
+        if self.source == "sim":
+            return None
+        if not SESSION.paper_ok(now):
+            return "market closed (NSE calendar)"
+        i = state.get(opt_key) if (state is not None and opt_key) else None
+        if i is not None and not SESSION.quote_fresh(getattr(i, "ltt", None), now):
+            return "option quote is from before today's open"
+        u = state.get(und_key) if (state is not None and und_key) else None
+        if u is not None and not SESSION.quote_fresh(getattr(u, "ltt", None), now, UND_MAX_AGE_S):
+            return "underlying price is old (feed not live)"
+        return None
 
     def open_trades(self):
         return self.store.trades(status="open", source=self.source)
@@ -90,6 +114,9 @@ class PaperBook:
         inst = state.get(opt["key"])
         if not inst or not inst.ltp:
             return None
+        why = self.market_ok(state, now, opt["key"], alert.get("und_key"))
+        if why:
+            return self._skip(why)
         entry = inst.ask or inst.ltp
         if override:
             lots = 1
@@ -108,12 +135,17 @@ class PaperBook:
                     und_key: str | None = None, kind="manual") -> dict:
         """Buy (direction 1) or sell (direction -1) an option by hand from the option chain or the chart. Selling an
         option you hold closes it; otherwise it opens a short. Market hours only, live price only. Paper only."""
-        hm = now.strftime("%H:%M")
-        if now.weekday() >= 5 or hm < "09:15" or hm >= "15:30":
-            raise ValueError("Market closed: paper fills only on live prices (09:15–15:30).")
+        if self.source != "sim" and not SESSION.paper_ok(now):   # 2.48: the NSE calendar (holidays, special sessions)
+            v = SESSION.view(now)
+            nxt = (v.get("next") or {}).get("open")
+            raise ValueError("Market closed: paper fills only on live prices in an open NSE session"
+                             + (f" (next: {nxt})." if nxt else "."))
         inst = state.get(opt["key"])
         if not inst or not inst.ltp:
             raise ValueError("No live price for this option right now.")
+        why = self.market_ok(state, now, opt["key"], und_key)
+        if why:
+            raise ValueError(f"Not filled: {why}.")
         for t in self.open_trades():
             if t["opt_key"] == opt["key"] and (t.get("dir") or 1) == -direction:
                 return {"closed": self.close_manual(t["id"], state, now)}
@@ -121,13 +153,28 @@ class PaperBook:
             raise ValueError(self.guard(now)["why"])
         entry = (inst.ask or inst.ltp) if direction > 0 else (inst.bid or inst.ltp)
         tid = self._open(state, now, sym=sym, kind=kind, opt=opt, entry=entry, ltp=inst.ltp, lots=max(1, int(lots)),
-                         direction=direction, manual=4, und_key=und_key, why="by hand")
+                         direction=direction, manual=4, und_key=und_key, why="by hand", strict=True)
         return {"opened": tid}
 
     def _open(self, state, now, *, sym, kind, opt, entry, ltp, lots, direction, manual, alert_id=None, und_key=None, why="",
-              exit=None, plan=None):
+              exit=None, plan=None, strict=False):
         c = self.cfg
         und = state.get(und_key) if und_key else None
+        # 2.48: never more money than the account has free (Mandeep, 10 Nov: "sometimes it is taking trades more than
+        # the amount"). Lots are cut to fit; if one lot does not fit, no trade (strict: say so to the person clicking).
+        und_px0 = und.ltp if und and und.ltp else None
+        per_lot = self.need(entry, int(opt["lot"]), direction, und_px0)
+        free = self.free_cash(state)
+        if per_lot > 0 and per_lot * int(lots) > free:
+            fit = int(free // per_lot)
+            if fit < 1:
+                msg = f"needs ₹{per_lot:,.0f} for 1 lot, only ₹{max(0.0, free):,.0f} free"
+                self.log(f"Paper skipped {opt['label']}: {msg}")
+                if strict:
+                    raise ValueError(f"Not enough free money: {msg} in the paper account.")
+                return self._skip("not enough free money")
+            self.log(f"Paper {opt['label']}: {lots} lots cut to {fit} (₹{free:,.0f} free)")
+            lots = fit
         tp, sp = float(c["target_pct"]) / 100, float(c["stop_pct"]) / 100
         hold, trail = None, None
         if exit:                                          # [target %, stop %, max minutes, trail start %, keep fraction]
@@ -146,8 +193,7 @@ class PaperBook:
         # 2.38: quantity (lot size x lots), the money the trade takes (premium paid; for a short, the margin estimate:
         # short_margin_pct of the underlying's value, at least the premium) and the account size at the time
         qty = int(opt["lot"]) * int(lots)
-        und_px = t["und_entry"]
-        need = entry * qty if direction > 0 else max(entry * qty, (und_px or 0) * qty * float(c.get("short_margin_pct") or 15) / 100)
+        need = self.need(entry, int(opt["lot"]), direction, t["und_entry"]) * int(lots)
         t.update(qty=qty, capital=round(need, 2), acct_capital=float(c.get("capital") or 0))
         if plan and t["und_entry"] and plan.get("R"):     # chart-level exit: stop / target on the underlying (lab/exits.py)
             import json as _json
@@ -164,7 +210,34 @@ class PaperBook:
                 t["mode"] = f"factory:{mm.group(1)}"
         tid = self.store.add_trade(t)
         self.log(f"Paper {'BUY' if direction > 0 else 'SELL'} {opt['label']} @ {entry:.2f} ({why})")
+        if self.on_open:
+            try:
+                self.on_open(opt["key"], und_key)
+            except Exception as e:
+                self.log(f"Live price for {opt['label']} not started: {e}")
         return tid
+
+    def need(self, entry: float, lot: int, direction: int, und_px: float | None) -> float:
+        """Money one lot takes: the premium for a buy; for a short the margin estimate (short_margin_pct of the
+        underlying's value, at least the premium)."""
+        if direction > 0:
+            return float(entry) * lot
+        return max(float(entry) * lot, (und_px or 0) * lot * float(self.cfg.get("short_margin_pct") or 15) / 100)
+
+    def free_cash(self, state=None) -> float:
+        """2.48: free money now = capital + booked P&L + open P&L (live prices) - money blocked in open positions:
+        the same 'Free' the Paper page shows."""
+        trades = self.store.trades(source=self.source, limit=5000)
+        realised = sum(t["net"] or 0 for t in trades if t["status"] == "closed")
+        unreal = used = 0.0
+        for t in trades:
+            if t["status"] != "open":
+                continue
+            i = state.get(t["opt_key"]) if state is not None else None
+            px = i.ltp if i is not None and i.ltp else (t.get("last") or t["entry"])
+            unreal += (t.get("dir") or 1) * (px - t["entry"]) * t["lot"] * t["lots"]
+            used += self.margin(t)
+        return float(self.cfg.get("capital") or 0) + realised + unreal - used
 
     def size(self, entry, lot) -> int:
         """Lots so that hitting the stop loses about risk_pct of capital (at least 1 lot)."""
@@ -306,6 +379,9 @@ class PaperBook:
         for t in opened:
             inst = state.get(t["opt_key"]) if state else None
             ltp = inst.ltp if inst and inst.ltp else t["last"] or t["entry"]
+            if inst and inst.ltp:                       # 2.48: when this price is from (exchange trade time, else received)
+                t["px_ts"] = (inst.ltt / 1000) if getattr(inst, "ltt", None) else getattr(inst, "t", None)
+                t["px_rx"] = getattr(inst, "t", None)
             t["unreal"] = round((t.get("dir") or 1) * (ltp - t["entry"]) * t["lot"] * t["lots"], 2)
             t["last"] = ltp
             und = state.get(t["und_key"]) if state and t.get("und_key") else None
@@ -331,5 +407,5 @@ class PaperBook:
                 "equity": eq, "n": n, "win_rate": round(wins / n * 100) if n else None,
                 "net": round(sum(t["net"] for t in closed), 2), "costs": round(sum(t["costs"] or 0 for t in closed), 2),
                 "unreal": round(sum(t["unreal"] for t in opened), 2), "settings": self.cfg,
-                "account": self.account(trades, opened),
+                "account": self.account(trades, opened), "skipped_today": dict(self.skipped),
                 "guard": self.guard(dt.datetime.now(IST) if state is None else (state.clock.now() if getattr(state, "clock", None) else dt.datetime.now(IST)))}

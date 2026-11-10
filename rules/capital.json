@@ -1,5 +1,5 @@
 {
- "about": "Account rules by capital. When you set a capital on the Paper page the app applies the tier it falls in (you can still change any rule in Data & settings). The first tier is the original small-account preset (₹40K: 1 lot, 1 position, 2 trades a day, 4% daily loss, lock the day at +3%). Amounts are in rupees; 'upto' null = no upper limit.",
+ "about": "Account rules by capital. When you type your capital on the Paper page the app applies the tier it falls in (you can still change any rule in Data & settings). 2.48: there is no fixed ₹40K preset any more; a small capital simply gets the first tier (1 lot, 1 position, 2 trades a day, 4% daily loss, lock the day at +3%). Paper trades never use more than the account's free money. Amounts are in rupees; 'upto' null = no upper limit.",
  "tiers": [
   {"upto": 60000, "name": "Small account", "risk_pct": 5.0, "max_lots": 1, "max_open": 1, "max_trades_day": 2, "max_daily_loss_pct": 4.0, "profit_lock_pct": 3.0},
   {"upto": 150000, "name": "Growing account", "risk_pct": 3.0, "max_lots": 2, "max_open": 2, "max_trades_day": 4, "max_daily_loss_pct": 4.0, "profit_lock_pct": 3.0},
@@ -8,5 +8,5 @@
  ],
  "limits": {"min": 10000, "max": 100000000},
  "test_accounts": {"about": "2.31 capital test (Strategy board): virtual paper accounts at these capitals, one per way of trading (only buying, buying + selling, only selling), each following its tier's rules above on the test bench's trades. 'proven' accounts take only strategies whose record on earlier days (at least proven_min_n trades) is positive after costs and its uncertainty.",
-                   "levels": [40000, 150000, 300000, 500000], "proven_min_n": 20, "days": 60, "since": "2026-11-04"}
+                   "levels": [100000, 200000, 500000, 1000000], "levels_note": "2.48 (10 Nov 2026): your own capital is always added as the first account; the fixed ₹40K level is gone (was [40000, 150000, 300000, 500000]).", "proven_min_n": 20, "days": 60, "since": "2026-11-04"}
 }

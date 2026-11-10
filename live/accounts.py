@@ -34,7 +34,7 @@ COLS = ("id", "ts", "day", "sym", "kind", "variant", "name", "style", "family", 
 
 def settings() -> dict:
     t = (C._cfg().get("test_accounts") or {})
-    return {"levels": [float(x) for x in (t.get("levels") or [40000, 150000, 300000, 500000])],
+    return {"levels": [float(x) for x in (t.get("levels") or [100000, 200000, 500000, 1000000])],
             "proven_min_n": int(t.get("proven_min_n") or 20), "days": int(t.get("days") or 60)}
 
 

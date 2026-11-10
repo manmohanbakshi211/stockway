@@ -9,7 +9,8 @@ import time
 class Inst:
     __slots__ = ("key", "ltp", "cp", "vol", "oi", "iv", "atp", "bid", "ask", "bidq", "askq", "tbq", "tsq",
                  "delta", "gamma", "theta", "vega", "day_o", "day_h", "day_l", "base_oi", "prev_oi", "ltq",
-                 "t", "hist", "ticks", "cvd", "flow", "_side", "_pv", "_pbid", "_pask", "_pltp")
+                 "t", "hist", "ticks", "cvd", "flow", "_side", "_pv", "_pbid", "_pask", "_pltp",
+                 "ltt")                                       # 2.48: the exchange's last-trade time (ms)
 
     def __init__(self, key):
         self.key = key
