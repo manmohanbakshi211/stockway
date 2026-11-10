@@ -52,7 +52,7 @@
     "trail": {
       "name": "Trailing exit",
       "short": "Same trades as the main account, trailing exit",
-      "explain": "2.56 (Mandeep, 11 Nov 2026: test the trailing exit as a separate account first). Takes the same alerts as the main account (same types, strength, risk check, lot sizing from its own money) and differs only in how it exits: stop 1.5 x the 5-minute ATR on the index or stock, then a stop that trails 2.5 x ATR behind the best price, no fixed target, out by the day's exit time. On 15,370 graded alerts (shadow exits, 2 to 9 Nov) this exit made +2.0% more on the option per trade than the +30% / -20% premium exit, better on 5 of 6 days. If it keeps beating the main account here, switching the main account is your call.",
+      "explain": "Takes the same alerts as the main account (same types, strength, risk check, lots sized from its own money) and differs only in how it exits: stop 1.5 x the 5-minute ATR of the index or stock, then a stop that trails 2.5 x ATR behind the best price, no fixed target, out by the day's exit time. Why: on 15,370 graded alerts (2-9 Nov) this exit made +2.0% more on the option per trade than the +30% / -20% premium exit, better on 5 of 6 days. Your call (11 Nov): test it here first; if it keeps beating the main account, switching the main account is your decision.",
       "on": true,
       "capital": null,
       "pick": {
