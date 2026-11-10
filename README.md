@@ -139,10 +139,16 @@ Costs: Upstox data is free with an account. Claude uses the plan you already hav
   a sweep of its high / low, counted; `pd_rt`: the swept level retested with a rejection candle; `eq_rt`: the same at
   equal highs / lows), 4-hour candles (09:15-13:15, 13:15-15:30) with a bigger-chart level broken and retested on a
   smaller chart (`xrt_4H_30m`, `xrt_1H_15m`), and a stop at the sweep's extreme (`dayx`: today's low / high so far).
-- **Bullets:** nine strategy files (239 rules): `aseem_swing`, `aseem_intraday`, `aseem_advanced`, `aseem_scalp`,
+- **Bullets:** nine strategy files (241 rules): `aseem_swing`, `aseem_intraday`, `aseem_advanced`, `aseem_scalp`,
   `aseem_options`, `aseem_price_action`, `daily_candle_sweep`, `james_berry_4h30m`, `nifty_liquidity_sweep`. Not testable yet (listed in the files): positional / daily holds (chapter 4,
   1.4, 1.5, 7.2, 7.5, 7.6), Elliott and Gann (hand-drawn), volume oscillator (no index volume), calendar / expiry decay /
   BTST / swing buying (overnight), 3 PM strategy (after 14:45), OI strikes and OTM-by-premium selling, Martingale (sizing).
+- **5-year Bank Nifty (real option premiums, all charges): 0 of 249 rules pass train** (luck alone ~4.8 of 2,625 tried).
+  Only lead positive in all three periods: James Berry sell (4H support broke on 30M, retest, close below the retest
+  candle) +₹474 / +₹324 / +₹1,230 per trade on 37 / 13 / 19 trades (train t 0.73): too few trades to trust. Book
+  scalping, SMC, Donchian, VWAP reversal, Supertrend / momentum option selling and buying lose in every period.
+- Results don't move: Lab regression 280 / 280 on the rebuilt 5-year table, 103 / 103 on a 1-year set rebuilt from
+  scratch (every old column identical).
 
 ## Fusions: the best strategies mixed, and how many agree at once (2.46)
 

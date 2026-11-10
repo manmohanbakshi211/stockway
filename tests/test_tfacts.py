@@ -106,6 +106,7 @@ def test_two_step_entries_setup_then_trigger(monkeypatch):
     t1, t2 = b.trades(one), b.trades(two)
     assert set(t1["tod"]) == {55} and set(t2["tod"]) == {65}         # setup bar 10; trigger bar 12 (not 8, not 20)
     assert (t2["pnl"] == 100).all()
+    assert F.score(b, two)["then"] == two["then"] and "then" not in F.score(b, one)       # kept for rescoring
     short = dict(two, then={"conds": [["b", ">", 0.5]], "within": 1})
     assert len(b.trades(short)) == 0                                 # bar 12 is 2 bars after the setup
     # live: the same rule on a day's facts

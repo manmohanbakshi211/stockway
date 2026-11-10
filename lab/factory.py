@@ -1088,7 +1088,7 @@ def score(book: Book, s: dict) -> dict:
     tr = book.trades(s)
     out = {"id": s["id"], "rule": words(s), **{k: s[k] for k in ("dir", "conds", "win", "exit", "max_day", "syms")},
            "source": s.get("source", "generated"), "note": s.get("note", "")}
-    out.update({k: s[k] for k in ("early", "pack", "pack_v", "name") if k in s})      # 2.43: strategy-file rules
+    out.update({k: s[k] for k in ("early", "pack", "pack_v", "name", "then") if k in s})   # 2.43 file rules; 2.47 then
     for p, name in ((0, "train"), (1, "valid"), (2, "hold")):
         out[name] = stats(tr[tr["part"] == p], book.n_days[p])
     if not passes(out["train"], PASS["train"]):
