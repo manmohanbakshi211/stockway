@@ -424,7 +424,9 @@ def vocabulary() -> dict:
     from . import factory as F
     return {"format": FORMAT, "facts": {k: v[0] + (f" ({v[1]})" if v[1] else "") for k, v in F.FEATURES.items()},
             "exits": {k: F.exit_words(k) for k in F.BUY_EXITS}, "sell_exits": {k: F.EXIT_WORDS.get(k, k) for k in F.SELL_EXITS},
-            "exit_fields": {"stop": [list(X.STOP_KINDS), "atr k | bar | fc (other side of the first 5-min candle) | pct k"],
+            "exit_fields": {"stop": [list(X.STOP_KINDS), "atr k | bar | fc (other side of the first 5-min candle) | pct k | or15 | or30 | swing | dayx | "
+                                     "pm (other side of the 14:15-14:20 candle) | fib38 (0.38 retracement of today's fall / rise) | "
+                                     "sig (beyond the confirmed hammer / shooting star)"],
                             "target_r": "number or null", "be_at": "R or null", "trail_atr": "ATRs or null (atr stop only)",
                             "momentum": list(X.MOMENTUM), "max": "minutes (375 = out by 15:15)",
                             "exit_if": "2.47: 1-3 [fact, '>' or '<', number]: out at the 5-min close where any holds",

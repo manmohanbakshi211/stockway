@@ -130,6 +130,11 @@ for _k in OPT_REFS:
     OPT_FACTS[f"pe_m{_k}"] = (f"the put that was at the money at {_k[:2]}:{_k[2:]}: premium change since then", "%")
 OPT_FACTS["strd_avg"] = ("ATM straddle premium vs its average so far today (below 0 = under its day average)", "%")
 FEATURES.update(OPT_FACTS)
+# 2.68 (gun pieces for the Ghanshyam option-buying course): fall / rise from the open, a confirmed hammer / shooting
+# star, the morning move, where the 2:20 candle sits, how much of today's fall / rise is taken back (lab/pafacts.py)
+from . import pafacts as PA  # noqa: E402
+
+FEATURES.update(PA.FACTS)
 INDEX_SYMS =("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX")
 STOCKS = "STOCKS"             # in a rule's syms: any F&O stock (tested on every stock with downloaded history)
 EACH = "EACH"                 # 2.50: every index and every F&O stock, each on its own (its own trades and day limit)
@@ -382,6 +387,11 @@ def bar_features(o, h, l, c, ctx: dict, iv=None, prem=None) -> dict:
     except Exception:
         from live.smc import FACTS as _SF
         for k in _SF:
+            f[k] = np.full(n, np.nan)
+    try:                                                  # 2.68: price-action facts (lab/pafacts.py), isolated
+        f.update(PA.facts(o, h, l, c))
+    except Exception:
+        for k in PA.FACTS:
             f[k] = np.full(n, np.nan)
     return f
 
@@ -735,6 +745,10 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
             f.update(opt_facts(day, nb, prem))
             atr = atr14(h, l, c)
             sw_lo, sw_hi = last_swings(h, l)                  # 2.44: the swing stop of file exits
+            try:                                              # 2.68: 2:20 candle, 0.38 retracement, hammer / star stops
+                pa_lv = PA.levels(o, h, l, c) if pack_styles else {}
+            except Exception:
+                pa_lv = {}
             for i in range(nb):
                 tod = (i + 1) * 5
                 if tod < SELL_FIRST_TOD or tod > LAST_ENTRY_TOD:
@@ -790,7 +804,8 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
                     if pack_styles:                       # 2.44: levels for file exits, the opposite option for sells
                         lv = {"fc": (l[0], h[0]), "or15": (l[:3].min(), h[:3].max()) if i >= 2 else (None, None),
                               "or30": (l[:6].min(), h[:6].max()) if i >= 5 else (None, None),
-                              "swing": (sw_lo[i], sw_hi[i]), "dayx": (float(l[:i + 1].min()), float(h[:i + 1].max()))}
+                              "swing": (sw_lo[i], sw_hi[i]), "dayx": (float(l[:i + 1].min()), float(h[:i + 1].max())),
+                              **{k_: (float(a_[i]), float(b_[i])) for k_, (a_, b_) in pa_lv.items()}}
                         oppx = day.px.get((float(k), "PE" if side == "CE" else "CE"))
                     for style in pack_styles:             # a bad file exit is NaN for its own column, nothing else
                         try:

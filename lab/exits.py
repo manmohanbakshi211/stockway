@@ -60,14 +60,16 @@ def atr14(h, l, c) -> np.ndarray:
 
 
 PACK_STYLES: dict = {}        # 2.43: exits defined in strategy files (key -> spec), registered by lab/packs.py
-STOP_KINDS = ("atr", "bar", "fc", "pct", "or15", "or30", "swing", "dayx")    # 2.44: opening ranges, last swing; 2.47: day extreme
+STOP_KINDS = ("atr", "bar", "fc", "pct", "or15", "or30", "swing", "dayx",     # 2.44: opening ranges, last swing; 2.47: day extreme
+              "pm", "fib38", "sig")                                         # 2.68: lab/pafacts.py LEVELS
 MOMENTUM = ("close", "wick")
 SPEC_KEYS = {"stop", "target_r", "be_at", "trail_atr", "momentum", "max", "words",
              "target_pts", "target_pct", "opt_target_pts", "opt_target_pct", "sell",             # 2.44
              "exit_if", "opt_stop_pct"}                                                         # 2.47
 NEW_244 = ("target_pts", "target_pct", "opt_target_pts", "opt_target_pct", "sell")
 NEW_247 = ("exit_if", "opt_stop_pct")
-LEVEL_STOPS = ("fc", "or15", "or30", "swing", "dayx")   # stop at the other side of a level pair (low for a buy, high for a sell)
+LEVEL_STOPS = ("fc", "or15", "or30", "swing", "dayx", "pm", "fib38", "sig")   # stop at the other side of a level pair
+#                                                                 (low for a buy, high for a sell)
 
 
 def spec_of(style: str) -> dict:
@@ -84,6 +86,9 @@ def spec_words(sp: dict) -> str:
             "stop at the other side of the first 30 minutes' range" if kind == "or30" else
             "stop beyond the last swing low (buy) / high (sell)" if kind == "swing" else
             "stop beyond today's low (buy) / high (sell) so far: the sweep's extreme" if kind == "dayx" else
+            "stop at the other side of the 14:15-14:20 candle" if kind == "pm" else
+            "stop at the 0.38 retracement of today's fall (buy) / rise (sell)" if kind == "fib38" else
+            "stop beyond the confirmed hammer's low (buy) / shooting star's high (sell)" if kind == "sig" else
             "stop just beyond the signal candle (0.5-2 ATR)")
     parts = [("SELL the opposite at-the-money option (the view: same direction); " if sp.get("sell") else "") + stop]
     if sp.get("be_at"):

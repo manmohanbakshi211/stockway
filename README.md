@@ -114,6 +114,29 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Ghanshyam option-buying course: gun pieces + strategy file (2.68, 11 Nov 2026)
+
+Mandeep shared the course transcript (72 pages, 2022). Split first (gun vs bullet), checked on Bank Nifty 2022-2026
+before building (index 1-minute data, then the 5-year Lab's real option prices with every charge):
+
+- His favourite **hammer** did not hold up (31-33% win, negative in both halves); his "90%" is not supported.
+- **Shooting star after a rise on a gap-down day**: the best candle lead (51% win, small sample, not proven).
+- **2:20 candle break WITH the morning move**: lost money in every period (about -Rs 300 to -670 per trade): an
+  "avoid" check, kept on trial as a control. **AGAINST the morning move, away from the middle of the range**: the
+  best lead (calls +Rs 83 / -97 / +514 per trade train / validation / holdout), not proven.
+- **Fibonacci 0.71** after a fall: only after a big fall (0.8%+), mixed. Window strategy (1-minute), breakout "with a
+  pause" and the round-figure rule: no edge found.
+
+Gun (`lab/pafacts.py`, in every bar table and live through the same facts): `open_fall` / `open_rise`, `hs_conf`
+(hammer / shooting star at the day's extreme confirmed by a close beyond it within 3 bars), `am_move` (open to 13:00),
+`pm_rng` / `pm_edge` (where the 14:15-14:20 candle sits in the 13:00-14:15 range), `fib_dday` / `fall_day` and
+`fib_uday` / `rise_day` (how much of today's fall / rise is taken back), and three level stops for strategy-file
+exits: `pm` (the 2:20 candle), `fib38` (the 0.38 retracement), `sig` (beyond the confirmed hammer / star). Each is
+isolated: a failure leaves only its own facts empty.
+Bullets: `rules/strategy_files/ghanshyam_course.json` (17 strategies, 67 Lab rules, upload on Strategy Lab →
+Strategy files). Everything starts on trial (test bench only). The bar tables rebuild once for the new facts.
+Lab regression: 103 / 103 and 103 / 103 (1-year), 1,444 / 1,444 (5-year) identical.
+
 ## 2.67.1: sidebar order (11 Nov 2026)
 
 Mandeep: the sidebar now reads Trade today, Market intel, Daily radar, Test & research, Setup. Same pages, new order.
