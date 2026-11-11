@@ -1,9 +1,11 @@
-"""Multi-timeframe charts: 1D / 75m / 1H / 15m / 5m candles, the markings that suit each timeframe, higher-timeframe
-levels drawn on lower charts, confluence zones, a trend strip, and strategy overlays (apply / remove).
+"""Multi-timeframe charts: 1W / 1D / 4H / 1H / 15m / 5m candles (2.70: 4H replaces 75m on screen, 1W added), the
+markings that suit each timeframe, higher-timeframe levels drawn on lower charts, confluence zones, a trend strip,
+and strategy overlays (apply / remove).
 
 Data: Dhan (daily candles and 15-minute / 5-minute intraday, kept on disk in data/charts, refreshed at most every 30
-minutes) plus today's live 1-minute bars from the scanner. 1H and 75m are built from 15-minute bars aligned to 09:15
-(75m = five candles a day, the Indian standard). Without Dhan it falls back to the scanner's own history.
+minutes) plus today's live 1-minute bars from the scanner. 1H and 4H (and the old 75m) are built from 15-minute bars
+aligned to 09:15 (4H = 09:15-13:15 and 13:15-15:30); 1W from the daily bars. Without Dhan it falls back to the scanner's
+own history. 2.70: each timeframe also gets its MindGame scene (live/mindgame.py), shown beside that chart only.
 
 Markings are computed here (the same maths as the scanner and the Lab), not drawn by AI, so what the chart shows is
 what gets tested. Each marking is a "layer"; a layer that fails is skipped and the chart still draws.
@@ -27,14 +29,16 @@ IST_SHIFT = 19800
 INDEX_IDS = {"NIFTY": 13, "BANKNIFTY": 25, "FINNIFTY": 27, "MIDCPNIFTY": 442}
 TFS = {
     "1D": {"label": "Daily", "base": "D", "days": 400},
-    "75m": {"label": "75 min", "base": 15, "mins": 75, "days": 60},
+    "1W": {"label": "Weekly", "base": "D", "step": "W", "days": 3650},
+    "4H": {"label": "4 hours", "base": 15, "mins": 240, "days": 120},
+    "75m": {"label": "75 min", "base": 15, "mins": 75, "days": 60},          # kept for old links; not shown (2.70)
     "1H": {"label": "1 hour", "base": 15, "mins": 60, "days": 60},
     "15m": {"label": "15 min", "base": 15, "mins": 15, "days": 20},
     "5m": {"label": "5 min", "base": 5, "mins": 5, "days": 5},
 }
-ORDER = ["1D", "75m", "1H", "15m", "5m"]
+ORDER = ["1W", "1D", "4H", "1H", "15m", "5m"]
 REFRESH_S = 1800
-TF_COLORS = {"1D": "#3D2FA8", "75m": "#9A6A12", "1H": "#B04ACF", "15m": "#0F7C8C", "5m": "#5E6B78"}
+TF_COLORS = {"1W": "#1B3A6B", "1D": "#3D2FA8", "4H": "#9A6A12", "75m": "#9A6A12", "1H": "#B04ACF", "15m": "#0F7C8C", "5m": "#5E6B78"}
 
 
 def _f(x):
@@ -343,6 +347,8 @@ class MTF:
             rows = [r for r in rows if r[0] < day0] + (daily_from(live) if base == "D" else resample(live, base))
         if base != "D" and spec["mins"] != base:
             rows = resample(rows, spec["mins"])
+        elif base == "D" and spec.get("step") in ("W", "M"):
+            rows = period_from(rows, spec["step"])
         cut = time.time() - spec["days"] * 86400 * (1.45 if base != "D" else 1.0)
         return [r for r in rows if r[0] >= cut]
 
@@ -380,6 +386,35 @@ class MTF:
         lv = [(f"Swing high", s["price"], "swing") for s in hs] + [(f"Swing low", s["price"], "swing") for s in ls]
         return lv, sw, PT.structure(sw)
 
+    @staticmethod
+    def _levels_weekly(b) -> list:
+        """2.70 (Mandeep: the weekly chart 'to get a long move, the strongest resistance and all-time high levels'): the
+        highest high on record, the 52-week high / low, and the strongest resistance / support: the price band that the
+        most weekly highs (lows) of the last 3 years stopped at, above (below) the price (within 25% of it)."""
+        if len(b) < 10:
+            return []
+        h = np.asarray([r[2] for r in b], float)
+        l = np.asarray([r[3] for r in b], float)
+        c = float(b[-1][4])
+        lv = [("All-time high", float(h.max()), "ath")]
+        y = b[-52:]
+        lv += [("52-week high", max(r[2] for r in y), "52w"), ("52-week low", min(r[3] for r in y), "52w")]
+        tol = 0.5 * float(np.median(h - l))
+        h3, l3 = h[-156:], l[-156:]                                   # the last 3 years, within 25% of the price
+        for up in (True, False):
+            pts = h3[(h3 > c) & (h3 <= c * 1.25)] if up else l3[(l3 < c) & (l3 >= c * 0.75)]
+            if not len(pts) or tol <= 0:
+                continue
+            cnt = np.array([(np.abs(pts - p) <= tol).sum() for p in pts])
+            k = int(cnt.max())
+            if k < 2:
+                continue
+            best = pts[cnt == k]
+            p = float(best.min() if up else best.max())                # the nearest of the strongest
+            band = pts[np.abs(pts - p) <= tol]
+            lv.append((f"Strongest {'resistance' if up else 'support'} ({k} weeks)", float(np.median(band)), "zone_w"))
+        return lv
+
     def panel(self, sym, tf, m: dict | None) -> dict:
         b = self.bars(sym, tf)
         out = {"tf": tf, "label": TFS[tf]["label"], "candles": [], "series": {}, "levels": [], "markers": [], "trend": None}
@@ -406,13 +441,16 @@ class MTF:
         if tf == "1D":
             layer("ema", lambda: out["series"].update(ema20=line(e20), ema50=line(e50), ema200=line(ta.ema(c, 200))))
             layer("daily levels", lambda: lv.extend(self._levels_daily(b)))
-        if tf in ("75m", "1H", "1D"):
-            if tf != "1D":
+        if tf == "1W":
+            layer("ema", lambda: out["series"].update(ema20=line(e20), ema50=line(e50)))
+            layer("weekly levels", lambda: lv.extend(self._levels_weekly(b)))
+        if tf in ("75m", "1H", "4H", "1D", "1W"):
+            if tf not in ("1D", "1W"):
                 layer("ema", lambda: out["series"].update(ema20=line(e20), ema50=line(e50)))
                 layer("supertrend", lambda: out["series"].update(st_up=line(np.where(sd > 0, st, np.nan)), st_dn=line(np.where(sd < 0, st, np.nan))))
 
             def sw():
-                s_lv, s, struct = self._swing_levels(b, 1.5 if tf == "1D" else 1.3)
+                s_lv, s, struct = self._swing_levels(b, 1.5 if tf in ("1D", "1W") else 1.3)
                 lv.extend(s_lv)
                 out["structure"] = struct
                 out["markers"] += [{"time": int(T[x["i"]]), "position": "aboveBar" if x["type"] == "H" else "belowBar",
@@ -495,7 +533,7 @@ class MTF:
             for up in ORDER[:i]:
                 if up in panels:
                     htf += [{**x, "htf": True, "name": f"{up}·{x['name']}"} for x in panels[up]["levels"]
-                            if x["group"] in ("prev", "week", "month", "swing")]
+                            if x["group"] in ("prev", "week", "month", "swing", "ath", "52w", "zone_w")]
             panels[tf]["htf_levels"] = htf
         spot = (m or {}).get("spot") or next((p["last"] for p in reversed(list(panels.values())) if p.get("last")), None)
         conf = self.confluence(panels, spot, sym)
@@ -510,7 +548,31 @@ class MTF:
             out["report"] = self.report(out)
         except Exception as ex:
             out["report"] = {"error": str(ex)[:120]}
+        try:                                            # 2.70: MindGame scene of each timeframe (a failure skips only this)
+            self._mind(sym, panels, m)
+        except Exception as ex:
+            out["mind_error"] = str(ex)[:120]
         return out
+
+    def _mind(self, sym, panels, m):
+        from . import mindgame as MG
+        mg = getattr(self.e, "mind", None)
+        st = mg.stats() if mg is not None else {}
+        o = (m or {}).get("opt") or {}
+        ex = {"pdc": (m or {}).get("cp"), "oi_call": o.get("resistance"), "oi_put": o.get("support")}
+        reads, rows = {}, {}
+        now = time.time()
+        for tf, p in panels.items():
+            if not p.get("candles"):
+                continue
+            try:
+                rows[tf] = MG.to_rows(p["candles"])
+                r = MG.read(rows[tf], tf, now, ex if tf in MG.INTRADAY else {}, st)
+            except Exception as e_:
+                r = {"tf": tf, "items": [], "empty": f"skipped: {str(e_)[:80]}", "score": 0.0}
+            p["mind"] = reads[tf] = r
+        if mg is not None:
+            mg.note_big(sym, reads, rows, now)
 
     @staticmethod
     def report(v: dict) -> dict:
@@ -518,7 +580,7 @@ class MTF:
         picture (aligned or a pullback), the zones that matter most and what would change the view. Rule-based."""
         panels, spot = v.get("panels") or {}, v.get("spot")
         small_to_large = [tf for tf in reversed(ORDER) if tf in panels]
-        rows, score, weight = [], 0.0, {"5m": 1, "15m": 1.5, "1H": 2, "75m": 2, "1D": 3}
+        rows, score, weight = [], 0.0, {"5m": 1, "15m": 1.5, "1H": 2, "75m": 2, "4H": 2.5, "1D": 3, "1W": 3.5}
         for tf in small_to_large:
             p = panels[tf]
             cs = [c_["close"] for c_ in p.get("candles") or [] if c_.get("close") is not None]
@@ -542,7 +604,7 @@ class MTF:
             return {"lines": [], "verdict": None}
         total = sum(weight.get(r_["tf"], 1) for r_ in rows)
         bias = round(score / total * 100) if total else 0
-        big = next((r_ for r_ in reversed(rows) if r_["tf"] in ("1D", "75m", "1H")), rows[-1])
+        big = next((r_ for r_ in reversed(rows) if r_["tf"] in ("1W", "1D", "4H", "75m", "1H")), rows[-1])
         small = rows[0]
         if bias >= 60:
             verdict = "Strong uptrend on every timeframe that matters: buy dips, don't fight it."
@@ -581,7 +643,7 @@ class MTF:
         if hot:
             watch.append(f"Stretched on {', '.join(hot)}: late to chase, a pause or pullback is common from here.")
         return {"verdict": verdict, "bias": bias, "per_tf": rows, "lines": lines, "watch": watch,
-                "note": "Rule-based read of all five charts (trend = price vs EMA 20 / 50 and Supertrend). Not a prediction."}
+                "note": f"Rule-based read of all {len(rows)} charts (trend = price vs EMA 20 / 50 and Supertrend). Not a prediction."}
 
     @staticmethod
     def confluence(panels: dict, spot, sym) -> list:
@@ -601,7 +663,7 @@ class MTF:
         zones.append(cur)
         out = []
         for z in zones:
-            tfs = sorted({x[1] for x in z}, key=ORDER.index)
+            tfs = sorted({x[1] for x in z}, key=lambda t: ORDER.index(t) if t in ORDER else 99)
             if len(tfs) >= 2:
                 lo, hi = min(x[0] for x in z), max(x[0] for x in z)
                 out.append({"lo": _f(lo), "hi": _f(hi), "mid": _f((lo + hi) / 2), "tfs": tfs, "strength": len(tfs),

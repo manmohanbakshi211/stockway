@@ -1,0 +1,257 @@
+{
+ "about": "MindGame bullets (2.70). Each bullet is a buyer / seller behaviour from a course or transcript, written as ACTIVITY (Mandeep, 12 Nov 2026: 'points, level ke number nahi, activity kya ho rahi hai ye dekhna hai'). No fixed points, rupees or minutes: every check is measured in the symbol's own typical candle on the timeframe it is read on (live/mindgame.py, the gun). who: buyers / sellers / both. detect: the gun's activity check. side: +1 the bullet expects up, -1 down, 0 information only (not graded). All bullets start on trial: shown on the Chart page, recorded and graded (right / wrong / flat), never an alert. Mandeep, 12 Nov 2026: a bullet reaches the alerts only when its record is positive (trust below); until then it stays out of the alerts. status 'later' = needs data the app does not join yet.",
+ "valid_from": "2026-11-12",
+ "settings": {
+  "unit_bars": 50,
+  "min_bars": 20,
+  "grade_bars": {
+   "1m": 10,
+   "3m": 8,
+   "5m": 6,
+   "15m": 6,
+   "1H": 5,
+   "4H": 4,
+   "1D": 5,
+   "1W": 4
+  },
+  "grade_units": 1.0,
+  "trust": {
+   "min_n": 30,
+   "min_right_pct": 60
+  },
+  "tf_weight": {
+   "1m": 0.5,
+   "3m": 0.75,
+   "5m": 1,
+   "15m": 1.5,
+   "1H": 2,
+   "4H": 2.5,
+   "1D": 3,
+   "1W": 3.5
+  },
+  "record_syms": [
+   "NIFTY",
+   "BANKNIFTY"
+  ],
+  "record_tfs": [
+   "1m",
+   "3m",
+   "5m",
+   "15m"
+  ],
+  "ai": {
+   "on": true,
+   "per_day": 60,
+   "min_gap_s": 120
+  }
+ },
+ "bullets": [
+  {
+   "id": "gap_booking",
+   "n": 1,
+   "who": "buyers",
+   "source": "Ghanshyam course p1-2",
+   "detect": "gap_booking",
+   "activity": "Big gap above yesterday's high, and the first candles sell",
+   "prediction": "Yesterday's buyers book profit early: an early dip or stall, no fresh buying at the open",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [56.1, 123],
+    "15m": [56.5, 85]
+   }
+  },
+  {
+   "id": "trap_run",
+   "n": 2,
+   "who": "buyers",
+   "source": "Ghanshyam course p37-48; Mandeep 12 Nov",
+   "detect": "level_break",
+   "activity": "One straight run from support into resistance (no rest), then a break",
+   "prediction": "Trap breakout: profit booking near resistance makes it fail",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [53.2, 2126],
+    "15m": [48.6, 741]
+   }
+  },
+  {
+   "id": "rest_break",
+   "n": 3,
+   "who": "buyers",
+   "source": "Ghanshyam course p47-48; Mandeep 12 Nov",
+   "detect": "level_break",
+   "activity": "Time spent near resistance (small candles, consolidation), then a strong break",
+   "prediction": "Real breakout: old buyers are out, new buyers in; buyers strong, the move runs",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [45.4, 995],
+    "15m": [46.9, 422]
+   }
+  },
+  {
+   "id": "holding",
+   "n": 4,
+   "who": "buyers",
+   "source": "Ghanshyam course p48",
+   "detect": "holding",
+   "activity": "Price works near a level and the lows do not break (highs, for sellers)",
+   "prediction": "The side holding wins: a break the same way",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [48.1, 3360],
+    "15m": [48.0, 1353]
+   }
+  },
+  {
+   "id": "reversal_candle",
+   "n": 5,
+   "who": "both",
+   "source": "Ghanshyam course p50-51",
+   "detect": "reversal_candle",
+   "activity": "Hammer / shooting star confirmed at an extreme",
+   "prediction": "Works only after a strong move (positions to book); inside a flat range it fails",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [44.1, 790],
+    "15m": [45.0, 431]
+   }
+  },
+  {
+   "id": "slow_move",
+   "n": 6,
+   "who": "buyers",
+   "source": "Ghanshyam course p63",
+   "detect": "slow_move",
+   "activity": "A slow, weak fall (small candles, no strength); mirror: slow weak rise",
+   "prediction": "Someone is absorbing on the other side: no bounce / reversal trade yet",
+   "shadow": true,
+   "alerts": false
+  },
+  {
+   "id": "leaving",
+   "n": 7,
+   "who": "buyers",
+   "source": "Ghanshyam course p6-7",
+   "detect": "leaving",
+   "activity": "A selling candle closes below the last buying candle's low (mirror for sellers)",
+   "prediction": "That side is leaving: book into weakness, the move turns",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [45.9, 4426],
+    "15m": [46.5, 1470]
+   }
+  },
+  {
+   "id": "oi_wall",
+   "n": 8,
+   "who": "sellers",
+   "source": "Ghanshyam course p49-52",
+   "detect": "oi_wall",
+   "activity": "Price rejected just below the big call-OI strike (above the put-OI strike); or accepted beyond it",
+   "prediction": "Option writers defend the strike; acceptance beyond it = they cover, the move runs",
+   "shadow": true,
+   "alerts": false
+  },
+  {
+   "id": "yclose",
+   "n": 9,
+   "who": "both",
+   "source": "Ghanshyam course p17-19",
+   "detect": "yclose",
+   "activity": "Price above / below yesterday's close",
+   "prediction": "Above: buyers lead the day, the close supports; below: sellers lead, it caps",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [41.5, 4364],
+    "15m": [46.6, 2442]
+   }
+  },
+  {
+   "id": "taken_back",
+   "n": 10,
+   "who": "sellers",
+   "source": "Ghanshyam course p57-58",
+   "detect": "taken_back",
+   "activity": "After a strong fall most of it is taken back (mirror after a strong rise)",
+   "prediction": "Most of that side has exited: price tends to reach the high (low) again",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [40.2, 4332],
+    "15m": [37.3, 1318]
+   }
+  },
+  {
+   "id": "gap_cover",
+   "n": 11,
+   "who": "both",
+   "source": "Ghanshyam course p20",
+   "detect": "gap_cover",
+   "activity": "Opening gap against yesterday's move",
+   "prediction": "Trapped positions cover toward yesterday's close (gap fill)",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [49.1, 265],
+    "15m": [48.3, 236]
+   }
+  },
+  {
+   "id": "range_trap",
+   "n": 12,
+   "who": "both",
+   "source": "Ghanshyam course p35-36",
+   "detect": "range_trap",
+   "activity": "Small candles in a tight range: both sides build positions; then a close out of it",
+   "prediction": "The losing side is trapped at the break: a fast move the breakout's way",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [43.0, 1172],
+    "15m": [57.6, 264]
+   }
+  },
+  {
+   "id": "retest",
+   "n": 13,
+   "who": "both",
+   "source": "Ghanshyam course p45",
+   "detect": "retest",
+   "activity": "After a breakout price comes back to the level and holds",
+   "prediction": "Right-entry buyers defend it: the move continues",
+   "shadow": true,
+   "alerts": false,
+   "check_5y": {
+    "5m": [45.8, 4044],
+    "15m": [49.0, 1372]
+   }
+  },
+  {
+   "id": "heavyweight",
+   "n": 14,
+   "who": "both",
+   "source": "Ghanshyam course p52",
+   "detect": "heavyweight",
+   "status": "later",
+   "activity": "HDFC Bank moving against Bank Nifty",
+   "prediction": "A weaker index move",
+   "shadow": true,
+   "alerts": false
+  }
+ ],
+ "check_5y": {
+  "what": "Offline check (2.70, 12 Nov 2026): Bank Nifty Aug 2021 - Oct 2026, 5-minute and 15-minute candles built from the minute prices; every behaviour graded the same way as live (a typical candle its way first = right, against first = wrong, both inside one candle = flat). [right %, decided].",
+  "coin_flip": {
+   "5m": [49.9, 12666],
+   "15m": [49.0, 4149]
+  },
+  "symbol": "BANKNIFTY"
+ }
+}

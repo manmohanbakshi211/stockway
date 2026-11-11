@@ -108,6 +108,19 @@ def static_checks(cfg: dict | None = None) -> list:
                       f"batches of {_nr.BATCH} every {_nr.EVERY_S} s in market hours; news alerts stay keyword-based until it proves better"))
     except Exception as e:
         out.append(_c("news_radar", "News radar", False, f"could not load: {e}"))
+    try:                                             # 2.70: MindGame (buyer / seller behaviour, on trial)
+        from live import mindgame as _mg
+        ok_b, later_b, bad_b = _mg.bullets()
+        mc = _mg.cfg()
+        on_alerts = [b["id"] for b in ok_b if b.get("alerts")]
+        out.append(_c("mindgame", "MindGame: buyer / seller behaviour read on every timeframe, recorded and graded (on trial)",
+                      bool(ok_b) and not bad_b and not on_alerts and not _mg._C.get("error"),
+                      _mg._C.get("error") or f"{len(ok_b)} bullets on trial, {len(later_b)} waiting for data"
+                      + (f"; skipped: {', '.join(bad_b)}" if bad_b else "") + (f"; alerts on (not allowed yet): {', '.join(on_alerts)}" if on_alerts else "")
+                      + f"; engine thread every 60 s for {', '.join(mc['record_syms'])} ({', '.join(mc['record_tfs'])}); "
+                        f"AI message: fast tier, own allowance {int((mc.get('ai') or {}).get('per_day') or 0)} a day, only when the scene changes"))
+    except Exception as e:
+        out.append(_c("mindgame", "MindGame", False, f"could not load: {e}"))
     try:                                             # 2.60: mass search (every single / paired condition at once)
         from lab import mass as _ms
         mc = _ms.cfg()

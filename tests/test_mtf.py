@@ -38,17 +38,19 @@ def test_all_timeframes_and_markings(tmp_path):
     e = engine(tmp_path, minutes())
     v = MTF(e).view("NIFTY")
     P = v["panels"]
-    assert set(P) == {"1D", "75m", "1H", "15m", "5m"}
+    assert set(P) == {"1W", "1D", "4H", "1H", "15m", "5m"}               # 2.70: 4H replaces 75m, 1W added
     for tf, p in P.items():
         assert p["candles"], tf
         assert p["trend"] in ("up", "down", "sideways"), tf
         assert not p.get("failed"), (tf, p.get("failed"))
-    day = [c for c in P["75m"]["candles"]]
+    day = [c for c in P["4H"]["candles"]]
     per_day = {}
     for c in day:
         per_day.setdefault(dt.datetime.utcfromtimestamp(c["time"]).date(), 0)
         per_day[dt.datetime.utcfromtimestamp(c["time"]).date()] += 1
-    assert max(per_day.values()) == 5                                  # 75m = five candles a day
+    assert max(per_day.values()) == 2                                  # 4H = 09:15-13:15 and 13:15-15:30
+    v75 = MTF(e).view("NIFTY", ["75m"])                                 # the old 75m still answers for old links
+    assert max(sum(1 for c in v75["panels"]["75m"]["candles"] if dt.datetime.utcfromtimestamp(c["time"]).date() == d) for d in per_day) == 5
     names = {x["name"] for x in P["1D"]["levels"]}
     assert {"PDH", "PDL", "PWH", "PWL"} <= names
     assert any(x["htf"] for x in P["5m"]["htf_levels"])               # daily levels drawn on the 5-minute chart

@@ -44,7 +44,7 @@ NAMES = {"nifty_al": "Nifty moving the same way", "nifty15_al": "Nifty's last 15
          "depth_all_al": "Whole order book leaning the same way", "mover_al": "Among today's movers the same way",
          "cdl_5m_al": "Candle pattern on 5 min agrees", "cdl_15m_al": "Candle pattern on 15 min agrees",
          "cdl_30m_al": "Candle pattern on 30 min agrees", "cdl_1h_al": "Candle pattern on 1 hour agrees",
-         "cdl_75m_al": "Candle pattern on 75 min agrees", "cdl_1d_al": "Candle pattern on the day chart agrees",
+         "cdl_75m_al": "Candle pattern on 75 min agrees", "cdl_4h_al": "Candle pattern on 4 hours agrees", "cdl_1d_al": "Candle pattern on the day chart agrees",
          "cdl_1w_al": "Candle pattern on the week chart agrees", "cdl_al_sum": "Candle patterns overall (all timeframes)",
          "conf_al": "Other named strategies agree", "conf_against": "Other named strategies against",
          "agree": "Evidence points agreeing", "against": "Evidence points against", "score_bias": "Score bias",

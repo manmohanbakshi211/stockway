@@ -391,7 +391,7 @@ function bindAlertButtons(root) {
   });
 }
 
-function stopPageTimer() { clearTimeout(L.pageTimer); L.pageTimer = null; chStreamStop(); lpStreamStop(); }
+function stopPageTimer() { clearTimeout(L.pageTimer); L.pageTimer = null; chStreamStop(); lpStreamStop(); if (typeof CH !== "undefined") clearTimeout(CH.mindTimer); }
 
 /* 2.69 (Mandeep: "jitna fast price chart par chalta hai utna hi fast live feed mein bhi"): the Live page's prices come
    over their own websocket (/ws/prices, ~0.2 s) like the chart's, on top of the 1-second page refresh. */
@@ -1945,9 +1945,10 @@ async function pageChart() {
       <span class="btn-row" style="margin:0"><button class="btn buy" id="ch-buy" title="Paper: buy the at-the-money call, 1 lot">Paper BUY</button><button class="btn sell" id="ch-sell" title="Paper: buy the at-the-money put, 1 lot">Paper SELL</button></span>
     </div>
     <div class="ch-wrap"><div id="ch-chart" class="ch-chart"></div>
-      <aside class="ch-side"><div class="panel tight" id="ch-eval"></div><div class="panel tight" id="ch-smart-wrap"><h3>Smart lines <span class="pill p-amber">new</span> <span class="muted small">drawn by the app</span></h3><div id="ch-smart"><p class="muted small">Loading…</p></div></div>
+      <aside class="ch-side"><div class="panel tight"><h3>Buyer / seller scene <span class="pill p-amber">on trial</span> <span class="muted small">MindGame · 1m, 3m, 5m</span></h3><div id="ch-mind"><p class="muted small">Loading…</p></div></div>
+        <div class="panel tight" id="ch-eval"></div><div class="panel tight" id="ch-smart-wrap"><h3>Smart lines <span class="pill p-amber">new</span> <span class="muted small">drawn by the app</span></h3><div id="ch-smart"><p class="muted small">Loading…</p></div></div>
         <div class="panel tight"><h3>Trade signals <span class="muted small">BUY / SELL marks on the chart</span></h3><div id="ch-sigs"><p class="muted small">Focus alerts on this symbol show here.</p></div></div>
-        <div class="panel tight"><h3>All timeframes read <span class="muted small">5m → daily</span></h3><div id="ch-mtfread"><p class="muted small">Loading…</p></div></div>
+        <div class="panel tight"><h3>All timeframes read <span class="muted small">5m → weekly</span></h3><div id="ch-mtfread"><p class="muted small">Loading…</p></div></div>
         <div class="panel tight"><h3>Candles on every timeframe <span class="muted small">on trial</span></h3><div id="ch-cdl"><p class="muted small">Loading…</p></div></div>
         <div class="panel tight"><h3>Chart read <span class="muted small">this chart</span></h3><div id="ch-read"><p class="muted">Loading…</p></div>
         <button class="link-btn" id="ch-ai">AI read this chart</button><div id="ch-ai-out"></div></div>
@@ -1971,7 +1972,8 @@ async function pageChart() {
           <details class="ch-ind"><summary class="btn">Layers</summary><div class="ch-menu">${MTF_LAYERS.map(([k, l]) => `<label class="check"><input type="checkbox" data-mtf="${k}" ${mtfOn(k) ? "checked" : ""}><span>${l}</span></label>`).join("")}</div></details>
         </div></div>
       <div id="mtf-ovres"></div>
-      <div class="mtf-grid" id="mtf-grid">${MTF_TFS.map((tf) => `<div class="mtf-cell"><div class="mtf-head" id="mtf-h-${tf}"><b>${tf}</b></div><div class="mtf-chart" id="mtf-${tf}"></div></div>`).join("")}</div>
+      <div class="mtf-rows" id="mtf-grid">${MTF_TFS.map((tf) => `<div class="mtf-row"><div class="mtf-cell"><div class="mtf-head" id="mtf-h-${tf}"><b>${tf}</b></div><div class="mtf-chart" id="mtf-${tf}"></div></div>
+        <aside class="mtf-side panel tight" id="mtf-s-${tf}"><h3>${tf} scene</h3><p class="muted small">Loading…</p></aside></div>`).join("")}</div>
       <div class="panel tight" style="margin-top:12px"><h3>Confluence zones <span class="muted small">where levels from 2+ timeframes meet</span></h3><div id="mtf-conf"><p class="muted small">Loading…</p></div></div>
     </section>
     <p class="note">Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts. ${""}Index VWAP counts each bar equally (indices have no volume).</p>`;
@@ -2215,13 +2217,13 @@ async function loadOlder() {
 }
 
 
-/* ---------------- all timeframes (live/mtf.py): 1D / 75m / 1H / 15m / 5m, markings, higher-timeframe levels,
-   confluence, trend strip, and strategy overlays (apply / remove) */
-const MTF_TFS = ["5m", "15m", "1H", "75m", "1D"];       // small to large (2.29)
+/* ---------------- all timeframes (live/mtf.py): 1W / 1D / 4H / 1H / 15m / 5m, markings, higher-timeframe levels,
+   confluence, trend strip, strategy overlays (apply / remove), and (2.70) each timeframe's MindGame scene beside it */
+const MTF_TFS = ["5m", "15m", "1H", "4H", "1D", "1W"];  // small to large (2.70: 4H replaces 75m, 1W added)
 const MTF_LAYERS = [["own", "Levels of each timeframe"], ["htf", "Higher-timeframe levels on lower charts"], ["conf", "Confluence zones"],
   ["ind", "Moving averages, VWAP, Supertrend"], ["marks", "Swings and patterns"]];
 const mtfOn = (k) => LS.get("mtf_" + k, k !== "htf" ? true : true);
-const MTF_COL = { "1D": "#3D2FA8", "75m": "#9A6A12", "1H": "#B04ACF", "15m": "#0F7C8C", "5m": "#5E6B78" };
+const MTF_COL = { "1W": "#1B3A6B", "1D": "#3D2FA8", "4H": "#9A6A12", "1H": "#B04ACF", "15m": "#0F7C8C", "5m": "#5E6B78" };
 const MTF_SER = { ema20: "#3D2FA8", ema50: "#9A6A12", ema200: "#5E6B78", vwap: "#0F7C8C", u1: "rgba(15,124,140,.35)", d1: "rgba(15,124,140,.35)",
   ema9: "#1E8A5A", ema21: "#C23B32", st_up: "#1E8A5A", st_dn: "#C23B32" };
 const MT = { charts: {}, data: null, ov: null, timer: null };
@@ -2246,6 +2248,54 @@ async function mtfInit() {
     MT.timer = setTimeout(loop, 60000);                      // higher timeframes: refresh as candles close
   };
   loop();
+  mindLoop();
+}
+
+/* ---------------- MindGame (2.70, live/mindgame.py): the buyer / seller scene as activity, on trial.
+   Main chart: 1m / 3m / 5m and one short combined message (AI when ready, else the system's); each timeframe chart
+   below shows only its own scene. */
+const mindSide = (s) => s > 0 ? `<span class="up">▲</span>` : s < 0 ? `<span class="down">▼</span>` : `<span class="muted">●</span>`;
+const mindWho = (c) => c === "buyers" ? "Buyers" : c === "sellers" ? "Sellers" : "Balanced";
+function mindRec(it) {
+  const r = it.record, k = it.check;
+  const live = r && r.n ? `live ${r.right_pct}% right of ${r.n}${r.status === "trusted" ? " · trusted" : ""}` : "live record starts";
+  const chk = k ? ` · 5-yr check <span class="${k.right_pct >= 52 ? "up" : k.right_pct <= 45 ? "down" : ""}">${k.right_pct}%</span> of ${Number(k.n).toLocaleString("en-IN")}` : "";
+  return ` <span class="small muted" title="Right = price went a typical candle its way first. A coin flip scores about 50%.${r && r.n ? ` Live: ${r.right} right, ${r.wrong} wrong, ${r.flat} flat.` : ""}">· ${live}${chk}</span>`;
+}
+function mindTf(r, max) {
+  if (!r || r.empty) return `<p class="small muted" style="margin:2px 0 0">${esc((r && r.empty) || "Loading…")}</p>`;
+  const its = (r.items || []).slice(0, max || 4);
+  return `<div class="mind-head"><span class="pill ${r.control === "buyers" ? "p-up" : r.control === "sellers" ? "p-down" : ""}">${mindWho(r.control)}</span> <span class="small">${esc(r.phase)}</span>${r.forming ? ` <span class="small muted">(candle still forming)</span>` : ""}</div>
+    ${its.length ? `<ul class="plain small mind-items">${its.map((it) => `<li>${mindSide(it.side)} <b>${esc(it.now)}</b><br><span class="muted">→ ${esc(it.next)}</span>${it.side ? mindRec(it) : ""}</li>`).join("")}</ul>`
+      : `<p class="small muted" style="margin:4px 0 0">No buyer / seller behaviour stands out right now.</p>`}`;
+}
+async function mindLoop() {
+  clearTimeout(CH.mindTimer);
+  if (state.page !== "chart" || !$("#ch-mind")) return;
+  const sym = CH.sym;
+  try { const v = await api(`/api/live/mind/${encodeURIComponent(sym)}`); if ($("#ch-mind") && sym === CH.sym) drawMind(v); }
+  catch (e) { const el = $("#ch-mind"); if (el) el.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; }
+  CH.mindTimer = setTimeout(mindLoop, 20000);
+}
+function drawMind(v) {
+  const el = $("#ch-mind"); if (!el) return;
+  const c = v.combined || {};
+  const col = c.lean === "buyers" ? "up" : c.lean === "sellers" ? "down" : "";
+  const big = MTF_TFS.filter((tf) => (v.big || {})[tf]).map((tf) => v.big[tf]);
+  el.innerHTML = `<div class="mind-msg"><div class="small muted">${v.by === "ai" ? "AI summary" : "System summary"} · <b class="${col}">${c.lean === "buyers" ? "buyers have the edge" : c.lean === "sellers" ? "sellers have the edge" : "no side has the edge"} (${(c.bias || 0) > 0 ? "+" : ""}${c.bias || 0})</b></div>
+      <ul class="plain small">${(v.message || []).map((l) => `<li>${esc(String(l).replace(/^\s*[-•*]\s*/, ""))}</li>`).join("")}</ul></div>
+    ${["1m", "3m", "5m"].map((tf) => `<div class="mind-tf"><b>${tf}</b> ${mindTf((v.reads || {})[tf], 3)}</div>`).join("")}
+    ${big.length ? `<p class="small" style="margin:6px 0 0"><b>Bigger picture:</b> ${big.map((r) => `${r.tf} <span class="${r.control === "buyers" ? "up" : r.control === "sellers" ? "down" : "muted"}">${esc(mindWho(r.control))}</span>`).join(" · ")}</p>` : ""}
+    <p class="small muted" style="margin:4px 0 0">${esc(v.note || "")}</p>`;
+}
+function mtfSide(tf, p, d) {
+  const el = $("#mtf-s-" + tf); if (!el) return;
+  const rep = (((d.report || {}).per_tf) || []).find((x) => x.tf === tf);
+  const wk = tf === "1W" ? (p.levels || []).filter((l) => ["ath", "52w", "zone_w"].includes(l.group)) : [];
+  el.innerHTML = `<h3>${tf} scene <span class="muted small">this timeframe only</span></h3>${mindTf(p.mind, 5)}
+    ${rep ? `<p class="small" style="margin:8px 0 0"><b>Trend</b> <span class="${rep.trend === "up" ? "up" : rep.trend === "down" ? "down" : "muted"}">${rep.trend === "up" ? "▲ up" : rep.trend === "down" ? "▼ down" : "▬ sideways"}</span> · RSI ${Math.round(rep.rsi)} <span class="muted">(${esc(rep.momentum)})</span>${rep.structure ? ` · ${esc(rep.structure)}` : ""}
+      ${rep.res ? `<br><span class="muted">Resistance</span> ${fx(rep.res.price)} <span class="muted">${esc(rep.res.name)}</span>` : ""}${rep.sup ? `<br><span class="muted">Support</span> ${fx(rep.sup.price)} <span class="muted">${esc(rep.sup.name)}</span>` : ""}</p>` : ""}
+    ${wk.length ? `<p class="small" style="margin:8px 0 0"><b>Long-term levels</b>${wk.map((l) => `<br>${esc(l.name)} <b>${fx(l.price)}</b>`).join("")}</p>` : ""}`;
 }
 
 /* one read of all five timeframes (live/mtf.py report): verdict, each timeframe small to large, what to watch */
@@ -2277,7 +2327,7 @@ function mtfChart(tf) {
   const LW = window.LightweightCharts;
   const chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 11 },
     grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" },
-    timeScale: { borderColor: "#D5DCE3", timeVisible: tf !== "1D", secondsVisible: false, rightOffset: 4 }, crosshair: { mode: 0 } });
+    timeScale: { borderColor: "#D5DCE3", timeVisible: tf !== "1D" && tf !== "1W", secondsVisible: false, rightOffset: 4 }, crosshair: { mode: 0 } });
   const candle = chart.addSeries(LW.CandlestickSeries, { upColor: "#1E8A5A", downColor: "#C23B32", borderVisible: false, wickUpColor: "#1E8A5A", wickDownColor: "#C23B32" });
   MT.charts[tf] = { chart, candle, lines: {}, plines: [], markers: LW.createSeriesMarkers(candle, []), first: true };
   return MT.charts[tf];
@@ -2293,6 +2343,7 @@ function drawMTF(d) {
   MTF_TFS.forEach((tf) => {
     const p = (d.panels || {})[tf]; const head = $("#mtf-h-" + tf);
     if (!p) return;
+    try { mtfSide(tf, p, d); } catch (_) {}
     if (head) head.innerHTML = `<b>${tf}</b> <span class="small muted">${esc(p.label)}</span> ${p.trend ? `<span class="pill ${p.trend === "up" ? "p-up" : p.trend === "down" ? "p-down" : ""}">${p.trend}</span>` : ""}${p.structure ? ` <span class="small muted">${esc(p.structure)}</span>` : ""}${p.empty ? ` <span class="small down">${esc(p.empty)}</span>` : ""}${(p.failed || []).length ? ` <span class="small muted" title="${esc(p.failed.join("; "))}">· ${p.failed.length} layer(s) skipped</span>` : ""}`;
     const C = mtfChart(tf); if (!C || !p.candles.length) return;
     C.candle.setData(p.candles);
@@ -2305,7 +2356,7 @@ function drawMTF(d) {
     C.plines.forEach((pl) => C.candle.removePriceLine(pl)); C.plines = [];
     const add = (price, color, style, width, title) => C.plines.push(C.candle.createPriceLine({ price, color, lineWidth: width, lineStyle: style, axisLabelVisible: true, title }));
     // less clutter: only levels near the price, nearest first; a confluence zone replaces the levels inside it
-    const spot = d.spot || p.last, near = { "1D": 0.08, "75m": 0.04, "1H": 0.04, "15m": 0.025, "5m": 0.015 }[tf] * spot;
+    const spot = d.spot || p.last, near = { "1W": 0.2, "1D": 0.08, "4H": 0.05, "1H": 0.04, "15m": 0.025, "5m": 0.015 }[tf] * spot;
     const zones = conf.filter((z) => Math.abs(z.mid - spot) <= near).slice(0, 3);
     const inZone = (x) => zones.some((z) => x >= z.lo - spot * 0.0005 && x <= z.hi + spot * 0.0005);
     const pick = (arr, n) => arr.filter((l) => Math.abs(l.price - spot) <= near && !inZone(l.price)).sort((a, b) => Math.abs(a.price - spot) - Math.abs(b.price - spot)).slice(0, n);
@@ -2318,7 +2369,7 @@ function drawMTF(d) {
     mk.sort((a, b) => a.time - b.time);
     C.markers.setMarkers(mk);
     if (C.first) {                          // each timeframe opens at its own zoom: small ones close in, big ones wide
-      const n = p.candles.length, want = { "5m": 100, "15m": 90, "1H": 90, "75m": 80, "1D": 120 }[tf] || 100;
+      const n = p.candles.length, want = { "5m": 100, "15m": 90, "1H": 90, "4H": 80, "1D": 120, "1W": 160 }[tf] || 100;
       C.chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, n - want), to: n + 3 }); C.first = false; }
   });
   $("#mtf-conf").innerHTML = (d.confluence || []).length
