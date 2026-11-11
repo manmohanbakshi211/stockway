@@ -116,3 +116,28 @@ def test_book_rules_in_the_library_are_valid():
         assert F.validate(r), r
         for f, _, _ in r["conds"]:
             assert f in F.FEATURES, f
+
+
+def test_a_held_back_lab_rule_is_still_measured_on_the_bench_only(tmp_path, monkeypatch):
+    """2.68.1: two different Strategy Lab rules, same symbol and side, inside the feed's cooldown: the second one adds
+    nothing to the feed, Telegram, Focus or paper, but the test bench still records it under its own rule id."""
+    from live.engine import LiveEngine
+    e = LiveEngine(lambda: {"live": {}}, tmp_path)
+    e.source = "upstox"
+    got, sent = [], []
+    e.bench = object()
+    monkeypatch.setattr(e, "bench_signal", lambda *a, **k: got.append(a) or 1)
+    monkeypatch.setattr(e.telegram, "send", lambda *a, **k: sent.append(a))
+    now = dt.datetime(2026, 11, 4, 10, 0, tzinfo=IST)
+    key = ("NIFTY", "factory", "up")
+    e.cool[key] = (now.timestamp() - 60, 3, "S1111aaaa")
+    fa = lambda rid: {"sym": "NIFTY", "kind": "factory", "direction": "up", "severity": 3, "title": f"rule {rid}",
+                      "data": {"factory": {"id": rid}}}
+    e._emit(fa("S2222bbbb"), now, e.cfg()["live"])
+    e._emit(fa("S1111aaaa"), now, e.cfg()["live"])          # the same rule again: its own repeat stays quiet
+    assert [g[4] for g in got] == ["S2222bbbb"] and got[0][:2] == ("NIFTY", "up")
+    assert not e.alerts_mem and not e.store.alerts() and not sent and not e.focus_last
+    assert e.cool[key][2] == "S1111aaaa"
+    e.cool[key] = (now.timestamp() - 60, 3)                 # a cooldown written before 2.68.1 (no rule id) still works
+    e._emit(fa("S3333cccc"), now, e.cfg()["live"])
+    assert len(got) == 1

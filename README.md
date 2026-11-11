@@ -114,6 +114,15 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.68.1: a held-back Lab rule is still measured (11 Nov 2026)
+
+Mandeep asked whether one strategy can stop another from being measured. Checked on the live data (30 Oct - 11 Nov):
+chart facts are computed once and every strategy checks its own rule; Focus and the main paper account pick one per
+symbol by design, and the test bench records every strategy separately. One gap: when two different Strategy Lab
+rules fired the same side on the same symbol inside the feed's 15-minute cooldown, the second was dropped before the
+test bench. Now it is recorded on the test bench under its own rule id (nothing you see or trade changes).
+448 tests, Lab regression 103 / 103 × 2 identical.
+
 ## Ghanshyam option-buying course: gun pieces + strategy file (2.68, 11 Nov 2026)
 
 Mandeep shared the course transcript (72 pages, 2022). Split first (gun vs bullet), checked on Bank Nifty 2022-2026

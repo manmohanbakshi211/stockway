@@ -1637,9 +1637,12 @@ class LiveEngine:
         key = (a["sym"], a["kind"], None if a["kind"] in detectors.NO_DIRECTION_COOLDOWN else a["direction"])
         last = self.cool.get(key)
         cool = detectors.COOLDOWN.get(a["kind"], float(lc["cooldown_min"]))
+        rid = ((a.get("data") or {}).get("factory") or {}).get("id")
         if last and ts - last[0] < cool * 60 and a["severity"] <= last[1]:
+            if rid and len(last) > 2 and rid != last[2]:
+                self._bench_only(a, rid, now)        # 2.68.1: another Lab rule, same side: still measured on the bench
             return
-        self.cool[key] = (ts, a["severity"])
+        self.cool[key] = (ts, a["severity"], rid)
         u = self.uni.underlyings.get(a["sym"]) if self.uni else None
         m = self.metrics.get(a["sym"])
         mins = minutes_since_open(now)
@@ -1793,6 +1796,19 @@ class LiveEngine:
         except Exception as e:
             if self._every("confluence_err", 600, clock_time=False):
                 self.log(f"Signals-agree check skipped: {e}")
+
+    def _bench_only(self, a, rid, now):
+        """2.68.1: a Strategy Lab rule whose alert was held back because a DIFFERENT Lab rule just fired the same side on
+        the same symbol (the feed's cooldown is per alert type). Nothing you see or trade changes: no alert, no Focus, no
+        Telegram, no paper trade. Only the test bench records it, so each rule keeps its own complete live record."""
+        if self.bench is None or a.get("direction") not in ("up", "down"):
+            return 0
+        try:
+            return self.bench_signal(a["sym"], a["direction"], now, a["kind"], rid, a.get("title"))
+        except Exception as e:
+            if self._every("bench_only_err", 600, clock_time=False):
+                self.log(f"Test bench skipped a held-back Lab rule: {e}")
+            return 0
 
     def _mv_verdict(self, a, now) -> dict | None:
         """2.61: the multiverse's verdict on this alert (lab/multiverse.py verdict), from the same facts the test bench
