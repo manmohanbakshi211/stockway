@@ -114,6 +114,20 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Multiverse brain: a learned model on every signal, judged on days it never saw (2.63)
+
+Mandeep, 11 Nov 2026: "AI kaha kaha ... zada smart aur accurate bana sakta hai, kya kya cheej bhot jaldi pakad sakta hai".
+
+- `lab/mvbrain.py`: gradient-boosted trees on every test-bench signal's facts (the same ones live: the stock, options,
+  index, breadth, sector, world, VIX, news, order book, movers, bigger picture, alert type, day type), learning the net %
+  under one fixed way of trading it (`rules/multiverse.json` brain.exit: ATM, at once, +30% / −20% / 60 min). Trained in
+  each multiverse run; milliseconds per live signal.
+- Walk-forward: the model for each day is trained only on the days before it. First run (Mac data): on 9 Nov, trained on
+  5-6 Nov, its top 10% made +1.3% a trade vs −3.1% for all signals. One unseen day: on trial.
+- Every alert shows "🧠 Brain: expects +x% on this one (better than y% of signals) · on trial"; the Engine eval panel and
+  the Multiverse panel show it too. **Trusted** only after its top 10% beat all signals on 70% of 5+ unseen days; until
+  then it is information only and decides nothing.
+
 ## AI router: the right Claude model for each job (2.62)
 
 Mandeep, 11 Nov 2026: "model bhi vo choose karo jo sabse zada capable ho or fit ho or bina bhot zada time liye near to

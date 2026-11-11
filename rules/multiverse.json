@@ -368,5 +368,18 @@
     "strike": "atm",
     "delay": 0
   },
-  "luck_shuffles": 1
+  "luck_shuffles": 1,
+  "brain": {
+    "on": true,
+    "exit": [
+      30,
+      20,
+      60
+    ],
+    "top_share": 0.1,
+    "min_rows": 400,
+    "trust_days": 5,
+    "trust_share": 0.7,
+    "about": "2.63 the multiverse brain: gradient-boosted trees on every signal's facts, learning the net % under this one way of trading it (ATM, at once, +30% / -20% / 60 min). Trusted only after its top 10% beat all signals on 70% of 5+ days it never saw; until then its number is information only."
+  }
 }

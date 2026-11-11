@@ -220,3 +220,32 @@ def test_engine_verdict_uses_the_bench_facts(tmp_path, monkeypatch):
     e.signal_facts = lambda sym, d, now: {"rel_vol": 1.0}
     v2 = e._mv_verdict({"sym": "X", "kind": "orb", "direction": "up", "severity": 2, "data": {}}, None)
     assert not v2["proven"] and v2["best"]["avg"] == -1.0
+
+
+def test_brain_learns_from_earlier_days_only_and_stays_on_trial(tmp_path):
+    """2.63: the learned model is scored only on days it never saw, and is information only until proven."""
+    rng = np.random.default_rng(9)
+
+    def spec(day, i):
+        hot = i % 3 == 0
+        return ("volume_surge" if hot else "sharp_move"), {"rel_vol": 5.0 if hot else 1.0, "z5": float(rng.normal()), "mins": 45}, \
+            _ramp(40 if hot else float(rng.normal(-5, 10)))
+    data = _universe(tmp_path, spec)
+    c = MV.cfg()
+    c["brain"] = {**c["brain"], "min_rows": 50, "min_test_rows": 20}
+    r = MV.run(data, log=lambda m: None, days=DAYS, c=c)
+    b = r["brain"]
+    assert [w["day"] for w in b["walk"]] == DAYS[2:]                       # trained on earlier days only
+    assert all(w["top_avg"] > w["all_avg"] for w in b["walk"]) and not b["trusted"]   # 2 unseen days: still on trial
+    from lab import mvbrain
+    hot = mvbrain.predict(data, "volume_surge", {"rel_vol": 5.0, "z5": 0.0, "mins": 45})
+    cold = mvbrain.predict(data, "sharp_move", {"rel_vol": 1.0, "z5": 0.0, "mins": 45})
+    assert hot["expect"] > cold["expect"] and hot["trusted"] is False
+
+
+def test_brain_needs_enough_signals(tmp_path):
+    def spec(day, i):
+        return "orb", {"mins": 45}, _ramp(5)
+    data = _universe(tmp_path, spec)
+    r = MV.run(data, log=lambda m: None, days=DAYS[:2])
+    assert "needs" in r["brain"].get("note", "")

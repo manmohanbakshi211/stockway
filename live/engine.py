@@ -1799,7 +1799,15 @@ class LiveEngine:
         ad = a.get("data") or {}
         tag = {"sev": a.get("severity"), "score": ad.get("score"), "conv": ad.get("conviction"), "focus": ad.get("focus")}
         facts = _facts_of(self.signal_facts(a["sym"], a["direction"], now), {k: v for k, v in tag.items() if v is not None}, a)
-        return verdict(self.data_dir, a["kind"], facts)
+        v = verdict(self.data_dir, a["kind"], facts)
+        try:                                         # 2.63: the learned brain's expectation (on trial until proven)
+            from lab.mvbrain import predict
+            b = predict(self.data_dir, a["kind"], facts)
+            if b:
+                v = dict(v or {}, brain=b)
+        except Exception:
+            pass
+        return v
 
     def _confluence_check(self, a, now, lc):
         """2.59 (rules/confluence.json): when `min_kinds` different alert types point the same way on the same symbol
