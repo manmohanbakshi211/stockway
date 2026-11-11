@@ -74,6 +74,14 @@ def static_checks(cfg: dict | None = None) -> list:
                       (f"; jobs without a model: {', '.join(bad)}" if bad else "")))
     except Exception as e:
         out.append(_c("ai_router", "AI router", False, f"could not load: {e}"))
+    try:                                             # 2.65: evening AI analyst
+        from live import analyst as _an
+        out.append(_c("analyst", "Evening AI analyst: worked / failed / bugs / ideas on trial, after the close",
+                      callable(_an.run) and _an.MAX_IDEAS > 0,
+                      f"deep AI tier; its ideas join the multiverse's filters (at most {_an.MAX_IDEAS} kept) and are tested on days "
+                      f"they never saw; nothing trades them by being proposed"))
+    except Exception as e:
+        out.append(_c("analyst", "Evening AI analyst", False, f"could not load: {e}"))
     try:                                             # 2.64: news radar (fast AI on every headline, shadow)
         from live import newsradar as _nr
         out.append(_c("news_radar", "News radar: the fast AI reads every headline (impact, direction, stocks), graded 30 min later",
