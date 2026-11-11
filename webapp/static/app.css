@@ -686,6 +686,21 @@ tr.best td { background: var(--up-soft); }
 .mtf-cell { background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; }
 .mtf-head { padding: 8px 10px; border-bottom: 1px solid var(--rule-soft); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .mtf-chart { height: 280px; }
+/* 2.70: each timeframe like the main chart: chart left, its own scene (MindGame) right; stacked on a phone */
+.mtf-rows { display: grid; gap: 12px; }
+.mtf-row { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; align-items: stretch; }
+.mtf-row > * { min-width: 0; }
+.mtf-row .mtf-chart { height: 340px; }
+.mtf-side { max-height: 384px; overflow: auto; }
+.mtf-side h3 { margin-top: 0; }
+.mind-msg { background: var(--paper-2, #F6F8FA); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; }
+.mind-msg ul { margin: 4px 0 0; }
+.mind-tf { border-top: 1px solid var(--rule-soft); padding: 6px 0; }
+.mind-tf > b { display: inline-block; min-width: 26px; }
+.mind-head { display: inline; }
+.mind-items { margin: 4px 0 0; }
+.mind-items li { margin-bottom: 5px; line-height: 1.35; }
+@media (max-width: 1000px) { .mtf-row { grid-template-columns: 1fr; } .mtf-side { max-height: none; } .mtf-row .mtf-chart { height: 280px; } }
 .mtf-trend { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
 @media (max-width: 700px) { .mtf-grid { grid-template-columns: 1fr; } .mtf-chart { height: 240px; } }
 

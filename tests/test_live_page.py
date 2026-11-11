@@ -130,9 +130,9 @@ def test_all_timeframes_report_reads_small_to_large():
         cs = [{"close": 100 + (i if up else -i) * 0.5} for i in range(60)]
         return {"candles": cs, "trend": trend, "structure": "uptrend" if up else "downtrend",
                 "levels": [{"name": "Swing high", "price": 200, "group": "swing"}, {"name": "PDL", "price": 50, "group": "prev"}]}
-    v = {"spot": 120, "confluence": [], "panels": {"1D": panel("up", True), "75m": panel("up", True), "1H": panel("up", True),
+    v = {"spot": 120, "confluence": [], "panels": {"1D": panel("up", True), "4H": panel("up", True), "1H": panel("up", True),
                                                    "15m": panel("down", False), "5m": panel("down", False)}}
     r = MTF.report(v)
-    assert [x["tf"] for x in r["per_tf"]] == ["5m", "15m", "1H", "75m", "1D"]
+    assert [x["tf"] for x in r["per_tf"]] == ["5m", "15m", "1H", "4H", "1D"]          # 2.70: 4H replaces 75m
     assert "Pullback inside an uptrend" in r["verdict"] and r["bias"] > 0
     assert r["per_tf"][0]["res"]["price"] == 200 and r["per_tf"][0]["sup"]["price"] == 50

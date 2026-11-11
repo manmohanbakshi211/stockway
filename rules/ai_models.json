@@ -33,6 +33,7 @@
     "pulse": "fast",
     "world": "fast",
     "news": "fast",
+    "mindgame": "fast",
     "alert_why": "balanced",
     "brain": "balanced",
     "indication": "balanced",

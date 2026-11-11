@@ -265,8 +265,8 @@ def live_chart_ai(sym: str):
                                "confluence_zones": [{k: z[k] for k in ("lo", "hi", "tfs", "dist_pct")} for z in mv["confluence"][:4]]}
     except Exception:
         pass
-    prompt = (SYSTEM_STYLE + "You are reading a live 5-minute chart like a senior prop trader, with the daily, 75-minute, "
-              "1-hour and 15-minute trends and the multi-timeframe confluence zones. In 5 short bullets: "
+    prompt = (SYSTEM_STYLE + "You are reading a live 5-minute chart like a senior prop trader, with the weekly, daily, "
+              "4-hour, 1-hour and 15-minute trends and the multi-timeframe confluence zones. In 5 short bullets: "
               "1) structure and trend across timeframes, 2) where price sits vs the key levels and zones, 3) the best trade setup now with entry, stop and "
               "target levels (or 'no trade' and why), 4) what would change your mind, 5) one risk. Use only the numbers given.\n\n"
               + _compact_json(facts))
@@ -349,6 +349,31 @@ async def live_mtf(sym: str, tfs: str | None = None):
     """All timeframes of one symbol: candles, markings, higher-timeframe levels, confluence and the trend strip."""
     m = _mtf()
     return clean(await _run_blocking(m.view, sym.upper(), tfs.split(",") if tfs else None))
+
+
+def _mind():
+    e = engine()
+    if getattr(e, "mind", None) is None:
+        from live.mindgame import MindGame
+        e.mind = MindGame(e, getattr(e, "store", None), getattr(e, "source", None) or "upstox", getattr(e, "log", print))
+    return e.mind
+
+
+@router.get("/api/live/mind/{sym}")
+async def live_mind(sym: str):
+    """2.70 MindGame (on trial): the buyer / seller scene on 1m / 3m / 5m, the bigger timeframes' scenes (from the
+    timeframe charts), and one short combined message: AI (fast tier, own allowance) when ready, else the system's."""
+    return clean(await _run_blocking(_mind().view, sym.upper()))
+
+
+@router.get("/api/live/mind_record")
+def live_mind_record(days: int = 60):
+    """Every MindGame bullet with its record (graded right / wrong / flat), per timeframe; none sends an alert."""
+    from live import mindgame as MG
+    mg = _mind()
+    rows = mg.book.table(max(1, min(365, days))) if mg.book is not None else []
+    return clean({"rows": rows, "trust": MG.cfg()["trust"], "days": days,
+                  "note": "On trial: a bullet joins the alerts only when its record is positive (Mandeep, 12 Nov 2026)."})
 
 
 @router.get("/api/live/candles/{sym}")

@@ -1,6 +1,6 @@
 """Multi-timeframe candle scanner (gun): every candle pattern on every timeframe, the moment each candle closes.
 
-Intraday timeframes (15m, 30m, 1H, 75m, and 5m for the stocks the older 5-minute scanner doesn't cover) are built from
+Intraday timeframes (15m, 30m, 1H, 4H, 75m, and 5m for the stocks the older 5-minute scanner doesn't cover) are built from
 the live 1-minute candles of every index and F&O stock, joined to yesterday's recorded 1-minute candles so the first
 candles of the day have context. Daily and weekly candles come from the daily history (finished days and weeks only).
 Patterns are the bullets in live/candles.py (the same code the Lab and the chart use); which timeframes run and which
@@ -25,10 +25,10 @@ import numpy as np
 from .clock import IST
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "candle_tfs.json"
-DEFAULTS = {"intraday_min": [15, 30, 60, 75], "daily": True, "weekly": True, "five_min_all_stocks": True,
-            "bench": ["15m", "30m", "1H", "75m", "1D", "1W"], "max_bench_per_close": 120,
-            "early_at": 0.7, "early_min": [15, 30, 60, 75], "early_bench": True}
-TF_NAME = {5: "5m", 15: "15m", 30: "30m", 60: "1H", 75: "75m"}
+DEFAULTS = {"intraday_min": [15, 30, 60, 75, 240], "daily": True, "weekly": True, "five_min_all_stocks": True,
+            "bench": ["15m", "30m", "1H", "75m", "4H", "1D", "1W"], "max_bench_per_close": 120,
+            "early_at": 0.7, "early_min": [15, 30, 60, 75, 240], "early_bench": True, "hidden": ["75m"]}
+TF_NAME = {5: "5m", 15: "15m", 30: "30m", 60: "1H", 75: "75m", 240: "4H"}
 NO_DIRECTION = {"doji", "inside_bar", "nr7"}
 PLAIN = {"doji": "Doji", "inside_bar": "Inside bar", "nr7": "Narrowest of 7 (NR7)", "doji_dir": "Dragonfly / gravestone doji"}
 KEEP = 60                                               # candles handed to the patterns (they look back ~14 at most)            # patterns that only say "pause", not which way
@@ -328,7 +328,7 @@ class CandleScanner:
             return {}
         now = self.e.clock.now().timestamp()
         out, tot = {}, 0
-        for tf in ("5m", "15m", "30m", "1H", "75m", "1D", "1W"):
+        for tf in ("5m", "15m", "30m", "1H", "75m", "4H", "1D", "1W"):
             x = self.latest.get((sym, tf))
             if not x:
                 continue
@@ -354,8 +354,11 @@ class CandleScanner:
         t0 = session_start(now.date())
         rows = []
         c = cfg()
+        hide = set(c.get("hidden") or [])                 # 2.70: still recorded and on trial, not shown (75m -> 4H on screen)
         for tf in sorted(set(int(x) for x in c["intraday_min"]) | {5}):
             name = TF_NAME.get(tf, f"{tf}m")
+            if name in hide:
+                continue
             b = self.bars(sym, tf)
             if len(b) < 3:
                 continue

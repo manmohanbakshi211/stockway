@@ -194,10 +194,11 @@ class AI:
             self.day, self.used, self.used_auto, self.budgets, self.tasks = today, 0, 0, {}, {}
         pro = c.get("provider") == "claude_pro"
         rt = self.route(task)
-        if rt and rt.get("budget") and not budget:       # a tier with its own allowance (the fast one): counted apart
-            budget = (f"tier:{rt['tier']}", int(rt["budget"]))
-            if self.budgets.get(budget[0], 0) >= budget[1]:
-                self.last_error = f"The {rt['tier']} AI allowance for today is used up"
+        if rt and rt.get("budget"):                      # a tier with its own allowance (the fast one): counted apart
+            # 2.70: a job on that tier with its own allowance (MindGame) counts only against that, not the tier's
+            budget = budget or (f"tier:{rt['tier']}", int(rt["budget"]))
+            if self.budgets.get(budget[0], 0) >= int(budget[1]):
+                self.last_error = f"The {budget[0].replace('tier:', '')} AI allowance for today is used up"
                 return None
             self.budgets[budget[0]] = self.budgets.get(budget[0], 0) + 1
             return self._run(prompt, max_tokens, c, pro, rt, task)

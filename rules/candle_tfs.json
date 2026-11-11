@@ -1,13 +1,36 @@
 {
- "about": "Multi-timeframe candle scanner (bullets). Every candle pattern in live/candles.py is checked on every timeframe below the moment a candle of that timeframe closes, on every index and F&O stock (intraday timeframes from the live 1-minute candles, joined to yesterday's recorded ones; daily and weekly from the daily candles, finished days only). Every pattern found is recorded in the day's data (the 'candles' part of data/recordings) and added to each test-bench signal as facts (which way the latest candle on each timeframe points). bench: timeframes whose alertable patterns also get an honest paper test on the test bench in every style (kind candle_<pattern>, version = the timeframe). The existing 5-minute candle trials on the indices and first stocks keep running as they are; five_min_all_stocks records 5-minute patterns on every other stock too. forming: show how the candle that is still forming looks so far (information only: a candle is not a pattern until it closes). Nothing here sends an alert or touches the paper account: everything is on trial. early_at (2.36): when a candle of an early_min timeframe is that far through its time, its shape so far is checked too; alertable shapes are paper-tested on the test bench as version '<tf>@70%' (buying before the candle closes), and how often the shape held at the close is counted, so the Strategy board shows whether entering early beats waiting.",
- "intraday_min": [15, 30, 60, 75],
+ "about": "Multi-timeframe candle scanner (bullets). Every candle pattern in live/candles.py is checked on every timeframe below the moment a candle of that timeframe closes, on every index and F&O stock (intraday timeframes from the live 1-minute candles, joined to yesterday's recorded ones; daily and weekly from the daily candles, finished days only). Every pattern found is recorded in the day's data (the 'candles' part of data/recordings) and added to each test-bench signal as facts (which way the latest candle on each timeframe points). bench: timeframes whose alertable patterns also get an honest paper test on the test bench in every style (kind candle_<pattern>, version = the timeframe). The existing 5-minute candle trials on the indices and first stocks keep running as they are; five_min_all_stocks records 5-minute patterns on every other stock too. forming: show how the candle that is still forming looks so far (information only: a candle is not a pattern until it closes). Nothing here sends an alert or touches the paper account: everything is on trial. early_at (2.36): when a candle of an early_min timeframe is that far through its time, its shape so far is checked too; alertable shapes are paper-tested on the test bench as version '<tf>@70%' (buying before the candle closes), and how often the shape held at the close is counted, so the Strategy board shows whether entering early beats waiting. 2.70 (Mandeep, 12 Nov 2026: '4 hours, replace 75 min from everywhere'): 4H (09:15-13:15, 13:15-15:30) added; hidden: timeframes still recorded and on trial (their records kept) but not shown on screen (75m).",
+ "intraday_min": [
+  15,
+  30,
+  60,
+  75,
+  240
+ ],
  "daily": true,
  "weekly": true,
  "five_min_all_stocks": true,
- "bench": ["15m", "30m", "1H", "75m", "1D", "1W"],
+ "bench": [
+  "15m",
+  "30m",
+  "1H",
+  "75m",
+  "4H",
+  "1D",
+  "1W"
+ ],
  "max_bench_per_close": 120,
  "early_at": 0.7,
- "early_min": [15, 30, 60, 75],
+ "early_min": [
+  15,
+  30,
+  60,
+  75,
+  240
+ ],
  "early_bench": true,
- "since": "2026-11-04"
+ "since": "2026-11-04",
+ "hidden": [
+  "75m"
+ ]
 }

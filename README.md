@@ -114,6 +114,35 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.70: MindGame (buyer / seller scene on every timeframe), 4H and 1W charts (12 Nov 2026)
+
+Mandeep, 12 Nov 2026 (02:50): show the buyer / seller scene on 1m / 3m / 5m on the main chart, and on the charts below
+5m / 15m / 1H / 4H (replaces 75m everywhere) / 1D / 1W (long moves, strongest resistance, all-time high), each laid out
+like the main chart with only its own timeframe's messages on the right. On trial: no alert, no paper trade.
+
+- **MindGame** (live/mindgame.py, gun; rules/mindgame.json, 14 bullets from the Ghanshyam course): every behaviour is
+  ACTIVITY, measured in the symbol's own typical candle on that timeframe (no fixed points, his rule): a straight run
+  into a level (trap risk), a rest at the level then a strong break (real breakout), lows / highs holding, a tight
+  range of small candles and the break that traps the other side, a slow weak move (someone absorbing), a side
+  leaving, a confirmed hammer / star (only after a strong move), a retest, the gap, the OI strike, yesterday's close.
+  Several at once are combined (bigger timeframes weigh more) into one short message: AI (fast tier, its own 60 a
+  day, only when the scene changes) or the system's own lines when AI is not there. A failing check is skipped and
+  named; the rest keep running.
+- **Record**: every behaviour that newly shows on a closed candle is written down (live.db `mind_reads`) and graded a
+  few candles later: right = a typical candle its way first, wrong = against first; a coin flip scores ~50%. The
+  engine records Nifty / Bank Nifty 1m / 3m / 5m / 15m every minute in its own thread; 1H and up when the charts are
+  open. Alerts only once a bullet's record is positive (Mandeep); none is on.
+- **5-year check** (Bank Nifty Aug 2021 - Oct 2026, minute prices; right % of decided, coin flip 49.9% / 49.0%):
+  better than a coin flip: gap booking 56% (5m, 123) / 57% (15m, 85), straight run = trap 53% (5m, 2,126), range
+  break 58% on 15m (264). Worse: "most of the fall taken back -> reaches the high" 40% / 37% (the opposite happens),
+  above / below yesterday's close 42% / 47%, range break on 5m 43%, rest-then-break 45% / 47%. Shown beside each
+  behaviour; the weak ones weigh less in the combined reading. All kept on trial (failed ones recorded, not deleted).
+- **Charts below the main chart**: 5m, 15m, 1H, 4H (09:15-13:15, 13:15-15:30), 1D, 1W; each full width with its scene,
+  trend, support / resistance on the right (stacked on a phone); the weekly adds the all-time high, 52-week high / low
+  and the strongest resistance / support (the band most weekly highs / lows of 3 years stopped at). 75m kept only for
+  old links and the candle scanner's running trial (hidden on screen; its records kept); the candle scanner adds 4H.
+- Tests: test_2_70 (18), full suite + test_no_clash; Lab regression identical; headless desktop + phone clean.
+
 ## 2.69: Ghanshyam section, paper totals and exits, seconds chart, faster Live page (12 Nov 2026)
 
 Mandeep, 12 Nov 2026 (01:40). All paper only; broker APIs for market data only.

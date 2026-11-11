@@ -171,6 +171,7 @@ class LiveEngine:
         self.tracker = None
         self.shadow = None                           # exit styles graded in shadow on every alert (live/shadow.py)
         self.linegrade = None                        # 2.54: smart chart lines graded on every touch (live/linegrade.py)
+        self.mind = None                             # 2.70: MindGame buyer / seller scenes, recorded and graded (live/mindgame.py)
         self.trials = None                           # bullets on trial: recorded and graded only (live/trials.py)
         self.bench = None                            # an honest paper trade for every signal (live/bench.py)
         self.focuslab = None                         # 2.37: shadow Focus challengers, recorded only (live/focuslab.py)
@@ -355,6 +356,12 @@ class LiveEngine:
         except Exception as e:
             self.linegrade = None
             self.log(f"Smart lines grading off: {e}")
+        try:                                         # 2.70: MindGame (on trial, display only)
+            from .mindgame import MindGame
+            self.mind = MindGame(self, self.store, self.source, self.log)
+        except Exception as e:
+            self.mind = None
+            self.log(f"MindGame off: {e}")
         try:
             from .trials import Trials
             self.trials = Trials(self.store, self.source, self.log)
@@ -793,6 +800,8 @@ class LiveEngine:
                 self._guard("Big prints", self._big_prints, now, lc)
             if self.linegrade is not None and open_ and self._every("line_grade", 60):   # 2.54: grade line touches
                 self._guard("Smart lines grading", self.linegrade.tick, now)
+            if self.mind is not None and open_ and self._every("mind_tick", 60):     # 2.70: MindGame (own thread)
+                self._guard("MindGame", self.mind.tick, now)
             self._guard("Alert tracker", self.tracker.update, self.state, self.clock.ts())
             if self.depth:
                 try:
