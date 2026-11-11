@@ -1,0 +1,18 @@
+{
+  "about": "Day-type forecaster (lab/daytype.py, 2.66): at 09:45 the chance that today ends a trend day, a range day or a quiet day, for each index. Information only and on trial until the walk-forward clears 'trust'. Labels from the whole day (09:15-14:45): trend = clean move (|move since the open| / day range >= trend_eff) with a range of at least trend_rel x the typical day (median of the previous 20 days); quiet = range under quiet_rel x the typical day; range = the rest. Every candidate in 'models' is tested walk-forward by month each night; the best log-loss skill is the live one.",
+  "valid_from": "2026-11-11",
+  "syms": ["NIFTY", "BANKNIFTY"],
+  "at_tod": 30,
+  "trend_eff": 0.6,
+  "trend_rel": 0.8,
+  "quiet_rel": 0.6,
+  "min_days": 120,
+  "min_fact_share": 0.5,
+  "first_test_share": 0.5,
+  "facts": ["rel_range", "eff_now", "gap", "vix", "dte", "is_bank", "or_pos", "range_x", "pdh_dist", "pdl_dist", "cpr_width", "adx"],
+  "models": {
+    "logit": {"C": 0.3},
+    "hgb_small": {"leaves": 4, "iters": 60, "leaf": 40}
+  },
+  "trust": {"min_tested_days": 200, "min_logloss_skill": 3, "min_trend_lift": 5, "min_live_days": 20}
+}

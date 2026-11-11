@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-JOBS = ("factory", "mlstrat", "candlecast", "paths", "multiverse", "mass", "echo")
+JOBS = ("factory", "mlstrat", "candlecast", "paths", "multiverse", "mass", "daytype", "echo")
 NICE = 10
 RESULT = "@@RESULT "
 LAST: dict = {}                   # the latest run: how it ran (child / in-process), when, how long (System page)
@@ -52,6 +52,9 @@ def _inproc(job: str, data_dir, log, should_stop, kw: dict):
     if job == "mass":                                    # 2.60: every single / paired condition at once (lab/mass.py)
         from . import mass
         return mass.run(data_dir, log=log, should_stop=should_stop)
+    if job == "daytype":                                 # 2.66: the 09:45 day-type forecaster (lab/daytype.py)
+        from . import daytype
+        return daytype.learn(data_dir, log=log)
     if job == "echo":                                    # for the tests: proves the child runs, logs and stops
         for i in range(int(kw.get("n", 3))):
             if should_stop():

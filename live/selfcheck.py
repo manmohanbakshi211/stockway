@@ -74,6 +74,15 @@ def static_checks(cfg: dict | None = None) -> list:
                       (f"; jobs without a model: {', '.join(bad)}" if bad else "")))
     except Exception as e:
         out.append(_c("ai_router", "AI router", False, f"could not load: {e}"))
+    try:                                             # 2.66: day-type forecaster
+        from lab import daytype as _dt
+        dc = _dt.cfg()
+        out.append(_c("daytype", "Day-type forecaster: trend / range / quiet day from the 09:45 facts (on trial)",
+                      bool(dc.get("facts")) and bool(dc.get("models")),
+                      f"{len(dc['facts'])} facts, models tried each night: {', '.join(dc['models'])}; walk-forward by month; "
+                      f"forecast at 09:45 for {', '.join(dc.get('syms') or [])}, graded at the close; nothing trades on it"))
+    except Exception as e:
+        out.append(_c("daytype", "Day-type forecaster", False, f"could not load: {e}"))
     try:                                             # 2.65: evening AI analyst
         from live import analyst as _an
         out.append(_c("analyst", "Evening AI analyst: worked / failed / bugs / ideas on trial, after the close",

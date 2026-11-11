@@ -843,6 +843,26 @@ def multiverse_run():
     return {"id": JOBS.start("multiverse", "Multiverse: every signal down every timeline", job)["id"]}
 
 
+# ---- 2.66 day-type forecaster (lab/daytype.py): trend / range / quiet day from the 09:45 facts, walk-forward by month
+@app.get("/api/daytype")
+def daytype_view():
+    from lab import daytype, dhan_hist
+    return clean(daytype.view(ROOT / "data", [ROOT / "data", dhan_hist.root(ROOT / "data")]))
+
+
+@app.post("/api/daytype/run")
+def daytype_run():
+    from lab import dhan_hist, proc
+
+    def job(log, stop):
+        for d in (ROOT / "data", dhan_hist.root(ROOT / "data")):
+            try:
+                proc.run("daytype", d, log=log, should_stop=stop)
+            except Exception as e:
+                log(f"{d.name}: {e}")
+    return {"id": JOBS.start("daytype", "Day-type forecaster: learning from the Lab's bar tables", job)["id"]}
+
+
 # ---- 2.65 evening AI analyst (live/analyst.py)
 @app.get("/api/analyst")
 def analyst_latest():

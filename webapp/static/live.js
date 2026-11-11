@@ -3644,6 +3644,39 @@ async function drawAnalyst() {
   const b = $("#an-run"); if (b) b.onclick = async () => { b.disabled = true; try { await post("/api/analyst/run", {}); toast("The analyst is reading the day: this panel updates in a minute or two"); setTimeout(drawAnalyst, 60000); } catch (e) { toast(e.message); b.disabled = false; } };
 }
 
+/* 2.66: the day-type forecaster (lab/daytype.py): trend / range / quiet day from the 09:45 facts, judged walk-forward */
+const DT_NAME = { NIFTY: "Nifty", BANKNIFTY: "Bank Nifty" };
+function dayTypeLine(dt) {
+  const rows = (dt && dt.rows) || [];
+  if (!rows.length) return "";
+  const pc = (v) => v == null ? "–" : `${Math.round(v)}%`;
+  const one = (r) => { const p = r.probs || {}, u = r.usual || {};
+    const up = (p.trend || 0) >= (u.trend || 0) + 10, qu = (p.quiet || 0) >= (u.quiet || 0) + 10;
+    const lean = up && r.dir_hint ? ` <span class="${r.dir_hint > 0 ? "up" : "down"}" title="On past trend days the move by 09:45 pointed the day's way about 8 times in 10">${r.dir_hint > 0 ? "↑ so far" : "↓ so far"}</span>` : "";
+    return `<b>${esc(DT_NAME[r.sym] || r.sym)}</b>: <span class="${up ? "up" : ""}">trend ${pc(p.trend)}</span> <span class="muted">(usual ${pc(u.trend)})</span>${lean} · range ${pc(p.range)} · <span class="${qu ? "amber" : ""}">quiet ${pc(p.quiet)}</span> <span class="muted">(usual ${pc(u.quiet)})</span>${r.label ? ` → was <b class="${r.right ? "up" : "down"}">${esc(r.label)}</b>` : ""}${r.late ? ` <span class="muted">(app started late)</span>` : ""}`; };
+  return `<p class="small" style="margin:6px 0 0">🔮 <b>Day type from the 09:45 facts</b> <span class="muted">${rows.some((r) => r.trusted) ? "trusted" : "on trial, information only"}${dt.live_graded ? ` · live ${dt.live_graded} day${dt.live_graded === 1 ? "" : "s"}, ${dt.live_right}% right` : ""}</span><br>${rows.map(one).join("<br>")}</p>`;
+}
+async function drawDayType() {
+  const el = $("#bd-daytype"); if (!el) return;
+  let d; try { d = await api("/api/daytype"); } catch (e) { el.innerHTML = `<span class="muted small">${esc(e.message)}</span>`; return; }
+  if (state.page !== "board") return;
+  const sg = (v) => v == null ? "–" : `<b class="${v > 0 ? "up" : "down"}">${v > 0 ? "+" : ""}${v}%</b>`;
+  const labs = Object.entries(d.labs || {}).map(([k, r]) => { const w = r.walk;
+    if (!w) return `<li><b>${k === "5y" ? "5-year Lab" : "1-year Lab"}</b>: <span class="muted">${esc(r.note || "not trained yet")}</span></li>`;
+    const ch = (r.runs || []).filter((x) => x.tested_days).map((x) => `${esc(x.model)} ${sg(x.logloss_skill)}`).join(" · ");
+    return `<li><b>${k === "5y" ? "5-year Lab" : "1-year Lab"}</b> <span class="muted">(${(r.syms || []).map((s) => DT_NAME[s] || s).join(", ")}, ${r.days} index days, ${esc(r.first || "")} to ${esc(r.last || "")})</span>: ${w.tested_days} unseen days, ${sg(w.logloss_skill)} better than the usual shares.
+      The 20% most trend-like mornings trended <b>${w.trend_top20}%</b> (all days ${w.trend_all}%, least trend-like 20%: ${w.trend_bottom20}%); the 20% most quiet-looking were quiet <b>${w.quiet_top20}%</b> (all days ${w.quiet_all}%).
+      <span class="muted">Models tried: ${ch}. ${r.trusted ? "Clears the walk-forward trust rule; trusted only after 20+ live days agree too." : "Below the walk-forward trust rule: on trial."}</span></li>`; }).join("");
+  const lv = d.live || {};
+  const rec = (lv.recent || []).slice(0, 6).map((r) => `${esc(r.day)} ${esc(DT_NAME[r.sym] || r.sym)}: said ${esc(r.call)}, was <b class="${r.right ? "up" : "down"}">${esc(r.label)}</b>`).join(" · ");
+  el.innerHTML = `<div class="toolbar" style="margin:0"><h3 style="margin:0">Day-type forecaster <span class="muted small">trend / range / quiet day, from the 09:45 facts · on trial</span></h3>
+      <button class="btn" id="dt-run" title="Learn again from the Lab's bar tables (a few seconds)">Run now</button></div>
+    <p class="small muted" style="margin:4px 0">Trend day = moved cleanly and wider than a usual day; quiet = under 60% of a usual day's range; range = the rest. Each month is forecast only by a model trained on the months before it.</p>
+    <ul class="small mv-list">${labs}</ul>
+    <p class="small"><b>Live:</b> ${lv.graded ? `${lv.graded} graded day${lv.graded === 1 ? "" : "s"}, ${lv.right_pct}% right${lv.skill != null ? `, ${sg(lv.skill)} vs the usual shares` : ""}. ${rec}` : "the first forecast comes at 09:45 on the next market day, graded at the close."}</p>`;
+  const b = $("#dt-run"); if (b) b.onclick = async () => { b.disabled = true; try { await post("/api/daytype/run", {}); toast("Learning: this panel updates in a few seconds"); setTimeout(drawDayType, 15000); } catch (e) { toast(e.message); b.disabled = false; } };
+}
+
 /* 2.58: the multiverse (lab/multiverse.py): every bench signal down every timeline at once, judged walk-forward */
 async function drawMultiverse() {
   const el = $("#bd-mv"); if (!el) return;
@@ -3751,6 +3784,7 @@ async function pageBoard() {
       ${best ? `<ol class="small">${best}</ol>` : `<p class="small muted">Nothing has earned it yet: ${b.n_closed.toLocaleString("en-IN")} bench trades closed so far${b.n_open ? `, ${b.n_open} open` : ""}. A strategy needs at least ${b.min_n} closed trades and a positive average after its uncertainty. The record grows every market day.</p>`}</div>
     <div class="panel tight" id="bd-analyst"></div>
     <div class="panel tight" id="bd-mv"></div>
+    <div class="panel tight" id="bd-daytype"></div>
     <div class="panel tight" id="bd-paths"></div>
     <div class="toolbar"><div class="chips" role="group" aria-label="Way of trading">${famChips}</div></div>
     <div class="toolbar"><div class="btn-row">
@@ -3766,6 +3800,7 @@ async function pageBoard() {
   bindCapitalBox(() => pageBoard());
   drawAnalyst();
   drawMultiverse();
+  drawDayType();
   drawJourneys();
   main.querySelectorAll("tr[data-bk]").forEach((row) => row.onclick = async () => {      // 2.38: every trade with its date and time
     const nx = row.nextElementSibling;
@@ -3835,5 +3870,5 @@ function boardMini(b) {
   const best = (b.best || []).slice(0, 3).map((r) => { const x = keyed ? r.regime : r.all;
     return `<li><b>${esc(r.label)}</b> <span class="muted small">${esc(r.style_label)}</span> <b class="up">${rupees(x.avg)}</b><small class="muted"> × ${x.n}</small></li>`; }).join("");
   return `<div id="lv-board" class="panel tight"><div class="toolbar" style="margin:0 0 4px"><h3 style="margin:0">What works ${keyed ? `on ${esc(b.day_type || "days like today")}` : "so far"} ${asOf(b.fetched)}</h3><a class="small" href="#/board">Strategy board →</a></div>
-    ${best ? `<ol class="small" style="margin:4px 0 0">${best}</ol>` : `<p class="small muted" style="margin:4px 0 0">Collecting: ${b.n_closed.toLocaleString("en-IN")} honest bench trades so far. Nothing fits ${rupees(b.capital)} with a positive record yet.</p>`}</div>`;
+    ${best ? `<ol class="small" style="margin:4px 0 0">${best}</ol>` : `<p class="small muted" style="margin:4px 0 0">Collecting: ${b.n_closed.toLocaleString("en-IN")} honest bench trades so far. Nothing fits ${rupees(b.capital)} with a positive record yet.</p>`}${dayTypeLine(b.daytype)}</div>`;
 }

@@ -2404,6 +2404,10 @@ class LiveEngine:
                 proc.run("mass", self.data_dir, log=log)
             except Exception as e:
                 log(f"Mass search failed: {e}")
+            try:                                          # 2.66: the day-type forecaster learns from the same bar table
+                proc.run("daytype", self.data_dir, log=log)
+            except Exception as e:
+                log(f"Day-type forecaster failed: {e}")
             proc.run("factory", self.data_dir, log=log, n_random=6000, n_mutate=3000)
             try:
                 proc.run("mlstrat", self.data_dir, log=log)
@@ -2419,6 +2423,10 @@ class LiveEngine:
                         proc.run("mass", r5, log=lambda m: log("[5y] " + m))
                     except Exception as e:
                         log(f"[5y] Mass search failed: {e}")
+                    try:                                  # 2.66: and on the 5-year table (more days)
+                        proc.run("daytype", r5, log=lambda m: log("[5y] " + m))
+                    except Exception as e:
+                        log(f"[5y] Day-type forecaster failed: {e}")
                     proc.run("factory", r5, log=lambda m: log("[5y] " + m), n_random=3000, n_mutate=1500)
             except Exception as e:
                 log(f"5-year Lab failed: {e}")
