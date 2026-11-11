@@ -114,6 +114,10 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.67.1: sidebar order (11 Nov 2026)
+
+Mandeep: the sidebar now reads Trade today, Market intel, Daily radar, Test & research, Setup. Same pages, new order.
+
 ## Daily Radar for all indices + grand view (2.67)
 
 The Daily Radar (next session's big-move chance) now covers **Bank Nifty, Nifty 50, Fin Nifty, Nifty Next 50 and
