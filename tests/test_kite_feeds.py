@@ -224,3 +224,19 @@ def test_kite_code_reads_prices_only():
             assert "ws.kite.trade" not in t and "api.kite.trade" not in t, p.name   # one Kite connection point
     ign = (ROOT / ".gitignore").read_text().split()
     assert "data/kite_token.json" in ign and "data/upstox_token.json" in ign and "user_settings.json" in ign
+
+
+def test_engine_builds_the_real_router_with_the_upstox_feed():
+    """2.56.1: the router must build with the real Upstox feed class (11 Nov 2026: NameError on the Mac at 09:24,
+    the scanner could not start; the simulator path never built the router)."""
+    from live.engine import LiveEngine
+    from live.upstox import UpstoxFeed
+    e = object.__new__(LiveEngine)
+    e._on_ticks = lambda ticks: None
+    e._feed_status = lambda *a, **k: None
+    e.log = lambda m: None
+    e.state, e.uni = None, None
+    e.cfg = lambda: {"live": {}}
+    r = e._make_router({"access_token": "not-a-real-token"})
+    assert isinstance(r, F.FeedRouter) and isinstance(r.primary, UpstoxFeed)
+    assert r.mode() in ("shadow", "on", "off") and r.is_open() in (True, False)
