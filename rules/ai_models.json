@@ -1,0 +1,16 @@
+{
+  "about": "2.62 AI router (Mandeep, 11 Nov 2026: 'model bhi vo choose karo jo sabse zada capable ho or fit ho or bina bhot zada time liye near to accuracy analysis kar sake'). Each AI job uses the model that fits it: fast (Haiku 5.5) for quick classification, balanced (Sonnet 5.5) for live notes and answers, deep (Opus 5.5) for the slow evening work where accuracy matters more than seconds. Claude Code aliases: haiku, sonnet, opus, fable (the most capable; on some plans it bills usage credits), best (fable where available, else opus). Effort: low / medium / high / xhigh / max. If a model is not available on your plan, the next one in 'fallback' is used and remembered for the day. A tier with budget_per_day has its own daily allowance (counted apart from the automatic-notes cap). Your Live setup choice 'Pick the model per job' (on by default) turns this on; off = the one model you chose there, as before.",
+  "valid_from": "2026-11-11",
+  "tiers": {
+    "fast":     {"model": "haiku",  "effort": "low",    "timeout": 60,  "budget_per_day": 150, "api_model": "claude-haiku-5-5"},
+    "balanced": {"model": "sonnet", "effort": "medium", "timeout": 120, "api_model": "claude-sonnet-5-5"},
+    "deep":     {"model": "opus",   "effort": "high",   "timeout": 420, "api_model": "claude-opus-5-5"}
+  },
+  "fallback": {"fable": "opus", "best": "opus", "opus": "sonnet", "sonnet": "haiku", "haiku": ""},
+  "tasks": {
+    "pulse": "fast", "world": "fast", "news": "fast",
+    "alert_why": "balanced", "brain": "balanced", "indication": "balanced", "briefs": "balanced", "ask": "balanced",
+    "chart_read": "balanced",
+    "review": "deep", "lab_ideas": "deep", "ebook": "deep", "analyst": "deep"
+  }
+}

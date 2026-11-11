@@ -64,6 +64,16 @@ def static_checks(cfg: dict | None = None) -> list:
                       if sc["choices"] else "rules/strikes.json missing or broken: every rule buys ATM (as before 2.57)"))
     except Exception as e:
         out.append(_c("strike_choice", "Lab strike choice", False, f"could not load: {e}"))
+    try:                                             # 2.62: AI router (model per job)
+        from live.notify import ai_models
+        am = ai_models()
+        bad = [t for t, tier in (am.get("tasks") or {}).items() if not ((am.get("tiers") or {}).get(tier) or {}).get("model")]
+        out.append(_c("ai_router", "AI: the right model per job (fast / balanced / deep), with fallback",
+                      not bad and bool(am.get("tasks")),
+                      " · ".join(f"{tier}: {(am['tiers'][tier] or {}).get('model')}" for tier in am.get("tiers", {})) +
+                      (f"; jobs without a model: {', '.join(bad)}" if bad else "")))
+    except Exception as e:
+        out.append(_c("ai_router", "AI router", False, f"could not load: {e}"))
     try:                                             # 2.60: mass search (every single / paired condition at once)
         from lab import mass as _ms
         mc = _ms.cfg()

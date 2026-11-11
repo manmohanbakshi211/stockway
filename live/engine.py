@@ -1948,7 +1948,7 @@ class LiveEngine:
         if a.get("ai"):
             return a["ai"]
         news = [n for n in self.news.items if a["sym"] in n.get("syms", [])]
-        text = self.ai.ask(alert_prompt(a, self.metrics.get(a["sym"]), news), 300, auto=auto)
+        text = self.ai.ask(alert_prompt(a, self.metrics.get(a["sym"]), news), 300, auto=auto, task="alert_why")
         if text:
             self.store.set_alert_ai(alert_id, text)
             for x in self.alerts_mem:
@@ -2182,7 +2182,7 @@ class LiveEngine:
                 "top_movers": [{k: m.get(k) for k in ("sym", "chg_pct", "rel_vol", "score")} for m in self._movers()["hot"][:6]],
                 "recent_alerts": [a["title"] for a in list(self.alerts_mem)[:10]],
                 "headlines": [n["title"] for n in self.news.items[:8]]}
-        text = self.ai.ask(pulse_prompt(snap), 350)
+        text = self.ai.ask(pulse_prompt(snap), 350, task="pulse")
         if text:
             self.pulse.update(ai=text, ts=time.time())
 

@@ -309,9 +309,9 @@ class Indication:
                   "slow background for single stocks, never a reason on its own for the whole market's next move."
                   "\n\nData: " + json.dumps(b, default=str))
         try:
-            text = ai.ask(prompt, 250, auto=True, budget=("indication", int(c["max_ai_per_day"])))
+            text = ai.ask(prompt, 250, auto=True, budget=("indication", int(c["max_ai_per_day"])), task="indication")
         except TypeError:                             # an AI client without separate allowances
-            text = ai.ask(prompt, 250, auto=True)
+            text = ai.ask(prompt, 250, auto=True, task="indication")
         self.ai_used[day] = self.ai_used.get(day, 0) + 1
         out = parse_ai(text, b["phase"])
         if out is None:

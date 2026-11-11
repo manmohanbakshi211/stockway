@@ -1207,6 +1207,7 @@ async function pageConnect() {
           <option value="gemini" ${!["claude", "claude_pro"].includes(s["ai.provider"]) ? "selected" : ""}>Google Gemini (free tier, needs a key)</option>
           <option value="claude" ${s["ai.provider"] === "claude" ? "selected" : ""}>Claude API (pay per use, needs a key)</option></select></label>
         <label class="field" id="f-aik">API key<input type="password" id="s-aik" value="${q(s["ai.api_key"])}" autocomplete="off"></label>
+        <label class="check" id="f-airoute"><input type="checkbox" id="s-airoute" ${s["ai.routing"] !== false ? "checked" : ""}><span>Pick the model per job (recommended)<small>Haiku for quick notes, Sonnet for alerts and answers, Opus for the evening research (rules/ai_models.json). Off = the one model below for everything.</small></span></label>
         <label class="field" id="f-aim">Claude model<select id="s-aim">${[["sonnet", "Sonnet (recommended)"], ["opus", "Opus (deepest, uses your limit faster)"], ["haiku", "Haiku (fastest, lightest)"], ["", "Claude Code's default"]].map(([v, l]) => `<option value="${v}" ${(s["ai.pro_model"] ?? "sonnet") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="field">Explain automatically<select id="s-aisev">${[[2, "Important and act-now alerts"], [3, "Only act-now alerts"], [9, "Never (only when I click Why?)"]].map(([v, l]) => `<option value="${v}" ${Number(s["ai.explain_min_severity"] || 3) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="field">Market pulse every<select id="s-aipulse">${[5, 10, 15, 30, 60].map((v) => `<option value="${v}" ${Number(s["ai.pulse_every_min"] || 15) === v ? "selected" : ""}>${v} minutes</option>`).join("")}</select></label>
@@ -1234,6 +1235,7 @@ async function pageConnect() {
     "live.sim_speed": Number($("#s-speed").value), "live.telegram_min_severity": Number($("#s-tsev").value),
     "ai.provider": $("#s-aip").value, "ai.api_key": $("#s-aik").value.trim(), "ai.explain_min_severity": Number($("#s-aisev").value),
     "ai.pro_model": $("#s-aim").value, "ai.pro_auto_per_day": Number($("#s-aiauto").value), "ai.language": $("#s-ailang").value,
+    "ai.routing": $("#s-airoute") ? $("#s-airoute").checked : true,
     "ai.pulse_every_min": Number($("#s-aipulse").value), "live.paper.auto": $("#s-pauto").checked, "live.paper.lots": Number($("#s-plots").value),
     "live.paper.target_pct": Number($("#s-ptgt").value), "live.paper.stop_pct": Number($("#s-pstop").value),
     "live.paper.capital": (parseAmount($("#s-pcap").value).value) || (() => { throw new Error(parseAmount($("#s-pcap").value).error); })(), "live.paper.risk_pct": Number($("#s-prisk").value),
@@ -3324,7 +3326,8 @@ async function pageSystem() {
             <label class="field">Dhan PIN (for TOTP)<input id="sy-pin" type="password" inputmode="numeric" autocomplete="off"></label>
             <label class="field">TOTP key (text under Dhan's QR)<input id="sy-totp" type="password" autocomplete="off"></label></div>`,
           `<button class="btn" id="sy-dsave">Save</button><button class="btn primary" id="sy-auto">${au.on ? "Save new PIN / key" : "Turn on automatic login"}</button>${au.on ? `<button class="btn" id="sy-auto-off">Turn off TOTP</button>` : ""}<button class="btn" id="sy-dtest">Test Dhan</button><button class="btn" id="sy-renew">Renew now</button>`)}
-        ${card(cl, `<div class="small muted" style="margin-top:6px">Used today: ${cl.used || 0}. If it says "not logged in": open Terminal, type <code>claude</code>, log in.</div>`,
+        ${card(cl, `<div class="small muted" style="margin-top:6px">Used today: ${cl.used || 0}. If it says "not logged in": open Terminal, type <code>claude</code>, log in.</div>
+          ${cl.routing ? `<div class="small" style="margin-top:4px">Model per job: ${Object.entries(cl.tasks || {}).length ? Object.entries(cl.tasks).map(([k, v]) => `${esc(k)} → ${esc(v.model || "?")} (${v.n}×, ${v.avg_s}s${v.error ? ", error" : ""})`).join(" · ") : "Haiku for quick notes, Sonnet for alerts and answers, Opus for the evening research"}</div>` : ""}`,
           `<button class="btn" id="sy-ai">Test Claude (uses 1 message)</button><a class="btn" href="#/data">AI settings</a>`)}
         ${card(tg, "", `<button class="btn" id="sy-tg">Send test message</button><a class="btn" href="#/data">Telegram settings</a>`)}
         ${card(S.yahoo)}

@@ -116,7 +116,7 @@ def ai_prompt(kind: str, facts: dict) -> str:
 
 def make(kind: str, facts: dict, ai=None) -> dict:
     lines = premarket_rules(facts) if kind == "pre" else postmarket_rules(facts)
-    text = ai.ask(ai_prompt(kind, facts), 500) if ai and ai.enabled() else None
+    text = ai.ask(ai_prompt(kind, facts), 500, task="briefs") if ai and ai.enabled() else None
     return {"kind": kind, "lines": lines, "ai": text, "ts": dt.datetime.now(IST).isoformat(),
             "facts": json.loads(json.dumps(facts, default=str))}
 

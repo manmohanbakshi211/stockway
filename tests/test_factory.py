@@ -73,7 +73,7 @@ class FakeAI:
     def enabled(self):
         return True
 
-    def ask(self, prompt, max_tokens=0, auto=True):
+    def ask(self, prompt, max_tokens=0, auto=True, **kw):
         assert "Do not quote the book" in prompt
         return json.dumps({"strategies": [{"dir": 1, "conds": [["or_pos", ">", 0.5], ["vs_twap", ">", 0]], "win": [15, 120],
                                            "exit": "swing", "note": "opening range breakout, ch. 3"}],

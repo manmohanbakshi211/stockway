@@ -4,6 +4,7 @@ from __future__ import annotations
 import collections
 import datetime as dt
 import html
+import json
 import queue
 import re
 import threading
@@ -101,6 +102,23 @@ def find_claude_cli() -> str | None:
     return None
 
 
+class ModelUnavailable(RuntimeError):
+    """2.62: Claude Code refused the model on this plan (the router tries the next one)."""
+
+
+_AIM: dict = {}
+
+
+def ai_models() -> dict:
+    """rules/ai_models.json (2.62), re-read when it changes."""
+    from pathlib import Path as _P
+    f = _P(__file__).resolve().parents[1] / "rules" / "ai_models.json"
+    mt = f.stat().st_mtime
+    if _AIM.get("mt") != mt:
+        _AIM.update(mt=mt, cfg=json.loads(f.read_text()))
+    return _AIM["cfg"]
+
+
 class AI:
     """Gemini (free tier), Claude with an API key, or Claude through your Pro/Max plan (Claude Code on this Mac).
 
@@ -115,6 +133,8 @@ class AI:
         self.day = None
         self.used = 0
         self.used_auto = 0
+        self.tasks: dict = {}            # 2.62: per job today: calls, seconds, model used, last error
+        self.unavailable: dict = {}      # 2.62: model -> day it was refused on this plan (skipped for that day)
         self.budgets: dict = {}          # 2.40: features with their own daily allowance (e.g. the market indication)
         self.last_error = None
         self._cli = None
@@ -139,16 +159,48 @@ class AI:
     def label(self):
         return {"claude_pro": "Claude (your Pro plan)", "claude": "Claude API", "gemini": "Gemini"}.get(self.provider(), "AI")
 
-    def ask(self, prompt: str, max_tokens=400, auto=True, budget: tuple | None = None) -> str | None:
+    def route(self, task: str | None) -> dict | None:
+        """2.62: the tier for a job (rules/ai_models.json): {tier, model, effort, timeout, budget, api_model}, or None
+        when routing is off (Live setup) or the job is unknown: then the one model you chose is used, as before."""
+        c = self.cfg()
+        if not task or c.get("routing") is False:
+            return None
+        try:
+            r = ai_models()
+            tier = (r.get("tasks") or {}).get(task)
+            spec = (r.get("tiers") or {}).get(tier) if tier else None
+        except Exception:
+            return None
+        if not spec:
+            return None
+        model = spec.get("model") or ""
+        fb = r.get("fallback") or {}
+        seen = set()
+        while model and self.unavailable.get(model) == dt.date.today() and model not in seen:
+            seen.add(model)
+            model = fb.get(model, "")
+        return {"tier": tier, "model": model, "effort": spec.get("effort"), "timeout": spec.get("timeout"),
+                "budget": spec.get("budget_per_day"), "api_model": spec.get("api_model"), "fallback": fb}
+
+    def ask(self, prompt: str, max_tokens=400, auto=True, budget: tuple | None = None, task: str | None = None) -> str | None:
         """auto=True for notes the app writes by itself; False when you clicked or asked. budget=(name, per day): a
-        feature with its own daily allowance (2.40), counted apart from the other automatic notes (still in the total)."""
+        feature with its own daily allowance (2.40), counted apart from the other automatic notes (still in the total).
+        task (2.62): the job's name; the router picks its model, effort and allowance (rules/ai_models.json)."""
         if not self.enabled():
             return None
         c = self.cfg()
         today = dt.date.today()
         if self.day != today:
-            self.day, self.used, self.used_auto, self.budgets = today, 0, 0, {}
+            self.day, self.used, self.used_auto, self.budgets, self.tasks = today, 0, 0, {}, {}
         pro = c.get("provider") == "claude_pro"
+        rt = self.route(task)
+        if rt and rt.get("budget") and not budget:       # a tier with its own allowance (the fast one): counted apart
+            budget = (f"tier:{rt['tier']}", int(rt["budget"]))
+            if self.budgets.get(budget[0], 0) >= budget[1]:
+                self.last_error = f"The {rt['tier']} AI allowance for today is used up"
+                return None
+            self.budgets[budget[0]] = self.budgets.get(budget[0], 0) + 1
+            return self._run(prompt, max_tokens, c, pro, rt, task)
         if self.used >= int(c.get("daily_limit") or (80 if pro else 200)):
             self.last_error = "Daily AI limit reached"
             return None
@@ -164,9 +216,14 @@ class AI:
             self.budgets[budget[0]] = self.budgets.get(budget[0], 0) + 1
         else:
             self.used_auto += 1 if auto else 0
+        return self._run(prompt, max_tokens, c, pro, rt, task)
+
+    def _run(self, prompt, max_tokens, c, pro, rt, task):
+        t0 = time.time()
+        used_model = None
         try:
             if pro:
-                text = self._ask_claude_code(prompt, c)
+                text, used_model = self._ask_routed(prompt, c, rt)
             elif c["provider"] == "gemini":
                 model = c.get("model") or "gemini-flash-lite-latest"
                 r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
@@ -178,7 +235,8 @@ class AI:
                 parts = r.json()["candidates"][0]["content"]["parts"]
                 text = "".join(p.get("text", "") for p in parts)
             else:
-                model = c.get("model") or "claude-haiku-5-5"
+                model = (rt or {}).get("api_model") or c.get("model") or "claude-haiku-5-5"
+                used_model = model
                 r = requests.post("https://api.anthropic.com/v1/messages",
                                   headers={"x-api-key": c["api_key"], "anthropic-version": "2023-06-01",
                                            "content-type": "application/json"},
@@ -187,9 +245,11 @@ class AI:
                 r.raise_for_status()
                 text = "".join(b.get("text", "") for b in r.json()["content"])
             self.last_error = None
+            self._note(task, rt, used_model, time.time() - t0, None)
             return text.strip()
         except Exception as e:
             err = str(e)[:300]
+            self._note(task, rt, used_model, time.time() - t0, err)
             now = time.time()
             if err != self.last_error or now - getattr(self, "_err_logged", 0) > 1800:   # same problem: once per 30 min
                 self.log(f"AI request failed: {err}")
@@ -197,7 +257,38 @@ class AI:
             self.last_error = err
             return None
 
-    def _ask_claude_code(self, prompt: str, c: dict) -> str:
+    def _note(self, task, rt, model, secs, err):
+        k = task or "other"
+        t = self.tasks.setdefault(k, {"n": 0, "secs": 0.0, "tier": (rt or {}).get("tier"), "model": None, "error": None})
+        t["n"] += 1
+        t["secs"] += float(secs)
+        t["model"] = model or t["model"]
+        t["error"] = err
+
+    def _ask_routed(self, prompt: str, c: dict, rt: dict | None) -> tuple:
+        """Claude Code with the router's model and effort; a model your plan refuses is skipped (for the day) and the
+        next one in the fallback chain is tried. Returns (text, model used)."""
+        if not rt:
+            return self._ask_claude_code(prompt, c), (c.get("pro_model") or "default")
+        fb = rt.get("fallback") or {}
+        model = rt.get("model") or ""
+        tried = []
+        while True:
+            try:
+                text = self._ask_claude_code(prompt, c, model=model, effort=rt.get("effort"), timeout=rt.get("timeout"))
+                return text, (model or "default")
+            except ModelUnavailable:
+                tried.append(model)
+                if model:
+                    self.unavailable[model] = dt.date.today()
+                nxt = fb.get(model, "") if model else None
+                if nxt is None or nxt in tried:
+                    raise
+                self.log(f"AI: '{model}' is not available on this plan; using {nxt or 'the Claude Code default'} instead")
+                model = nxt
+
+    def _ask_claude_code(self, prompt: str, c: dict, model: str | None = None, effort: str | None = None,
+                         timeout: int | None = None) -> str:
         import os
         import subprocess
         import tempfile
@@ -207,15 +298,16 @@ class AI:
         env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}  # use the Pro login
         sandbox = os.path.join(tempfile.gettempdir(), "stockway-ai")
         os.makedirs(sandbox, exist_ok=True)
-        model = (c.get("pro_model") or "").strip()
+        model = (c.get("pro_model") or "").strip() if model is None else model.strip()
         core = [cli, "-p", "--output-format", "text"] + (["--model", model] if model else [])
-        attempts = [core + ["--no-session-persistence", "--strict-mcp-config", "--disable-slash-commands", "--tools", ""],
-                    core + ["--disallowedTools", "Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch",
-                            "WebSearch", "Task", "Read", "Glob", "Grep"]]                   # older Claude Code
+        safe = ["--no-session-persistence", "--strict-mcp-config", "--disable-slash-commands", "--tools", ""]
+        old = ["--disallowedTools", "Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch",
+               "WebSearch", "Task", "Read", "Glob", "Grep"]                                  # older Claude Code
+        attempts = ([core + ["--effort", effort] + safe] if effort else []) + [core + safe, core + old]
         last = ""
         for cmd in attempts:
-            r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=int(c.get("pro_timeout") or 150),
-                               cwd=sandbox, env=env)
+            r = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
+                               timeout=int(timeout or c.get("pro_timeout") or 150), cwd=sandbox, env=env)
             if r.returncode == 0 and r.stdout.strip():
                 return r.stdout
             last = (r.stderr or r.stdout or "").strip()
@@ -225,8 +317,8 @@ class AI:
         if "login" in low or "log in" in low or "auth" in low:
             raise RuntimeError("Claude Code is not logged in: open Terminal, type claude, and log in with your Claude account.")
         if "model" in low and any(w in low for w in ("not available", "not found", "invalid", "access", "not supported")):
-            raise RuntimeError(f"The model '{model or 'default'}' isn't available on your Claude plan in Claude Code: "
-                               "choose Sonnet in Live setup → AI.")
+            raise ModelUnavailable(f"The model '{model or 'default'}' isn't available on your Claude plan in Claude Code: "
+                                   "choose Sonnet in Live setup → AI.")
         if "limit" in low:
             raise RuntimeError("Your Claude plan's usage limit is reached for now; it resets in a few hours.")
         raise RuntimeError(last[:300] or "Claude Code returned nothing.")

@@ -476,7 +476,7 @@ class World:
         prompt = ("For each headline, judge the likely impact on Indian equity indices (Nifty/Bank Nifty) today. Reply ONLY with a "
                   "JSON list of objects {\"i\": index, \"impact\": \"high\"|\"medium\"|\"low\", \"direction\": 1|0|-1, \"why\": "
                   "\"<8 words\"}.\n" + "\n".join(f"{i}. {t}" for i, t in enumerate(titles)))
-        text = self.ai.ask(prompt, 900)
+        text = self.ai.ask(prompt, 900, task="world")
         if not text:
             return
         try:
