@@ -995,7 +995,9 @@ class LiveEngine:
                            "One large player acting in a hurry.", "price": m.get("spot"), "data": {"qty": qty, "px": px}}
             self._emit_safe(a, now, lc)
 
-    def _suggest(self, sym, direction):
+    def _suggest(self, sym, direction, strike: str | None = None):
+        """The option an alert suggests: the ATM call / put of the nearest expiry, or (2.57) the strike a Strategy Lab
+        rule asks for (rules/strikes.json: n strikes away, or the out-of-the-money strike nearest a premium)."""
         if direction not in ("up", "down"):
             return None
         u = self.uni.underlyings.get(sym)
@@ -1010,6 +1012,11 @@ class LiveEngine:
             return None
         k = min(chain, key=lambda s: abs(s - m["spot"]))
         side = "CE" if direction == "up" else "PE"
+        if strike:
+            try:
+                k = self._strike_for(chain, k, side, float(m["spot"]), strike) or k
+            except Exception:
+                pass
         o = chain[k].get(side)
         i = self.state.get(o.key) if o else None
         if not o or not i or not i.ltp:
@@ -1017,6 +1024,32 @@ class LiveEngine:
         return {"key": o.key, "label": f"{sym} {k:g} {side} {exp:%d %b}", "side": side, "strike": k,
                 "expiry": exp.isoformat(), "lot": o.lot, "ltp": i.ltp, "ask": i.ask, "iv": norm_iv(i.iv),
                 "delta": i.delta, "cost_per_lot": round((i.ask or i.ltp) * o.lot, 2)}
+
+    def _strike_for(self, chain: dict, k_atm: float, side: str, spot: float, name: str):
+        """2.57: the strike a choice means right now (None = keep ATM): n steps away (+ = out of the money) or the
+        out-of-the-money strike whose live price is nearest premium_pct of the index."""
+        from lab.factory import strikes_cfg
+        ch = strikes_cfg()["choices"].get(name)
+        if not ch:
+            return None
+        ks = sorted(chain)
+        sgn = 1 if side == "CE" else -1
+        if ch.get("steps"):
+            i = ks.index(k_atm) + sgn * int(ch["steps"])
+            return ks[i] if 0 <= i < len(ks) and chain[ks[i]].get(side) else None
+        want = spot * float(ch["premium_pct"]) / 100
+        best, err = None, None
+        for kk in ks:
+            o = chain[kk].get(side)
+            if not o or (kk - k_atm) * sgn <= 0:
+                continue
+            i = self.state.get(o.key)
+            if not i or not i.ltp or i.ltp <= 0.5:
+                continue
+            e = abs(i.ltp - want)
+            if err is None or e < err:
+                best, err = kk, e
+        return best
 
     def trade_plan(self, a, m, now):
         """Entry, stop-loss and targets for an alert, set on the chart the way pro traders do (lab/exits.py), plus the
@@ -1575,7 +1608,8 @@ class LiveEngine:
         mins = minutes_since_open(now)
         a["is_index"] = bool(u and u.is_index)
         a["und_key"] = (u.key if self.state.get(u.key) and self.state.get(u.key).ltp else u.fut_key) if u else None
-        a.update(ts=ts, day=now.date().isoformat(), source=self.source, option=self._suggest(a["sym"], a["direction"]))
+        a.update(ts=ts, day=now.date().isoformat(), source=self.source,
+                 option=self._suggest(a["sym"], a["direction"], ((a.get("data") or {}).get("factory") or {}).get("strike")))
         # evidence, levels, structure, track record, score
         reg = self.regimes.get(a["sym"]) or self.regimes.get("NIFTY")
         ev = evidence(m, a["direction"], self.metrics.get("NIFTY")) if m else []

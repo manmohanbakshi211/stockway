@@ -114,6 +114,26 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Strike choice: the Lab can buy out-of-the-money strikes, alerts and paper buy the rule's strike (2.57)
+
+Mandeep, 11 Nov 2026: "go ahead" on choosing strikes by premium (the Lab could only buy at the money).
+
+- **Gun:** a Lab rule may name a strike (`rules/strikes.json`): `otm1` / `otm2` (strikes away from ATM on the
+  out-of-the-money side) or `lowprem` (the out-of-the-money strike priced nearest 0.15% of the index, about ₹37 on
+  Nifty 25,000). The bar table prices the same buy on those strikes for 3 exits (std, trail, chand) on the indices
+  (32-bit columns, so the Mac's 1.1-million / 2.7-million-row tables stay small); the table is rebuilt once when
+  they are missing. Scoring reads `exit@strike`; rule ids, words ("Buy the call 2 strikes out of the money …"),
+  validation, the random search (tries a strike on 40% of buy rules) and mutations (switch strike / back to ATM) know
+  it; strategy files may set `"strike"`. Live: a promoted rule's alert suggests that strike (`_suggest`), so the paper
+  trade buys it. **A rule without a strike buys ATM exactly as before: old ids and results unchanged.**
+- **First run** (the Mac's 1-year data copy, 8,302 rules, train / validation / holdout): no buy rule passed all three
+  exams on any strike (1 straddle-selling rule did; luck alone ≈ 15). Among rules that passed train, the 2-OTM versions
+  did best on validation (24 of 32 positive vs 28 of 58 at the money); 1 in the money did worst (0 of 9), so it is not
+  priced for now. In ₹ per lot the further out-of-the-money options lose less per random trade (cheaper lots): a lead
+  to keep testing, not an edge. System check `strike_choice`.
+- A saved bar table without the new columns stays usable when there is no option history to rebuild from (tests,
+  a fresh install): rules that need a strike column just can't be scored there.
+
 ## Live QA fixes (2.56.2)
 
 Mandeep, 11 Nov 2026 (market open): "as a highly professional QA test the app fix the bugs". Checked page by page on the

@@ -1,0 +1,30 @@
+{
+  "about": "2.57 strike choice for option-buying rules (Mandeep, 11 Nov 2026: 'go ahead' on choosing strikes by premium; the Lab could only buy at the money). A Lab rule may name a strike; without one it buys the ATM option exactly as before (old rules and their results unchanged). choices: name -> {steps: strikes away from ATM, + = out of the money (higher strike for a call, lower for a put), - = in the money} or {premium_pct: the strike on the out-of-the-money side whose price is nearest this % of the index (0.15% of Nifty 25,000 = about Rs 37; of Bank Nifty 57,000 = about Rs 85)}. exits: the exits the Lab prices for every strike (the bar table grows by choices x exits columns, so only these). syms: where other strikes are priced (index option chains are deep; stock chains are thin). share: how often the random search tries a non-ATM strike. First run (11 Nov 2026, 1-year data copy, 8,302 rules): no buy rule passed all three exams on any strike; among rules that passed train, the 2-out-of-the-money versions did best on validation (24 of 32 positive vs 28 of 58 at the money), 1 in the money did worst (0 of 9): so itm1 is not priced for now, and only 3 exits per strike keep the bar table small (the Mac's 1-year table has 1.1 million rows, the 5-year one 2.7 million).",
+  "valid_from": "2026-11-11",
+  "choices": {
+    "otm1": {
+      "steps": 1,
+      "words": "1 strike out of the money"
+    },
+    "otm2": {
+      "steps": 2,
+      "words": "2 strikes out of the money"
+    },
+    "lowprem": {
+      "premium_pct": 0.15,
+      "words": "the out-of-the-money strike priced nearest 0.15% of the index"
+    }
+  },
+  "exits": [
+    "std",
+    "trail",
+    "chand"
+  ],
+  "syms": [
+    "NIFTY",
+    "BANKNIFTY",
+    "FINNIFTY",
+    "MIDCPNIFTY"
+  ],
+  "share": 0.4
+}

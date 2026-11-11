@@ -37,7 +37,7 @@ MAX_EXITS = 20
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 NAME_RE = re.compile(r"^[a-z0-9_]{1,24}$")
 TOP_KEYS = {"stockway_pack", "id", "name", "version", "made", "source", "about", "exits", "strategies", "cannot_test"}
-STRAT_KEYS = {"name", "dir", "conds", "win", "exit", "syms", "max_day", "note", "then"}     # 2.47: then
+STRAT_KEYS = {"name", "dir", "conds", "win", "exit", "syms", "max_day", "note", "then", "strike"}     # 2.47 then; 2.57 strike
 _LOCK = threading.Lock()
 _CACHE: dict = {}
 
@@ -236,6 +236,14 @@ def check(raw: bytes, each: bool | None = None) -> dict:
                  "source": f"pack:{pid}:{name}"[:80], "pack": pid, "pack_v": ver, "name": name, "early": w[0] < F.FIRST_ENTRY_TOD}
             if then is not None:
                 r["then"] = then
+            stc = st.get("strike")                             # 2.57: a non-ATM strike (rules/strikes.json)
+            if stc and stc != "atm":
+                if stc not in F.strikes_cfg()["choices"] or dr == 0:
+                    out["problems"].append(f"'{name}': strike '{_txt(stc, 20)}' unknown (or a sell rule): ATM used")
+                elif key not in F.strikes_cfg()["exits"]:
+                    out["problems"].append(f"'{name}': exit '{e}' is not priced on other strikes: ATM used")
+                else:
+                    r["strike"] = str(stc)
             v = _validate(r, out["exits"])
             if not v:
                 out["problems"].append(f"'{name}' with exit '{e}': not a testable rule")
