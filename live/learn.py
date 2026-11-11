@@ -8,6 +8,18 @@ from pathlib import Path
 MIN_TRAIN = 120          # graded alerts needed before the model is trusted
 
 
+def _session_day(day) -> bool:
+    """2.56.2: only NSE session days teach or judge the model. On 10 Nov 2026 (a holiday) the scanner of that time ran on
+    Friday's frozen prices; its 224 "graded" alerts all had no move and became the model's whole holdout (AUC 0.5).
+    Unknown or unreadable days are kept (the simulator, old rows)."""
+    try:
+        import datetime as _dt
+        from .session import session
+        return session(_dt.date.fromisoformat(str(day))) is not None
+    except Exception:
+        return True
+
+
 def regime(m: dict, mins: float, marks: dict, vix_chg: float | None = None) -> dict:
     """Trend / range / two-way / quiet, from how far and how cleanly price travelled vs what options priced."""
     spot, o, h, l = m.get("spot"), m.get("day_o"), m.get("day_h"), m.get("day_l")
@@ -212,7 +224,8 @@ class Ranker:
 
     def train(self, rows: list) -> dict:
         import numpy as np
-        rows = sorted([r for r in rows if r.get("result") and r.get("features") and r.get("o0")], key=lambda r: r["ts"])
+        rows = sorted([r for r in rows if r.get("result") and r.get("features") and r.get("o0") and _session_day(r.get("day"))],
+                      key=lambda r: r["ts"])
         days = sorted({r["day"] for r in rows})
         if len(rows) < MIN_TRAIN:
             self.info = {"trained": False, "n": len(rows), "days": len(days), "need": MIN_TRAIN}

@@ -26,17 +26,30 @@ def test_trail_account_mirrors_main_and_uses_its_own_exit(tmp_path):
     sp = B.cfg()["books"]["trail"]
     assert sp["exit_style"] == "chand" and sp["pick"]["same_as_main"]
     bk = bs.books["trail"]
-    assert bk.cfg["kinds"] == MAIN["kinds"] and bk.cfg["min_severity"] == MAIN["min_severity"]
+    assert sp["pick"]["mirror_main"] and bk.cfg["kinds"] == "all" and bk.cfg["max_open"] >= 99   # 2.56.2: main decides
     now = _t(DAY, 10, 0)
-    out = bs.consider(_alert(R=12.0), _state(O1=10.0), now)
+    out = bs.consider(_alert(R=12.0), _state(O1=10.0), now, main={"id": 7, "lots": 2})   # 2.56.2: main took it, 2 lots
     assert out["trail"] == "taken"
     t = st.trades(source="upstox#trail")[0]
     plan = json.loads(t["plan"])
     assert plan["style"] == "chand" and abs(plan["R"] - 12.0) < 1e-9          # the chart exit, not +30% / -20%
+    assert t["lots"] == 2                                                      # the same lots as the main account
     assert out["best"] != "taken"                                              # weak alert: Best only says no
-    assert bs.consider(_alert(R=None, i=2, key="O2"), _state(O2=10.0), now)["trail"].startswith("no chart risk")
-    assert bs.consider(_alert(kind="orb", R=10.0, i=3, key="O3"), _state(O3=10.0), now)["trail"] != "taken"   # not a main kind
+    assert bs.consider(_alert(R=None, i=2, key="O2"), _state(O2=10.0), now, main={"lots": 1})["trail"].startswith("no chart risk")
+    assert bs.consider(_alert(kind="orb", R=10.0, i=3, key="O3"), _state(O3=10.0), now)["trail"] \
+        == "the main account did not take it"                                  # 2.56.2: only the main account's trades
     assert st.trades(source="upstox") == []                                   # the main account is untouched
+
+
+def test_trail_mirrors_even_when_its_own_limits_would_stop_it(tmp_path):
+    """2.56.2 (live QA 11 Nov): the main account was full (3 open), so the trailing account took different alerts and
+    the two could not be compared. Now the main account's limits decide; the mirror takes every trade main takes."""
+    st = Store(tmp_path / "t.db")
+    bs = B.Books("upstox", st, dict(MAIN), None, log=lambda m: None)
+    now = _t(DAY, 10, 0)
+    taken = [bs.consider(_alert(R=5.0, i=i, key=f"O{i}"), _state(**{f"O{i}": 10.0}), now, main={"lots": 1})["trail"]
+             for i in range(1, 9)]
+    assert taken == ["taken"] * 8 and len(st.trades(source="upstox#trail")) == 8
 
 
 def test_unknown_exit_style_marks_only_that_account(tmp_path, monkeypatch):

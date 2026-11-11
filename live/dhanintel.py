@@ -72,6 +72,10 @@ def id_map(cache_dir) -> dict:
     return out
 
 
+LIVE_TRIES = 2                        # 2.56.2: a live call tries twice (was 5 tries, up to 45 s, which stalled the news loop)
+COOL_FIRST, COOL_MAX = 120, 900       # after Dhan says busy (429 / 5xx): rest 2 min, doubling up to 15 min, then try again
+
+
 class DhanIntel:
     def __init__(self, dhan, cache_dir, log=print):
         self.d, self.cache_dir, self.log = dhan, Path(cache_dir), log
@@ -79,6 +83,26 @@ class DhanIntel:
         self.movers: dict = {}            # list key -> [symbol, ...] in rank order
         self.movers_at = 0.0
         self.errors: dict = {}
+        self.cool: dict = {}              # "news" / "movers" -> (resting till, current rest in seconds)
+        self.news_at = 0.0
+
+    def _resting(self, what: str) -> bool:
+        till = self.cool.get(what, (0, 0))[0]
+        return time.time() < till
+
+    def _busy(self, what: str, e) -> None:
+        """Dhan answered busy / failing (HTTP 429 or 5xx after the retries): rest this endpoint a while, say so."""
+        rest = min(COOL_MAX, max(COOL_FIRST, self.cool.get(what, (0, 0))[1] * 2))
+        till = time.time() + rest
+        self.cool[what] = (till, rest)
+        st = getattr(e, "status", None)
+        why = "Dhan says too many calls" if st == 429 else f"Dhan's server error {st}" if st else "no answer from Dhan"
+        self.errors[what] = f"{why} (HTTP {st}); next try {dt.datetime.fromtimestamp(till).strftime('%H:%M')}" if st \
+            else f"{why}: {str(e)[:120]}; next try {dt.datetime.fromtimestamp(till).strftime('%H:%M')}"
+
+    def _ok(self, what: str) -> None:
+        self.cool.pop(what, None)
+        self.errors.pop(what, None)
 
     def _ids(self):
         if not self.ids:
@@ -105,16 +129,21 @@ class DhanIntel:
 
     def news(self) -> list:
         """[{title, link, source, ts, dhan_syms}] newest first (Dhan headlines)."""
-        if self._dead():
+        if self._dead() or self._resting("news"):
             return []
         try:
-            res = self.d.post("/data/newsheadline", {"dhanClientId": self.d.client_id, "categories": ["ALL"], "limit": 50})
-            self.errors.pop("news", None)
+            res = self.d.post("/data/newsheadline", {"dhanClientId": self.d.client_id, "categories": ["ALL"], "limit": 50},
+                              tries=LIVE_TRIES)
+            self._ok("news")
+            self.news_at = time.time()
         except PermissionError as e:
             self.log(f"Dhan news paused: {e}")
             return []
         except Exception as e:
-            self.errors["news"] = str(e)[:160]
+            if getattr(e, "status", None) or "too many retries" in str(e) or "Network error" in str(e):
+                self._busy("news", e)
+            else:
+                self.errors["news"] = str(e)[:160]
             return []
         out = []
         ids = self._ids()
@@ -139,7 +168,7 @@ class DhanIntel:
 
     # ---------------- market movers
     def refresh_movers(self, expiry: dt.date | None):
-        if self._dead():
+        if self._dead() or self._resting("movers"):
             return
         ids = self._ids()
         out = {}
@@ -152,11 +181,14 @@ class DhanIntel:
             if uni:
                 body["universe"] = uni
             try:
-                res = self.d.post("/data/marketmovers", body)
+                res = self.d.post("/data/marketmovers", body, tries=LIVE_TRIES)
             except PermissionError as e:
                 self.log(f"Dhan movers paused: {e}")
                 return
             except Exception as e:
+                if getattr(e, "status", None) or "too many retries" in str(e) or "Network error" in str(e):
+                    self._busy("movers", e)            # Dhan is busy: don't ask for the other lists now either
+                    break
                 self.errors["movers"] = str(e)[:160]
                 continue
             syms = []
@@ -171,7 +203,8 @@ class DhanIntel:
             out[key] = syms
         if out:
             self.movers, self.movers_at = out, time.time()
-            self.errors.pop("movers", None)
+            if not self._resting("movers"):
+                self._ok("movers")
 
     def mover_rank(self, sym: str) -> dict:
         """Best (lowest) rank of a symbol across the mover lists, and which lists it is in."""

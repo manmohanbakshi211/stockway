@@ -114,6 +114,35 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Live QA fixes (2.56.2)
+
+Mandeep, 11 Nov 2026 (market open): "as a highly professional QA test the app fix the bugs". Checked page by page on the
+Mac during the market. Nothing here changes an alert, a score, a paper rule or the Lab (Lab regression: identical).
+
+- **Dhan news and market movers** said only "too many retries". Now the error says Dhan's answer (HTTP 429 = too many
+  calls, 5xx = Dhan's server), a live call tries 2 times instead of 5 (a busy Dhan stalled the news loop up to 45 s),
+  and a busy endpoint rests 2 min, doubling to 15 min, instead of being asked every minute. One busy movers list makes
+  the others wait too. The 5-year download keeps its own 5 tries (`lab/dhan.py` `tries`).
+- **Charts that took 45-100 s** to open a stock the first time: a chart's Dhan client now gives up after 2 tries and
+  fills in from saved bars; an older-history fetch that failed is tried again after 10 min (it was never tried again
+  that session).
+- **Nifty Midcap Select "52 weeks"** showed only today's range: Yahoo has one monthly bar for that index. Less than a
+  year of Yahoo history now falls back to the chart's saved daily bars (Dhan); no all-time high is claimed from under
+  3 years of bars.
+- **A slow page could draw over the next one** (Paper's data arrived after you opened Scanner and was drawn on top of it).
+  Paper, Scanner, World, Watchlist, Strategy desk and System now drop data that arrives after you moved on.
+- **The live snapshot was asked twice a second** (two loops side by side). Now one at a time: half the load on the app.
+- **"Trailing exit" account took different trades from the main account** (main was full with 3 open trades, and in the
+  first minutes after the scanner started there were no 5-minute bars), so the two could not be compared. Now
+  `pick.mirror_main`: it takes exactly the trades the main account takes, with the same lots; the main account's limits
+  decide. Only the exit differs, as 2.56 meant.
+- **The conviction model was judged on a holiday.** On 10 Nov (NSE holiday) the scanner of that time (before 2.48's
+  calendar) ran on Friday's frozen prices: 231 alerts, aggressive paper trades closed by hand, and 224 "graded" alerts
+  with no move, which became the model's whole holdout (base rate 0, AUC 0.5: no verdict possible). Only NSE session days
+  teach or judge the model now. Since 2.48 the scanner does not run on holidays. The trades stay in the record.
+- Checked and fine: Alerts, Chart (smart lines: 8 lines, no sideways scroll), Option chain, Scanner, System; the
+  "Range" day type on Nifty (opened at 25,338, still 25,361 after an hour: a gap-up then sideways is a range day).
+
 ## Trailing-exit paper account; the Daily Radar checked (2.56)
 
 Mandeep, 11 Nov 2026: "go ahead" on: selling stays off (focus on buying), the trailing exit as a separate paper account

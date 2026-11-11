@@ -146,7 +146,7 @@ def test_news_and_movers_parsing(tmp_path):
     class FD:
         client_id = "1"
 
-        def post(self, path, body):
+        def post(self, path, body, **kw):
             assert "PORTFOLIO" not in str(body) and "order" not in path
             if path == "/data/newsheadline":
                 return {"data": [{"headline": "Reliance jumps on results", "timestamp": 1793000000000, "securityIds": ["2885"]}]}

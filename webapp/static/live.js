@@ -58,7 +58,16 @@ api("/api/registry").then((r) => (r.kinds || []).forEach((k) => { if (k.label) K
 /* ---------------- polling + notifications */
 function livePage() { return ["live", "chart", "world", "desk", "scanner", "sym", "alerts", "paper", "connect", "context", "scorecard", "briefs", "insiders"].includes(state.page); }
 
-async function pollSnapshot() {
+/* 2.56.2 (live QA 11 Nov): two snapshot loops could run side by side (a page or button started one while another was
+   waiting for its answer; each answer takes ~1.5 s, longer than the 1 s pause), so every second asked twice. Now one at a
+   time: a second caller shares the answer already on its way. */
+function pollSnapshot() {
+  if (L.polling) return L.polling;
+  L.polling = pollSnapshotOnce().finally(() => { L.polling = null; });
+  return L.polling;
+}
+
+async function pollSnapshotOnce() {
   try {
     const s = await api(`/api/live/snapshot?since=${L.lastId}`);
     s.fetched = s.fetched || Date.now() / 1000;
@@ -654,6 +663,7 @@ async function pageScanner() {
   const tick = async () => {
     if (state.page !== "scanner") return;
     try { L.scanner = await api("/api/live/scanner"); drawScanner(); } catch (_) {}
+    if (state.page !== "scanner") return;                               // 2.56.2: don't take over the next page's timer
     const bar = $("#lv-bar"); if (bar && L.snap) { bar.innerHTML = statusBar(); bindLiveButtons(bar); }
     L.pageTimer = setTimeout(tick, 2000);
   };
@@ -963,8 +973,10 @@ async function pagePaper() {
       const bk = L.paperBook;
       if (bk !== "main" && !((L.books || {}).books || []).some((b) => b.id === bk)) L.paperBook = "main";
       const p = await api(L.paperBook === "main" ? "/api/live/paper" : `/api/live/paper?book=${encodeURIComponent(L.paperBook)}`);
+      if (state.page !== "paper") return;                                 // 2.56.2: you moved on while it loaded: don't draw over the new page
       busy = (p.open || []).length > 0; drawPaper(p, first);
-    } catch (e) { if (first) main.innerHTML = `<div class="empty"><h2>Paper trading</h2><p>${esc(e.message)}</p></div>`; }
+    } catch (e) { if (first && state.page === "paper") main.innerHTML = `<div class="empty"><h2>Paper trading</h2><p>${esc(e.message)}</p></div>`; }
+    if (state.page !== "paper") return;
     L.pageTimer = setTimeout(() => tick(false), busy ? 1500 : 3000);     // 2.48: open trades refresh every 1.5 s
   };
   tick(true);
@@ -1601,7 +1613,8 @@ async function pageDesk() {
   }).catch(() => {});
   const tick = async () => {
     if (state.page !== "desk") return;
-    try { drawDeskLive(await api("/api/lab/desk")); } catch (_) {}
+    try { const d = await api("/api/lab/desk"); if (state.page !== "desk") return; drawDeskLive(d); } catch (_) {}
+    if (state.page !== "desk") return;
     L.pageTimer = setTimeout(tick, 3000);
   };
   tick();
@@ -2468,7 +2481,9 @@ async function pageWorld() {
   stopPageTimer();
   const tick = async (first) => {
     if (state.page !== "world") return;
-    try { drawWorld(await api("/api/world"), first); } catch (e) { if (first) main.innerHTML = `<div class="empty"><h2>World</h2><p>${esc(e.message)}</p></div>`; }
+    try { const w = await api("/api/world"); if (state.page !== "world") return; drawWorld(w, first); }
+    catch (e) { if (first && state.page === "world") main.innerHTML = `<div class="empty"><h2>World</h2><p>${esc(e.message)}</p></div>`; }
+    if (state.page !== "world") return;
     L.pageTimer = setTimeout(() => tick(false), 10000);
   };
   tick(true);
@@ -2882,7 +2897,9 @@ async function pageWatchlist() {
   });
   const tick = async () => {
     if (state.page !== "watchlist") return;
-    try { drawWatchlist(await api("/api/watchlist")); } catch (e) { $("#wl-body").innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    try { const w = await api("/api/watchlist"); if (state.page !== "watchlist") return; drawWatchlist(w); }
+    catch (e) { const el = $("#wl-body"); if (el) el.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+    if (state.page !== "watchlist") return;
     clearTimeout(L.pageTimer); L.pageTimer = setTimeout(tick, 3000);
   };
   tick();
@@ -3204,7 +3221,7 @@ async function pageSystem() {
   let live = {};
   const draw = async () => {
     let x;
-    try { x = await api("/api/system"); } catch (e) { main.innerHTML = `<div class="empty"><h2>System status unavailable</h2><p>${esc(e.message)}</p></div>`; return; }
+    try { x = await api("/api/system"); } catch (e) { if (state.page === "system") main.innerHTML = `<div class="empty"><h2>System status unavailable</h2><p>${esc(e.message)}</p></div>`; return; }
     if (state.page !== "system") return;
     const S = Object.fromEntries(x.services.map((s) => [s.id, s]));
     const up = S.upstox, dh = S.dhan, cl = S.claude, tg = S.telegram, tk = dh.token || {}, au = dh.auto || {};
