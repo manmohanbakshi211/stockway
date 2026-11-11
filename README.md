@@ -114,6 +114,16 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## News radar: the fast AI reads every headline (2.64)
+
+Until now a headline's direction came only from keywords ("rise" good, "fall" bad) and its stocks only from name
+matching. `live/newsradar.py`: new headlines (RSS, Dhan, official feeds) go in batches of 25 every 2 minutes in market
+hours to the fast AI tier (Haiku 5.5): impact 0-3, direction for the stocks it names (or the market), the NSE symbols
+it is clearly about, a few words why. Each call is graded 30 minutes later on its stock's price (or Nifty), next to the
+keyword tone: Market context → News radar shows both scores, high-impact accuracy, and stocks the AI found that name
+matching missed. Shadow: news alerts stay keyword-based until the AI is clearly better, on Mandeep's say-so. Only
+public headlines and symbol names are sent. Setting `ai.news_radar` (on). Fast-tier allowance now 250 a day.
+
 ## Multiverse brain: a learned model on every signal, judged on days it never saw (2.63)
 
 Mandeep, 11 Nov 2026: "AI kaha kaha ... zada smart aur accurate bana sakta hai, kya kya cheej bhot jaldi pakad sakta hai".

@@ -90,6 +90,8 @@ class LiveEngine:
         self.telegram = Telegram(get_cfg, self.log)
         self.ai = AI(get_cfg, self.log)
         self.news = News(self.log)
+        from .newsradar import NewsRadar
+        self.radar_news = NewsRadar(self.ai, self.data_dir, self.log)     # 2.64: the fast AI reads every headline (shadow)
         self.context = Context(self.data_dir, self.log)
         self.context.on_filing = self._filing_alert
         from .brain import Brain
@@ -2433,6 +2435,14 @@ class LiveEngine:
                     for n in new:
                         if n["syms"] and self.running and n["ts"] > time.time() - 1800:
                             self._news_alert(n)
+                    try:                                  # 2.64: the news radar (fast AI), graded 30 min later; shadow
+                        if self.running and (self.cfg().get("ai") or {}).get("news_radar", True):
+                            self.radar_news.add(new)
+                            self.radar_news.run(self.metrics or {}, sorted(self.uni.underlyings) if self.uni else [])
+                            self.radar_news.grade(self.metrics or {})
+                    except Exception as e:
+                        if self._every("news_radar_err", 600, clock_time=False):
+                            self.log(f"News radar skipped: {e}")
             except Exception as e:
                 self.log(f"News fetch failed: {e}")
             now = dt.datetime.now(IST)

@@ -74,6 +74,13 @@ def static_checks(cfg: dict | None = None) -> list:
                       (f"; jobs without a model: {', '.join(bad)}" if bad else "")))
     except Exception as e:
         out.append(_c("ai_router", "AI router", False, f"could not load: {e}"))
+    try:                                             # 2.64: news radar (fast AI on every headline, shadow)
+        from live import newsradar as _nr
+        out.append(_c("news_radar", "News radar: the fast AI reads every headline (impact, direction, stocks), graded 30 min later",
+                      _nr.BATCH > 0 and _nr.GRADE_AFTER_S > 0,
+                      f"batches of {_nr.BATCH} every {_nr.EVERY_S} s in market hours; news alerts stay keyword-based until it proves better"))
+    except Exception as e:
+        out.append(_c("news_radar", "News radar", False, f"could not load: {e}"))
     try:                                             # 2.60: mass search (every single / paired condition at once)
         from lab import mass as _ms
         mc = _ms.cfg()
