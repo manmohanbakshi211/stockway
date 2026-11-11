@@ -803,3 +803,7 @@ details.lab-adv > summary { cursor: pointer; padding: 10px 0; }
 .smart-dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; }
 .smart-h { margin: 8px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .smart-act { color: var(--ink); }
+/* 2.58 multiverse panel: each timeline as one readable item (no narrow table columns on a phone) */
+.mv-list { padding-left: 20px; }
+.mv-list li { padding: 5px 0; border-top: 1px solid var(--rule-soft); overflow-wrap: anywhere; }
+.mv-list li:first-child { border-top: 0; }

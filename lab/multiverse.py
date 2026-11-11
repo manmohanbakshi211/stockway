@@ -587,7 +587,7 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
             walk.append(rec)
         log(f"Multiverse: {day} done ({D['n']:,} signals)")
     # the final board: every day so far
-    best = top_of(accs, z, min_n, min_days, k=int(c.get("top", 30)))
+    best = _distinct(top_of(accs, z, min_n, min_days, k=int(c.get("top", 30)) * 40), int(c.get("top", 30)), by_idea=True)
     luck_best = top_of(luck, z, min_n, min_days, k=1)
     res = {"made": time.time(), "seconds": None, "days": days, "signals": int(sum(D["n"] for D in loaded.values())),
            "filters": K, "exits": E, "strikes": strikes, "delays": delays, "timelines": n_timelines,
@@ -647,8 +647,9 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
                            / max(1, sum(w.get("champ_n") or 0 for w in walk)), 2) if any(w.get("champ_n") for w in walk) else None}
     # live picks for the "Multiverse pick" paper account: delay 0, strikes the paper account can buy, lower bound > 0
     live_strikes = set(c.get("live_strikes") or ["atm"])
-    lp = top_of(accs, z, min_n, max(min_days, 1), k=int(c.get("live_picks", 5)),
-                keep=lambda ck, fi: ck[2] == 0 and ck[0] in live_strikes and not defs[fi].get("champion"))
+    lp = _distinct(top_of(accs, z, min_n, max(min_days, 1), k=int(c.get("live_picks", 5)) * 20,
+                          keep=lambda ck, fi: ck[2] == 0 and ck[0] in live_strikes and not defs[fi].get("champion")),
+                   int(c.get("live_picks", 5)), by_filter=True)
     res["live_picks"] = [{**describe(ck, fi, ei), **stats(accs[ck], fi, ei)} for lcb, ck, fi, ei, _m in lp if lcb > 0]
     res["seconds"] = round(time.time() - t_start, 1)
     _save(data_dir, res)
@@ -656,6 +657,23 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
         f"{res['best'][0]['lcb'] if res['best'] else '–'}% vs luck {res['luck']['lcb'] if res['luck'] else '–'}%; "
         f"{len(res['live_picks'])} live pick(s)")
     return res
+
+
+def _distinct(cands: list, k: int, by_filter: bool = False, by_idea: bool = False) -> list:
+    """Drop look-alikes: the same signals with an exit that never fired (a -40% stop no trade reached) give the same
+    trades and result; keep the best of each. by_filter: one exit per (strike, entry time, filter); by_idea: one row
+    per (strike, filter), whatever the entry time and exit (the board's list of different ideas)."""
+    seen, out = set(), []
+    for c_ in cands:
+        _l, ck, fi, ei, mean = c_
+        key = (ck[0], fi) if by_idea else (ck, fi) if by_filter else (ck, fi, round(mean, 3))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c_)
+        if len(out) >= k:
+            break
+    return out
 
 
 def _fdef(f: dict, singles: list) -> dict:

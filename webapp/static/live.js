@@ -3552,11 +3552,10 @@ async function drawMultiverse() {
     el.innerHTML = head + `<p class="small muted">${esc(m.note || "Not run yet.")}</p>`;
   } else {
     const wt = m.walk_total || {}, lk = m.luck || {}, ch = m.champion || {};
-    const best = (m.best || []).slice(0, 10).map((b) => `<tr><td class="small">${esc(b.words)}</td><td class="r">${nf(b.n)}</td><td class="r">${pc(b.avg)}</td>
-        <td class="r">${b.win != null ? b.win + "%" : "–"}</td><td class="r"><b>${pc(b.lcb)}</b></td><td class="r">${b.green_days ?? "–"} / ${b.days}</td></tr>`).join("");
-    const walk = (m.walk || []).map((w) => `<tr><td class="nw">${esc(w.day)}</td><td class="small">${esc((w.picks[0] || {}).words || "")}</td>
-        <td class="r">${pc(w.best_avg)} <small class="muted">× ${w.best_n}</small></td><td class="r">${pc(w.port_avg)} <small class="muted">× ${w.port_n}</small></td>
-        <td class="r">${pc(w.champ_avg)} <small class="muted">× ${w.champ_n ?? 0}</small></td></tr>`).join("");
+    const best = (m.best || []).slice(0, 10).map((b) => `<li><b>${pc(b.avg)}</b> a trade × ${nf(b.n)} · won ${b.win != null ? b.win + "%" : "–"} ·
+        lower bound <b>${pc(b.lcb)}</b> · green days ${b.green_days ?? "–"} of ${b.days}<br><span class="muted">${esc(b.words)}</span></li>`).join("");
+    const walk = (m.walk || []).map((w) => `<li><b>${esc(w.day)}</b>: pick ${pc(w.best_avg)} × ${w.best_n} · top ${w.picks.length} ${pc(w.port_avg)} × ${w.port_n} ·
+        main account's way ${pc(w.champ_avg)} × ${w.champ_n ?? 0}<br><span class="muted">${esc((w.picks[0] || {}).words || "")}</span></li>`).join("");
     const reg = (m.by_regime || []).map((r) => `<li><b>${esc(r.name)}</b>: ${r.n ? `${esc(r.words)} · ${pc(r.avg)} a trade × ${nf(r.n)}, lower bound ${pc(r.lcb)}` : `<span class="muted">no signals on such a day yet</span>`}</li>`).join("");
     const picks = (m.live_picks || []).map((p) => `<li>${esc(p.words)} · ${pc(p.avg)} × ${nf(p.n)}, lower bound ${pc(p.lcb)}</li>`).join("");
     el.innerHTML = head + `
@@ -3569,9 +3568,9 @@ async function drawMultiverse() {
         <div class="kpi"><b>${pc(wt.port_avg)}</b><span>Its top ${(m.walk[0] || { picks: [] }).picks.length || 5} together (${nf(wt.port_n)} trades)</span></div>
         <div class="kpi"><b>${pc(wt.champ_avg)}</b><span>The main account's way, same days (${nf(wt.champ_n)} trades)</span></div>
         <div class="kpi"><b>${(m.live_picks || []).length}</b><span>Live picks for the "Multiverse pick" paper account</span></div></div>
-      ${walk ? `<h4>Walk-forward: each day picked only from the days before it</h4><div class="table-wrap"><table class="mini"><thead><tr><th>Day</th><th>Pick (from earlier days only)</th><th class="r">Pick that day</th><th class="r">Top ${(m.walk[0] || { picks: [] }).picks.length} picks</th><th class="r">Main account's way</th></tr></thead><tbody>${walk}</tbody></table></div>` : `<p class="small muted">Walk-forward starts once there are 3 recorded days.</p>`}
+      ${walk ? `<h4>Walk-forward: each day picked only from the days before it</h4><ul class="small mv-list">${walk}</ul>` : `<p class="small muted">Walk-forward starts once there are 3 recorded days.</p>`}
       <h4>Best timelines so far <span class="muted small">ranked by the lower bound (days, not signals, are the proof)</span></h4>
-      <div class="table-wrap"><table class="mini"><thead><tr><th>Timeline</th><th class="r">Trades</th><th class="r">Avg net</th><th class="r">Won</th><th class="r">Lower bound</th><th class="r">Green days</th></tr></thead><tbody>${best}</tbody></table></div>
+      <ol class="small mv-list">${best}</ol>
       <h4>Best by day type</h4><ul class="small">${reg}</ul>
       <h4>Trading now on paper ("Multiverse pick" account)</h4>${picks ? `<ol class="small">${picks}</ol>` : `<p class="small muted">Nothing proven yet: the account takes no trade until a timeline's lower bound is above zero.</p>`}
       <p class="note">The main account's way here: its alert types and exit (${ch.avg != null ? `${pc(ch.avg)} a trade over ${nf(ch.n)}, won ${ch.win}%` : "–"}), without its risk check and limits.
