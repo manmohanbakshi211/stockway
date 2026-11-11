@@ -47,6 +47,25 @@ def out_dir() -> Path:
     return Path(cfg()["output_dir"])
 
 
+def rcfg(idx: str | None = None) -> dict:
+    """2.67: the radar config for one index (radar/indices.py); no index or the main one = the original radar."""
+    c = cfg()
+    if not idx:
+        return c
+    from radar import indices
+    e = indices.entry(idx)
+    if e is None or not e.get("on"):
+        raise HTTPException(404, f"Unknown or switched-off radar index: {idx}")
+    return indices.index_cfg(c, e)
+
+
+def rnice(f: str, c: dict) -> str:
+    """Factor names for another index read with its own name ("Bank Nifty vs Nifty" -> "Sensex vs Nifty")."""
+    n = report.nice(f)
+    ri = c.get("radar_index")
+    return n.replace("Bank Nifty", ri["name"]) if ri else n
+
+
 def clean(o):
     return pipeline._jsonable(o)
 
@@ -157,6 +176,24 @@ def start_forecast(label="Updating forecast"):
     return JOBS.start("forecast", label, lambda log, stop: pipeline.forecast(cfg(), log=log, should_stop=stop))
 
 
+def start_indices(mode: str, keys=None, demo: bool = False, label: str | None = None, after_main: str | None = None):
+    """2.67: the Daily Radar for every other index, in a low-priority child process. after_main: run the original
+    Bank Nifty radar first ('forecast' / 'train'), unchanged, so the scheduler keeps one job at a time."""
+    from lab import proc
+    names = ", ".join(keys) if keys else "all indices"
+    lab = label or (f"Training the radar: {names}" if mode == "train" else f"Updating the forecast: {names}")
+
+    def fn(log, stop):
+        if after_main == "forecast":
+            pipeline.forecast(cfg(), log=log, should_stop=stop)
+        elif after_main == "train":
+            pipeline.train(cfg(), demo=demo, use_news=True, log=log, should_stop=stop)
+        if stop():
+            raise news.Stopped()
+        proc.run("radar_indices", ROOT / "data", log=log, should_stop=stop, mode=mode, keys=keys, demo=demo)
+    return JOBS.start("forecast" if mode == "forecast" else "train", lab, fn)
+
+
 def start_news(label="Downloading news"):
     return JOBS.start("news", label, lambda log, stop: pipeline.download_news(cfg(), log=log, should_stop=stop))
 
@@ -208,12 +245,20 @@ def scheduler_loop():
                 if now.weekday() < 5 and state.get("last_forecast") != today:
                     state["last_forecast"] = today
                     state_f.write_text(json.dumps(state))
-                    start_forecast("Scheduled daily forecast")
+                    start_indices("forecast", label="Scheduled daily forecast (all indices)", after_main="forecast")   # 2.67
                 elif now.weekday() == 5 and s.get("weekly_retrain") and state.get("last_retrain") != today:
                     state["last_retrain"] = today
                     state_f.write_text(json.dumps(state))
                     demo = bool(model.load_bundle(c).get("demo"))
-                    start_train(demo, True, "Scheduled weekly retrain")
+                    start_indices("train", demo=demo, label="Scheduled weekly retrain (all indices)", after_main="train")
+            if has_model and not JOBS.busy() and state.get("last_index_setup") != today and (now.hour >= 17 or now.weekday() >= 5):
+                from radar import indices as _ix                     # 2.67: a newly listed index learns once by itself
+                new = [e["key"] for e in _ix.others() if not _ix.has_model(c, e)]
+                state["last_index_setup"] = today
+                state_f.write_text(json.dumps(state))
+                if new:
+                    start_indices("train", keys=new, demo=bool(model.load_bundle(c).get("demo")),
+                                  label=f"First training for {', '.join(new)}")
         except Exception:
             pass
         time.sleep(30)
@@ -288,7 +333,13 @@ def version_check(force: bool = False):
 
 
 @app.get("/api/status")
-def status():
+def status(idx: str | None = None):
+    if idx:                                               # 2.67: one index's model and training only
+        ci = rcfg(idx)
+        b = model.load_bundle(ci)
+        return clean({"model": None if b is None else {k: b.get(k) for k in ("trained_at", "data_end", "demo", "news")},
+                      "training": read_json(Path(ci["output_dir"]) / "last_training.json"),
+                      "has_forecast": (Path(ci["output_dir"]) / "forecast_latest.json").exists(), "job": job_summary()})
     c = cfg()
     out = Path(c["output_dir"])
     bundle = model.load_bundle(c)
@@ -337,6 +388,23 @@ def job_current(since: int = 0):
 async def job_start(req: Request):
     body = await req.json()
     kind = body.get("kind")
+    idx = body.get("idx")
+    from radar import indices as _ix
+    if idx and _ix.entry(idx) and not _ix.entry(idx).get("main"):     # 2.67: one other index
+        rcfg(idx)
+        if kind == "forecast" and not _ix.has_model(cfg(), _ix.entry(idx)):
+            raise HTTPException(400, "Train this index first, then update the forecast.")
+        if kind not in ("train", "forecast"):
+            raise HTTPException(400, "Unknown job")
+        job = start_indices(kind, keys=[idx.upper()], demo=bool(body.get("demo")))
+        return {"id": job["id"]}
+    if kind in ("train_indices", "forecast_indices"):    # 2.67: every other index (the main radar untouched)
+        job = start_indices(kind.split("_")[0], demo=bool(body.get("demo")))
+        return {"id": job["id"]}
+    if kind == "forecast_all":                            # 2.67: the main radar's forecast, then every other index
+        main_ok = model.load_bundle(cfg()) is not None
+        job = start_indices("forecast", label="Updating the forecast: all indices", after_main="forecast" if main_ok else None)
+        return {"id": job["id"]}
     if kind == "train":
         job = start_train(bool(body.get("demo")), True)
     elif kind == "forecast":
@@ -357,8 +425,8 @@ def job_stop():
 
 # ----------------------------------------------------------------- API: forecast
 @app.get("/api/forecast")
-def forecast():
-    c = cfg()
+def forecast(idx: str | None = None):
+    c = rcfg(idx)
     out = Path(c["output_dir"])
     fc = read_json(out / "forecast_latest.json")
     calls = []
@@ -380,8 +448,8 @@ def forecast():
 
 # ----------------------------------------------------------------- API: history
 @app.get("/api/history")
-def history():
-    c = cfg()
+def history(idx: str | None = None):
+    c = rcfg(idx)
     out = Path(c["output_dir"])
     f = out / "banknifty.parquet"
     if not f.exists():
@@ -402,8 +470,8 @@ def history():
 
 
 @app.get("/api/day/{date}")
-def day(date: str):
-    c = cfg()
+def day(date: str, idx: str | None = None):
+    c = rcfg(idx)
     out = Path(c["output_dir"])
     d = pd.Timestamp(date)
     bn_f = out / "banknifty.parquet"
@@ -427,9 +495,9 @@ def day(date: str):
     if X is not None and d in X.index:
         xr = X.loc[[d]]
         if bundle is not None:
-            drivers = [{"feature": f, "label": report.nice(f), "value": v, "effect": e}
+            drivers = [{"feature": f, "label": rnice(f, c), "value": v, "effect": e}
                        for f, v, e in model.drivers(bundle, xr, top=8)[0]]
-        cues = [{"feature": f, "label": report.nice(f), "value": _num(xr[f].iloc[0])}
+        cues = [{"feature": f, "label": rnice(f, c), "value": _num(xr[f].iloc[0])}
                 for f in pipeline.KEY_FEATURES if f in xr.columns]
         news_rows = [{"feature": f, "label": report.nice(f), "value": _num(xr[f].iloc[0])}
                      for f in xr.columns if f.startswith("gd_") and f.endswith(("_tone_1d", "_vol_z3"))]
@@ -454,8 +522,8 @@ def day(date: str):
 
 
 @app.get("/api/biggest")
-def biggest():
-    f = out_dir() / "biggest_days.csv"
+def biggest(idx: str | None = None):
+    f = Path(rcfg(idx)["output_dir"]) / "biggest_days.csv"
     if not f.exists():
         return []
     df = pd.read_csv(f)
@@ -463,8 +531,9 @@ def biggest():
 
 
 @app.get("/api/factors")
-def factors():
-    out = out_dir()
+def factors(idx: str | None = None):
+    c = rcfg(idx)
+    out = Path(c["output_dir"])
     fac = pd.read_csv(out / "crucial_factors.csv") if (out / "crucial_factors.csv").exists() else pd.DataFrame()
     imp = pd.read_csv(out / "importance.csv", index_col=0)["importance"] if (out / "importance.csv").exists() else pd.Series(dtype=float)
     lab_path = out / "labels.parquet"
@@ -474,16 +543,16 @@ def factors():
         hi_col = [c for c in fac.columns if "when high" in c][0]
         lo_col = [c for c in fac.columns if "when low" in c][0]
         for _, r in fac.iterrows():
-            rows.append({"feature": r["feature"], "label": report.nice(r["feature"]),
+            rows.append({"feature": r["feature"], "label": rnice(r["feature"], c),
                          "high": _num(r[hi_col]), "low": _num(r[lo_col])})
     return clean({"base": base, "factors": rows,
-                  "importance": [{"feature": f, "label": report.nice(f), "value": _num(v)}
+                  "importance": [{"feature": f, "label": rnice(f, c), "value": _num(v)}
                                  for f, v in imp.head(20).items()]})
 
 
 @app.get("/api/performance")
-def performance():
-    out = out_dir()
+def performance(idx: str | None = None):
+    out = Path(rcfg(idx)["output_dir"])
     mets = read_json(out / "metrics.json")
     if not mets:
         return {}
@@ -496,6 +565,23 @@ def performance():
               "flag_dates": [str(d.date()) for d in fl.index], "flag": (fl["pnl_pct"].cumsum() * 100).round(3).tolist()}
     return clean({"metrics": mets, "backtest": read_json(out / "backtest_summary.json", []), "equity": eq,
                   "training": read_json(out / "last_training.json")})
+
+
+# ----------------------------------------------------------------- API: all indices (2.67)
+@app.get("/api/radar/indices")
+def radar_indices():
+    from radar import indices
+    c = cfg()
+    st = indices.load_status(c)
+    return clean([{"key": e["key"], "name": e["name"], "on": bool(e.get("on")), "main": bool(e.get("main")),
+                   "trained": (model.load_bundle(c) is not None) if e.get("main") else (e.get("on") and indices.has_model(c, e)),
+                   "error": (st.get(e["key"]) or {}).get("error"), "why_off": e.get("why_off")} for e in indices.registry()])
+
+
+@app.get("/api/radar/grand")
+def radar_grand():
+    from radar import indices
+    return clean(indices.grand(cfg()))
 
 
 # ----------------------------------------------------------------- API: settings & uploads
@@ -1485,7 +1571,9 @@ ROLES = {
                "Login: Claude Code on this Mac (Terminal: claude)"],
     "telegram": ["Alerts and important notices on your phone (token expired, live data stopped)"],
     "yahoo": ["World markets, India VIX history, global context (free, no login)",
-              "All-time and 52-week highs / lows of the indices; chart history when Dhan isn't available"],
+              "All-time and 52-week highs / lows of the indices; chart history when Dhan isn't available",
+              "Daily Radar: 10 years of daily prices for Bank Nifty, Nifty 50, Fin Nifty, Nifty Next 50 and Sensex "
+              "(2.67; one small download per index after the close)"],
     "official": ["RBI press releases and notifications, SEBI orders and circulars, Government (PIB) releases, NSE circulars, "
                  "BSE notices (free RSS feeds, no login)", "Event risk on every alert; a new high-impact item to Telegram"],
     "kite": ["2.52: backup live feed and cross-check for Upstox: the same instruments, compared every few seconds; takes over "

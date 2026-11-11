@@ -114,6 +114,25 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Daily Radar for all indices + grand view (2.67)
+
+The Daily Radar (next session's big-move chance) now covers **Bank Nifty, Nifty 50, Fin Nifty, Nifty Next 50 and
+Sensex** (free Yahoo daily prices since 2015). `radar/indices.py` runs the same radar engine for each index in its own
+folders (`models/indices/<key>`, `output/indices/<key>`), with its own expiry calendar (dated data in
+`rules/radar_indices.json`) and the same honest test: each year forecast by a model trained only on earlier years.
+
+- **All indices** page (Daily radar → All indices): every index's next-session call, big-move chance against its flag
+  level, expected move, unseen-year score, live record, and how many indices flag together ("broad big move likely"
+  when 60%+ of them flag). An index picker on Tomorrow, History, Biggest days, What drives moves and Model check.
+- The scheduled daily forecast and the Saturday retrain now run Bank Nifty first (unchanged), then the other indices in
+  a low-priority background process; one Telegram message lists every index. A newly listed index trains by itself
+  once (after 5 PM or at the weekend), or from the All indices page.
+- A failing index (no data, broken prices) is skipped and marked; the others keep running. Midcap Select and Bankex
+  are listed but off: Yahoo has no daily history for them.
+- Bank Nifty's radar is unchanged: trained and forecast on the same demo data before and after this change, every
+  output file (predictions, metrics, biggest days, factors, importance, backtest) and the forecast were identical.
+- Information only: nothing trades on it.
+
 ## 2.66.1: Mac lag fixes (11 Nov 2026)
 
 - Live metrics read the per-instrument tick and bar lists while the feed thread adds to them: "Metrics failed ...

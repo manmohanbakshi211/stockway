@@ -74,6 +74,16 @@ def static_checks(cfg: dict | None = None) -> list:
                       (f"; jobs without a model: {', '.join(bad)}" if bad else "")))
     except Exception as e:
         out.append(_c("ai_router", "AI router", False, f"could not load: {e}"))
+    try:                                             # 2.67: Daily Radar for every index
+        from radar import indices as _rix
+        on = [e["name"] for e in _rix.active()]
+        off = [e["name"] for e in _rix.registry() if not e.get("on")]
+        out.append(_c("radar_indices", "Daily Radar, all indices: next-session big-move chance per index + grand view",
+                      bool(on) and sum(1 for e in _rix.registry() if e.get("main")) == 1,
+                      f"On: {', '.join(on)}" + (f"; off (no daily history): {', '.join(off)}" if off else "")
+                      + "; free Yahoo daily prices; each index trained walk-forward in a background process; information only"))
+    except Exception as e:
+        out.append(_c("radar_indices", "Daily Radar, all indices", False, f"could not load: {e}"))
     try:                                             # 2.66: day-type forecaster
         from lab import daytype as _dt
         dc = _dt.cfg()
