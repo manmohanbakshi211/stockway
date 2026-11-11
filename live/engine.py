@@ -60,6 +60,22 @@ LIVE_DEFAULTS = {
 STORY_GAP_MIN = 30
 
 
+_CONF_C: dict = {}
+
+
+def confluence_cfg() -> dict:
+    """rules/confluence.json (2.59), re-read when it changes; off if missing or broken."""
+    from pathlib import Path as _P
+    f = _P(__file__).resolve().parents[1] / "rules" / "confluence.json"
+    try:
+        mt = f.stat().st_mtime
+        if _CONF_C.get("mt") != mt:
+            _CONF_C.update(mt=mt, cfg=json.loads(f.read_text()))
+        return _CONF_C["cfg"]
+    except Exception:
+        return {"on": False}
+
+
 class LiveEngine:
     def __init__(self, get_cfg, data_dir: str | Path):
         self.get_cfg = get_cfg
@@ -1723,7 +1739,8 @@ class LiveEngine:
         self.store.set_alert_story(a["id"], s["id"])
         a["ai"] = None
         self.alerts_mem.appendleft(a)
-        if a["severity"] >= int(lc["telegram_min_severity"]) and not muted and (focus or not lc.get("telegram_focus_only", True)):
+        if not muted and ((a["severity"] >= int(lc["telegram_min_severity"]) and (focus or not lc.get("telegram_focus_only", True)))
+                          or (a.get("data") or {}).get("notify")):     # 2.59: a "Signals agree" alert always tells you
             self.telegram.send(telegram_text(a))
         aic = self.cfg().get("ai") or {}
         if self.ai.enabled() and a["severity"] >= int(aic.get("explain_min_severity") or 3) and self._auto_explain_ok(a, aic):
@@ -1761,6 +1778,39 @@ class LiveEngine:
             except Exception as e:
                 if self._every("bench_err", 600, clock_time=False):
                     self.log(f"Test bench skipped an alert: {e}")
+        try:                                         # 2.59: several alert types agree on this symbol right now
+            self._confluence_check(a, now, lc)
+        except Exception as e:
+            if self._every("confluence_err", 600, clock_time=False):
+                self.log(f"Signals-agree check skipped: {e}")
+
+    def _confluence_check(self, a, now, lc):
+        """2.59 (rules/confluence.json): when `min_kinds` different alert types point the same way on the same symbol
+        within `window_s`, one "Signals agree" alert (pop-up, sound, Telegram) that names them. Its own cooldown is the
+        registry's; it changes no Focus, risk check or paper rule; the bench records it for the multiverse to grade."""
+        c = confluence_cfg()
+        if not c.get("on") or a.get("direction") not in ("up", "down") or a.get("kind") in set(c.get("ignore_kinds") or []):
+            return
+        q = self.__dict__.setdefault("_agree", {}).setdefault((a["sym"], a["direction"]), [])
+        ts = now.timestamp()
+        q.append((ts, a["kind"], str(a.get("title") or "")[:80]))
+        win = float(c.get("window_s") or 180)
+        q[:] = [x for x in q if ts - x[0] <= win]
+        kinds = {}
+        for t, k, title in q:
+            kinds.setdefault(k, title)
+        if len(kinds) < int(c.get("min_kinds") or 3):
+            return
+        q.clear()                                    # these alerts are spent: the next confluence needs new ones
+        from . import registry as _reg
+        m = self.metrics.get(a["sym"]) or {}
+        names = [_reg.label(k) for k in kinds]
+        word = "up" if a["direction"] == "up" else "down"
+        self._emit_safe({"sym": a["sym"], "kind": "confluence", "direction": a["direction"],
+                         "severity": int(c.get("severity") or 2),
+                         "title": f"{a['sym']}: {len(kinds)} signals agree {word} ({', '.join(names[:4])})",
+                         "detail": " · ".join(kinds.values())[:400], "price": m.get("spot"),
+                         "data": {"notify": bool(c.get("notify", True)), "parts": list(kinds), "window_s": win}}, now, lc)
 
     @staticmethod
     def open_files() -> dict:
@@ -2317,6 +2367,10 @@ class LiveEngine:
             except Exception as e:
                 log(f"library not queued ({e})")
             from lab import proc                          # 2.38: in its own low-priority process (the app stays quick)
+            try:                                          # 2.60: mass search first; its best go to tonight's exams
+                proc.run("mass", self.data_dir, log=log)
+            except Exception as e:
+                log(f"Mass search failed: {e}")
             proc.run("factory", self.data_dir, log=log, n_random=6000, n_mutate=3000)
             try:
                 proc.run("mlstrat", self.data_dir, log=log)
@@ -2328,6 +2382,10 @@ class LiveEngine:
                 if any(r5.glob("history/*/raw_*.parquet")):
                     from lab import library
                     factory.queue_untested(r5, library.rules(), source="library")
+                    try:                                  # 2.60: the 5-year mass search (the most days: the real proof)
+                        proc.run("mass", r5, log=lambda m: log("[5y] " + m))
+                    except Exception as e:
+                        log(f"[5y] Mass search failed: {e}")
                     proc.run("factory", r5, log=lambda m: log("[5y] " + m), n_random=3000, n_mutate=1500)
             except Exception as e:
                 log(f"5-year Lab failed: {e}")

@@ -1,0 +1,17 @@
+{
+  "about": "2.60 mass search (Mandeep, 11 Nov 2026: '1000 magzine ... saari mag khali karke best bullet'): every fact of the Lab's bar table at these train quantiles, above and below, alone and paired with the best singles, in each time window, each direction, each index and all indices together, each exit. Ranked on TRAIN days by the lower confidence bound; month-by-month walk-forward on the later months; luck line from swapped days; the best go to the Lab's usual exams as ideas. Change the numbers here.",
+  "valid_from": "2026-11-11",
+  "syms": ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"],
+  "quantiles": [0.2, 0.5, 0.8],
+  "windows": [[15, 90], [95, 210], [215, 330], [15, 330]],
+  "exits": ["quick", "std", "swing", "runner", "trail", "atr2r", "chand"],
+  "skip_facts": ["dow"],
+  "train_share": 0.6,
+  "lcb_z": 2.0,
+  "min_trades": 30,
+  "pair_top": 60,
+  "keep": 300,
+  "show": 30,
+  "to_lab": 40,
+  "queue_to_lab": true
+}

@@ -94,8 +94,9 @@ const sevPass = (a, f) => f === 0 ? isFocus(a) : a.severity >= f;
 function notify(a) {
   const min = LS.get("notifySev", 2);
   if (a.severity < min) return;
-  if (!LS.get("notifyAll", false) && !isFocus(a)) return;     // pop-ups and sounds for Focus alerts only
-  if (LS.get("sound", true) && a.severity >= 3) beep();
+  const agree = !!(a.data && a.data.notify);                  // 2.59: "Signals agree" always pops up and beeps
+  if (!LS.get("notifyAll", false) && !isFocus(a) && !agree) return;     // pop-ups and sounds for Focus alerts only
+  if (LS.get("sound", true) && (a.severity >= 3 || agree)) beep();
   if ("Notification" in window && Notification.permission === "granted" && document.visibilityState !== "visible" || (LS.get("notifyAlways", false) && "Notification" in window && Notification.permission === "granted")) {
     const n = new Notification(`${a.direction === "up" ? "▲" : a.direction === "down" ? "▼" : "●"} ${a.title}`, { body: a.detail + (a.option ? `\nIdea: ${a.option.label} @ ₹${a.option.ltp}` : ""), tag: `sw-${a.id}` });
     n.onclick = () => { window.focus(); location.hash = `#/sym?s=${encodeURIComponent(a.sym)}`; };
@@ -2967,6 +2968,7 @@ async function pageLab() {
           <li><b>Green "Passed all 3"</b> = good enough to paper-trade live. Most rules fail; that is normal and saves money.</li>
           <li><b>Click any strategy or rule</b> to see every stock and index it was tested on, with its result in each exam.</li>
           <li><b>The numbers:</b> trades · average ₹ per trade after charges · <b>t</b> = how sure (2+ strong, 1–2 some, below 1 could be luck) · green = % of days that ended in profit.</li></ol></div>
+      <div class="panel tight" id="lab-mass" style="margin-top:14px"></div>
       <div class="panel tight" id="lab-packs" style="margin-top:14px"></div>
       <div class="kpis kpi6" style="margin-top:16px">
         <div class="kpi"><b>${(f.tried_total || 0).toLocaleString("en-IN")}</b><span>Rules tried so far</span></div>
@@ -3014,6 +3016,7 @@ async function pageLab() {
     main.querySelectorAll("[data-read]").forEach((b) => b.onclick = () => job("/api/factory/ebook/read", { name: b.dataset.read }));
     drawStocks();
     draw5y();
+    drawMass();
     drawPacks();
     main.querySelectorAll("[data-rexp]").forEach((tr) => tr.onclick = (ev) => { if (ev.target.closest("input,label,a,button")) return;
       const row = main.querySelector(`[data-rrow="${CSS.escape(tr.dataset.rexp)}"]`); if (!row) return;
@@ -3021,6 +3024,37 @@ async function pageLab() {
     main.querySelectorAll("[data-rlive]").forEach((c) => c.onchange = async () => { try { await post(`/api/factory/rule/${c.dataset.rlive}`, { on: c.checked }); toast(c.checked ? "Rule live on paper" : "Rule switched off"); } catch (e) { toast(e.message); } });
   };
   let t5 = null;
+  const drawMass = async () => {                 // 2.60: mass search (lab/mass.py)
+    const el = $("#lab-mass"); if (!el) return;
+    const lab = LS.get("massLab", "5y");
+    let m; try { m = await api(`/api/lab/mass?lab=${lab}`); } catch (e) { el.innerHTML = `<span class="muted small">${esc(e.message)}</span>`; return; }
+    if (state.page !== "lab") return;
+    const rs = (v) => v == null ? "–" : `<span class="nw ${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(Math.round(v)).toLocaleString("en-IN")}</span>`;
+    const nf = (v) => v == null ? "–" : Number(v).toLocaleString("en-IN");
+    const seg = `<div class="seg" role="group" aria-label="Which Lab">${[["5y", "5 years"], ["1y", "1 year"]].map(([v, l]) => `<button data-mlab="${v}" aria-pressed="${lab === v}">${l}</button>`).join("")}</div>`;
+    const head = `<div class="toolbar" style="margin:0"><h3 style="margin:0">Mass search <span class="muted small">every fact, alone and paired, × time window × direction × exit, all at once</span></h3>
+      <div class="btn-row" style="margin:0">${seg}<button class="btn" id="mass-run">Run now</button></div></div>`;
+    if (!m.best) { el.innerHTML = head + `<p class="small muted">${esc(m.note || "Not run yet.")}</p>`; }
+    else {
+      const wt = m.walk_total || {};
+      const best = m.best.slice(0, 8).map((b) => `<li>train ${rs(b.train_avg)} × ${b.train_n} (lower bound ${rs(b.train_lcb)}) · later months ${b.later_n ? `${rs(b.later_avg)} × ${b.later_n}` : "no trades"}<br><span class="muted">${esc(b.rule)}</span></li>`).join("");
+      const walk = (m.walk || []).map((w) => `<li><b>${esc(w.month)}</b>: pick ${w.n ? `${rs(w.avg)} × ${w.n}` : "no trade"} · buy-every-day ${rs(w.base_avg)} × ${w.base_n}<br><span class="muted">${esc(w.rule)}</span></li>`).join("");
+      el.innerHTML = head + `
+        <p class="small">${nf(m.conditions)} conditions + ${nf(m.pairs)} pairs × ${m.windows} windows × ${m.scopes} direction / index choices × ${m.exits.length} exits =
+          <b>${nf(m.tested)} rules</b> screened in ${m.secs}s on ${nf(m.days)} days (search on days to ${esc(m.train_to)}, then month by month).</p>
+        <div class="kpis kpi6"><div class="kpi"><b>${rs((m.best[0] || {}).train_lcb)}</b><span>Best rule's lower bound (train)</span></div>
+          <div class="kpi"><b>${rs(m.luck_lcb)}</b><span>Luck line: best of the same search on swapped days</span></div>
+          <div class="kpi"><b>${rs(wt.avg)}</b><span>Walk-forward: a trade, on months it never saw (${nf(wt.n)} trades)</span></div>
+          <div class="kpi"><b>${rs(wt.total)}</b><span>Walk-forward total, ${wt.months} months</span></div>
+          <div class="kpi"><b>${rs(wt.base_total)}</b><span>Buying every day instead (same months, ${nf(wt.base_n)} trades)</span></div>
+          <div class="kpi"><b>${nf(m.to_lab)}</b><span>Sent to the Lab's three exams</span></div></div>
+        ${walk ? `<details class="lab-adv" style="margin-top:8px"><summary><b>Month by month</b> <span class="muted small">each month's pick from the months before it</span></summary><ul class="small mv-list">${walk}</ul></details>` : ""}
+        <details class="lab-adv" style="margin-top:8px"><summary><b>Best rules found</b> <span class="muted small">ranked on train; "later months" is what came after</span></summary><ol class="small mv-list">${best}</ol></details>
+        <p class="note">A rule beating the luck line on train is a lead; the walk-forward months and the Lab's holdout exam are the proof. The best go to the Lab as ideas (source "mass search") and must pass all three exams like every rule.</p>`;
+    }
+    el.querySelectorAll("[data-mlab]").forEach((b) => b.onclick = () => { LS.set("massLab", b.dataset.mlab); drawMass(); });
+    const rb = $("#mass-run"); if (rb) rb.onclick = async () => { try { await post(`/api/lab/mass/run?lab=${lab}`, {}); state.jobSince = 0; $("#job-log").textContent = ""; watchJob(); } catch (e) { toast(e.message); } };
+  };
   const drawPacks = async () => {                // 2.43: strategy files (lab/packs.py)
     const el = $("#lab-packs"); if (!el) return;
     let x; try { x = await api("/api/packs"); } catch (e) { el.innerHTML = `<span class="muted small">${esc(e.message)}</span>`; return; }
