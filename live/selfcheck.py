@@ -64,6 +64,19 @@ def static_checks(cfg: dict | None = None) -> list:
                       if sc["choices"] else "rules/strikes.json missing or broken: every rule buys ATM (as before 2.57)"))
     except Exception as e:
         out.append(_c("strike_choice", "Lab strike choice", False, f"could not load: {e}"))
+    try:                                             # 2.58: the multiverse (every bench signal down every timeline)
+        from lab import multiverse as _mv
+        mc = _mv.cfg()
+        errs: dict = {}
+        _mv.single_masks([{}], __import__("numpy").array(["na"]), mc["singles"], errs)
+        ne = len(_mv.exit_specs(mc))
+        out.append(_c("multiverse", "Multiverse: filters x strikes x entry times x exits, judged walk-forward (shadow)",
+                      ne > 0 and not errs and bool(mc.get("strikes")),
+                      f"{len(mc['singles'])} filters, {len(mc['strikes'])} strikes, {len(mc['delays'])} entry times, {ne} exits; "
+                      f"runs after the close in the Lab's low-priority process; the 'Multiverse pick' paper account takes only "
+                      f"its proven picks" + (f"; broken filters skipped: {', '.join(errs)}" if errs else "")))
+    except Exception as e:
+        out.append(_c("multiverse", "Multiverse", False, f"could not load: {e}"))
     try:                                             # 2.55: straddle-selling rules: one signal a day, no naked paper
         from live.chartdata import range_sell_cfg
         rc = range_sell_cfg()

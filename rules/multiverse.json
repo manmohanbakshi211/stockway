@@ -1,0 +1,372 @@
+{
+  "about": "2.58 Multiverse (Mandeep, 11 Nov 2026: 'saari possibilities simultaneously test karke best path ... 100 magzine, 1000 magzine ... gun itni smart ho ki saari mag khali karke best bullet ka pata laga le'). Every live test-bench signal is replayed down every timeline below at once, on the day's recorded minute prices: which signals (filters: single facts and alert type x fact), which strike (the bench's ATM / 1 OTM / 1 ITM buys), when to enter (delay in minutes, at the ask then), and how to exit (target x stop x time, and trailing). Sold at the bid every minute, real charges, 1 lot, closed by 15:15. Results are net % of the premium paid, so a cheap and an expensive option count the same. The judge is honest: each day's pick is chosen only from the days before it (walk-forward) and the luck line says how good the best of this many timelines looks on shuffled data. Paper and shadow only: nothing is ever ordered. Everything here is a bullet: add filters, exits, delays freely; a broken one is skipped and listed.",
+  "valid_from": "2026-11-11",
+  "source": "upstox",
+  "strikes": {
+    "atm": "buy",
+    "otm1": "buy_otm",
+    "itm1": "buy_itm"
+  },
+  "strike_words": {
+    "atm": "the at-the-money option",
+    "otm1": "the option 1 strike out of the money",
+    "itm1": "the option 1 strike in the money"
+  },
+  "delays": [
+    0,
+    2,
+    5
+  ],
+  "exits": {
+    "targets": [
+      10,
+      15,
+      20,
+      30,
+      40,
+      50,
+      75,
+      100,
+      null
+    ],
+    "stops": [
+      10,
+      15,
+      20,
+      30,
+      40,
+      null
+    ],
+    "holds": [
+      5,
+      10,
+      15,
+      30,
+      60,
+      90,
+      120,
+      null
+    ],
+    "trails": [
+      [
+        10,
+        0.5
+      ],
+      [
+        20,
+        0.5
+      ],
+      [
+        30,
+        0.5
+      ],
+      [
+        20,
+        0.75
+      ],
+      [
+        40,
+        0.6
+      ]
+    ],
+    "trail_holds": [
+      30,
+      60,
+      120,
+      null
+    ]
+  },
+  "kinds_min": 60,
+  "singles": [
+    {
+      "name": "going up",
+      "fact": "dir",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "going down",
+      "fact": "dir",
+      "op": "<",
+      "v": 0
+    },
+    {
+      "name": "with Nifty",
+      "fact": "nifty_al",
+      "op": ">",
+      "v": 0.1
+    },
+    {
+      "name": "against Nifty",
+      "fact": "nifty_al",
+      "op": "<",
+      "v": -0.1
+    },
+    {
+      "name": "Nifty's 15 min with it",
+      "fact": "nifty15_al",
+      "op": ">",
+      "v": 0.05
+    },
+    {
+      "name": "first 30 min",
+      "fact": "mins",
+      "op": "<",
+      "v": 30
+    },
+    {
+      "name": "first hour",
+      "fact": "mins",
+      "op": "<",
+      "v": 60
+    },
+    {
+      "name": "after 10:15",
+      "fact": "mins",
+      "op": ">",
+      "v": 60
+    },
+    {
+      "name": "after 12:15",
+      "fact": "mins",
+      "op": ">",
+      "v": 180
+    },
+    {
+      "name": "volume 2x+",
+      "fact": "rel_vol",
+      "op": ">",
+      "v": 2
+    },
+    {
+      "name": "volume 4x+",
+      "fact": "rel_vol",
+      "op": ">",
+      "v": 4
+    },
+    {
+      "name": "big 5-min move (z 3+)",
+      "fact": "z5",
+      "op": ">",
+      "v": 3
+    },
+    {
+      "name": "options cheap (IV under 0.9x movement)",
+      "fact": "iv_hv",
+      "op": "<",
+      "v": 0.9
+    },
+    {
+      "name": "options expensive (IV over 1.2x movement)",
+      "fact": "iv_hv",
+      "op": ">",
+      "v": 1.2
+    },
+    {
+      "name": "on its side of VWAP",
+      "fact": "vwap_al",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "wrong side of VWAP",
+      "fact": "vwap_al",
+      "op": "<",
+      "v": 0
+    },
+    {
+      "name": "15-min move with it",
+      "fact": "ret15_al",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "15-min move against it",
+      "fact": "ret15_al",
+      "op": "<",
+      "v": 0
+    },
+    {
+      "name": "daily trend with it",
+      "fact": "htf_d_al",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "daily trend against it",
+      "fact": "htf_d_al",
+      "op": "<",
+      "v": 0
+    },
+    {
+      "name": "weekly trend with it",
+      "fact": "htf_w_al",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "futures buildup with it",
+      "fact": "buildup_al",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "order flow with it",
+      "fact": "flow_al",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "breadth with it",
+      "fact": "breadth_al",
+      "op": ">",
+      "v": 0.2
+    },
+    {
+      "name": "sector with it",
+      "fact": "sector_al",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "order book with it",
+      "fact": "depth_al",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "in the movers list its way",
+      "fact": "mover_al",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "3+ more facts for than against",
+      "fact": "agree_net",
+      "op": ">",
+      "v": 2.5
+    },
+    {
+      "name": "signal score 60+",
+      "fact": "score",
+      "op": ">",
+      "v": 59.9
+    },
+    {
+      "name": "conviction 70+",
+      "fact": "conv",
+      "op": ">",
+      "v": 69.9
+    },
+    {
+      "name": "Focus alert",
+      "fact": "focus",
+      "op": ">",
+      "v": 0.5
+    },
+    {
+      "name": "strength 3",
+      "fact": "sev",
+      "op": ">",
+      "v": 2.5
+    },
+    {
+      "name": "index",
+      "fact": "is_index",
+      "op": ">",
+      "v": 0.5
+    },
+    {
+      "name": "stock",
+      "fact": "is_index",
+      "op": "<",
+      "v": 0.5
+    },
+    {
+      "name": "lot under Rs 10K",
+      "fact": "cost_lot",
+      "op": "<",
+      "v": 10000
+    },
+    {
+      "name": "expiry within 2 days",
+      "fact": "dte",
+      "op": "<",
+      "v": 2.5
+    },
+    {
+      "name": "VIX rising",
+      "fact": "vix_chg",
+      "op": ">",
+      "v": 2
+    },
+    {
+      "name": "news its way",
+      "fact": "news_al",
+      "op": ">",
+      "v": 0
+    },
+    {
+      "name": "opening (first 30 min) day type",
+      "cat": "regime",
+      "is": "opening"
+    },
+    {
+      "name": "range day",
+      "cat": "regime",
+      "is": "range"
+    },
+    {
+      "name": "quiet day",
+      "cat": "regime",
+      "is": "quiet"
+    },
+    {
+      "name": "trend-up day",
+      "cat": "regime",
+      "is": "trend_up"
+    },
+    {
+      "name": "trend-down day",
+      "cat": "regime",
+      "is": "trend_down"
+    },
+    {
+      "name": "volatile day",
+      "cat": "regime",
+      "is": "volatile"
+    }
+  ],
+  "pairs": "kind_x_single",
+  "min_trades": 30,
+  "min_days": 1,
+  "lcb_z": 2.0,
+  "top": 30,
+  "portfolio": 5,
+  "live_picks": 5,
+  "live_strikes": [
+    "atm",
+    "otm1"
+  ],
+  "champion": {
+    "name": "Main account today",
+    "kinds": [
+      "beyond_priced",
+      "oi_buildup",
+      "orb",
+      "sharp_move",
+      "unusual_options",
+      "volume_surge",
+      "factory"
+    ],
+    "min_sev": 2,
+    "exit": [
+      20,
+      20,
+      60
+    ],
+    "strike": "atm",
+    "delay": 0
+  },
+  "luck_shuffles": 1
+}

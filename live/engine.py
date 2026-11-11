@@ -319,7 +319,7 @@ class LiveEngine:
         try:                                         # 2.49: extra paper accounts (Best only, 3% a day); never block the main one
             from .books import Books
             self.books = Books(self.source, self.store, self.paper.cfg, lc.get("books"), self.log, on_open=self._keep_live,
-                               risk_for=self.risk_for)
+                               risk_for=self.risk_for, data_dir=self.data_dir)
         except Exception as e:
             self.books = None
             self.log(f"Extra paper accounts not loaded: {e}")
@@ -1415,7 +1415,27 @@ class LiveEngine:
         if self.dguard is not None and self.dguard.symbol_problem(sym):
             return 0
         a = {"sym": sym, "kind": kind, "direction": direction, "option": self._suggest(sym, direction), "data": {}}
-        return self.bench.add(a, self, now, self.paper.cfg if self.paper else {}, name=name, variant=variant)
+        return self._bench_add(a, now, name=name, variant=variant)
+
+    def _bench_add(self, a, now, **kw):
+        """2.58: every test-bench signal (alerts, ideas on trial, Lab rules) is also offered to the "Multiverse pick" paper
+        account, which takes it when it matches one of the multiverse's live picks (lab/multiverse.py). The bench itself
+        is called exactly as before."""
+        out = self.bench.add(a, self, now, self.paper.cfg if self.paper else {}, **kw)
+        bs = getattr(self, "books", None)
+        if bs is not None and getattr(bs, "has_multiverse", lambda: False)() and a.get("direction") in ("up", "down"):
+            try:
+                from lab.multiverse import _facts_of
+                ad = a.get("data") or {}
+                tag = {"sev": a.get("severity"), "score": ad.get("score"), "conv": ad.get("conviction"), "focus": ad.get("focus")}
+                facts = _facts_of(self.signal_facts(a["sym"], a["direction"], now),
+                                  {k: v for k, v in tag.items() if v is not None}, a)
+                bs.offer_multiverse(a, self.state, now, facts,
+                                    lambda strike, a=a: self._suggest(a["sym"], a["direction"], None if strike == "atm" else strike))
+            except Exception as e:
+                if self._every("mv_offer_err", 600, clock_time=False):
+                    self.log(f"Multiverse pick account skipped a signal: {e}")
+        return out
 
     def factory_live_record(self) -> list:
         """Paper results of Strategy Lab rules, for demotion: [{'rule', 'net'}]."""
@@ -1585,8 +1605,7 @@ class LiveEngine:
         self.trials.add(a, und, self.clock.ts(), float(cool))
         if self.bench is not None and a.get("direction") in ("up", "down"):     # ideas on trial get an honest paper trade too
             try:
-                self.bench.add({**a, "option": self._suggest(a["sym"], a["direction"])}, self, now,
-                               self.paper.cfg if self.paper else {})
+                self._bench_add({**a, "option": self._suggest(a["sym"], a["direction"])}, now)
             except Exception as e:
                 if self._every("bench_err", 600, clock_time=False):
                     self.log(f"Test bench skipped a trial: {e}")
@@ -1738,7 +1757,7 @@ class LiveEngine:
                     self.log(f"Extra paper accounts skipped an alert: {e}")
         if self.bench is not None:                   # every directional alert, Focus or not, demoted or not
             try:
-                self.bench.add(a, self, now, self.paper.cfg if self.paper else {})
+                self._bench_add(a, now)
             except Exception as e:
                 if self._every("bench_err", 600, clock_time=False):
                     self.log(f"Test bench skipped an alert: {e}")
@@ -2258,6 +2277,11 @@ class LiveEngine:
             proc.run("paths", self.data_dir, log=lambda m: self.log(f"Journeys: {m}"))
         except Exception as e:
             self.log(f"Trade journeys failed: {e}")
+        try:                                             # 2.58: then the multiverse on every recorded day (incl. today)
+            from lab import proc
+            proc.run("multiverse", self.data_dir, log=lambda m: self.log(m))
+        except Exception as e:
+            self.log(f"Multiverse failed: {e}")
 
     def _nightly_lab(self):
         """Every evening: fetch new expiries (if logged in), switch off rules losing money live, ask Claude for a few

@@ -827,6 +827,22 @@ def paths_run():
     return {"id": JOBS.start("paths", "Trade journeys: replaying recorded days", job)["id"]}
 
 
+# ---- 2.58 multiverse (lab/multiverse.py): every bench signal down every timeline, judged walk-forward
+@app.get("/api/multiverse")
+def multiverse_view():
+    from lab import multiverse
+    return clean(multiverse.view(ROOT / "data"))
+
+
+@app.post("/api/multiverse/run")
+def multiverse_run():
+    from lab import proc
+
+    def job(log, stop):
+        proc.run("multiverse", ROOT / "data", log=log, should_stop=stop)
+    return {"id": JOBS.start("multiverse", "Multiverse: every signal down every timeline", job)["id"]}
+
+
 # ---- 2.43 strategy files (lab/packs.py): upload a .json, checked against a fixed vocabulary, data only
 @app.get("/api/packs")
 def packs_view():

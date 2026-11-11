@@ -114,6 +114,35 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Multiverse: every signal down every timeline at once, judged honestly (2.58)
+
+Mandeep, 11 Nov 2026: "saari possibilities simultaneously test karke check karke best path as fastest as we can ...
+100 magzine, 1000 magzine ... gun itni smart ho ki saari mag khali karke best bullet ka pata laga le".
+
+- **Gun** (`lab/multiverse.py`): every test-bench signal of the recorded days (data/bench.db + the day's minute
+  recording) is replayed on its real option prices, minute by minute to 15:15, sold at the bid, every charge, net % of
+  the premium. Timelines = filters (alert type × one fact: with / against Nifty, time of day, volume, IV, VWAP, trends,
+  order flow, breadth, day type …) × strike (ATM, 1 OTM, 1 ITM) × entry time (at once, 2 or 5 min later at the ask
+  then) × exit (target × stop × time, trailing). All exits come from one pass of array maths and every filter × exit
+  total from one matrix product per day: **7.2 million timelines in about 20 seconds** on 3 days. The same move seen
+  by several alert types or timeframes in the same minute counts once.
+- **The judge:** ranked by the lower confidence bound, never the raw average; days (not signals) are the proof (the
+  per-day error with Student's t for the number of days, so 2 days need 12.7 standard errors). Walk-forward: each day's
+  pick is chosen only from the days before it, then scored on that day. The luck line: the same search on shuffled
+  data (facts no longer tied to results). Next to it, the main account's way (its alert types and exit).
+- **First run** (3 recorded days, 5, 6 and 9 Nov; 13,412 signals; 7,158,888 timelines): best lower bound +27.1% vs
+  luck line +5.2%. Walk-forward on 9 Nov (chosen from 5-6 Nov only): the pick +2.9% a trade (39 trades), its top 5
+  together +1.9% (195), the main account's way −2.9% (679). One unseen day: a lead, not proof. All 3 days were rising
+  days; trend-down days have no data yet.
+- **"Multiverse pick" paper account** (`rules/paper_books.json` → `mvpick`): takes a live test-bench signal only when
+  it matches one of the live picks (lower bound above zero, entry at once, ATM or 1 OTM), with that pick's strike and
+  exit, 1 lot, its own money. Nothing proven = no trades. The main account, alerts and the bench are untouched (the
+  bench is called exactly as before; `_bench_add` only offers the signal to this account afterwards).
+- Runs after the close (after the trade journeys) in the Lab's low-priority process (`lab/proc.py` job `multiverse`),
+  or Strategy board → Multiverse → Run now. Results in data/multiverse.json. **Bullets:** `rules/multiverse.json`
+  (filters, strikes, entry times, exit grid, the proof thresholds); a broken filter is skipped and listed. System check
+  `multiverse`.
+
 ## Strike choice: the Lab can buy out-of-the-money strikes, alerts and paper buy the rule's strike (2.57)
 
 Mandeep, 11 Nov 2026: "go ahead" on choosing strikes by premium (the Lab could only buy at the money).
