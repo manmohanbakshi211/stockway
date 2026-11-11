@@ -57,6 +57,7 @@ class Books:
         self.specs: dict[str, dict] = {}
         self.errors: dict[str, str] = {}
         self.today: dict[str, dict] = {}
+        self._pack_seen: dict = {}                                # 2.69: strategy-file signals taken today
         self.load(main_cfg, user_books)
 
     # ------------------------------------------------------------------ loading (each account on its own)
@@ -72,8 +73,8 @@ class Books:
                       "min_severity": int((sp.get("pick") or {}).get("min_severity") or 1)}
                 if (sp.get("pick") or {}).get("same_as_main"):    # 2.56: the main account's alerts, only the exit differs
                     pc.update(kinds=main_cfg.get("kinds") or "all", min_severity=int(main_cfg.get("min_severity") or 2))
-                if (sp.get("pick") or {}).get("multiverse"):      # 2.58: the multiverse's live picks decide (any signal)
-                    pc.update(kinds="all", min_severity=1)
+                if (sp.get("pick") or {}).get("multiverse") or (sp.get("pick") or {}).get("pack_prefix"):
+                    pc.update(kinds="all", min_severity=1)        # 2.58 / 2.69: the picks / the strategy file decide
                 if (sp.get("pick") or {}).get("mirror_main"):     # 2.56.2: the main account's own trades decide; its
                     pc.update(kinds="all", min_severity=1, max_open=99, max_trades_day=99,    # limits already applied
                               max_daily_loss_pct=100, cooloff_min=0)
@@ -155,8 +156,8 @@ class Books:
         for bid, bk in list(self.books.items()):
             try:
                 sp = self.specs[bid]
-                if (sp.get("pick") or {}).get("multiverse"):
-                    continue                                  # 2.58: takes test-bench signals (offer_multiverse), not alerts
+                if (sp.get("pick") or {}).get("multiverse") or (sp.get("pick") or {}).get("pack_prefix"):
+                    continue                                  # 2.58 / 2.69: take test-bench / strategy-file signals, not alerts
                 mirror = bool((sp.get("pick") or {}).get("mirror_main"))
                 ds = self.day_state(bid, state, now) if (sp.get("day_target_pct") or sp.get("day_stop_pct")
                                                           or sp.get("compound")) else None
@@ -243,6 +244,49 @@ class Books:
             except Exception as e:
                 self.errors[bid] = str(e)
                 self.log(f"Paper account {bid} skipped a signal: {e}")
+        return out
+
+    # ------------------------------------------------------------------ 2.69: strategy-file accounts (e.g. Ghanshyam)
+    def has_pack(self) -> bool:
+        return any((sp.get("pick") or {}).get("pack_prefix") for sp in self.specs.values())
+
+    def offer_pack(self, a: dict, state, now: dt.datetime, r: dict) -> dict:
+        """A strategy-file signal (r: the live rule with _pack, _strategy, _variant): each account whose pack_prefix
+        matches the file takes it on its symbols, 1 lot, once per strategy, symbol and day. Paper only."""
+        out = {}
+        pid, strat = str(r.get("_pack") or ""), str(r.get("_strategy") or "")
+        day = now.date().isoformat()
+        if self._pack_seen.get("day") != day:
+            self._pack_seen = {"day": day, "keys": set()}
+        for bid, bk in list(self.books.items()):
+            p = self.specs[bid].get("pick") or {}
+            pre = p.get("pack_prefix")
+            if not pre or not pid.startswith(str(pre)):
+                continue
+            if p.get("syms") and a["sym"] not in p["syms"]:
+                continue                                   # the account never looks at other symbols
+            try:
+                key = (bid, strat, a["sym"])
+                if key in self._pack_seen["keys"]:
+                    why = "this strategy already traded this symbol today"
+                elif not a.get("option"):
+                    why = "no option price for this signal"
+                else:
+                    d = dict(a.get("data") or {})
+                    d.update(risk={"verdict": "PASS", "lots": 1},
+                             pack={"pack": pid, "strategy": strat, "variant": r.get("_variant")})
+                    a2 = {**a, "data": d, "title": strat[:200]}
+                    before = dict(bk.skipped)
+                    tid = bk.try_open(a2, state, now)
+                    new = [k for k, v in bk.skipped.items() if v > before.get(k, 0)]
+                    why = None if tid else (new[0] if new else "account rules (open trades, trades a day, time)")
+                    if tid:
+                        self._pack_seen["keys"].add(key)
+                self._count(bid, now, why)
+                out[bid] = "taken" if why is None else why
+            except Exception as e:
+                self.errors[bid] = str(e)
+                self.log(f"Paper account {bid} skipped a strategy-file signal: {e}")
         return out
 
     def _count(self, bid, now, why):

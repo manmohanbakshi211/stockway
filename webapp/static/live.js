@@ -56,7 +56,7 @@ const KIND = { manual: "By hand", range_sell: "Range-day sell (Lab)",
 api("/api/registry").then((r) => (r.kinds || []).forEach((k) => { if (k.label) KIND[k.kind] = k.label; })).catch(() => {});
 
 /* ---------------- polling + notifications */
-function livePage() { return ["live", "chart", "world", "desk", "scanner", "sym", "alerts", "paper", "connect", "context", "scorecard", "briefs", "insiders"].includes(state.page); }
+function livePage() { return ["live", "chart", "world", "desk", "scanner", "sym", "alerts", "paper", "ghanshyam", "connect", "context", "scorecard", "briefs", "insiders"].includes(state.page); }
 
 /* 2.56.2 (live QA 11 Nov): two snapshot loops could run side by side (a page or button started one while another was
    waiting for its answer; each answer takes ~1.5 s, longer than the 1 s pause), so every second asked twice. Now one at a
@@ -229,7 +229,7 @@ function indexCard(m) {
   const bu = f.buildup_label ? `<span class="pill ${f.buildup_sign > 0 ? "p-up" : "p-down"}">${esc(f.buildup_label)}</span>` : "";
   return `<a class="icard" href="#/sym?s=${encodeURIComponent(m.sym)}">
     <div class="ic-head"><b>${esc(m.name)} ${mkPill(L.snap && L.snap.nse)}</b>${bu}</div>
-    <div class="ic-price">${fx(m.spot)} ${fpc(m.chg_pct)} ${pxTime(m)}</div>
+    <div class="ic-price"><span data-lp="${esc(m.sym)}">${fx(m.spot)}</span> <span data-lpc="${esc(m.sym)}">${fpc(m.chg_pct)}</span> ${pxTime(m)}</div>
     ${rangeBar(m)}
     <dl class="ic-grid">
       <div><dt>PCR</dt><dd>${o.pcr != null ? o.pcr.toFixed(2) : "–"}</dd></div>
@@ -391,7 +391,35 @@ function bindAlertButtons(root) {
   });
 }
 
-function stopPageTimer() { clearTimeout(L.pageTimer); L.pageTimer = null; chStreamStop(); }
+function stopPageTimer() { clearTimeout(L.pageTimer); L.pageTimer = null; chStreamStop(); lpStreamStop(); }
+
+/* 2.69 (Mandeep: "jitna fast price chart par chalta hai utna hi fast live feed mein bhi"): the Live page's prices come
+   over their own websocket (/ws/prices, ~0.2 s) like the chart's, on top of the 1-second page refresh. */
+L.lp = L.lp || {};
+function lpStreamStop() { if (L.lpWs) { try { L.lpWs.onclose = null; L.lpWs.close(); } catch (_) {} L.lpWs = null; L.lpSyms = ""; } }
+function lpApply(only) {
+  const now = Date.now();
+  Object.entries(only || L.lp).forEach(([sym, v]) => {
+    if (!v || now - v.at > 5000) return;
+    document.querySelectorAll(`[data-lp="${CSS.escape(sym)}"]`).forEach((el) => { el.textContent = fx(v.p); });
+    if (v.c != null) document.querySelectorAll(`[data-lpc="${CSS.escape(sym)}"]`).forEach((el) => { el.innerHTML = fpc(v.c); });
+  });
+}
+function lpStream() {
+  if (!window.WebSocket || state.page !== "live") return;
+  const syms = [...new Set([...document.querySelectorAll("[data-lp]")].map((el) => el.dataset.lp))].slice(0, 60);
+  const key = syms.join(",");
+  if (!syms.length) return;
+  if (L.lpWs && L.lpWs.readyState <= 1) { if (key !== L.lpSyms && L.lpWs.readyState === 1) { L.lpSyms = key; L.lpWs.send(JSON.stringify({ syms })); } return; }
+  let ws; try { ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/prices`); } catch (_) { return; }
+  L.lpWs = ws; L.lpSyms = key;
+  ws.onopen = () => { try { ws.send(JSON.stringify({ syms })); } catch (_) {} };
+  ws.onmessage = (ev) => { let d; try { d = JSON.parse(ev.data); } catch (_) { return; }
+    if (!d.px) return; const got = {};
+    Object.entries(d.px).forEach(([sym, a]) => { got[sym] = L.lp[sym] = { p: a[0], c: a[1], tt: a[2], at: Date.now() }; });
+    lpApply(got); };
+  ws.onclose = () => { if (L.lpWs === ws) { L.lpWs = null; if (state.page === "live") setTimeout(lpStream, 5000); } };
+}
 
 /* 2.51 (Mandeep: "websocket for charting, tick-by-tick and price at the same time"): an open chart keeps a websocket to
    this app (/ws/ticks) and moves with every new price (~0.1 s) instead of asking every 2 seconds. The app reads its own
@@ -555,7 +583,7 @@ function renderLive(force = false) {
   const nFocus = L.alerts.filter(isFocus).length;
   const mv = s.movers || { hot: [], gainers: [], losers: [] };
   const tab = LS.get("moversTab", "hot");
-  const mrows = (mv[tab] || []).map((m) => `<tr class="click" data-sym="${esc(m.sym)}"><td><b>${esc(m.sym)}</b></td><td class="r">${fx(m.spot)}</td><td class="r">${fpc(m.chg_pct)}</td><td class="r">${m.rel_vol ? m.rel_vol.toFixed(1) + "×" : "–"}</td><td class="r">${m.heat ?? "–"}</td></tr>`).join("");
+  const mrows = (mv[tab] || []).map((m) => `<tr class="click" data-sym="${esc(m.sym)}"><td><b>${esc(m.sym)}</b></td><td class="r" data-lp="${esc(m.sym)}">${fx(m.spot)}</td><td class="r" data-lpc="${esc(m.sym)}">${fpc(m.chg_pct)}</td><td class="r">${m.rel_vol ? m.rel_vol.toFixed(1) + "×" : "–"}</td><td class="r">${m.heat ?? "–"}</td></tr>`).join("");
   const pp = s.paper;
   const news = (s.news || []).slice(0, 8).map((n) => `<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a><span class="muted small"> ${esc(n.source)} · ${hm(n.ts)}${n.syms && n.syms.length ? " · " + n.syms.map(esc).join(", ") : ""}</span></li>`).join("");
   const mk = s.market || {}, br = mk.breadth, cx = s.context || {};
@@ -613,6 +641,7 @@ function renderLive(force = false) {
   body.querySelectorAll("[data-brain-run]").forEach((b) => b.onclick = async () => { b.disabled = true; b.textContent = "Thinking…"; try { L.brain = await post("/api/brain/run", {}); renderLive(true); } catch (e) { toast(e.message); b.disabled = false; } });
   body.querySelectorAll("tr[data-sym]").forEach((tr) => tr.onclick = () => { location.hash = `#/sym?s=${encodeURIComponent(tr.dataset.sym)}`; });
   fitIndTile();
+  lpApply(); if (L.snap.status && L.snap.status.running) lpStream();      // 2.69: the streamed prices stay on top
 }
 
 /* ---------------- page: Scanner */
@@ -982,6 +1011,9 @@ async function pagePaper() {
       if (first || Date.now() - lastBooks > 15000) {                     // 2.49: the accounts + their comparison
         lastBooks = Date.now(); L.books = await api("/api/live/paper/books").catch(() => L.books || null);
       }
+      if (first || !L.ppTotAt || Date.now() - L.ppTotAt > 6000) {        // 2.69: every account added up
+        L.ppTotAt = Date.now(); L.ppTotal = await api("/api/live/paper/total").catch(() => L.ppTotal || null);
+      }
       const bk = L.paperBook;
       if (bk !== "main" && !((L.books || {}).books || []).some((b) => b.id === bk)) L.paperBook = "main";
       const p = await api(L.paperBook === "main" ? "/api/live/paper" : `/api/live/paper?book=${encodeURIComponent(L.paperBook)}`);
@@ -1029,6 +1061,19 @@ function bookHead(p) {
     ${p.error ? `<div class="banner">This account had an error and was skipped: ${esc(p.error)}</div>` : ""}`;
 }
 
+/* 2.69 (Mandeep: "sabhi trades ka mila ke bhi dikhao"): every paper account added up, on every tab */
+function paperTotal(t) {
+  if (!t || !t.total) return "";
+  const T = t.total, cls = (v) => (v || 0) >= 0 ? "up" : "down";
+  const per = (t.accounts || []).filter((a) => !a.error).map((a) => `${esc(a.name)} <b class="${cls(a.booked + a.open_pnl)}">${rupees(a.booked + a.open_pnl)}</b>`).join(" · ");
+  return `<div class="panel tight pp-total" style="margin:10px 0"><div class="kpis kpi4" style="margin:0">
+      <div class="kpi"><b class="${cls(T.net)}">${rupees(T.net)}</b><span>All accounts together: net (booked + open)</span></div>
+      <div class="kpi"><b class="${cls(T.today)}">${rupees(T.today)}</b><span>Today, all accounts</span></div>
+      <div class="kpi"><b>${(T.trades || 0).toLocaleString("en-IN")}</b><span>Closed trades${T.won_pct != null ? ` · ${T.won_pct}% won` : ""}</span></div>
+      <div class="kpi"><b>${T.open || 0}</b><span>Open now · ${rupees(T.open_pnl)}</span></div></div>
+    <p class="small muted" style="margin:8px 0 0">${per}</p></div>`;
+}
+
 /* 2.48: why paper trades were not taken today (no free money, market closed, old quote) */
 function skippedLine(sk) {
   const e = Object.entries(sk || {});
@@ -1055,7 +1100,7 @@ function drawPaper(p, first) {
   const open = p.open.map((t) => {
     const chg = t.last && t.entry ? (t.last / t.entry - 1) * 100 : null;
     return `<tr><td>${sideTag(t)} <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${sizeLine(t)}${links(t)}</td><td>${stockNow(t)}</td><td>${esc((t.day || "").slice(5))} ${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r">${fx(t.last)} ${fpc(chg, 1)}${t.px_ts ? `<br><small class="muted" title="Exchange time of this price">at ${hms(t.px_ts)}</small>` : ""}</td>
-      <td class="r">${fx(t.target)} / ${fx(t.stop)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}"><b>${rupees(t.unreal)}</b></td><td>${p.book ? "" : `<button class="link-btn" data-close="${t.id}">Exit</button>`}</td></tr>`;
+      <td class="r">${fx(t.target)} / ${fx(t.stop)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}"><b>${rupees(t.unreal)}</b></td><td>${p.book ? `<button class="link-btn" data-close-book="${t.id}">Exit</button>` : `<button class="link-btn" data-close="${t.id}">Exit</button>`}</td></tr>`;
   }).join("");
   // 2.40: the latest 25 closed trades (the rest one tap away), dates short and on one line
   const shortDay = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" }); } catch (_) { return d; } };
@@ -1068,8 +1113,9 @@ function drawPaper(p, first) {
   if (!$("#pp-main")) main.insertAdjacentHTML("afterbegin", `<div id="pp-main"></div>`);
   const isMain = !p.book;                                      // 2.49: Main account or an extra one (Best only, 3% a day)
   $("#pp-main").innerHTML = `<div class="toolbar"><h1 class="page-title" style="margin:0">Paper trading</h1>
-      <div class="btn-row" style="margin:0">${isMain && p.open.length ? `<button class="btn danger" id="pp-closeall">Close all (${p.open.length})</button>` : ""}
+      <div class="btn-row" style="margin:0">${p.open.length ? `<button class="btn danger" id="pp-closeall">Exit all${isMain ? "" : ` in ${esc(p.name || "this account")}`} (${p.open.length})</button>` : ""}
         <a class="btn" href="#/briefs">Day report</a></div></div>
+    ${paperTotal(L.ppTotal)}
     ${bookTabs()}
     ${isMain ? "" : bookHead(p)}
     ${skippedLine(p.skipped_today)}
@@ -1096,6 +1142,8 @@ function drawPaper(p, first) {
     ${isMain ? bookCompare() : ""}
     <p class="note">Paper only: no order ever reaches a broker. Charges are real (brokerage, STT, exchange, GST, stamp). Target +${s.target_pct}% / stop −${s.stop_pct}% on the option; alert trades exit after ${s.max_hold_min} min, all by ${esc(s.exit_time)}. ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : ""}</p>`;
   main.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => { try { await post(`/api/live/paper/${b.dataset.close}/close`, {}); toast("Closed"); pagePaper(); } catch (e) { toast(e.message); } });
+  main.querySelectorAll("[data-close-book]").forEach((b) => b.onclick = async () => { b.disabled = true;
+    try { const r = await post(`/api/live/paper/books/${encodeURIComponent(p.book)}/${b.dataset.closeBook}/close`, {}); toast(`Closed · ${rupees(r.net)}`); L.ppTotAt = 0; pagePaper(); } catch (e) { toast(e.message); b.disabled = false; } });
   main.querySelectorAll("[data-book]").forEach((b) => b.onclick = () => { L.paperBook = b.dataset.book; L.paperAll = false;
     location.hash = L.paperBook === "main" ? "#/paper" : `#/paper?b=${encodeURIComponent(L.paperBook)}`; });
   { const f = $("#bk-cap-form"); if (f) f.onsubmit = async (ev) => { ev.preventDefault();
@@ -1114,8 +1162,8 @@ function drawPaper(p, first) {
   }
   const slot = $("#pp-slot"); if (slot && top) { slot.appendChild(top); top.style.display = isMain ? "" : "none"; }
   const ca = $("#pp-closeall");
-  if (ca) ca.onclick = async () => { if (!window.confirm(`Close all ${p.open.length} open paper positions at the live price?`)) return;
-    ca.disabled = true; try { const r = await post("/api/live/paper/close_all", {}); toast(`Closed ${r.closed} · net ${rupees(r.net)}`); pagePaper(); } catch (e) { toast(e.message); ca.disabled = false; } };
+  if (ca) ca.onclick = async () => { if (!window.confirm(`Exit all ${p.open.length} open paper positions${isMain ? "" : ` of ${p.name || "this account"}`} at the live price?`)) return;
+    ca.disabled = true; try { const r = await post(isMain ? "/api/live/paper/close_all" : `/api/live/paper/books/${encodeURIComponent(p.book)}/close_all`, {}); toast(`Closed ${r.closed} · net ${rupees(r.net)}`); L.ppTotAt = 0; pagePaper(); } catch (e) { toast(e.message); ca.disabled = false; } };
   $("#pp-agg").onchange = async (e) => {
     const on = e.target.checked;
     if (on && !window.confirm("Aggressive auto trading (paper only): the system will take every up/down idea, even ones the risk check blocks. Turn on?")) { e.target.checked = false; return; }
@@ -1846,9 +1894,11 @@ const PAT_SHORT = { double_top: "DT", double_bottom: "DB", head_shoulders: "H&S"
   breakout_retest: "Retest", rsi_divergence: "Div", candle_at_level: "Candle" };
 // 2.29: a clean chart by default (candles + the move prediction); every layer is one click away and remembered
 function chOn(k) { return LS.get("ch2_" + k, ["scen", "em", "smart"].includes(k)); }
-const CH_TFS = ["1m", "3m", "5m", "15m", "30m", "1H", "1D", "1W", "1M"];
-const CH_MIN = { "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60, "1D": 1440, "1W": 10080, "1M": 43200 };
-const CH_VIEW = { "1m": 150, "3m": 125, "5m": 150, "15m": 130, "30m": 130, "1H": 140, "1D": 130, "1W": 156, "1M": 120 };   // bars in view at first
+// 2.69 (Mandeep: "main chart par seconds ki timeline bhi"): 5s / 15s / 30s candles from the app's own prices (today only)
+const CH_TFS = ["5s", "15s", "30s", "1m", "3m", "5m", "15m", "30m", "1H", "1D", "1W", "1M"];
+const CH_MIN = { "5s": 5 / 60, "15s": 0.25, "30s": 0.5, "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60, "1D": 1440, "1W": 10080, "1M": 43200 };
+const CH_VIEW = { "5s": 120, "15s": 120, "30s": 120, "1m": 150, "3m": 125, "5m": 150, "15m": 130, "30m": 130, "1H": 140, "1D": 130, "1W": 156, "1M": 120 };   // bars in view at first
+const chSec = () => CH_MIN[CH.tf] < 1;
 const chIntraday = () => CH_MIN[CH.tf] < 1440;
 function chTf(v) { const old = { 1: "1m", 3: "3m", 5: "5m", 15: "15m", 30: "30m", 60: "1H" }; v = String(v || ""); return CH_TFS.includes(v) ? v : old[Number(v)] || "5m"; }
 
@@ -1947,16 +1997,18 @@ async function pageChart() {
   const loadBars = async () => {
     try {
       const r = await api(`/api/live/candles/${encodeURIComponent(CH.sym)}?tf=${CH.tf}`);
+      if (!r.candles.length) throw new Error(r.message || "No candles yet.");
       CH.bars = r.candles; CH.vol = r.volume; CH.more = r.more; CH.src = r.source; CH.hasVol = r.has_volume;
       if (!CH.chart) buildChart();
       drawBars(true);
     } catch (err) {
-      $("#ch-chart").innerHTML = `<div class="empty" style="margin:20px"><h2>Loading ${esc(CH.sym)} history…</h2><p class="small muted">${esc(err.message)} Trying again in a few seconds.</p></div>`;
+      $("#ch-chart").innerHTML = chSec() ? `<div class="empty" style="margin:20px"><h2>Seconds chart</h2><p class="small muted">${esc(err.message)} Trying again in a few seconds.</p></div>`
+        : `<div class="empty" style="margin:20px"><h2>Loading ${esc(CH.sym)} history…</h2><p class="small muted">${esc(err.message)} Trying again in a few seconds.</p></div>`;
       CH.chart = null; L.pageTimer = setTimeout(loadBars, 6000); return false;
     }
     return true;
   };
-  const payloadTf = () => Math.min(60, CH_MIN[CH.tf]);
+  const payloadTf = () => Math.max(1, Math.min(60, CH_MIN[CH.tf]));
   const overlay = async () => {                    // levels, prediction, signals, patterns, side panels
     if (state.page !== "chart") return;
     try { CH.data = await api(`/api/live/chart/${encodeURIComponent(CH.sym)}?tf=${payloadTf()}&days=${chIntraday() ? 3 : 1}`); drawChart(CH.data, false); }
@@ -2020,7 +2072,8 @@ function nextCandleSide(d, nx) {
   const p = nx.now, b = nx.backtest || {};
   const dir = (x) => x.close >= x.open ? `<b class="fo-up">Up</b>` : `<b class="fo-dn">Down</b>`;
   const running = !!(L.snap && L.snap.status && L.snap.status.running);
-  const nowHTML = p ? `<p style="margin:0 0 6px">Candle forming now (${hm(p.time - 19800)}): ${dir(p)} · close ~<b>${fx(p.close)}</b> <span class="muted">(likely ${fx(p.close_lo)} – ${fx(p.close_hi)})</span> · ${p.p_green}% chance up</p>
+  const pm_ = { "5m": 5, "15m": 15, "1H": 60 }[d.tf];
+  const nowHTML = p ? `<p style="margin:0 0 6px">Candle forming now (${hm(p.time - 19800)}${pm_ ? `, closes <b>${hm(p.time - 19800 + pm_ * 60)}</b>` : ""}): ${dir(p)} · close ~<b>${fx(p.close)}</b> <span class="muted">(likely ${fx(p.close_lo)} – ${fx(p.close_hi)})</span> · ${p.p_green}% chance up</p>
       <p class="muted" style="margin:0 0 6px">Made after ${p.k} of ${p.n_sub} closed ${sub} candles, from the ${p.similar} most similar past moments. It updates with every ${sub} candle.</p>`
     : `<p class="muted" style="margin:0 0 6px">${running ? `The next ${tf} candle appears after ${nx.after} of its ${sub} candles close.` : "Market closed: the next one comes after the open. On the chart: what it predicted before."}</p>`;
   const honest = b.calls ? `<p class="small" style="margin:0 0 6px">How good: on ${b.test_days} days it never saw it called up / down right <b>${b.hit_pct}%</b> of the time; the plain rule "the candle keeps the colour it has so far" was right <b>${b.mom_pct}%</b>. ${b.edge ? "So it adds a real edge." : "So far it adds nothing beyond what the chart already shows."}</p>` : "";
@@ -2132,8 +2185,14 @@ function fortuneDraw(d) {
   if (nx.now) ["close_hi", "close_lo"].forEach((k) => FO.lines.push(FO.s.p.createPriceLine({ price: nx.now[k], color: "#5E6B78", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "likely close" })));
   const cn = nx.cast && nx.cast.now, onBar = cn && nx.now && cn.time === nx.now.time;       // 2.41: the forecast on the forming candle
   if (onBar && cn.zone) cn.zone.forEach((v) => FO.lines.push(FO.s.p.createPriceLine({ price: v, color: "#9AA6B2", lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: "90%" })));
-  if (FO.mk) FO.mk.setMarkers(onBar ? [{ time: cn.time, position: cn.dir === "up" ? "aboveBar" : "belowBar", color: cn.dir === "up" ? FO_UP : FO_DN,
-    shape: cn.dir === "up" ? "arrowUp" : "arrowDown", text: `${cn.pakka ? "PAKKA " : ""}${Math.round(cn.strength)}%` }] : []);
+  // 2.69 (Mandeep: "candle par time bhi batao"): the forming candle shows when it started and the time it closes
+  const foMin = { "5m": 5, "15m": 15, "1H": 60 }[FO.tf], foHm = (t) => { const z = new Date(t * 1000); return `${z.getUTCHours()}:${String(z.getUTCMinutes()).padStart(2, "0")}`; };
+  const spanTxt = nx.now && foMin ? `${foHm(nx.now.time)}→${foHm(nx.now.time + foMin * 60)}` : "";
+  const mks = onBar ? [{ time: cn.time, position: cn.dir === "up" ? "aboveBar" : "belowBar", color: cn.dir === "up" ? FO_UP : FO_DN,
+    shape: cn.dir === "up" ? "arrowUp" : "arrowDown", text: `${cn.pakka ? "PAKKA " : ""}${Math.round(cn.strength)}%${spanTxt ? ` · ${spanTxt}` : ""}` }] : [];
+  if (!onBar && spanTxt) mks.push({ time: nx.now.time, position: "aboveBar", color: "#5E6B78", shape: "circle", size: 0.6, text: spanTxt });
+  FO.span = spanTxt;
+  if (FO.mk) FO.mk.setMarkers(mks);
   if (!FO.fitted && preds.length) { FO.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, preds.length - 40), to: preds.length + 2 }); FO.fitted = true; }
 }
 
@@ -2302,7 +2361,7 @@ function buildChart() {
   const intra = chIntraday();
   const chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 12, panes: { separatorColor: "#D5DCE3" } },
     grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" },
-    timeScale: { borderColor: "#D5DCE3", timeVisible: intra, secondsVisible: false, rightOffset: 6 }, crosshair: { mode: 0 } });
+    timeScale: { borderColor: "#D5DCE3", timeVisible: intra, secondsVisible: chSec(), rightOffset: 6 }, crosshair: { mode: 0 } });
   const S = {};
   S.candle = chart.addSeries(LW.CandlestickSeries, { upColor: "#1E8A5A", downColor: "#C23B32", borderVisible: false, wickUpColor: "#1E8A5A", wickDownColor: "#C23B32" });
   const ln = (color, width = 1, style = 0, pane = 0, extra = {}) => chart.addSeries(LW.LineSeries, { color, lineWidth: width, lineStyle: style, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...extra }, pane);
@@ -3279,10 +3338,93 @@ function labML(f) {
     <div class="table-wrap"><table class="lab"><thead><tr><th>Model</th><th>Validation</th><th>Holdout</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
+/* ---------------- page: Ghanshyam (2.69, Mandeep: "ghanshyam ke naam se ek different section... nifty or banknifty
+   mein bas... strategy accountability ka monitor... alerts ki list expand karne wale button ke saath") */
+async function pageGhanshyam() {
+  stopPageTimer();
+  main.innerHTML = `<div id="gh-main"><p class="muted">Loading…</p></div>`;
+  const tick = async (first) => {
+    if (state.page !== "ghanshyam") return;
+    try { const d = await api(`/api/live/ghanshyam?days=${L.ghDays || 30}`); if (state.page !== "ghanshyam") return; drawGhanshyam(d, first); }
+    catch (e) { if (first) $("#gh-main").innerHTML = `<div class="empty"><h2>Ghanshyam</h2><p>${esc(e.message)}</p></div>`; }
+    if (state.page === "ghanshyam") L.pageTimer = setTimeout(() => tick(false), 6000);
+  };
+  tick(true);
+}
+
+function ghRec(r, money = true) {
+  if (!r || !r.n) return `<span class="muted">–</span>`;
+  return `${r.n} · ${r.won_pct}% won${money ? ` · <b class="${r.net >= 0 ? "up" : "down"}">${rupees(r.net)}</b>` : ""}`;
+}
+
+function ghLab(lab) {
+  const one = (k) => { const x = (lab || {})[k] || {}; if (!x.tested) return `<span class="muted">${k}: not tested</span>`;
+    const h = x.hold || {}; return `${k}: <span class="pill ${x.stage === "promoted" ? "p-up" : ""}">${esc(x.stage || "tested")}</span>${h.n ? ` <small class="muted">holdout ${h.n} · ${h.avg != null ? rupees(h.avg) : "–"}/trade</small>` : ""}`; };
+  return `${one("5y")}<br>${one("1y")}`;
+}
+
+function drawGhanshyam(d, first) {
+  const el = $("#gh-main"); if (!el) return;
+  const openKeys = new Set([...el.querySelectorAll("details[open]")].map((x) => x.dataset.k));
+  const a = d.account || {}, A = a.account || {}, T = d.totals || {};
+  const cls = (v) => (v || 0) >= 0 ? "up" : "down";
+  const open = (a.open || []).map((t) => `<tr><td><span class="pill ${(t.dir || 1) > 0 ? "p-up" : "p-down"}">BUY</span> <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(t.strategy || "")}</small></td>
+      <td>${esc(t.sym)}</td><td>${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r">${fx(t.last)}</td><td class="r">${fx(t.target)} / ${fx(t.stop)}</td>
+      <td class="r ${t.unreal >= 0 ? "up" : "down"}"><b>${rupees(t.unreal)}</b></td><td><button class="link-btn" data-gh-close="${t.id}">Exit</button></td></tr>`).join("");
+  const closed = (a.closed || []).slice(0, 15).map((t) => `<tr><td><b>${esc(t.label)}</b>${t.strategy ? `<br><small class="muted">${esc(t.strategy)}</small>` : ""}</td><td>${esc(t.sym)}</td><td class="nw">${esc((t.day || "").slice(5))} ${hm(t.entry_ts)}–${hm(t.exit_ts)}</td>
+      <td class="r nw">${fx(t.entry)} → ${fx(t.exit)}</td><td class="nw">${esc(t.reason || "")}</td><td class="r ${t.net >= 0 ? "up" : "down"}"><b>${rupees(t.net)}</b></td></tr>`).join("");
+  const strat = (d.strategies || []).map((s, i) => `<tr><td><details data-k="s${i}" ${openKeys.has("s" + i) ? "open" : ""}><summary><b>${esc(s.name)}</b></summary>
+        <p class="small" style="margin:6px 0">${esc(s.words || "")}</p>${s.note ? `<p class="small muted" style="margin:0 0 6px">${esc(s.note)}</p>` : ""}</details>
+        <small class="muted">${s.dir > 0 ? "calls" : "puts"} · ${esc((s.syms || []).join(", "))}${s.last ? ` · last signal ${esc(new Date(s.last * 1000).toLocaleDateString("en-IN", { day: "numeric", month: "short" }))} ${hm(s.last)}` : ""}</small></td>
+      <td class="small">${ghLab(s.lab)}</td><td class="small">${ghRec(s.bench)}</td><td class="small">${ghRec(s.account)}</td><td class="small">${esc(s.verdict || "")}</td></tr>`).join("");
+  const sigs = (d.signals || []).slice(0, L.ghAll ? 300 : 40).map((g, i) => { const k = `g${g.ts}${g.sym}`;
+    return `<li class="gh-sig"><details data-k="${esc(k)}" ${openKeys.has(k) ? "open" : ""}><summary>
+        <span class="nw">${esc(new Date(g.ts * 1000).toLocaleDateString("en-IN", { day: "numeric", month: "short" }))} ${hm(g.ts)}</span>
+        <b>${esc(g.sym)}</b> <span class="pill ${g.direction === "up" ? "p-up" : "p-down"}">${g.direction === "up" ? "CALL" : "PUT"}</span> ${esc(g.strategy || "")}
+        ${g.net != null ? `<b class="${g.net >= 0 ? "up" : "down"}">${rupees(g.net)}</b>` : `<span class="muted">open</span>`}${g.account ? ` <span class="pill">account took it</span>` : ""}</summary>
+      <div class="small" style="margin:6px 0 0 4px">
+        <p style="margin:0 0 4px">${esc(g.words || "")}</p>
+        <p style="margin:0 0 4px">Test bench (1 lot): option ${fx(g.entry)} → ${g.exit != null ? fx(g.exit) : "…"}${g.exit_ts ? ` at ${hm(g.exit_ts)}` : ""} · ${esc(g.reason || "open")} · ${g.net != null ? rupees(g.net) : "–"}</p>
+        <p style="margin:0">${g.account ? `Ghanshyam account: ${esc(g.account.label)} · ${esc(g.account.status)}${g.account.net != null ? ` · ${rupees(g.account.net)}` : ""}${g.account.reason ? ` (${esc(g.account.reason)})` : ""}` : "Ghanshyam account: not taken (another trade open, the day's limit, or the same strategy already traded this symbol today)."}</p>
+      </div></details></li>`; }).join("");
+  el.innerHTML = `<div class="toolbar"><h1 class="page-title" style="margin:0">Ghanshyam</h1>
+      <div class="btn-row" style="margin:0">${(a.open || []).length ? `<button class="btn danger" id="gh-closeall">Exit all (${a.open.length})</button>` : ""}
+      <div class="seg" role="group" aria-label="Period">${[7, 30, 90].map((n) => `<button data-gh-days="${n}" aria-pressed="${(L.ghDays || 30) === n}">${n} days</button>`).join("")}</div></div></div>
+    <p class="lede" style="margin:0 0 12px">Only Ghanshyam's strategies (course + 9:20 interview), only Nifty and Bank Nifty. Paper only; every strategy is on trial until it passes the Lab on data it never saw and you switch it on.</p>
+    ${!d.have_file ? `<div class="banner">His strategy file is not loaded in the Strategy Lab yet. <button class="btn primary" id="gh-install">Load Ghanshyam's strategies</button></div>` : ""}
+    ${a.error ? `<div class="banner">The Ghanshyam account had an error: ${esc(a.error)}</div>` : ""}
+    <div class="kpis kpi4">
+      <div class="kpi"><b>${rupees(A.equity)}</b><span>Ghanshyam account value</span></div>
+      <div class="kpi"><b class="${cls(A.today)}">${rupees(A.today)}</b><span>Today: booked ${rupees(A.today_booked)} + open ${rupees(A.unrealised)}</span></div>
+      <div class="kpi"><b class="${cls(A.realised)}">${rupees(A.realised)}</b><span>All booked (${a.n || 0} trades${a.win_rate != null ? `, ${a.win_rate}% won` : ""})</span></div>
+      <div class="kpi"><b class="${cls((T.bench || {}).net)}">${rupees((T.bench || {}).net)}</b><span>Test bench, every signal at 1 lot (${(T.bench || {}).n || 0} closed, last ${d.days} days)</span></div></div>
+    <h2>Open positions</h2>
+    <div class="table-wrap"><table><thead><tr><th>Option</th><th>Index</th><th>In at</th><th class="r">Entry</th><th class="r">Now</th><th class="r">Target / stop</th><th class="r">P&amp;L</th><th></th></tr></thead>
+      <tbody>${open || `<tr><td colspan="8" class="muted">No open Ghanshyam trades.</td></tr>`}</tbody></table></div>
+    <h2>Strategy accountability <span class="muted small">${(d.strategies || []).length} strategies</span></h2>
+    <p class="muted small" style="margin-top:-6px">Three records side by side: the Lab on past days it never saw (real option prices, all charges), the test bench live (every signal, 1 lot), and the Ghanshyam account. Tap a name for its rules.</p>
+    <div class="table-wrap"><table class="gh-acc"><thead><tr><th>Strategy</th><th>Lab (5 years / 1 year)</th><th>Test bench live</th><th>Ghanshyam account</th><th>So far</th></tr></thead>
+      <tbody>${strat || `<tr><td colspan="5" class="muted">Load his strategy file to start.</td></tr>`}</tbody></table></div>
+    <h2>Alerts <span class="muted small">${(d.signals || []).length} signals on Nifty and Bank Nifty, last ${d.days} days</span></h2>
+    <ul class="gh-sigs">${sigs || `<li class="muted">No signal yet. They appear here as his setups fire live.</li>`}</ul>
+    ${(d.signals || []).length > 40 ? `<p><button class="btn" id="gh-all">${L.ghAll ? "Show the latest 40" : `Show all ${d.signals.length}`}</button></p>` : ""}
+    <h2>Closed trades</h2>
+    <div class="table-wrap"><table><thead><tr><th>Option</th><th>Index</th><th>When</th><th class="r">Price</th><th>Exit</th><th class="r">Net</th></tr></thead>
+      <tbody>${closed || `<tr><td colspan="6" class="muted">None yet.</td></tr>`}</tbody></table></div>`;
+  el.querySelectorAll("[data-gh-close]").forEach((b) => b.onclick = async () => { b.disabled = true;
+    try { const r = await post(`/api/live/paper/books/ghanshyam/${b.dataset.ghClose}/close`, {}); toast(`Closed · ${rupees(r.net)}`); pageGhanshyam(); } catch (e) { toast(e.message); b.disabled = false; } });
+  const ca = $("#gh-closeall"); if (ca) ca.onclick = async () => { if (!window.confirm(`Exit all ${a.open.length} Ghanshyam paper trades at the live price?`)) return;
+    ca.disabled = true; try { const r = await post("/api/live/paper/books/ghanshyam/close_all", {}); toast(`Closed ${r.closed} · ${rupees(r.net)}`); pageGhanshyam(); } catch (e) { toast(e.message); ca.disabled = false; } };
+  const ins = $("#gh-install"); if (ins) ins.onclick = async () => { ins.disabled = true;
+    try { const r = await post("/api/live/ghanshyam/install", {}); toast(`${r.name}: ${r.rules} Lab rules loaded`); pageGhanshyam(); } catch (e) { toast(e.message); ins.disabled = false; } };
+  el.querySelectorAll("[data-gh-days]").forEach((b) => b.onclick = () => { L.ghDays = Number(b.dataset.ghDays); pageGhanshyam(); });
+  const ga = $("#gh-all"); if (ga) ga.onclick = () => { L.ghAll = !L.ghAll; pageGhanshyam(); };
+}
+
 /* ---------------- register */
 Object.assign(PAGES, { live: pageLive, scanner: pageScanner, sym: pageSym, alerts: pageAlerts, paper: pagePaper, connect: pageConnect,
   context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk, chart: pageChart, world: pageWorld, insiders: pageInsiders,
-  timemachine: pageTimeMachine, ask: pageAsk, watchlist: pageWatchlist, lab: pageLab });
+  timemachine: pageTimeMachine, ask: pageAsk, watchlist: pageWatchlist, lab: pageLab, ghanshyam: pageGhanshyam });
 window.addEventListener("hashchange", () => { stopPageTimer(); if (!location.hash.startsWith("#/chart") && CH.chart) { CH.chart.remove(); CH.chart = null; } main.classList.toggle("wide", location.hash.startsWith("#/chart")); });
 pollSnapshot();
 aiStatus(true); setInterval(() => aiStatus(true), 5 * 60000);

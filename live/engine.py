@@ -717,6 +717,12 @@ class LiveEngine:
                 ses = SESSION.session(now.date())
                 ended = ses is None or now >= ses["close"] + dt.timedelta(minutes=1)
             self.trading_open = self._trading_open(now)
+            try:                                         # 2.69: seconds candles for the chart (live/secbars.py)
+                from . import secbars
+                secbars.SB.sample(self, now)
+            except Exception as e:
+                if self._every("secbars_err", 600, clock_time=False):
+                    self.log(f"Seconds candles skipped: {e}")
             if ended:
                 self._end_of_day(now, mins)
                 return
@@ -1434,6 +1440,23 @@ class LiveEngine:
             return 0
         a = {"sym": sym, "kind": kind, "direction": direction, "option": self._suggest(sym, direction), "data": {}}
         return self._bench_add(a, now, name=name, variant=variant)
+
+    def pack_signal(self, sym, direction, now, r):
+        """2.69: a strategy-file signal for the paper accounts that take strategy files (rules/paper_books.json "pack"),
+        e.g. the Ghanshyam account on Nifty and Bank Nifty. No alert, no main account. Paper only."""
+        bs = getattr(self, "books", None)
+        if bs is None or not self.paper or not getattr(bs, "has_pack", lambda: False)():
+            return {}
+        if self.dguard is not None and self.dguard.symbol_problem(sym):
+            return {}
+        a = {"sym": sym, "kind": "pack", "direction": direction, "severity": 2, "title": str(r.get("_name") or "")[:200],
+             "option": self._suggest(sym, direction), "data": {}}
+        try:
+            u = self.uni.underlyings.get(sym) if self.uni else None
+            a["und_key"] = getattr(u, "key", None)
+        except Exception:
+            pass
+        return bs.offer_pack(a, self.state, now, r)
 
     def _bench_add(self, a, now, **kw):
         """2.58: every test-bench signal (alerts, ideas on trial, Lab rules) is also offered to the "Multiverse pick" paper

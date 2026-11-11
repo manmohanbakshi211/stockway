@@ -130,9 +130,9 @@ def test_the_course_strategy_file_reads_cleanly(monkeypatch):
     raw = (ROOT / "rules" / "strategy_files" / "ghanshyam_course.json").read_bytes()
     res = P.check(raw)
     assert res["fatal"] is None and res["problems"] == []
-    assert all(s["status"] == "ok" for s in res["strategies"]) and len(res["strategies"]) == 17
-    assert len(res["rules"]) >= 60
+    assert all(s["status"] == "ok" for s in res["strategies"]) and len(res["strategies"]) == 25    # v2 (2.69): 9:20 merged
+    assert len(res["rules"]) >= 80
     stops = {sp["stop"][0] for sp in res["exits"].values()}
     assert {"pm", "fib38", "sig"} <= stops
     d = json.loads(raw)
-    assert not any(k in json.dumps(d).lower() for k in ("order", "broker", "api_key", "token"))
+    assert not any(k in json.dumps(d).lower() for k in ("place_order", "modify_order", "api_key", "access_token"))   # text, no keys

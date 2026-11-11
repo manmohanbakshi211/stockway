@@ -17,7 +17,7 @@ from pathlib import Path
 from .clock import IST
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "chart_stream.json"
-DEFAULTS = {"every_ms": 100, "max_streams": 8, "heartbeat_s": 5, "reconcile_s": 10}
+DEFAULTS = {"every_ms": 100, "max_streams": 8, "heartbeat_s": 5, "reconcile_s": 10, "prices_ms": 200, "max_price_streams": 6}
 IST_SHIFT = 19800
 INTRADAY_MIN = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60}
 OPEN = {"n": 0, "served": 0, "since": time.time()}
@@ -66,6 +66,18 @@ def frame(e, sym: str, tf: str) -> dict | None:
         return None
     out = {"sym": sym, "tf": tf, "p": i.ltp, "tt": (i.ltt / 1000) if getattr(i, "ltt", None) else None,
            "rx": getattr(i, "t", None), "chg_pct": round((i.ltp / i.cp - 1) * 100, 2) if getattr(i, "cp", None) else None}
+    from . import secbars
+    if tf in secbars.SEC_TFS:                    # 2.69: seconds candles from the app's own prices
+        try:
+            secbars.SB.watch[sym] = time.time()
+            if out["tt"]:
+                secbars.SB.add(sym, out["tt"], i.ltp)
+            c = secbars.SB.forming(sym, tf)
+        except Exception:
+            c = None
+        if c:
+            out["candle"] = c
+        return out
     try:
         rows = e.charts.today_bars(sym) if getattr(e, "charts", None) is not None else []
     except RuntimeError:                         # the engine added a bar while we read: the next frame has it
@@ -73,6 +85,21 @@ def frame(e, sym: str, tf: str) -> dict | None:
     c = forming(rows, tf)
     if c:
         out["candle"] = c
+    return out
+
+
+def prices(e, syms: list) -> dict:
+    """2.69 (Mandeep: "live feed bhi chart jitna fast"): the latest price, day change and exchange time of each symbol."""
+    out = {}
+    if not getattr(e, "running", False) or getattr(e, "state", None) is None:
+        return out
+    for s in syms[:60]:
+        k = _key(e, s)
+        i = e.state.get(k) if k else None
+        if i is None or not getattr(i, "ltp", None):
+            continue
+        out[s] = [i.ltp, round((i.ltp / i.cp - 1) * 100, 2) if getattr(i, "cp", None) else None,
+                  (i.ltt / 1000) if getattr(i, "ltt", None) else None]
     return out
 
 

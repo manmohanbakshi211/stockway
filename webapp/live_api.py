@@ -355,8 +355,18 @@ async def live_mtf(sym: str, tfs: str | None = None):
 async def live_candles(sym: str, tf: str = "5m", before: float | None = None, tail: int | None = None):
     """Main chart bars (2.29): long history per timeframe; `before` (epoch seconds) loads older bars for scroll-back."""
     from live.mtf import MAIN_TFS
+    from live.secbars import SB, SEC_TFS
+    if tf in SEC_TFS:                                   # 2.69: seconds candles (today, from the app's own prices)
+        if before:
+            return {"sym": sym.upper(), "tf": tf, "candles": [], "volume": [], "more": False, "has_volume": False}
+        d = SB.candles(sym.upper(), tf)
+        if tail:
+            d["candles"] = d["candles"][-int(tail):]
+        if not d["candles"] and not tail:
+            d["message"] = "No seconds prices yet: they are kept while the live scanner runs (today only)."
+        return clean(d)
     if tf not in MAIN_TFS:
-        raise HTTPException(400, f"Timeframe must be one of {', '.join(MAIN_TFS)}")
+        raise HTTPException(400, f"Timeframe must be one of {', '.join(list(SEC_TFS) + list(MAIN_TFS))}")
     d = await _run_blocking(_mtf().candles, sym.upper(), tf, before, 1500, tail)
     if not d["candles"] and not before and not tail:
         raise HTTPException(404, "No price history for this symbol yet (Dhan, Yahoo and the app's own history had none).")
@@ -414,6 +424,56 @@ async def ws_ticks(ws: WebSocket):
     finally:
         task.cancel()
         ST.OPEN["n"] = max(0, ST.OPEN["n"] - 1)
+
+
+@router.websocket("/ws/prices")
+async def ws_prices(ws: WebSocket):
+    """2.69: the Live page's prices as fast as the chart's (the browser sends {"syms": [...]}; the app sends the prices
+    that changed, ~every 0.2 s). Reads the app's own prices only; nothing new connects to a broker."""
+    import asyncio
+    import json as _json
+    import time as _t
+    from live import stream as ST
+    c = ST.cfg()
+    await ws.accept()
+    if ST.OPEN.get("p", 0) >= int(c.get("max_price_streams") or 6):
+        await ws.send_json({"error": "too many open Live pages"})
+        await ws.close()
+        return
+    ST.OPEN["p"] = ST.OPEN.get("p", 0) + 1
+    sub = {"syms": []}
+
+    async def reader():
+        while True:
+            try:
+                m = _json.loads(await ws.receive_text())
+            except (ValueError, TypeError):
+                continue
+            if isinstance(m, dict) and isinstance(m.get("syms"), list):
+                sub["syms"] = [str(x).upper()[:30] for x in m["syms"]][:60]
+    task = asyncio.create_task(reader())
+    last, beat = {}, 0.0
+    try:
+        while not task.done():
+            await asyncio.sleep(max(0.1, float(c.get("prices_ms") or 200) / 1000))
+            try:
+                px = ST.prices(engine(), sub["syms"])
+            except Exception:
+                px = {}
+            ch = {k: v for k, v in px.items() if last.get(k) != v}
+            now = _t.time()
+            if ch:
+                await ws.send_json({"px": ch})
+                last.update(ch)
+                beat = now
+            elif now - beat >= float(c["heartbeat_s"]):
+                await ws.send_json({"hb": now})
+                beat = now
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        task.cancel()
+        ST.OPEN["p"] = max(0, ST.OPEN.get("p", 1) - 1)
 
 
 @router.get("/api/live/mtf/{sym}/overlays")
@@ -699,6 +759,93 @@ def live_paper_close_all():
         raise HTTPException(400, "Start the live scanner first.")
     done = e.paper.close_all(e.state, e.clock.now())
     return {"ok": True, "closed": len(done), "net": round(sum(t["net"] for t in done), 2)}
+
+
+def _book_live(bid: str):
+    """2.69: a running extra paper account (Best only, 3% a day, Trailing, Ghanshyam...) for its Exit buttons."""
+    e = engine()
+    bs = getattr(e, "books", None)
+    if not e.paper or bs is None:
+        raise HTTPException(400, "Start the live scanner first.")
+    if bid not in bs.books:
+        raise HTTPException(404, f"No paper account '{bid}'")
+    return e, bs.books[bid]
+
+
+@router.post("/api/live/paper/books/{bid}/close_all")
+def live_book_close_all(bid: str):
+    """2.69 (Mandeep: "har section mein exit all"): close every open trade of one extra paper account. Paper only."""
+    e, bk = _book_live(bid)
+    done = bk.close_all(e.state, e.clock.now())
+    return {"ok": True, "book": bid, "closed": len(done), "net": round(sum(t["net"] for t in done), 2)}
+
+
+@router.post("/api/live/paper/books/{bid}/{trade_id}/close")
+def live_book_close(bid: str, trade_id: int):
+    """2.69: close one open trade of an extra paper account at the live price. Paper only."""
+    e, bk = _book_live(bid)
+    r = bk.close_manual(trade_id, e.state, e.clock.now())
+    if not r:
+        raise HTTPException(404, "Trade not open")
+    return clean(r)
+
+
+@router.get("/api/live/paper/total")
+def live_paper_total(source: str | None = None):
+    """2.69 (Mandeep: "sabhi trades ka mila ke bhi dikhao"): every paper account added up: booked, open, today."""
+    from live.paper import PaperBook
+    e = engine()
+    src = source or (e.source if e.paper else e.cfg()["live"]["source"])
+    live_ = bool(e.paper and e.source == src)
+    accts = []
+    try:
+        mb = e.paper if live_ else PaperBook(e.store, src, e.cfg()["live"].get("paper"))
+        accts.append(("main", "Main account", mb))
+    except Exception:
+        pass
+    try:
+        bs, _ = _books(src)
+        for bid, bk in bs.books.items():
+            accts.append((bid, (bs.specs.get(bid) or {}).get("name") or bid, bk))
+    except Exception:
+        pass
+    rows = []
+    for bid, name, bk in accts:
+        try:
+            sm = bk.summary(e.state if live_ else None)
+            a = sm.get("account") or {}
+            rows.append({"id": bid, "name": name, "booked": a.get("realised") or 0, "open_pnl": a.get("unrealised") or 0,
+                         "today": a.get("today") or 0, "open": len(sm.get("open") or []), "trades": sm.get("n") or 0,
+                         "won": round((sm.get("win_rate") or 0) * (sm.get("n") or 0) / 100)})
+        except Exception as ex:
+            rows.append({"id": bid, "name": name, "error": str(ex)[:120]})
+    ok = [r for r in rows if "error" not in r]
+    tot = {k: round(sum(r[k] for r in ok), 2) for k in ("booked", "open_pnl", "today", "open", "trades", "won")}
+    tot["net"] = round(tot["booked"] + tot["open_pnl"], 2)
+    tot["won_pct"] = round(tot["won"] / tot["trades"] * 100, 1) if tot["trades"] else None
+    return clean({"source": src, "total": tot, "accounts": rows})
+
+
+@router.get("/api/live/ghanshyam")
+def live_ghanshyam(source: str | None = None, days: int = 30):
+    """2.69: the Ghanshyam section: his strategies' records (Lab, test bench, paper account) and their signals on Nifty
+    and Bank Nifty. Paper only."""
+    from live import ghanshyam as G
+    e = engine()
+    src = source or (e.source if e.paper else e.cfg()["live"]["source"])
+    bs, live_ = _books(src)
+    return clean(G.view(e, bs, src, live_, max(1, min(365, int(days)))))
+
+
+@router.post("/api/live/ghanshyam/install")
+def live_ghanshyam_install():
+    """2.69: load the repo's Ghanshyam strategy file into the Strategy Lab (same check as an upload)."""
+    from live import ghanshyam as G
+    try:
+        out = G.install(getattr(engine(), "data_dir", None) or G.ROOT / "data")
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    return clean({k: out.get(k) for k in ("id", "name", "version", "rules", "problems", "already")})
 
 
 @router.post("/api/live/paper/open")

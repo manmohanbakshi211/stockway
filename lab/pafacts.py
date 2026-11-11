@@ -31,6 +31,14 @@ FACTS = {
     "fib_uday": ("how much of the rise from today's low has been given back (0 at the high after the low, "
                  "1 back at the low)", ""),
     "rise_day": ("size of that rise: today's low to the high after it", "%"),
+    # 2.69 (course fixes): the 2:20 candle against the 4-5 candles just before it; the level a bar breaks or nears
+    "pm_edge5": ("how far the 14:15-14:20 candle is from the middle of the 5 candles before it (0 middle, 1 edge, "
+                 "above 1 outside)", ""),
+    "lv_brk": ("close above today's high so far (+1) / below today's low so far (-1), 0 neither", ""),
+    "lv_touches": ("how many separate times price touched that level (the one broken, else the nearer of today's "
+                   "high / low) before this bar", ""),
+    "lv_pause": ("candles in a row just before this one that waited near that level (within 0.15%)", ""),
+    "lv_run": ("how far price ran into that level in the hour before the wait (the 'journey')", "%"),
 }
 # level stops (lab/exits.py): (stop for a buy, stop for a sell) on each bar
 LEVELS = {
@@ -48,6 +56,10 @@ MIN_RANGE = 0.0005     # a candle of at least 0.05% of the open
 AT_EXTREME = 0.0003    # at today's low / high so far, within 0.03%
 CONFIRM = 3            # the confirming close within 3 bars
 FIB_STOP = 0.38
+PM5_FROM = 55          # 13:50-14:15: the 5 candles before the 2:20 candle
+TOUCH = 0.0005         # a touch: within 0.05% of the level
+NEAR = 0.0015          # waiting near the level: within 0.15%
+RUN_BARS = 12          # the journey: the 12 candles (1 hour) before the wait
 
 
 def _nan(n):
@@ -137,7 +149,39 @@ def facts(o, h, l, c) -> dict:
             f["pm_rng"][PM_BAR:] = pos
             f["pm_edge"][PM_BAR:] = abs(pos - 0.5) * 2
     f["fib_dday"], f["fall_day"], f["fib_uday"], f["rise_day"], _, _ = swings(h, l, c)
+    if n > PM_BAR:
+        ah, al = h[PM5_FROM:PM_BAR].max(), l[PM5_FROM:PM_BAR].min()
+        if ah > al:
+            f["pm_edge5"][PM_BAR:] = abs(((h[PM_BAR] + l[PM_BAR]) / 2 - al) / (ah - al) - 0.5) * 2
+    f["lv_brk"], f["lv_touches"], f["lv_pause"], f["lv_run"] = level_facts(h, l, c)
     return f
+
+
+def level_facts(h, l, c):
+    """For each bar: does it close beyond today's high / low so far, and for that level (or the nearer one): how many
+    separate touches before, how many candles waited near it just before, and how far price ran into it."""
+    n = len(c)
+    brk, tch, pau, run = np.zeros(n), _nan(n), _nan(n), _nan(n)
+    brk[0] = np.nan
+    for i in range(1, n):
+        R, S = h[:i].max(), l[:i].min()
+        if c[i] > R:
+            brk[i], lv, up = 1.0, R, True
+        elif c[i] < S:
+            brk[i], lv, up = -1.0, S, False
+        else:
+            up = (R - c[i]) <= (c[i] - S)
+            lv = R if up else S
+        hit = h[:i] >= lv * (1 - TOUCH) if up else l[:i] <= lv * (1 + TOUCH)
+        tch[i] = float(hit[0]) + float(np.sum(hit[1:] & ~hit[:-1]))
+        k = 0
+        while k < i and k < RUN_BARS and ((h[i - 1 - k] >= lv * (1 - NEAR)) if up else (l[i - 1 - k] <= lv * (1 + NEAR))):
+            k += 1
+        pau[i] = float(k)
+        a, b = max(0, i - k - RUN_BARS), i - k
+        if b > a:
+            run[i] = ((lv - l[a:b].min()) if up else (h[a:b].max() - lv)) / lv * 100
+    return brk, tch, pau, run
 
 
 def levels(o, h, l, c) -> dict:

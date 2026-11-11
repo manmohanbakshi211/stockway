@@ -381,6 +381,14 @@ def queue(data_dir) -> dict:
     return F.queue_untested(data_dir, rs, source="pack")
 
 
+def bench_variant(pid: str, r: dict) -> str:
+    """The test bench's id of one strategy-file rule (entry only, exits aside), shared by the live scan and the
+    Ghanshyam page (2.69) so both name the same strategy the same way."""
+    import json as _json
+    sig = _json.dumps([pid, r["conds"], r["dir"], r.get("win"), r["syms"]], sort_keys=True)
+    return "P" + hashlib.sha1(sig.encode()).hexdigest()[:7]
+
+
 def view(data_dir) -> dict:
     """For the Strategy Lab page: each file, its strategies and their Lab results (1-year and 5-year)."""
     from . import factory as F

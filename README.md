@@ -114,6 +114,32 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.69: Ghanshyam section, paper totals and exits, seconds chart, faster Live page (12 Nov 2026)
+
+Mandeep, 12 Nov 2026 (01:40). All paper only; broker APIs for market data only.
+
+- **Ghanshyam section** (new page, under Trade today): his own paper account (rules/paper_books.json `ghanshyam`) that
+  takes only his strategy-file signals on Nifty and Bank Nifty (1 lot, once per strategy, symbol and day, the main
+  account's paper rules); a strategy accountability table (Lab 5-year / 1-year, test bench live, the account, one
+  honest line each); every signal as a list with an expand button; a one-click "Load Ghanshyam's strategies".
+- **One Ghanshyam file** (`rules/strategy_files/ghanshyam_course.json` v2, 25 strategies, 90 Lab rules): the 9:20
+  interview file merged in, keeping the versions that did best in the 5-year Lab (920-E: yesterday's high / low taken
+  out in the first candle with the trend, +₹104 / +430 / +843 per trade) plus the course's big-gap rule and the plain
+  break as control; 920-A to D left out (they lost; recorded in the notes). Course fixes: Fibonacci only after a 1%+
+  fall (5-year check: swing exit +₹643 / +20 / +917 vs negative at 0.5%); 2:20 "middle" = the 5 candles before it, as
+  he said (standard exit +₹128 / +21 / +454, all three periods positive; the 13:00-14:15 version kept as data
+  version); breakouts need 3+ touches, a wait and no long run (new facts; the check says this loses: kept on trial).
+  Nothing passes the Lab bar yet.
+- **Gun**: `lv_brk`, `lv_touches`, `lv_pause`, `lv_run`, `pm_edge5` (lab/pafacts.py); strategy-file signals reach
+  paper accounts that ask for them (`pack_prefix`), tagged with the strategy (`mode = pack:<id>`); `packs.bench_variant`
+  shared by the live scan and the page (same ids as before).
+- **Paper trades**: every account added up on every tab (net, today, trades, open); Exit and Exit all in every
+  account (were missing outside the main account).
+- **Fortune chart**: the forming candle shows its start and close time (e.g. 9:20→9:25).
+- **Main chart**: 5s / 15s / 30s candles from the app's own prices (today, from when the scanner started;
+  live/secbars.py). **Live page**: prices streamed over their own websocket (~0.2 s) like the chart.
+- Tests: 460+ (incl. test_no_clash); Lab regression identical; headless desktop + phone clean.
+
 ## 2.68.1: a held-back Lab rule is still measured (11 Nov 2026)
 
 Mandeep asked whether one strategy can stop another from being measured. Checked on the live data (30 Oct - 11 Nov):

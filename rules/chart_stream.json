@@ -1,8 +1,18 @@
 {
-  "about": "2.51 (Mandeep, 10 Nov 2026: 'connect the websocket for charting, we need tick-by-tick and the price at the same time'): the chart's live stream. The app already receives every price change Upstox sends on its one live feed; this pushes them from the app to your browser over a websocket instead of the chart asking every 2 seconds. No new connection to any broker. every_ms: how often the app checks for a new price for an open chart (a price is sent only when it changed); max_streams: open charts at once; heartbeat_s: a still-alive message when nothing changes; reconcile_s: how often the chart also re-reads its last bars (volume and any missed bar).",
-  "valid_from": "2026-11-11",
-  "every_ms": 100,
-  "max_streams": 8,
-  "heartbeat_s": 5,
-  "reconcile_s": 10
+ "about": "2.51 (Mandeep, 10 Nov 2026: 'connect the websocket for charting, we need tick-by-tick and the price at the same time'): the chart's live stream. The app already receives every price change Upstox sends on its one live feed; this pushes them from the app to your browser over a websocket instead of the chart asking every 2 seconds. No new connection to any broker. every_ms: how often the app checks for a new price for an open chart (a price is sent only when it changed); max_streams: open charts at once; heartbeat_s: a still-alive message when nothing changes; reconcile_s: how often the chart also re-reads its last bars (volume and any missed bar). 2.69: prices_ms / max_price_streams: the Live page's own price stream (as fast as the chart); sec_syms / sec_keep: seconds candles (5s, 15s, 30s) kept for these symbols plus any symbol an open chart streams, today only.",
+ "valid_from": "2026-11-11",
+ "every_ms": 100,
+ "max_streams": 8,
+ "heartbeat_s": 5,
+ "reconcile_s": 10,
+ "prices_ms": 200,
+ "max_price_streams": 6,
+ "sec_syms": [
+  "NIFTY",
+  "BANKNIFTY",
+  "FINNIFTY",
+  "MIDCPNIFTY",
+  "SENSEX"
+ ],
+ "sec_keep": 30000
 }

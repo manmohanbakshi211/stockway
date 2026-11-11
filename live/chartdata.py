@@ -237,6 +237,8 @@ class ChartData:
                         continue
                     fired.append(now.timestamp())
                     self.e.bench_signal(sym, "up" if r["dir"] > 0 else "down", now, r.get("_kind", "library"), r["_variant"], r["_name"])
+                    if r.get("_pack") and hasattr(self.e, "pack_signal"):      # 2.69: e.g. the Ghanshyam paper account
+                        self.e.pack_signal(sym, "up" if r["dir"] > 0 else "down", now, r)
                 except Exception as ex:
                     if self._rate(f"bench_rule:{r.get('_variant')}", 3600):
                         self.e.log(f"Test bench rule {r.get('_name')} skipped: {ex}")
@@ -457,8 +459,9 @@ class ChartData:
                 seen.add(sig)
                 v = dict(r)
                 v["_kind"] = "pack"
-                v["_variant"] = "P" + hashlib.sha1(sig.encode()).hexdigest()[:7]
+                v["_variant"] = packs.bench_variant(pid, r)          # same id as before 2.69 (shared helper)
                 v["_name"] = f"{e.get('name') or pid}: {r.get('name') or ''} ({'long' if r['dir'] > 0 else 'short'})"[:160]
+                v["_pack"], v["_strategy"] = pid, r.get("name")
                 out.append(v)
         return out
 

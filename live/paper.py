@@ -147,7 +147,8 @@ class PaperBook:
         ex = fac.get("exit")                              # a Strategy Lab rule brings its own exit
         return self._open(state, now, sym=alert["sym"], kind=alert["kind"], opt=opt, entry=entry, ltp=inst.ltp, lots=lots,
                           direction=1, manual=manual_code, alert_id=alert.get("id"), und_key=alert.get("und_key"),
-                          why=alert.get("title", ""), exit=ex, plan=fac.get("plan"))
+                          why=alert.get("title", ""), exit=ex, plan=fac.get("plan"),
+                          tag=(((alert.get("data") or {}).get("pack") or {}).get("variant")))
 
     def open_manual(self, state, now: dt.datetime, *, sym: str, opt: dict, direction: int, lots: int = 1,
                     und_key: str | None = None, kind="manual") -> dict:
@@ -175,7 +176,7 @@ class PaperBook:
         return {"opened": tid}
 
     def _open(self, state, now, *, sym, kind, opt, entry, ltp, lots, direction, manual, alert_id=None, und_key=None, why="",
-              exit=None, plan=None, strict=False):
+              exit=None, plan=None, strict=False, tag=None):
         c = self.cfg
         und = state.get(und_key) if und_key else None
         # 2.48: never more money than the account has free (Mandeep, 10 Nov: "sometimes it is taking trades more than
@@ -221,6 +222,8 @@ class PaperBook:
             t["target"] = round(entry * 100, 2)            # the chart target decides, not a premium %
             t["stop"] = round(entry * (1 - PREM_STOP / 100), 2)
             t["hold_max"] = STYLES[plan["style"]]["max"]
+        if tag:                                           # 2.69: which strategy-file strategy took it (Ghanshyam page)
+            t["mode"] = f"pack:{tag}"
         if kind == "factory":                             # remember which Strategy Lab rule took it (for its live record)
             import re as _re
             mm = _re.search(r"\b(S[0-9a-f]{8})\b", why or "")
