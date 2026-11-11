@@ -131,6 +131,8 @@ Mandeep, 11 Nov 2026: "go ahead" on choosing strikes by premium (the Lab could o
   did best on validation (24 of 32 positive vs 28 of 58 at the money); 1 in the money did worst (0 of 9), so it is not
   priced for now. In ₹ per lot the further out-of-the-money options lose less per random trade (cheaper lots): a lead
   to keep testing, not an edge. System check `strike_choice`.
+- A saved bar table without the new columns stays usable when there is no option history to rebuild from (tests,
+  a fresh install): rules that need a strike column just can't be scored there.
 
 ## Live QA fixes (2.56.2)
 

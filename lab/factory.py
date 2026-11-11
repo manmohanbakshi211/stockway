@@ -922,8 +922,9 @@ def load_or_build(data_dir, log=print, should_stop=lambda: False, rebuild=False)
     f = cache_path(data_dir)
     hist = Path(data_dir) / "history"
     newest = max((p.stat().st_mtime for p in hist.glob("*/raw_*.parquet")), default=0)
+    cached = None
     if f.exists() and not rebuild and f.stat().st_mtime >= newest:
-        df = pd.read_parquet(f)
+        df = cached = pd.read_parquet(f)
         missing = [k for k in FEATURES if k not in df.columns]
         stk = strikes_cfg()                               # 2.57: strike choices priced in the table
         no_stk = [c for c in (f"pnl_{e}@{n}" for n in stk["choices"] for e in stk["exits"]) if c not in df.columns]
@@ -934,6 +935,9 @@ def load_or_build(data_dir, log=print, should_stop=lambda: False, rebuild=False)
             else "New exit styles to test: rebuilding the bar table once…")
     log("Building the bar table from the option history (once; later runs reuse it)…")
     df = build(data_dir, log=log, should_stop=should_stop)
+    if df.empty and cached is not None:                  # 2.57: nothing to rebuild from: keep the saved table (new columns
+        log("No option history to rebuild from: using the saved bar table (new strike / exit columns not priced)")
+        return cached                                    # are simply missing; rules needing them can't be scored)
     if not df.empty:
         f.parent.mkdir(parents=True, exist_ok=True)
         tmp = f.with_name(f.name + ".tmp")

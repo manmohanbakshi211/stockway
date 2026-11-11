@@ -58,7 +58,7 @@ def static_checks(cfg: dict | None = None) -> list:
     try:                                             # 2.57: strike choice for buy rules
         from lab.factory import strikes_cfg
         sc = strikes_cfg()
-        out.append(_c("strike_choice", "Lab strike choice (ITM / ATM / OTM / low premium) for buy rules",
+        out.append(_c("strike_choice", "Lab strike choice (ATM / OTM / low premium) for buy rules",
                       bool(sc["choices"]) and bool(sc["exits"]),
                       f"{len(sc['choices'])} choices besides ATM on {', '.join(sc['syms'][:4])}, priced for {len(sc['exits'])} exits"
                       if sc["choices"] else "rules/strikes.json missing or broken: every rule buys ATM (as before 2.57)"))
