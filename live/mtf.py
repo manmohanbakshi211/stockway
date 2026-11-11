@@ -110,6 +110,7 @@ class MTF:
         self.dir = Path(engine.data_dir) / "charts"
         self.mem: dict = {}
         self.errors: dict = {}
+        self.retry_at: dict = {}          # 2.56.2: a failed older-history fetch is tried again after 10 min (was: never this session)
 
     # ------------------------------------------------------------ data
     def _dhan(self):
@@ -119,7 +120,9 @@ class MTF:
         if not (lab.get("dhan_client_id") and tok) or dhan_token.is_dead(tok):
             return None
         from lab.dhan import Dhan
-        return Dhan(lab["dhan_client_id"], tok, per_sec=2.0)
+        d = Dhan(lab["dhan_client_id"], tok, per_sec=2.0)
+        d.tries = 2                       # 2.56.2: a chart waits at most one short retry; saved bars fill in if Dhan is busy
+        return d
 
     def _sec(self, sym):
         if sym in INDEX_IDS:
@@ -241,7 +244,7 @@ class MTF:
             rows = []
         first = rows[0][0] if rows else time.time()
         want = time.time() - days * 86400
-        d = self._dhan() if first > want + 86400 and not self.errors.get(k) else None
+        d = self._dhan() if first > want + 86400 and (not self.errors.get(k) or time.time() > self.retry_at.get(k, float("inf"))) else None
         if d is not None:
             try:                                          # older history from Dhan, 90 days per call
                 sec = self._sec(sym)
@@ -264,10 +267,14 @@ class MTF:
                     if got:
                         rows = self._merge_save(f, got)
                         self.mem[(sym, base)] = (time.time(), rows)
+                        self.errors.pop(k, None)
+                        self.retry_at.pop(k, None)
                     else:
                         self.errors[k] = "no older bars"            # Dhan has nothing older: don't ask again
+                        self.retry_at.pop(k, None)
             except Exception as ex:
                 self.errors[k] = str(ex)[:120]
+                self.retry_at[k] = time.time() + 600
         if (not rows or rows[0][0] > want + 86400) and base in (1, 5, 15, 60, "D"):
             yk = ("yahoo", sym, base)
             hit = self.mem.get(yk)

@@ -1687,14 +1687,18 @@ class LiveEngine:
                                 float(lc.get("small_lot_max") or 10000))
         except Exception as e:
             self.log(f"Shadow exits failed: {e}")
+        main_trade = None
         if not muted:
             try:
-                self.paper.try_open(a, self.state, now)
+                tid = self.paper.try_open(a, self.state, now)
+                if tid:                                 # 2.56.2: what the main account took, for accounts that mirror it
+                    main_trade = next(({"id": t["id"], "lots": t["lots"]} for t in self.paper.open_trades() if t["id"] == tid),
+                                      {"id": tid, "lots": 1})
             except Exception as e:
                 self.log(f"Paper trade failed: {e}")
         if getattr(self, "books", None) is not None:   # 2.49: Best only / 3% a day look at the same alert
             try:
-                self.books.consider(a, self.state, now)
+                self.books.consider(a, self.state, now, main=main_trade)
             except Exception as e:
                 if self._every("books_err", 600, clock_time=False):
                     self.log(f"Extra paper accounts skipped an alert: {e}")
@@ -2441,6 +2445,12 @@ class LiveEngine:
         from .world import YAHOO_INDEX
         from . import ta
         ext = (getattr(self.world, "extremes", {}) or {}).get(YAHOO_INDEX.get(sym, ""), {}) if self.world else {}
+        try:                                             # 2.56.2: Yahoo's history too short (Midcap Select): the saved daily bars
+            from .world import short_history
+            if short_history(ext):
+                ext = self._daily_extremes(sym, day_h, day_l) or {}
+        except Exception:
+            pass
         d = self.daily.get(sym) or (self._last_session().get("daily") or {}).get(sym) or {}
         h = d.get("htf") or {}
         prev = d.get("prev") or {}
@@ -2464,6 +2474,23 @@ class LiveEngine:
         if h:
             out["trend"] = {"daily": h.get("trend"), "weekly": h.get("w_trend")}
         return out
+
+    def _daily_extremes(self, sym, day_h=None, day_l=None) -> dict | None:
+        """52-week (and, with 3+ years, all-time) high / low from the chart's saved daily bars (data/charts/SYM_D.json, kept by
+        the chart from Dhan). Read from disk at most every 30 min; no network call here."""
+        from .world import extremes_from_daily
+        c = getattr(self, "_dext", None)
+        if c is None:
+            c = self._dext = {}
+        hit = c.get(sym)
+        if not hit or time.time() - hit[0] > 1800:
+            rows = []
+            try:
+                rows = json.loads((Path(self.data_dir) / "charts" / f"{sym}_D.json").read_text()).get("rows") or []
+            except Exception:
+                rows = []
+            hit = c[sym] = (time.time(), rows)
+        return extremes_from_daily(hit[1], day_h, day_l)
 
     def index_cards(self) -> list:
         """Index cards: live while the scanner runs; otherwise the last session's (saved every minute), else Yahoo."""

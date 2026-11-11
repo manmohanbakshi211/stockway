@@ -22,6 +22,11 @@ def test_features_are_signed_with_the_alert():
     assert set(learn.NUM) <= set(up) | {"x"} - {"x"}
 
 
+# NSE session days (2.56.2: holidays and weekends no longer teach the model, so the made-up days must be real ones)
+_DAYS = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12", "2026-10-13", "2026-10-14",
+         "2026-10-15", "2026-10-16"]
+
+
 def _rows(n_days, per_day, signal=True, seed=0):
     rng = np.random.default_rng(seed)
     rows, ts = [], 0
@@ -32,7 +37,7 @@ def _rows(n_days, per_day, signal=True, seed=0):
             f = learn.features(_alert("up"), {"chg_pct": al, "is_index": False}, [], None, 120, {})
             f["regime"] = rng.choice(["trend_up", "range", "quiet"])
             p = 1 / (1 + np.exp(-2.5 * al)) if signal else 0.4
-            rows.append({"ts": ts, "day": f"2026-10-{d + 1:02d}", "features": json.dumps(f), "o0": 50,
+            rows.append({"ts": ts, "day": _DAYS[d], "features": json.dumps(f), "o0": 50,
                          "result": "hit" if rng.random() < p else "miss", "o60": float(rng.normal())})
     return rows
 

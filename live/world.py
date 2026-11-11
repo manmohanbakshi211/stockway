@@ -528,6 +528,40 @@ def extremes_from_chart(js: dict) -> dict | None:
     last12 = rows[-12:]
     m = res[0].get("meta") or {}
     return {"ath": round(float(hi[1]), 2), "ath_date": day(hi[0])[:7], "atl": round(float(lo[2]), 2), "atl_date": day(lo[0])[:7],
-            "since": day(rows[0][0])[:4],
+            "since": day(rows[0][0])[:4], "months": len(rows),
             "hi52": float(m["fiftyTwoWeekHigh"]) if isinstance(m.get("fiftyTwoWeekHigh"), (int, float)) else round(max(r[1] for r in last12), 2),
             "lo52": float(m["fiftyTwoWeekLow"]) if isinstance(m.get("fiftyTwoWeekLow"), (int, float)) else round(min(r[2] for r in last12), 2)}
+
+
+def short_history(ext: dict | None, today: dt.date | None = None) -> bool:
+    """2.56.2: Yahoo has almost no history for some indices (Nifty Midcap Select: one monthly bar on 11 Nov 2026), so
+    its "52-week" range was just today's range. Less than a year of monthly bars is not a 52-week range."""
+    if not ext:
+        return True
+    if ext.get("months") is not None:
+        return ext["months"] < 12
+    try:
+        return int(ext.get("since") or 0) >= (today or dt.date.today()).year
+    except (TypeError, ValueError):
+        return True
+
+
+def extremes_from_daily(rows: list, day_h=None, day_l=None, now: float | None = None) -> dict | None:
+    """52-week high / low from daily bars [[ts, o, h, l, c, v], ...] (the chart's saved Dhan daily bars), today's live
+    high / low included. All-time high / low only when the bars go back 3+ years (else None: not a claim we can make)."""
+    import time as _t
+    now = now or _t.time()
+    rows = [r for r in rows or [] if r and r[2] and r[3]]
+    yr = [r for r in rows if r[0] >= now - 365 * 86400]
+    if len(yr) < 200:
+        return None
+    his = [r[2] for r in yr] + ([day_h] if day_h else [])
+    los = [r[3] for r in yr] + ([day_l] if day_l else [])
+    day = lambda t: dt.datetime.fromtimestamp(t, IST).date().isoformat()
+    out = {"hi52": round(float(max(his)), 2), "lo52": round(float(min(los)), 2), "since": day(rows[0][0])[:4], "src": "daily bars",
+           "ath": None, "ath_date": None, "atl": None, "atl_date": None}
+    if rows[0][0] <= now - 3 * 365 * 86400:
+        hi = max(rows, key=lambda r: r[2])
+        lo = min(rows, key=lambda r: r[3])
+        out.update(ath=round(float(max(hi[2], day_h or 0)), 2), ath_date=day(hi[0])[:7], atl=round(float(lo[3]), 2), atl_date=day(lo[0])[:7])
+    return out

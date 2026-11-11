@@ -1,5 +1,5 @@
 {
-  "about": "2.49: extra paper accounts next to your main one (Mandeep, 10 Nov 2026, points 14 and 15). Each has its own money and its own trades (saved as source '<feed>#<id>', never mixed with the main account, the scorecard or the test bench). Paper only: nothing here can place a real order. 'pick' = which alerts the account takes; 'paper' = its account rules (same names as the main account's); capital null = the same as your main capital. Change the numbers here; old trades keep the rules they were taken with. 2.56: 'exit_style' (a chart exit from lab/exits.py STYLES) gives an account its own exit for every trade; pick.same_as_main takes the main account's alert types and strength.",
+  "about": "2.49: extra paper accounts next to your main one (Mandeep, 10 Nov 2026, points 14 and 15). Each has its own money and its own trades (saved as source '<feed>#<id>', never mixed with the main account, the scorecard or the test bench). Paper only: nothing here can place a real order. 'pick' = which alerts the account takes; 'paper' = its account rules (same names as the main account's); capital null = the same as your main capital. Change the numbers here; old trades keep the rules they were taken with. 2.56: 'exit_style' (a chart exit from lab/exits.py STYLES) gives an account its own exit for every trade; pick.same_as_main takes the main account's alert types and strength. 2.56.2: pick.mirror_main takes exactly the main account's trades (same alert, same lots); the main account's limits decide.",
   "valid_from": "2026-11-11",
   "books": {
     "best": {
@@ -52,11 +52,12 @@
     "trail": {
       "name": "Trailing exit",
       "short": "Same trades as the main account, trailing exit",
-      "explain": "Takes the same alerts as the main account (same types, strength, risk check, lots sized from its own money) and differs only in how it exits: stop 1.5 x the 5-minute ATR of the index or stock, then a stop that trails 2.5 x ATR behind the best price, no fixed target, out by the day's exit time. Why: on 15,370 graded alerts (2-9 Nov) this exit made +2.0% more on the option per trade than the +30% / -20% premium exit, better on 5 of 6 days. Your call (11 Nov): test it here first; if it keeps beating the main account, switching the main account is your decision.",
+      "explain": "Takes exactly the trades the main account takes (2.56.2: the same alert, the same number of lots, at the same moment) and differs only in how it exits: stop 1.5 x the 5-minute ATR of the index or stock, then a stop that trails 2.5 x ATR behind the best price, no fixed target, out by the day's exit time. Only in the first minutes after the scanner starts (no 5-minute bars yet) can it miss a trade. Why: on 15,370 graded alerts (2-9 Nov) this exit made +2.0% more on the option per trade than the +30% / -20% premium exit, better on 5 of 6 days. Your call (11 Nov): test it here first; if it keeps beating the main account, switching the main account is your decision.",
       "on": true,
       "capital": null,
       "pick": {
         "same_as_main": true,
+        "mirror_main": true,
         "risk_pass": true
       },
       "exit_style": "chand",

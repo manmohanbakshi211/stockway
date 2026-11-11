@@ -19,7 +19,9 @@ FIELDS = ["open", "high", "low", "close", "iv", "volume", "strike", "oi", "spot"
 
 
 class DhanError(RuntimeError):
-    pass
+    def __init__(self, msg: str = "", status: int | None = None):
+        super().__init__(msg)
+        self.status = status          # 2.56.2: Dhan's last HTTP answer (429 = too many calls, 5xx = Dhan's side), None if unknown
 
 
 class Dhan:
@@ -34,6 +36,7 @@ class Dhan:
         self.lock = threading.Lock()
         self.calls = collections.deque(maxlen=1000)
         self.background = False          # 2.38: the 5-year download sets this: it gives way to screens, news and movers
+        self.tries = 5                   # 2.56.2: a screen's client sets 2: a busy Dhan falls back to saved bars in seconds, not 30+ s
 
     def _wait(self):
         """Own pace (per_sec) and the app-wide Dhan pace (all clients together stay under Dhan's 5 calls a second)."""
@@ -56,8 +59,10 @@ class Dhan:
             return True
         return False
 
-    def post(self, path: str, body: dict, tries: int = 5) -> dict:
+    def post(self, path: str, body: dict, tries: int | None = None) -> dict:
+        tries = tries or self.tries
         swapped = False
+        last, last_txt = None, ""
         for i in range(tries):
             self._wait()
             try:
@@ -69,7 +74,9 @@ class Dhan:
                 continue
             self.calls.append(time.time())
             if r.status_code in (429, 500, 502, 503, 504):
-                time.sleep(3 * (i + 1))
+                last, last_txt = r.status_code, (r.text or "")[:80].replace("\n", " ")
+                if i < tries - 1:
+                    time.sleep(3 * (i + 1))
                 continue
             try:
                 body_json = r.json()
@@ -86,7 +93,7 @@ class Dhan:
                 msg = body_json.get("errorMessage") or body_json.get("remarks") or r.text[:200]
                 raise DhanError(f"Dhan {path}: {msg}")
             return body_json
-        raise DhanError(f"Dhan {path}: too many retries")
+        raise DhanError(f"Dhan {path}: too many retries (last answer HTTP {last}{': ' + last_txt if last_txt else ''})", status=last)
 
     def profile(self) -> dict:
         self._wait()

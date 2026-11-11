@@ -70,6 +70,9 @@ class Books:
                       "min_severity": int((sp.get("pick") or {}).get("min_severity") or 1)}
                 if (sp.get("pick") or {}).get("same_as_main"):    # 2.56: the main account's alerts, only the exit differs
                     pc.update(kinds=main_cfg.get("kinds") or "all", min_severity=int(main_cfg.get("min_severity") or 2))
+                if (sp.get("pick") or {}).get("mirror_main"):     # 2.56.2: the main account's own trades decide; its
+                    pc.update(kinds="all", min_severity=1, max_open=99, max_trades_day=99,    # limits already applied
+                              max_daily_loss_pct=100, cooloff_min=0)
                 if sp.get("exit_style"):
                     from lab.exits import STYLES
                     if sp["exit_style"] not in STYLES:
@@ -139,20 +142,24 @@ class Books:
             return "day stop reached"
         return None
 
-    def consider(self, a: dict, state, now: dt.datetime) -> dict:
-        """Every account looks at a new alert. Returns {account: "taken" | reason}."""
+    def consider(self, a: dict, state, now: dt.datetime, main: dict | None = None) -> dict:
+        """Every account looks at a new alert. Returns {account: "taken" | reason}.
+        main: the trade the main account just opened for this alert ({"lots": n}), None if it took none (2.56.2)."""
         out = {}
         if a.get("direction") not in ("up", "down") or not a.get("option"):
             return out
         for bid, bk in list(self.books.items()):
             try:
                 sp = self.specs[bid]
+                mirror = bool((sp.get("pick") or {}).get("mirror_main"))
                 ds = self.day_state(bid, state, now) if (sp.get("day_target_pct") or sp.get("day_stop_pct")
                                                           or sp.get("compound")) else None
-                why = self.pick(bid, a, ds)
+                why = ("the main account did not take it" if not main else None) if mirror else self.pick(bid, a, ds)
                 if why is None:
-                    risk = self.risk_for(a, now, book=bk, capital=ds["start"] if ds else None) if self.risk_for else \
-                        ((a.get("data") or {}).get("risk") or {})
+                    risk = self.risk_for(a, now, book=bk, capital=ds["start"] if ds else None) if self.risk_for and not mirror \
+                        else ((a.get("data") or {}).get("risk") or {})
+                    if mirror:                                # 2.56.2: exactly the main account's trade, same lots
+                        risk = {**risk, "verdict": "PASS", "lots": int(main.get("lots") or 1)}
                     if (sp.get("pick") or {}).get("risk_pass") and risk.get("verdict") != "PASS":
                         why = "risk check: " + "; ".join((risk.get("reasons") or ["not PASS"])[:1])
                     elif sp.get("exit_style") and not ((a.get("data") or {}).get("plan_R") or {}).get(sp["exit_style"]):
