@@ -311,11 +311,13 @@ function alertItem(a, full = false, extra = "") {
 
 /* 2.61: the multiverse's verdict on an alert: how signals like it did on the recorded days, the best way to trade them */
 function mvLine(m) {
-  if (!m || !m.best) return "";
+  if (!m || (!m.best && !m.brain)) return "";
   const b = m.best, pc = (x) => x == null ? "–" : `<span class="${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : ""}${Number(x).toFixed(1)}%</span>`;
-  return `<p class="small mv-verdict" title="The multiverse replays every signal of the recorded days down every timeline; information only">🌌 <b>Multiverse</b> (${m.days} day${m.days > 1 ? "s" : ""}):
+  const br = m.brain ? `<br>🧠 <b>Brain</b>: expects ${pc(m.brain.expect)} on this one${m.brain.pct != null ? ` (better than ${m.brain.pct}% of signals)` : ""}
+    ${m.brain.trusted ? `<span class="pill p-up">trusted</span>` : `<span class="pill p-amber" title="Information only until its top 10% beat the rest on most days it never saw">on trial</span>`}` : "";
+  return `<p class="small mv-verdict" title="The multiverse replays every signal of the recorded days down every timeline; information only">${b ? `🌌 <b>Multiverse</b> (${m.days} day${m.days > 1 ? "s" : ""}):
     ${esc(b.like)}: ${pc(b.avg)} a trade × ${b.n}, lower bound ${pc(b.lcb)} ${m.proven ? `<span class="pill p-up">proven</span>` : `<span class="pill">not proven</span>`}
-    <br><span class="muted">Best way: ${esc(b.how)}${m.base ? ` · all ${esc(m.base.like)}: ${pc(m.base.avg)} × ${m.base.n}` : ""}</span></p>`;
+    <br><span class="muted">Best way: ${esc(b.how)}${m.base ? ` · all ${esc(m.base.like)}: ${pc(m.base.avg)} × ${m.base.n}` : ""}</span>` : ""}${br}</p>`;
 }
 
 /* The bigger picture (live/htf.py + results calendar): information only, not in the score until it proves itself */
@@ -2452,7 +2454,7 @@ async function drawEval(sym) {
   const verdict = v.lean === "up" ? `<b class="up">Calls have the proven edge now</b>` : v.lean === "down" ? `<b class="down">Puts have the proven edge now</b>`
     : `<b>No proven edge right now</b> <span class="muted small">wait for a proven signal</span>`;
   const line = (b, d) => !b ? "" : `<li>${d === "up" ? "▲ Calls" : "▼ Puts"}: signals like the latest ${pc(b.avg)} a trade × ${b.n}, lower bound ${pc(b.lcb)}<br><span class="muted">${esc(b.like)} · best way: ${esc(b.how)}</span></li>`;
-  const items = (v.items || []).slice(0, 5).map((x) => `<li>${hms(x.ts)} ${arrow(x.direction)} ${esc(x.title)}${x.mv && x.mv.best ? ` <span class="muted">· ${pc(x.mv.best.avg)} × ${x.mv.best.n}</span>` : ""}</li>`).join("");
+  const items = (v.items || []).slice(0, 5).map((x) => `<li>${hms(x.ts)} ${arrow(x.direction)} ${esc(x.title)}${x.mv && x.mv.best ? ` <span class="muted">· ${pc(x.mv.best.avg)} × ${x.mv.best.n}</span>` : ""}${x.mv && x.mv.brain ? ` <span class="muted">· 🧠 ${pc(x.mv.brain.expect)}</span>` : ""}</li>`).join("");
   el.innerHTML = `<h3>Engine eval <span class="pill p-amber">new</span> <span class="muted small">the multiverse on ${esc(sym)}'s last ${v.minutes} min of signals</span></h3>
     ${bar}<p class="small" style="margin:6px 0">${verdict}</p>
     ${up || dn ? `<ul class="small mv-list">${line(up, "up")}${line(dn, "down")}</ul>` : `<p class="small muted">No directional signal on ${esc(sym)} in the last ${v.minutes} minutes.</p>`}
@@ -3640,6 +3642,8 @@ async function drawMultiverse() {
       ${walk ? `<h4>Walk-forward: each day picked only from the days before it</h4><ul class="small mv-list">${walk}</ul>` : `<p class="small muted">Walk-forward starts once there are 3 recorded days.</p>`}
       <h4>Best timelines so far <span class="muted small">ranked by the lower bound (days, not signals, are the proof)</span></h4>
       <ol class="small mv-list">${best}</ol>
+      ${m.brain && m.brain.walk ? `<h4>🧠 Brain (learned model, ${nf(m.brain.rows)} signals, ${m.brain.features} facts) <span class="muted small">${m.brain.trusted ? "trusted" : "on trial"}</span></h4>
+        <ul class="small mv-list">${m.brain.walk.map((w) => `<li><b>${esc(w.day)}</b> (never seen): its top 10% ${pc(w.top_avg)} × ${w.top_n} vs all signals ${pc(w.all_avg)} × ${nf(w.n)}${w.auc != null ? ` · ranking AUC ${w.auc}` : ""}</li>`).join("") || `<li class="muted">${esc(m.brain.note || "Needs 3 recorded days.")}</li>`}</ul>` : ""}
       <h4>Best by day type</h4><ul class="small">${reg}</ul>
       <h4>Trading now on paper ("Multiverse pick" account)</h4>${picks ? `<ol class="small">${picks}</ol>` : `<p class="small muted">Nothing proven yet: the account takes no trade until a timeline's lower bound is above zero.</p>`}
       <p class="note">The main account's way here: its alert types and exit (${ch.avg != null ? `${pc(ch.avg)} a trade over ${nf(ch.n)}, won ${ch.win}%` : "–"}), without its risk check and limits.

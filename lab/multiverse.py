@@ -547,6 +547,10 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
                 champ_ei = i
     walk = []
     port = int(c.get("portfolio", 5))
+    bcfg = c.get("brain") or {}                            # 2.63: what the brain learns from (one fixed way to trade)
+    bx = bcfg.get("exit") or [30, 20, 60]
+    b_ei = next((i for i, x in enumerate(exits) if x[0] == "tsh" and x[1] == bx[0] and x[3] == bx[1] and x[4] == bx[2]), None)
+    brain_days = []
     for day in days:
         if should_stop():
             break
@@ -565,6 +569,9 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
             s1, s2, w, n = day_sums(F, X, valid)
             today[ck] = (s1, n)
             accs[ck].add(s1, s2, w, n)
+            if b_ei is not None and ck[0] == "atm" and ck[2] == 0:
+                brain_days.append({"day": day, "facts": D["facts"], "kinds": D["kinds"], "regime": list(D["regime"]),
+                                   "y": X[:, b_ei].astype(float), "valid": valid.copy()})
             ls1, ls2, lw, ln = day_sums(F, X[perm], valid[perm])     # the luck line: results no longer tied to facts
             luck[ck].add(ls1, ls2, lw, ln)
         if picks:
@@ -672,6 +679,12 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
                              f"{'at once' if ck[2] == 0 else f'{ck[2]} min later'}, exit {exit_words(exits[ei])}",
                       "n": st_["n"], "avg": st_["avg"], "lcb": st_["lcb"], "win": st_["win"], "days": st_["days"]})
     res["table"] = table
+    if bcfg.get("on", True) and brain_days:                # 2.63: the learned model, judged on unseen days
+        try:
+            from . import mvbrain
+            res["brain"] = mvbrain.learn(brain_days, data_dir, c, log=log)
+        except Exception as e:
+            res["brain"] = {"error": str(e)[:160]}
     res["seconds"] = round(time.time() - t_start, 1)
     _save(data_dir, res)
     log(f"Multiverse: {n_timelines:,} timelines judged in {res['seconds']}s; best lower bound "
