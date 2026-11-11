@@ -305,8 +305,17 @@ function alertItem(a, full = false, extra = "") {
     <div class="al-body"><div class="al-title">${arrow(a.direction)} <a href="${a.sym === "GLOBAL" ? "#/world" : `#/chart?s=${encodeURIComponent(a.sym)}`}">${esc(a.title)}</a></div>
       <p>${esc(a.detail)}${link} <span class="muted small">${esc(KIND[a.kind] || a.kind)}</span> ${track}</p>${live ? `<p class="small" style="margin:2px 0 6px">${live}</p>` : ""}
       ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}${bigLine(d.bigger)}${eventLine(d.event_risk)}
-      ${ev || ctxChips || conv || fits ? `<div class="evs">${conv}${fits}${ev}${ctxChips}</div>` : ""}${plan}${pro}${trade}${riskLine(d.risk)}
+      ${ev || ctxChips || conv || fits ? `<div class="evs">${conv}${fits}${ev}${ctxChips}</div>` : ""}${plan}${pro}${mvLine(d.mv)}${trade}${riskLine(d.risk)}
       ${a.ai ? `<div class="ai-text">${fmtAI(a.ai)}</div>` : ""}${extra}</div></li>`;
+}
+
+/* 2.61: the multiverse's verdict on an alert: how signals like it did on the recorded days, the best way to trade them */
+function mvLine(m) {
+  if (!m || !m.best) return "";
+  const b = m.best, pc = (x) => x == null ? "–" : `<span class="${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : ""}${Number(x).toFixed(1)}%</span>`;
+  return `<p class="small mv-verdict" title="The multiverse replays every signal of the recorded days down every timeline; information only">🌌 <b>Multiverse</b> (${m.days} day${m.days > 1 ? "s" : ""}):
+    ${esc(b.like)}: ${pc(b.avg)} a trade × ${b.n}, lower bound ${pc(b.lcb)} ${m.proven ? `<span class="pill p-up">proven</span>` : `<span class="pill">not proven</span>`}
+    <br><span class="muted">Best way: ${esc(b.how)}${m.base ? ` · all ${esc(m.base.like)}: ${pc(m.base.avg)} × ${m.base.n}` : ""}</span></p>`;
 }
 
 /* The bigger picture (live/htf.py + results calendar): information only, not in the score until it proves itself */
@@ -1863,7 +1872,7 @@ async function pageChart() {
       <span class="btn-row" style="margin:0"><button class="btn buy" id="ch-buy" title="Paper: buy the at-the-money call, 1 lot">Paper BUY</button><button class="btn sell" id="ch-sell" title="Paper: buy the at-the-money put, 1 lot">Paper SELL</button></span>
     </div>
     <div class="ch-wrap"><div id="ch-chart" class="ch-chart"></div>
-      <aside class="ch-side"><div class="panel tight" id="ch-smart-wrap"><h3>Smart lines <span class="pill p-amber">new</span> <span class="muted small">drawn by the app</span></h3><div id="ch-smart"><p class="muted small">Loading…</p></div></div>
+      <aside class="ch-side"><div class="panel tight" id="ch-eval"></div><div class="panel tight" id="ch-smart-wrap"><h3>Smart lines <span class="pill p-amber">new</span> <span class="muted small">drawn by the app</span></h3><div id="ch-smart"><p class="muted small">Loading…</p></div></div>
         <div class="panel tight"><h3>Trade signals <span class="muted small">BUY / SELL marks on the chart</span></h3><div id="ch-sigs"><p class="muted small">Focus alerts on this symbol show here.</p></div></div>
         <div class="panel tight"><h3>All timeframes read <span class="muted small">5m → daily</span></h3><div id="ch-mtfread"><p class="muted small">Loading…</p></div></div>
         <div class="panel tight"><h3>Candles on every timeframe <span class="muted small">on trial</span></h3><div id="ch-cdl"><p class="muted small">Loading…</p></div></div>
@@ -2424,6 +2433,29 @@ function drawChart(d, first) {
   const spot = d.spot;
   $("#ch-levels").innerHTML = `<ul class="plain lv">${d.levels.slice().sort((a, b) => b.price - a.price).map((l) => `<li class="${l.price > spot ? "abv" : "blw"}"><span><i style="background:${l.color}"></i>${esc(l.name)}</span><b>${fx(l.price)}</b><small>${((l.price / spot - 1) * 100).toFixed(2)}%</small></li>`).join("")}</ul>`;
   const sm = $("#ch-smart"); if (sm) sm.innerHTML = smartPanel(d.smart, spot);
+  if (!CH.evalAt || Date.now() - CH.evalAt > 20000 || CH.evalSym !== d.sym) { CH.evalAt = Date.now(); CH.evalSym = d.sym; drawEval(d.sym); }
+}
+
+/* 2.61 engine evaluation (chess-engine style): this symbol's alerts of the last 45 minutes, each with what the multiverse
+   says about signals like it, and the side that is proven right now. Information only. */
+async function drawEval(sym) {
+  const el = $("#ch-eval"); if (!el) return;
+  let v; try { v = await api(`/api/live/eval/${encodeURIComponent(sym)}`); } catch (_) { return; }
+  if (state.page !== "chart" || CH.sym !== sym) return;
+  const pc = (x) => x == null ? "–" : `<span class="${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : ""}${Number(x).toFixed(1)}%</span>`;
+  const up = (v.side || {}).up, dn = (v.side || {}).down;
+  const score = (b) => b && b.lcb != null ? Math.max(-1, Math.min(1, b.lcb / 10)) : 0;
+  const lean = Math.max(-1, Math.min(1, score(up) - score(dn)));
+  const bar = `<div class="ev-bar" title="Left: puts proven · right: calls proven · middle: nothing proven"><span style="left:${50 + lean * 50}%"></span></div>`;
+  const verdict = v.lean === "up" ? `<b class="up">Calls have the proven edge now</b>` : v.lean === "down" ? `<b class="down">Puts have the proven edge now</b>`
+    : `<b>No proven edge right now</b> <span class="muted small">wait for a proven signal</span>`;
+  const line = (b, d) => !b ? "" : `<li>${d === "up" ? "▲ Calls" : "▼ Puts"}: signals like the latest ${pc(b.avg)} a trade × ${b.n}, lower bound ${pc(b.lcb)}<br><span class="muted">${esc(b.like)} · best way: ${esc(b.how)}</span></li>`;
+  const items = (v.items || []).slice(0, 5).map((x) => `<li>${hms(x.ts)} ${arrow(x.direction)} ${esc(x.title)}${x.mv && x.mv.best ? ` <span class="muted">· ${pc(x.mv.best.avg)} × ${x.mv.best.n}</span>` : ""}</li>`).join("");
+  el.innerHTML = `<h3>Engine eval <span class="pill p-amber">new</span> <span class="muted small">the multiverse on ${esc(sym)}'s last ${v.minutes} min of signals</span></h3>
+    ${bar}<p class="small" style="margin:6px 0">${verdict}</p>
+    ${up || dn ? `<ul class="small mv-list">${line(up, "up")}${line(dn, "down")}</ul>` : `<p class="small muted">No directional signal on ${esc(sym)} in the last ${v.minutes} minutes.</p>`}
+    ${items ? `<details class="lab-adv"><summary class="small">Signals behind it</summary><ul class="small plain">${items}</ul></details>` : ""}
+    <p class="note" style="margin-top:6px">From the recorded days the multiverse has replayed; a lower bound above zero is the proof, the average alone is not. Information only.</p>`;
 }
 
 /* 2.54: smart lines (live/linesmith.py): the lines that matter, each with what it usually does in the situation now,

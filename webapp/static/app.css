@@ -807,3 +807,7 @@ details.lab-adv > summary { cursor: pointer; padding: 10px 0; }
 .mv-list { padding-left: 20px; }
 .mv-list li { padding: 5px 0; border-top: 1px solid var(--rule-soft); overflow-wrap: anywhere; }
 .mv-list li:first-child { border-top: 0; }
+/* 2.61 engine eval bar: left = puts proven, right = calls proven, middle = nothing proven */
+.ev-bar { position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--down, #C23B32) 0%, var(--rule-soft, #e5e7eb) 50%, var(--up, #1E8A5A) 100%); margin: 6px 0; }
+.ev-bar span { position: absolute; top: -4px; width: 4px; height: 18px; margin-left: -2px; border-radius: 2px; background: var(--ink, #111); }
+.mv-verdict { margin: 4px 0 6px; overflow-wrap: anywhere; }

@@ -179,3 +179,44 @@ def test_job_and_self_check():
     chk = {c["id"]: c for c in selfcheck.static_checks()} if hasattr(selfcheck, "static_checks") else None
     if chk is not None:
         assert chk["multiverse"]["ok"]
+
+
+def test_verdict_tells_an_alert_how_signals_like_it_did(tmp_path):
+    """2.61: the verdict table: every filter's best way and record; a live alert gets the best proven match."""
+    rng = np.random.default_rng(5)
+
+    def spec(day, i):
+        if i % 4 == 0:
+            return "volume_surge", {"rel_vol": 5.0, "mins": 45}, _ramp(40)
+        return "sharp_move", {"rel_vol": 1.0, "mins": 45}, _ramp(float(rng.normal(0, 15)))
+    data = _universe(tmp_path, spec)
+    r = MV.run(data, log=lambda m: None, days=DAYS)
+    assert r["table"] and all(t["lcb"] is not None for t in r["table"])
+    v = MV.verdict(data, "volume_surge", {"rel_vol": 5.0, "mins": 45, "dir": 1.0})
+    assert v["proven"] and v["best"]["lcb"] > 30 and ("Volume surge" in v["best"]["like"] or "volume" in v["best"]["like"]) and v["days"] == 4
+    assert v["base"] and v["base"]["n"] >= v["best"]["n"] * 0 and "buy" in v["best"]["how"]
+    w = MV.verdict(data, "sharp_move", {"rel_vol": 1.0, "mins": 45, "dir": 1.0})
+    assert w is None or w["best"]["lcb"] < v["best"]["lcb"]
+    from live.notify import telegram_text
+    a = {"direction": "up", "severity": 2, "title": "t", "detail": "d", "ts": 1794200000, "option": None, "data": {"mv": v}}
+    assert "Multiverse:" in telegram_text(a)
+
+
+def test_engine_verdict_uses_the_bench_facts(tmp_path, monkeypatch):
+    from live.engine import LiveEngine
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "multiverse.json").write_text(json.dumps({"days": DAYS, "table": [
+        {"f": {"kind": "orb", "single": {"name": "volume 2x+", "fact": "rel_vol", "op": ">", "v": 2}}, "strike": "atm", "delay": 0,
+         "exit": ["tsh", 30, None, 20, 60], "how": "buy at-the-money option, at once, exit +30% / −20%", "n": 50, "avg": 6.0,
+         "lcb": 1.5, "win": 60, "days": 4},
+        {"f": {"kind": "orb"}, "strike": "atm", "delay": 0, "exit": ["tsh", 30, None, 20, 60], "how": "x", "n": 200, "avg": -1.0,
+         "lcb": -3.0, "win": 40, "days": 4}]}))
+    e = LiveEngine.__new__(LiveEngine)
+    e.data_dir = data
+    e.signal_facts = lambda sym, d, now: {"rel_vol": 3.0}
+    v = e._mv_verdict({"sym": "X", "kind": "orb", "direction": "up", "severity": 2, "data": {}}, None)
+    assert v["proven"] and v["best"]["avg"] == 6.0 and v["base"]["avg"] == -1.0
+    e.signal_facts = lambda sym, d, now: {"rel_vol": 1.0}
+    v2 = e._mv_verdict({"sym": "X", "kind": "orb", "direction": "up", "severity": 2, "data": {}}, None)
+    assert not v2["proven"] and v2["best"]["avg"] == -1.0

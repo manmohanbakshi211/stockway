@@ -114,6 +114,19 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Engine eval: the multiverse's verdict on every alert, and on the chart (2.61)
+
+Mandeep, 11 Nov 2026: "sab kuch dekh kar best evaluation line bhi ban rahi hai" (like a chess engine's evaluation).
+
+- Every multiverse run now saves a verdict table: for each filter (alert type × fact), its best way to trade it (strike,
+  entry time, exit) and its record on the recorded days (`lab/multiverse.py` `verdict`).
+- **Every directional alert** carries the verdict for signals like it (the same facts the test bench records):
+  "🌌 Multiverse (3 days): Volume surge signals, with Nifty: +4.2% a trade × 92, lower bound +1.1% · proven · best way:
+  buy 1 OTM at once, exit +30% / −20%, 60 min · all Volume surge signals: +1.2% × 410". Also in Telegram.
+- **Chart → Engine eval** (above Smart lines): the symbol's last 45 minutes of signals with their verdicts, a bar that
+  leans to calls or puts only when that side's lower bound is above zero, and the best way to trade it
+  (`/api/live/eval/{sym}`). Information only: it changes no alert, Focus, risk check or paper rule.
+
 ## Mass search: every fact alone and paired, all at once, on the Lab's years of data (2.60)
 
 Mandeep, 11 Nov 2026: "1000 magzine ... saari mag khali karke best bullet ka pata laga le" and "prove you best".

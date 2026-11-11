@@ -74,6 +74,10 @@ def telegram_text(a: dict) -> str:
     o = a.get("option")
     if o:
         t += f"\nIdea: {html.escape(o['label'])} @ ₹{o['ltp']:.2f} (lot {o['lot']})"
+    mv = ((a.get("data") or {}).get("mv") or {}).get("best")
+    if mv and mv.get("avg") is not None:                 # 2.61: the multiverse's verdict on signals like this one
+        t += (f"\nMultiverse: {html.escape(mv['like'])}: {mv['avg']:+.1f}% a trade × {mv['n']} "
+              f"(lower bound {mv['lcb']:+.1f}%); best way: {html.escape(mv['how'])}")
     t += f"\n<i>{dt.datetime.fromtimestamp(a['ts'], IST):%H:%M:%S}</i>"
     return t
 

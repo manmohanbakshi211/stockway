@@ -651,6 +651,27 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
                           keep=lambda ck, fi: ck[2] == 0 and ck[0] in live_strikes and not defs[fi].get("champion")),
                    int(c.get("live_picks", 5)), by_filter=True)
     res["live_picks"] = [{**describe(ck, fi, ei), **stats(accs[ck], fi, ei)} for lcb, ck, fi, ei, _m in lp if lcb > 0]
+    # 2.61 the verdict table: for every filter, its best way (strike, entry time, exit) and record, so a live alert can be
+    # told "signals like this one did X" (live/engine.py _mv_verdict; information only)
+    table = []
+    best_fi = {}
+    for ck, acc in accs.items():
+        lcb, mean = lcb_table(acc, z, min_n, min_days)
+        e_best = np.argmax(lcb, axis=1)
+        v_best = lcb[np.arange(lcb.shape[0]), e_best]
+        for fi in np.nonzero(np.isfinite(v_best))[0]:
+            if defs[fi].get("champion"):
+                continue
+            if fi not in best_fi or v_best[fi] > best_fi[fi][0]:
+                best_fi[fi] = (float(v_best[fi]), ck, int(e_best[fi]))
+    for fi, (lv, ck, ei) in best_fi.items():
+        d_ = describe(ck, fi, ei)
+        st_ = stats(accs[ck], fi, ei)
+        table.append({"f": d_["filter"], "strike": d_["strike"], "delay": d_["delay"], "exit": d_["exit"],
+                      "how": f"buy {c['strike_words'].get(ck[0], ck[0]).replace('the ', '', 1)}, "
+                             f"{'at once' if ck[2] == 0 else f'{ck[2]} min later'}, exit {exit_words(exits[ei])}",
+                      "n": st_["n"], "avg": st_["avg"], "lcb": st_["lcb"], "win": st_["win"], "days": st_["days"]})
+    res["table"] = table
     res["seconds"] = round(time.time() - t_start, 1)
     _save(data_dir, res)
     log(f"Multiverse: {n_timelines:,} timelines judged in {res['seconds']}s; best lower bound "
@@ -718,3 +739,39 @@ def matches(fdef: dict, kind: str, facts: dict) -> bool:
     if not isinstance(x, (int, float)) or x is None or not math.isfinite(float(x)):
         return False
     return float(x) > float(sp["v"]) if sp["op"] == ">" else float(x) < float(sp["v"])
+
+
+_VT: dict = {}
+
+
+def verdict(data_dir, kind, facts: dict) -> dict | None:
+    """2.61: what the multiverse says about a live signal like this one: the best-proven filter it matches (its way to
+    trade it and its record on the recorded days) and the record of its alert type as a whole. Information only."""
+    p = Path(data_dir) / OUT_NAME
+    try:
+        mt = p.stat().st_mtime
+    except OSError:
+        return None
+    if _VT.get("mt") != mt or _VT.get("p") != str(p):
+        try:
+            r = json.loads(p.read_text())
+            _VT.update(mt=mt, p=str(p), table=r.get("table") or [], days=len(r.get("days") or []))
+        except Exception:
+            _VT.update(mt=mt, p=str(p), table=[], days=0)
+    table = _VT.get("table") or []
+    if not table:
+        return None
+    kinds = kind if isinstance(kind, (list, tuple, set)) else [kind]
+    hits = [t for t in table if matches(t["f"], kinds, facts) and t.get("lcb") is not None]
+    if not hits:
+        return None
+    best = max(hits, key=lambda t: t["lcb"])
+    base = next((t for t in table if (t["f"].get("kind") in kinds) and not t["f"].get("single")), None) or \
+        next((t for t in table if not t["f"].get("kind") and not t["f"].get("single") and not t["f"].get("champion")), None)
+    word = lambda t: (f"{kind_label(t['f']['kind'])} signals" if t["f"].get("kind") else "all signals") + \
+        (f", {t['f']['single']['name']}" if t["f"].get("single") else "")
+    return {"days": _VT.get("days"), "n_match": len(hits),
+            "best": {"like": word(best), "how": best["how"], "n": best["n"], "avg": best["avg"], "lcb": best["lcb"],
+                     "win": best.get("win"), "strike": best["strike"], "delay": best["delay"]},
+            "base": {"like": word(base), "n": base["n"], "avg": base["avg"], "lcb": base["lcb"]} if base else None,
+            "proven": bool(best["lcb"] > 0)}
