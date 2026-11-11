@@ -114,6 +114,15 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.66.1: Mac lag fixes (11 Nov 2026)
+
+- Live metrics read the per-instrument tick and bar lists while the feed thread adds to them: "Metrics failed ...
+  deque mutated during iteration" 15 times on 11 Nov (that stock's numbers skipped for that minute). They now read a
+  copy. Same numbers.
+- Evening Lab jobs (journeys, multiverse, mass search, Lab rounds, day type) run in macOS background mode as well as
+  nice 10: efficiency cores, throttled disk. Last night's round ran 16:15 to 01:05; the Mac stays usable while it
+  runs. Same results, slower only when the Mac is busy.
+
 ## Day-type forecaster: trend, range or quiet day, from the 09:45 facts (2.66)
 
 `lab/daytype.py` learns from the Lab's bar tables (1-year and 5-year) how the first 30 minutes look on days that end

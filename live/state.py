@@ -28,7 +28,7 @@ class Inst:
     def flow_window(self, minutes: int, now_minute: int):
         b = s = 0.0
         n = 0
-        for m, bv, sv, k in self.flow:
+        for m, bv, sv, k in tuple(self.flow):         # 2.66.1: a copy (the feed thread appends meanwhile)
             if m > now_minute - minutes * 60:
                 b += bv
                 s += sv
@@ -37,10 +37,10 @@ class Inst:
 
     def ago(self, minutes: int):
         """Snapshot from about `minutes` ago (or the oldest available)."""
-        if not self.hist:
+        h = tuple(self.hist)                          # 2.66.1: one consistent copy
+        if not h:
             return None
-        idx = max(0, len(self.hist) - 1 - minutes)
-        return self.hist[idx]
+        return h[max(0, len(h) - 1 - minutes)]
 
 
 class Bars:
@@ -66,7 +66,7 @@ class Bars:
             self.bars.append([minute, px, px, px, px, dv])
 
     def closes(self, n=None):
-        xs = [b[4] for b in self.bars]
+        xs = [b[4] for b in tuple(self.bars)]
         return xs[-n:] if n else xs
 
 

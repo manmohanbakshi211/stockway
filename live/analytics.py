@@ -56,7 +56,7 @@ def max_pain(chain: dict) -> float | None:
 def opening_range(bars, day: dt.date, tz) -> tuple:
     start = dt.datetime.combine(day, OPEN, tz).timestamp()
     end = start + 15 * 60
-    rng = [b for b in bars.bars if start <= b[0] < end] if bars else []
+    rng = [b for b in tuple(bars.bars) if start <= b[0] < end] if bars else []
     if not rng:
         return None, None
     return max(b[2] for b in rng), min(b[3] for b in rng)
