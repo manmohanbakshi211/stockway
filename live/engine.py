@@ -505,6 +505,7 @@ class LiveEngine:
         """2.52: the Upstox feed inside the feed router (live/feeds.py). Kite is the backup and the cross-check; without
         Kite keys or today's Kite login the router is the Upstox feed exactly as before."""
         from .feeds import FeedRouter
+        from .upstox import UpstoxFeed                # 2.56.1: was only imported inside _run, so the router crashed
         up = UpstoxFeed(tok["access_token"], self._on_ticks, self._feed_status)
         return FeedRouter(up, self._on_ticks, self.log, backup_factory=self._kite_backup,
                           state_get=lambda k: self.state.get(k) if self.state is not None else None,
