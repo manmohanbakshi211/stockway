@@ -62,7 +62,7 @@ class ChartData:
 
     def today_bars(self, sym):
         b = self.e.state.bars.get(sym) if self.e.state else None
-        rows = [list(x) for x in b.bars] if b else []
+        rows = [list(x) for x in tuple(b.bars)] if b else []
         extra = self.today_fill.get(sym) or []
         if extra:
             have = {r[0] for r in rows}

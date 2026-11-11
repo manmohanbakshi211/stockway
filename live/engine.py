@@ -1407,7 +1407,7 @@ class LiveEngine:
         if self.recorder is None or self.state is None:
             return
         with self.state.lock:
-            snap = {s: [list(x) for x in b.bars] for s, b in self.state.bars.items() if b.bars}
+            snap = {s: [list(x) for x in tuple(b.bars)] for s, b in list(self.state.bars.items()) if b.bars}
         if snap:
             self.recorder.bars(snap)
 
@@ -2820,7 +2820,7 @@ class LiveEngine:
                 "levels": {"up": levels(m, "up", self.state), "down": levels(m, "down", self.state)},
                 "daily": {k: v for k, v in (self.daily.get(sym) or {}).items() if k != "iv_hist"},
                 "prints": prints, "sector": self.context.sector_of(sym),
-                "bars": [b[:6] for b in bars.bars] if bars else [],
+                "bars": [b[:6] for b in tuple(bars.bars)] if bars else [],
                 "alerts": [a for a in self.alerts_mem if a["sym"] == sym][:30],
                 "filings": [f for f in self.context.filings if f["sym"] == sym][:10],
                 "news": [n for n in self.news.items if sym in n["syms"]][:10]}

@@ -3,7 +3,8 @@
 A Lab round (thousands of rules scored on a 200 MB bar table) and the model-based strategies keep a CPU busy for
 minutes to hours. Run inside the app's own process they compete with every screen for Python's single interpreter
 lock, so pages crawl in the evening and at night while the nightly Lab runs. Here the same code runs in a child
-process at lower priority (nice 10): the same results, and the app stays quick.
+process at lower priority (nice 10; on a Mac also macOS background mode, 2.66.1): the same results, and the app
+and the Mac stay quick.
 
 - One run per Lab folder at a time still holds: the parent keeps lab.factory's per-folder lock while the child works.
 - Log lines stream back to the caller's log; Stop asks the child to finish cleanly (SIGTERM -> its should_stop), and
@@ -101,10 +102,23 @@ def run(job: str, data_dir, log=print, should_stop=lambda: False, child: bool = 
             lk.release()
 
 
+def lower_priority(nice: int = NICE):
+    """Runs in the child before the job starts. nice 10 everywhere; on a Mac also macOS background mode (2.66.1):
+    efficiency cores, throttled disk and network, so a long Lab evening no longer makes the whole Mac lag.
+    Same results, only slower when the Mac is busy."""
+    if nice and hasattr(os, "nice"):
+        os.nice(nice)
+    if sys.platform == "darwin" and hasattr(os, "setpriority"):
+        try:
+            os.setpriority(getattr(os, "PRIO_DARWIN_PROCESS", 4), 0, getattr(os, "PRIO_DARWIN_BG", 0x1000))
+        except Exception:
+            pass
+
+
 def _child(job, data_dir, log, should_stop, nice, kw):
     spec = json.dumps({"job": job, "data_dir": str(data_dir), "kw": kw}, default=str)
     env = {**os.environ, "PYTHONWARNINGS": "ignore", "PYTHONUNBUFFERED": "1"}
-    pre = (lambda: os.nice(nice)) if (nice and hasattr(os, "nice")) else None
+    pre = (lambda: lower_priority(nice)) if nice else None
     try:
         p = subprocess.Popen([sys.executable, "-u", "-m", "lab.proc", spec], cwd=str(ROOT), env=env, stdin=subprocess.DEVNULL,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, preexec_fn=pre)
