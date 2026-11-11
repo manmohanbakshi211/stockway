@@ -46,6 +46,17 @@ def cfg() -> dict:
     return json.loads(CFG_FILE.read_text())
 
 
+def with_ideas(c: dict, data_dir) -> dict:
+    """2.65: the filters the evening AI analyst proposed (data/multiverse_ideas.json) join the configured ones, on trial."""
+    try:
+        extra = json.loads((Path(data_dir) / "multiverse_ideas.json").read_text()).get("singles") or []
+    except Exception:
+        extra = []
+    names = {s.get("name") for s in c.get("singles") or []}
+    add = [{k: x[k] for k in ("name", "fact", "op", "v") if k in x} for x in extra if x.get("name") not in names]
+    return {**c, "singles": list(c.get("singles") or []) + add} if add else c
+
+
 # ------------------------------------------------------------------ exits (the exit magazine)
 def exit_specs(c: dict | None = None) -> list:
     """[(kind, a, b, stop, hold)]: ("tsh", target, None, stop, hold) or ("trail", start, keep, stop, hold). None = off."""
@@ -486,7 +497,7 @@ def top_of(accs: dict, z, min_n, min_days, k=1, keep=None):
 def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None, c: dict | None = None) -> dict:
     t_start = time.time()
     data_dir = Path(data_dir)
-    c = c or cfg()
+    c = with_ideas(c or cfg(), data_dir)
     source = c.get("source") or "upstox"
     days = days or days_available(data_dir, source)
     errors: dict = {}

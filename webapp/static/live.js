@@ -3629,6 +3629,21 @@ function coachBox(c) {
 
 /* ---------------- page: Strategy board (2.30) */
 const REGIMES = [["auto", "Today's day type"], ["all", "All days"], ["trend_up", "Trend up"], ["trend_down", "Trend down"], ["range", "Range"], ["quiet", "Quiet range"], ["volatile", "Volatile"]];
+/* 2.65: the evening AI analyst (live/analyst.py): what worked, what failed, what looks broken, ideas on trial */
+async function drawAnalyst() {
+  const el = $("#bd-analyst"); if (!el) return;
+  let a; try { a = await api("/api/analyst"); } catch (_) { return; }
+  if (state.page !== "board") return;
+  const r = a.report;
+  const li = (xs, ic) => (xs || []).map((x) => `<li>${ic} ${esc(x)}</li>`).join("");
+  el.innerHTML = `<div class="toolbar" style="margin:0"><h3 style="margin:0">Evening AI analyst <span class="muted small">${a.day ? esc(a.day) : ""} · reads the whole day after the close (deep model)</span></h3>
+      <button class="btn" id="an-run" title="Read today now (uses one deep AI call)">Run now</button></div>
+    ${r ? `<ul class="small mv-list">${li(r.worked, "✅")}${li(r.failed, "❌")}${li(r.bugs, "🐞")}</ul>
+      ${(r.ideas || []).length ? `<p class="small"><b>Ideas on trial in the multiverse:</b> ${r.ideas.map((x) => `${esc(x.name)} <span class="muted">(${esc(x.fact)} ${esc(x.op)} ${x.v}: ${esc(x.why)})</span>`).join(" · ")}</p>` : ""}
+      ${r.tomorrow ? `<p class="small">➡️ <b>Tomorrow:</b> ${esc(r.tomorrow)}</p>` : ""}` : `<p class="small muted">${esc(a.note || "No report yet.")}</p>`}`;
+  const b = $("#an-run"); if (b) b.onclick = async () => { b.disabled = true; try { await post("/api/analyst/run", {}); toast("The analyst is reading the day: this panel updates in a minute or two"); setTimeout(drawAnalyst, 60000); } catch (e) { toast(e.message); b.disabled = false; } };
+}
+
 /* 2.58: the multiverse (lab/multiverse.py): every bench signal down every timeline at once, judged walk-forward */
 async function drawMultiverse() {
   const el = $("#bd-mv"); if (!el) return;
@@ -3734,6 +3749,7 @@ async function pageBoard() {
     ${accountsPanel(acc)}
     <div class="panel tight"><h3>Best for you right now <span class="muted small">fits ${rupees(b.capital)}, positive after costs, enough trades</span></h3>
       ${best ? `<ol class="small">${best}</ol>` : `<p class="small muted">Nothing has earned it yet: ${b.n_closed.toLocaleString("en-IN")} bench trades closed so far${b.n_open ? `, ${b.n_open} open` : ""}. A strategy needs at least ${b.min_n} closed trades and a positive average after its uncertainty. The record grows every market day.</p>`}</div>
+    <div class="panel tight" id="bd-analyst"></div>
     <div class="panel tight" id="bd-mv"></div>
     <div class="panel tight" id="bd-paths"></div>
     <div class="toolbar"><div class="chips" role="group" aria-label="Way of trading">${famChips}</div></div>
@@ -3748,6 +3764,7 @@ async function pageBoard() {
       <div class="table-wrap"><table><thead><tr><th>Candle pattern</th><th class="r">All days</th>${keyed ? `<th class="r">This day type</th>` : ""}<th class="r">Today</th><th class="r">1 lot needs</th><th class="r">Rank</th></tr></thead><tbody>${cdlTr}</tbody></table></div></details>` : ""}
     <p class="note">${esc(b.note)} Last ${b.days} days.</p>`;
   bindCapitalBox(() => pageBoard());
+  drawAnalyst();
   drawMultiverse();
   drawJourneys();
   main.querySelectorAll("tr[data-bk]").forEach((row) => row.onclick = async () => {      // 2.38: every trade with its date and time

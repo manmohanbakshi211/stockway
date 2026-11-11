@@ -2359,6 +2359,12 @@ class LiveEngine:
             proc.run("multiverse", self.data_dir, log=lambda m: self.log(m))
         except Exception as e:
             self.log(f"Multiverse failed: {e}")
+        try:                                             # 2.65: then the evening AI analyst reads the whole day
+            if (self.cfg().get("ai") or {}).get("analyst", True):
+                from .analyst import run as _analyst
+                _analyst(self, self.data_dir, log=self.log)
+        except Exception as e:
+            self.log(f"Evening analyst failed: {e}")
 
     def _nightly_lab(self):
         """Every evening: fetch new expiries (if logged in), switch off rules losing money live, ask Claude for a few

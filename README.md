@@ -114,6 +114,16 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Evening AI analyst (2.65)
+
+After the close (after the trade journeys and the multiverse), `live/analyst.py` collects the day on one page (paper
+accounts, alerts by type, the multiverse's best / walk-forward / brain, the mass search, the news radar's scores, the
+day's error lines from the app log, failed self-checks) and asks the deep AI tier (Opus) for: what worked, what failed,
+what looks broken (with the log line or number), up to 5 new filters to test, and one line for tomorrow. Its filters
+go to data/multiverse_ideas.json and the next multiverse run tests them on days they never saw (on trial; nothing
+trades them by being proposed). Report: Strategy board → Evening AI analyst (Run now too), data/analyst/<day>.json and
+Telegram when set. Setting `ai.analyst` (on). Only the app's own numbers and log lines are sent.
+
 ## News radar: the fast AI reads every headline (2.64)
 
 Until now a headline's direction came only from keywords ("rise" good, "fall" bad) and its stocks only from name

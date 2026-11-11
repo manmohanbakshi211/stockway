@@ -843,6 +843,23 @@ def multiverse_run():
     return {"id": JOBS.start("multiverse", "Multiverse: every signal down every timeline", job)["id"]}
 
 
+# ---- 2.65 evening AI analyst (live/analyst.py)
+@app.get("/api/analyst")
+def analyst_latest():
+    from live import analyst
+    return clean(analyst.latest(ROOT / "data"))
+
+
+@app.post("/api/analyst/run")
+def analyst_run():
+    from live import analyst
+    from webapp.live_api import engine as _eng
+
+    def job(log, stop):
+        analyst.run(_eng(), ROOT / "data", log=log)
+    return {"id": JOBS.start("analyst", "Evening AI analyst: reading the day", job)["id"]}
+
+
 # ---- 2.60 mass search (lab/mass.py): every single / paired condition x window x exit, walk-forward by month
 def _mass_dir(lab: str):
     return ROOT / "data" / "lab5y" if lab == "5y" else ROOT / "data"
