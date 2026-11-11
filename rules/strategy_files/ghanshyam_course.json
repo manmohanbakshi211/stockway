@@ -1,105 +1,848 @@
 {
-  "stockway_pack": 1,
-  "id": "ghanshyam_course",
-  "name": "Ghanshyam option-buying course (2022): hammer / star, 2:20 candle, Fibonacci 0.71, breakouts",
-  "version": 1,
-  "made": "2026-11-11",
-  "source": "Ghanshyam option-buying course transcript (72 pages, recorded 2022), shared by Mandeep 11 Nov 2026",
-  "about": "Rules from the course, written with the app's facts (2.68 gun pieces: open_fall / open_rise, hs_conf, am_move, pm_rng / pm_edge, fib_dday / fall_day, fib_uday / rise_day, and the pm / fib38 / sig stops). Thresholds are the course's rules scaled to today's prices (his 100-150 Bank Nifty points at ~42,000 = about 0.3%); the example-day numbers in the course (42,000, premium 300 to 350, 28-point candles) are illustrations, not targets. The 9:20 strategy is in the earlier file ghanshyam_920. Checked before this file on Bank Nifty 2022-2026 (index 1-minute data and the 5-year Lab's real option prices, all charges): his favourite hammer did NOT hold up (31-33% win, negative in both halves); the shooting star after a rise on a gap-down day was the best candle lead (small sample); the 2:20 break WITH the morning move lost money in every period (an 'avoid' check), AGAINST it and away from the middle of the range was the best lead (+Rs 150 / -730 / +370 per trade train / validation / holdout, not proven); Fibonacci 0.71 after a fall worked only after a big fall (0.8%+), mixed. Every strategy here starts on trial (test bench only); nothing goes live or in the alerts until it passes the Lab on data it never saw and you switch it on.",
-  "exits": {
-    "sig_mom": {"stop": ["sig"], "momentum": "close", "max": 375},
-    "sig_day": {"stop": ["sig"], "max": 375},
-    "bar_mom": {"stop": ["bar"], "momentum": "close", "max": 375},
-    "pm_mom": {"stop": ["pm"], "momentum": "close", "max": 35},
-    "pm_day": {"stop": ["pm"], "max": 375},
-    "fib_t1": {"stop": ["fib38"], "target_r": 0.88, "max": 375},
-    "fib_t2": {"stop": ["fib38"], "target_r": 1.7, "max": 375},
-    "fib_mom": {"stop": ["fib38"], "momentum": "close", "max": 375},
-    "swing_day": {"stop": ["swing"]},
-    "swing2r": {"stop": ["swing"], "target_r": 2}
+ "stockway_pack": 1,
+ "id": "ghanshyam_course",
+ "name": "Ghanshyam option-buying course (2022): hammer / star, 2:20 candle, Fibonacci 0.71, breakouts",
+ "version": 2,
+ "made": "2026-11-12",
+ "source": "Ghanshyam option-buying course transcript (72 pages, recorded 2022), shared by Mandeep 11 Nov 2026",
+ "about": "Rules from the course, written with the app's facts (2.68 gun pieces: open_fall / open_rise, hs_conf, am_move, pm_rng / pm_edge, fib_dday / fall_day, fib_uday / rise_day, and the pm / fib38 / sig stops). Thresholds are the course's rules scaled to today's prices (his 100-150 Bank Nifty points at ~42,000 = about 0.3%); the example-day numbers in the course (42,000, premium 300 to 350, 28-point candles) are illustrations, not targets. The 9:20 strategy is in the earlier file ghanshyam_920. Checked before this file on Bank Nifty 2022-2026 (index 1-minute data and the 5-year Lab's real option prices, all charges): his favourite hammer did NOT hold up (31-33% win, negative in both halves); the shooting star after a rise on a gap-down day was the best candle lead (small sample); the 2:20 break WITH the morning move lost money in every period (an 'avoid' check), AGAINST it and away from the middle of the range was the best lead (+Rs 150 / -730 / +370 per trade train / validation / holdout, not proven); Fibonacci 0.71 after a fall worked only after a big fall (0.8%+), mixed. Every strategy here starts on trial (test bench only); nothing goes live or in the alerts until it passes the Lab on data it never saw and you switch it on. v2 (12 Nov 2026, Mandeep: can 2 lots make 5% / 10%?): every setup also has option-premium targets of +6% and +11% (about +5% / +10% of the money after charges for a Rs 30K lot), with the course's own stops.",
+ "exits": {
+  "sig_mom": {
+   "stop": [
+    "sig"
+   ],
+   "momentum": "close",
+   "max": 375
   },
-  "strategies": [
-    {"name": "Shooting star after a rise, gap-down day (full size)", "dir": -1,
-     "conds": [["gap", "<", 0], ["open_rise", ">", 0.3], ["hs_conf", "<", -0.5], ["day_ret", "<", 0]],
-     "win": [15, 255], "exit": ["sig_mom", "sig_day", "bar_mom", "swing_day", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V1: trading below yesterday's close, a rise of 100-150 points from the open, a shooting star at the day's high; buy puts when a close breaks its low (within 3 bars); stop above the star; book when a candle closes above the previous one. Claim '8 of 10': not supported (51% win, n 35 on 2022-2026), but the best candle lead."},
-    {"name": "Shooting star after a rise, above yesterday's close (half size)", "dir": -1,
-     "conds": [["gap", "<", 0], ["open_rise", ">", 0.3], ["hs_conf", "<", -0.5], ["day_ret", ">", 0]],
-     "win": [15, 255], "exit": ["sig_mom", "sig_day", "swing_day", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V1: the same star after price climbed back above yesterday's close: he trades half size (lower accuracy)."},
-    {"name": "Hammer after a fall, gap-up day (full size)", "dir": 1,
-     "conds": [["gap", ">", 0], ["open_fall", ">", 0.3], ["hs_conf", ">", 0.5], ["day_ret", ">", 0]],
-     "win": [15, 255], "exit": ["sig_mom", "sig_day", "bar_mom", "swing_day", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V1: trading above yesterday's close, a fall of 100-150 points from the open, a hammer at the day's low; buy calls when a close breaks its high; stop below the hammer. Claim '90% over 100 trades': not supported (31-33% win, negative 2022-24 and 2025-26). Kept on trial so the Lab records it."},
-    {"name": "Hammer after a fall, below yesterday's close (half size)", "dir": 1,
-     "conds": [["gap", ">", 0], ["open_fall", ">", 0.3], ["hs_conf", ">", 0.5], ["day_ret", "<", 0]],
-     "win": [15, 255], "exit": ["sig_mom", "sig_day", "swing_day", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V1: the hammer after price fell below yesterday's close: half size."},
-    {"name": "Hammer at yesterday's close (support)", "dir": 1,
-     "conds": [["open_fall", ">", 0.3], ["hs_conf", ">", 0.5], ["day_ret", ">", -0.15], ["day_ret", "<", 0.15]],
-     "win": [15, 255], "exit": ["sig_mom", "sig_day", "swing_day", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V2: a hammer at yesterday's close (support) 'works very well'. Within 0.15% of yesterday's close."},
-    {"name": "Shooting star at yesterday's close (resistance)", "dir": -1,
-     "conds": [["open_rise", ">", 0.3], ["hs_conf", "<", -0.5], ["day_ret", ">", -0.15], ["day_ret", "<", 0.15]],
-     "win": [15, 255], "exit": ["sig_mom", "sig_day", "swing_day", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V2 mirror: a shooting star at yesterday's close (resistance)."},
-    {"name": "2:20 candle break against the morning move, call (not mid-range)", "dir": 1,
-     "conds": [["pm_pos", ">", 0.5], ["am_move", "<", 0], ["pm_edge", ">", 0.5]],
-     "win": [310, 330], "exit": ["pm_mom", "pm_day", "swing_day", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V3: break of the 14:15-14:20 candle's high, stop at its low, out on a close below the previous candle or by ~15:00; not when the candle sits in the middle of the afternoon range; a break against the earlier trend moves better. Best 2:20 lead in the check (+Rs 150 / -730 / +370 per trade), not proven."},
-    {"name": "2:20 candle break against the morning move, put (not mid-range)", "dir": -1,
-     "conds": [["pm_pos", "<", -0.5], ["am_move", ">", 0], ["pm_edge", ">", 0.5]],
-     "win": [310, 330], "exit": ["pm_mom", "pm_day", "swing_day", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V3 mirror: break of the 2:20 candle's low after a rising morning."},
-    {"name": "2:20 against the morning move, call (Nifty)", "dir": 1,
-     "conds": [["pm_pos", ">", 0.5], ["am_move", "<", 0], ["pm_edge", ">", 0.5]],
-     "win": [310, 330], "exit": ["pm_mom", "pm_day", "std"], "syms": ["NIFTY"], "max_day": 1,
-     "note": "Does the Bank Nifty idea carry over to Nifty? (the course is Bank Nifty only)"},
-    {"name": "2:20 against the morning move, put (Nifty)", "dir": -1,
-     "conds": [["pm_pos", "<", -0.5], ["am_move", ">", 0], ["pm_edge", ">", 0.5]],
-     "win": [310, 330], "exit": ["pm_mom", "pm_day", "std"], "syms": ["NIFTY"], "max_day": 1,
-     "note": "Nifty mirror."},
-    {"name": "AVOID check: 2:20 break with the morning move, call", "dir": 1,
-     "conds": [["pm_pos", ">", 0.5], ["am_move", ">", 0], ["pm_edge", ">", 0.5]],
-     "win": [310, 330], "exit": ["pm_mom", "pm_day", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Control: the same break in the direction of the morning move lost money in every period (-Rs 250 to -630 per trade). Expected to fail; kept to confirm the 'avoid' check on new data."},
-    {"name": "AVOID check: 2:20 break with the morning move, put", "dir": -1,
-     "conds": [["pm_pos", "<", -0.5], ["am_move", "<", 0], ["pm_edge", ">", 0.5]],
-     "win": [310, 330], "exit": ["pm_mom", "pm_day", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Control, mirror."},
-    {"name": "Fibonacci 0.71 call after a fall from the day's high", "dir": 1,
-     "conds": [["fib_dday", "<", 0.71]],
-     "then": {"conds": [["fib_dday", ">", 0.71], ["fall_day", ">", 0.5]], "within": 1},
-     "win": [15, 330], "exit": ["fib_t1", "fib_t2", "fib_mom", "swing2r", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V5: after a strong fall, buy calls when price crosses back above the 0.71 retracement; stop at 0.38; target 1 = back at the high (about 0.9R), target 2 = the 1.27 extension (about 1.7R). Calls only in the course. All falls of 0.5%+: negative in the check."},
-    {"name": "Fibonacci 0.71 call after a big fall (0.8%+)", "dir": 1,
-     "conds": [["fib_dday", "<", 0.71]],
-     "then": {"conds": [["fib_dday", ">", 0.71], ["fall_day", ">", 0.8]], "within": 1},
-     "win": [15, 330], "exit": ["fib_t1", "fib_t2", "fib_mom", "swing2r", "std"], "syms": ["BANKNIFTY", "NIFTY"], "max_day": 1,
-     "note": "Course V5: 'only after a good downfall with strength (700 points, not a 300-point drift)'. Mixed lead in the check (swing stop 2R: +Rs 373 / +734 / -339)."},
-    {"name": "Fibonacci 0.71 put after a big rise (mirror, never tested in the course)", "dir": -1,
-     "conds": [["fib_uday", "<", 0.71]],
-     "then": {"conds": [["fib_uday", ">", 0.71], ["rise_day", ">", 0.8]], "within": 1},
-     "win": [15, 330], "exit": ["fib_t1", "fib_t2", "fib_mom", "swing2r", "std"], "syms": ["BANKNIFTY", "NIFTY"], "max_day": 1,
-     "note": "He uses Fibonacci for calls only and says he never tested puts: this mirror is our own trial."},
-    {"name": "Breakout after a pause, with the daily trend (call)", "dir": 1,
-     "conds": [["cons_brk_5m", ">", 0.5], ["d_trend", ">", 0.5]],
-     "win": [15, 330], "exit": ["swing_day", "swing2r", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V4: trade breakouts after price pauses at the level (5-20 minutes), full size with the trend. His '7 of 10 with a pause' was not supported in the check (the 'ideal' breakout was no better than others)."},
-    {"name": "Breakdown after a pause, with the daily trend (put)", "dir": -1,
-     "conds": [["cons_brk_5m", "<", -0.5], ["d_trend", "<", -0.5]],
-     "win": [15, 330], "exit": ["swing_day", "swing2r", "std"], "syms": ["BANKNIFTY"], "max_day": 1,
-     "note": "Course V4 mirror."}
-  ],
-  "cannot_test": [
-    {"idea": "Window strategy: first 1-minute candle's high within 30 points above a round hundred, 2nd or 3rd candle breaks it (puts mirror)", "needs": "1-minute entries in the Lab. Checked on 1-minute index data 2022-2026: no edge (34% win vs the claimed 60-75%; a stop at the 2nd candle's low lost 93% of the time)"},
-    {"idea": "Round figures (x000 / x500): no new breakout trade within 50-70 points below one until price holds above it 15-20 minutes", "needs": "a round-number distance fact. Checked on the 9:20 break: no difference (-0.036R vs -0.033R)"},
-    {"idea": "Book 70% at the first sign of weakness, keep 30% for the bigger move", "needs": "part-booking in the Lab (it trades 1 lot)"},
-    {"idea": "After 150+ points, exit if 50 points are given back", "needs": "a giveback-from-best exit in index points"},
-    {"idea": "Money rules: after a profit risk only 20% of it next; 2 losses = stop; 3-5 trades only after 2 wins; 5% of savings in trading", "needs": "a money-rules simulator on the same trades"},
-    {"idea": "Half size against the trend / below yesterday's close", "needs": "position sizes in the Lab (the half-size setups are separate strategies here)"},
-    {"idea": "Heavyweights (HDFC Bank, ICICI) confirming the breakout", "needs": "testable now with hw_open; add when the breakout rules show a lead"},
-    {"idea": "Thursday expiry: premium doubles on 100 points", "needs": "nothing: weekly Bank Nifty expiry no longer exists (monthly only since Nov 2024)"},
-    {"idea": "BTST only when the close is at the top of a 4-5 day range", "needs": "overnight holds (the Lab is intraday)"}
-  ]
+  "sig_day": {
+   "stop": [
+    "sig"
+   ],
+   "max": 375
+  },
+  "bar_mom": {
+   "stop": [
+    "bar"
+   ],
+   "momentum": "close",
+   "max": 375
+  },
+  "pm_mom": {
+   "stop": [
+    "pm"
+   ],
+   "momentum": "close",
+   "max": 35
+  },
+  "pm_day": {
+   "stop": [
+    "pm"
+   ],
+   "max": 375
+  },
+  "fib_t1": {
+   "stop": [
+    "fib38"
+   ],
+   "target_r": 0.88,
+   "max": 375
+  },
+  "fib_t2": {
+   "stop": [
+    "fib38"
+   ],
+   "target_r": 1.7,
+   "max": 375
+  },
+  "fib_mom": {
+   "stop": [
+    "fib38"
+   ],
+   "momentum": "close",
+   "max": 375
+  },
+  "swing_day": {
+   "stop": [
+    "swing"
+   ]
+  },
+  "swing2r": {
+   "stop": [
+    "swing"
+   ],
+   "target_r": 2
+  },
+  "sig_6pct": {
+   "stop": [
+    "sig"
+   ],
+   "opt_target_pct": 6
+  },
+  "sig_11pct": {
+   "stop": [
+    "sig"
+   ],
+   "opt_target_pct": 11
+  },
+  "pm_6pct": {
+   "stop": [
+    "pm"
+   ],
+   "opt_target_pct": 6,
+   "max": 35
+  },
+  "pm_11pct": {
+   "stop": [
+    "pm"
+   ],
+   "opt_target_pct": 11,
+   "max": 35
+  },
+  "fib_6pct": {
+   "stop": [
+    "fib38"
+   ],
+   "opt_target_pct": 6
+  },
+  "fib_11pct": {
+   "stop": [
+    "fib38"
+   ],
+   "opt_target_pct": 11
+  },
+  "swing_6pct": {
+   "stop": [
+    "swing"
+   ],
+   "opt_target_pct": 6
+  },
+  "swing_11pct": {
+   "stop": [
+    "swing"
+   ],
+   "opt_target_pct": 11
+  }
+ },
+ "strategies": [
+  {
+   "name": "Shooting star after a rise, gap-down day (full size)",
+   "dir": -1,
+   "conds": [
+    [
+     "gap",
+     "<",
+     0
+    ],
+    [
+     "open_rise",
+     ">",
+     0.3
+    ],
+    [
+     "hs_conf",
+     "<",
+     -0.5
+    ],
+    [
+     "day_ret",
+     "<",
+     0
+    ]
+   ],
+   "win": [
+    15,
+    255
+   ],
+   "exit": [
+    "sig_mom",
+    "sig_day",
+    "bar_mom",
+    "swing_day",
+    "std",
+    "sig_6pct",
+    "sig_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V1: trading below yesterday's close, a rise of 100-150 points from the open, a shooting star at the day's high; buy puts when a close breaks its low (within 3 bars); stop above the star; book when a candle closes above the previous one. Claim '8 of 10': not supported (51% win, n 35 on 2022-2026), but the best candle lead."
+  },
+  {
+   "name": "Shooting star after a rise, above yesterday's close (half size)",
+   "dir": -1,
+   "conds": [
+    [
+     "gap",
+     "<",
+     0
+    ],
+    [
+     "open_rise",
+     ">",
+     0.3
+    ],
+    [
+     "hs_conf",
+     "<",
+     -0.5
+    ],
+    [
+     "day_ret",
+     ">",
+     0
+    ]
+   ],
+   "win": [
+    15,
+    255
+   ],
+   "exit": [
+    "sig_mom",
+    "sig_day",
+    "swing_day",
+    "std",
+    "sig_6pct",
+    "sig_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V1: the same star after price climbed back above yesterday's close: he trades half size (lower accuracy)."
+  },
+  {
+   "name": "Hammer after a fall, gap-up day (full size)",
+   "dir": 1,
+   "conds": [
+    [
+     "gap",
+     ">",
+     0
+    ],
+    [
+     "open_fall",
+     ">",
+     0.3
+    ],
+    [
+     "hs_conf",
+     ">",
+     0.5
+    ],
+    [
+     "day_ret",
+     ">",
+     0
+    ]
+   ],
+   "win": [
+    15,
+    255
+   ],
+   "exit": [
+    "sig_mom",
+    "sig_day",
+    "bar_mom",
+    "swing_day",
+    "std",
+    "sig_6pct",
+    "sig_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V1: trading above yesterday's close, a fall of 100-150 points from the open, a hammer at the day's low; buy calls when a close breaks its high; stop below the hammer. Claim '90% over 100 trades': not supported (31-33% win, negative 2022-24 and 2025-26). Kept on trial so the Lab records it."
+  },
+  {
+   "name": "Hammer after a fall, below yesterday's close (half size)",
+   "dir": 1,
+   "conds": [
+    [
+     "gap",
+     ">",
+     0
+    ],
+    [
+     "open_fall",
+     ">",
+     0.3
+    ],
+    [
+     "hs_conf",
+     ">",
+     0.5
+    ],
+    [
+     "day_ret",
+     "<",
+     0
+    ]
+   ],
+   "win": [
+    15,
+    255
+   ],
+   "exit": [
+    "sig_mom",
+    "sig_day",
+    "swing_day",
+    "std",
+    "sig_6pct",
+    "sig_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V1: the hammer after price fell below yesterday's close: half size."
+  },
+  {
+   "name": "Hammer at yesterday's close (support)",
+   "dir": 1,
+   "conds": [
+    [
+     "open_fall",
+     ">",
+     0.3
+    ],
+    [
+     "hs_conf",
+     ">",
+     0.5
+    ],
+    [
+     "day_ret",
+     ">",
+     -0.15
+    ],
+    [
+     "day_ret",
+     "<",
+     0.15
+    ]
+   ],
+   "win": [
+    15,
+    255
+   ],
+   "exit": [
+    "sig_mom",
+    "sig_day",
+    "swing_day",
+    "std",
+    "sig_6pct",
+    "sig_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V2: a hammer at yesterday's close (support) 'works very well'. Within 0.15% of yesterday's close."
+  },
+  {
+   "name": "Shooting star at yesterday's close (resistance)",
+   "dir": -1,
+   "conds": [
+    [
+     "open_rise",
+     ">",
+     0.3
+    ],
+    [
+     "hs_conf",
+     "<",
+     -0.5
+    ],
+    [
+     "day_ret",
+     ">",
+     -0.15
+    ],
+    [
+     "day_ret",
+     "<",
+     0.15
+    ]
+   ],
+   "win": [
+    15,
+    255
+   ],
+   "exit": [
+    "sig_mom",
+    "sig_day",
+    "swing_day",
+    "std",
+    "sig_6pct",
+    "sig_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V2 mirror: a shooting star at yesterday's close (resistance)."
+  },
+  {
+   "name": "2:20 candle break against the morning move, call (not mid-range)",
+   "dir": 1,
+   "conds": [
+    [
+     "pm_pos",
+     ">",
+     0.5
+    ],
+    [
+     "am_move",
+     "<",
+     0
+    ],
+    [
+     "pm_edge",
+     ">",
+     0.5
+    ]
+   ],
+   "win": [
+    310,
+    330
+   ],
+   "exit": [
+    "pm_mom",
+    "pm_day",
+    "swing_day",
+    "std",
+    "pm_6pct",
+    "pm_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V3: break of the 14:15-14:20 candle's high, stop at its low, out on a close below the previous candle or by ~15:00; not when the candle sits in the middle of the afternoon range; a break against the earlier trend moves better. Best 2:20 lead in the check (+Rs 150 / -730 / +370 per trade), not proven."
+  },
+  {
+   "name": "2:20 candle break against the morning move, put (not mid-range)",
+   "dir": -1,
+   "conds": [
+    [
+     "pm_pos",
+     "<",
+     -0.5
+    ],
+    [
+     "am_move",
+     ">",
+     0
+    ],
+    [
+     "pm_edge",
+     ">",
+     0.5
+    ]
+   ],
+   "win": [
+    310,
+    330
+   ],
+   "exit": [
+    "pm_mom",
+    "pm_day",
+    "swing_day",
+    "std",
+    "pm_6pct",
+    "pm_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V3 mirror: break of the 2:20 candle's low after a rising morning."
+  },
+  {
+   "name": "2:20 against the morning move, call (Nifty)",
+   "dir": 1,
+   "conds": [
+    [
+     "pm_pos",
+     ">",
+     0.5
+    ],
+    [
+     "am_move",
+     "<",
+     0
+    ],
+    [
+     "pm_edge",
+     ">",
+     0.5
+    ]
+   ],
+   "win": [
+    310,
+    330
+   ],
+   "exit": [
+    "pm_mom",
+    "pm_day",
+    "std",
+    "pm_6pct",
+    "pm_11pct"
+   ],
+   "syms": [
+    "NIFTY"
+   ],
+   "max_day": 1,
+   "note": "Does the Bank Nifty idea carry over to Nifty? (the course is Bank Nifty only)"
+  },
+  {
+   "name": "2:20 against the morning move, put (Nifty)",
+   "dir": -1,
+   "conds": [
+    [
+     "pm_pos",
+     "<",
+     -0.5
+    ],
+    [
+     "am_move",
+     ">",
+     0
+    ],
+    [
+     "pm_edge",
+     ">",
+     0.5
+    ]
+   ],
+   "win": [
+    310,
+    330
+   ],
+   "exit": [
+    "pm_mom",
+    "pm_day",
+    "std",
+    "pm_6pct",
+    "pm_11pct"
+   ],
+   "syms": [
+    "NIFTY"
+   ],
+   "max_day": 1,
+   "note": "Nifty mirror."
+  },
+  {
+   "name": "AVOID check: 2:20 break with the morning move, call",
+   "dir": 1,
+   "conds": [
+    [
+     "pm_pos",
+     ">",
+     0.5
+    ],
+    [
+     "am_move",
+     ">",
+     0
+    ],
+    [
+     "pm_edge",
+     ">",
+     0.5
+    ]
+   ],
+   "win": [
+    310,
+    330
+   ],
+   "exit": [
+    "pm_mom",
+    "pm_day",
+    "std",
+    "pm_6pct",
+    "pm_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Control: the same break in the direction of the morning move lost money in every period (-Rs 250 to -630 per trade). Expected to fail; kept to confirm the 'avoid' check on new data."
+  },
+  {
+   "name": "AVOID check: 2:20 break with the morning move, put",
+   "dir": -1,
+   "conds": [
+    [
+     "pm_pos",
+     "<",
+     -0.5
+    ],
+    [
+     "am_move",
+     "<",
+     0
+    ],
+    [
+     "pm_edge",
+     ">",
+     0.5
+    ]
+   ],
+   "win": [
+    310,
+    330
+   ],
+   "exit": [
+    "pm_mom",
+    "pm_day",
+    "std",
+    "pm_6pct",
+    "pm_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Control, mirror."
+  },
+  {
+   "name": "Fibonacci 0.71 call after a fall from the day's high",
+   "dir": 1,
+   "conds": [
+    [
+     "fib_dday",
+     "<",
+     0.71
+    ]
+   ],
+   "then": {
+    "conds": [
+     [
+      "fib_dday",
+      ">",
+      0.71
+     ],
+     [
+      "fall_day",
+      ">",
+      0.5
+     ]
+    ],
+    "within": 1
+   },
+   "win": [
+    15,
+    330
+   ],
+   "exit": [
+    "fib_t1",
+    "fib_t2",
+    "fib_mom",
+    "swing2r",
+    "std",
+    "fib_6pct",
+    "fib_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V5: after a strong fall, buy calls when price crosses back above the 0.71 retracement; stop at 0.38; target 1 = back at the high (about 0.9R), target 2 = the 1.27 extension (about 1.7R). Calls only in the course. All falls of 0.5%+: negative in the check."
+  },
+  {
+   "name": "Fibonacci 0.71 call after a big fall (0.8%+)",
+   "dir": 1,
+   "conds": [
+    [
+     "fib_dday",
+     "<",
+     0.71
+    ]
+   ],
+   "then": {
+    "conds": [
+     [
+      "fib_dday",
+      ">",
+      0.71
+     ],
+     [
+      "fall_day",
+      ">",
+      0.8
+     ]
+    ],
+    "within": 1
+   },
+   "win": [
+    15,
+    330
+   ],
+   "exit": [
+    "fib_t1",
+    "fib_t2",
+    "fib_mom",
+    "swing2r",
+    "std",
+    "fib_6pct",
+    "fib_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY",
+    "NIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V5: 'only after a good downfall with strength (700 points, not a 300-point drift)'. Mixed lead in the check (swing stop 2R: +Rs 373 / +734 / -339)."
+  },
+  {
+   "name": "Fibonacci 0.71 put after a big rise (mirror, never tested in the course)",
+   "dir": -1,
+   "conds": [
+    [
+     "fib_uday",
+     "<",
+     0.71
+    ]
+   ],
+   "then": {
+    "conds": [
+     [
+      "fib_uday",
+      ">",
+      0.71
+     ],
+     [
+      "rise_day",
+      ">",
+      0.8
+     ]
+    ],
+    "within": 1
+   },
+   "win": [
+    15,
+    330
+   ],
+   "exit": [
+    "fib_t1",
+    "fib_t2",
+    "fib_mom",
+    "swing2r",
+    "std",
+    "fib_6pct",
+    "fib_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY",
+    "NIFTY"
+   ],
+   "max_day": 1,
+   "note": "He uses Fibonacci for calls only and says he never tested puts: this mirror is our own trial."
+  },
+  {
+   "name": "Breakout after a pause, with the daily trend (call)",
+   "dir": 1,
+   "conds": [
+    [
+     "cons_brk_5m",
+     ">",
+     0.5
+    ],
+    [
+     "d_trend",
+     ">",
+     0.5
+    ]
+   ],
+   "win": [
+    15,
+    330
+   ],
+   "exit": [
+    "swing_day",
+    "swing2r",
+    "std",
+    "swing_6pct",
+    "swing_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V4: trade breakouts after price pauses at the level (5-20 minutes), full size with the trend. His '7 of 10 with a pause' was not supported in the check (the 'ideal' breakout was no better than others)."
+  },
+  {
+   "name": "Breakdown after a pause, with the daily trend (put)",
+   "dir": -1,
+   "conds": [
+    [
+     "cons_brk_5m",
+     "<",
+     -0.5
+    ],
+    [
+     "d_trend",
+     "<",
+     -0.5
+    ]
+   ],
+   "win": [
+    15,
+    330
+   ],
+   "exit": [
+    "swing_day",
+    "swing2r",
+    "std",
+    "swing_6pct",
+    "swing_11pct"
+   ],
+   "syms": [
+    "BANKNIFTY"
+   ],
+   "max_day": 1,
+   "note": "Course V4 mirror."
+  }
+ ],
+ "cannot_test": [
+  {
+   "idea": "Window strategy: first 1-minute candle's high within 30 points above a round hundred, 2nd or 3rd candle breaks it (puts mirror)",
+   "needs": "1-minute entries in the Lab. Checked on 1-minute index data 2022-2026: no edge (34% win vs the claimed 60-75%; a stop at the 2nd candle's low lost 93% of the time)"
+  },
+  {
+   "idea": "Round figures (x000 / x500): no new breakout trade within 50-70 points below one until price holds above it 15-20 minutes",
+   "needs": "a round-number distance fact. Checked on the 9:20 break: no difference (-0.036R vs -0.033R)"
+  },
+  {
+   "idea": "Book 70% at the first sign of weakness, keep 30% for the bigger move",
+   "needs": "part-booking in the Lab (it trades 1 lot)"
+  },
+  {
+   "idea": "After 150+ points, exit if 50 points are given back",
+   "needs": "a giveback-from-best exit in index points"
+  },
+  {
+   "idea": "Money rules: after a profit risk only 20% of it next; 2 losses = stop; 3-5 trades only after 2 wins; 5% of savings in trading",
+   "needs": "a money-rules simulator on the same trades"
+  },
+  {
+   "idea": "Half size against the trend / below yesterday's close",
+   "needs": "position sizes in the Lab (the half-size setups are separate strategies here)"
+  },
+  {
+   "idea": "Heavyweights (HDFC Bank, ICICI) confirming the breakout",
+   "needs": "testable now with hw_open; add when the breakout rules show a lead"
+  },
+  {
+   "idea": "Thursday expiry: premium doubles on 100 points",
+   "needs": "nothing: weekly Bank Nifty expiry no longer exists (monthly only since Nov 2024)"
+  },
+  {
+   "idea": "BTST only when the close is at the top of a 4-5 day range",
+   "needs": "overnight holds (the Lab is intraday)"
+  }
+ ]
 }
