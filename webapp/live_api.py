@@ -292,6 +292,13 @@ def _fortune():
     return e.fortune
 
 
+@router.get("/api/live/newsradar")
+def live_newsradar():
+    """2.64: the fast AI's read of every headline, graded 30 minutes later against the keyword tone (shadow)."""
+    r = getattr(engine(), "radar_news", None)
+    return clean(r.view() if r else {"calls": 0, "note": "Starts with the live scanner."})
+
+
 @router.get("/api/live/eval/{sym}")
 def live_eval(sym: str, minutes: int = 45):
     """2.61 engine evaluation: the symbol's alerts of the last `minutes` with the multiverse's verdict on each (signals

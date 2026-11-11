@@ -1282,6 +1282,23 @@ async function pageConnect() {
 
 
 /* ---------------- page: Market context */
+/* 2.64 news radar: the fast AI's read of each headline vs the keyword tone, graded 30 minutes later (shadow) */
+async function drawNewsRadar() {
+  const el = $("#ctx-radar"); if (!el) return;
+  let r; try { r = await api("/api/live/newsradar"); } catch (_) { return; }
+  if (state.page !== "context") return;
+  const pct = (s) => s && s.right_pct != null ? `<b>${s.right_pct}%</b> <small class="muted">of ${s.decided}</small>` : `<span class="muted">–</span>`;
+  const dir = (d) => d > 0 ? `<span class="up">▲</span>` : d < 0 ? `<span class="down">▼</span>` : `<span class="muted">●</span>`;
+  const rows = (r.latest || []).map((c) => `<li>${dir(c.ai_dir)} <b>${esc(c.sym)}</b> · impact ${c.impact} · ${esc(c.title)}<br><span class="muted">AI: ${esc(c.why || "")}${c.tone ? ` · keywords ${c.tone > 0 ? "▲" : "▼"}` : ""}${c.move != null ? ` · 30 min later ${c.move >= 0 ? "+" : ""}${c.move}%` : " · grading in 30 min"}</span></li>`).join("");
+  el.innerHTML = `<h3 style="margin-top:0">News radar <span class="pill p-amber">on trial</span> <span class="muted small">the fast AI reads every headline: impact, direction, stocks; graded on the price 30 minutes later</span></h3>
+    <div class="kpis kpi6"><div class="kpi"><b>${(r.calls || 0).toLocaleString("en-IN")}</b><span>Headlines read with a call</span></div>
+      <div class="kpi">${pct(r.ai)}<span>AI direction right</span></div><div class="kpi">${pct(r.keywords)}<span>Keyword tone right (today's way)</span></div>
+      <div class="kpi">${pct(r.ai_big)}<span>AI right on high-impact news</span></div><div class="kpi"><b>${r.extra_syms ?? 0}</b><span>Stocks the AI found that name matching missed</span></div>
+      <div class="kpi"><b>${r.graded || 0}</b><span>Graded so far</span></div></div>
+    ${rows ? `<ul class="small mv-list">${rows}</ul>` : `<p class="small muted">${esc(r.note || "No headline read yet: it starts with the next headlines while the scanner runs.")}</p>`}
+    <p class="note">News alerts still use the keyword tone. The AI takes over only if it is clearly right more often, on your say-so.</p>`;
+}
+
 async function pageContext(auto = false) {
   stopPageTimer();
   let c;
@@ -1298,6 +1315,7 @@ async function pageContext(auto = false) {
   main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Market context</h1><p class="lede" style="margin-bottom:0">Who is positioned where, what money moved, and what companies just announced. From NSE and global markets.</p></div>
       <div style="text-align:right"><button class="btn" id="ctx-refresh">Refresh now</button><p class="small muted" style="margin:6px 0 0"><span class="dot-live"></span> Auto-refresh every 30s · ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}</p></div></div>
     ${errs.length ? `<div class="banner">Some sources didn't answer: ${errs.map(([k, v]) => `${esc(k)} (${esc(v)})`).join("; ")}. They retry every 30 minutes.</div>` : ""}
+    <div class="panel tight" id="ctx-radar" style="margin-top:14px"></div>
     <h2>Positioning in index derivatives <span class="muted small">${c.participants ? "NSE, " + esc(c.participants.date) : ""}</span></h2>
     <div class="table-wrap"><table><thead><tr><th>Who</th><th class="r">Index futures long %</th><th class="r">Futures net</th><th class="r">Change</th><th class="r">Calls net</th><th class="r">Change</th><th class="r">Puts net</th><th class="r">Change</th><th class="r">Stock futures net</th></tr></thead>
       <tbody>${P.map((r) => `<tr><td><b>${esc(r.who)}</b></td><td class="r"><b class="${r.fut_long_pct >= 50 ? "up" : "down"}">${r.fut_long_pct}%</b></td><td class="r ${cls(r.fut_net)}">${nm(r.fut_net)}</td><td class="r ${cls(r.fut_net_chg)}">${nm(r.fut_net_chg)}</td><td class="r ${cls(r.call_net)}">${nm(r.call_net)}</td><td class="r ${cls(r.call_net_chg)}">${nm(r.call_net_chg)}</td><td class="r ${cls(r.put_net)}">${nm(r.put_net)}</td><td class="r ${cls(r.put_net_chg)}">${nm(r.put_net_chg)}</td><td class="r ${cls(r.stock_fut_net)}">${nm(r.stock_fut_net)}</td></tr>`).join("") || `<tr><td colspan="9" class="muted">Not loaded yet.</td></tr>`}</tbody></table></div>
@@ -1317,6 +1335,7 @@ async function pageContext(auto = false) {
     <h2>Company filings, live <span class="muted small">F&amp;O stocks, from NSE</span></h2>
     <ul class="alerts filings">${fil || `<li class="muted" style="padding:16px">Filings appear here as companies announce them (checked every minute, 7:30 AM to 8 PM).</li>`}</ul>`;
   $("#ctx-refresh").onclick = async (e) => { e.target.disabled = true; e.target.textContent = "Refreshing…"; try { await post("/api/live/context/refresh", {}); } catch (err) { toast(err.message); } pageContext(); };
+  drawNewsRadar();
   L.pageTimer = setTimeout(() => state.page === "context" && pageContext(true), 30000);
 }
 
