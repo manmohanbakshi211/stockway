@@ -99,7 +99,7 @@ def review(e, topic: str, data: dict | None, data_dir: Path) -> dict:
     lang = LANG.get(((e.cfg().get("ai") or {}).get("language") or "hinglish"), LANG["hinglish"])
     prompt = f"{RULES} {lang}\n\nTASK: {ASK[topic]}\n\nDATA:\n{body}"
     t0 = time.time()
-    text = e.ai.ask(prompt, 800, auto=False)
+    text = e.ai.ask(prompt, 800, auto=False, task="review")
     if not text:
         raise RuntimeError(e.ai.last_error or "The AI did not answer. Try again in a minute.")
     return {"text": text, "by": e.ai.label(), "secs": round(time.time() - t0, 1)}

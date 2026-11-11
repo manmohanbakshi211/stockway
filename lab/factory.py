@@ -1702,7 +1702,7 @@ def ask_ideas(data_dir, ai, auto=False) -> dict:
     import re as _re
     if not ai or not ai.enabled():
         raise PermissionError("Connect Claude (your Pro plan) in Live setup → AI first.")
-    text = ai.ask(ideas_prompt(data_dir), 2000, auto=auto)
+    text = ai.ask(ideas_prompt(data_dir), 2000, auto=auto, task="lab_ideas")
     m = _re.search(r"\{.*\}", text or "", _re.S)
     try:
         out = json.loads(m.group(0)) if m else {}

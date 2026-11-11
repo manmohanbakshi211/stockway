@@ -1535,7 +1535,10 @@ def system_view():
     err = ai.last_error
     svcs.append(_svc("claude", "Claude (AI)", "ok" if on and not err else "warn" if on else "off",
                      (err if err else f"{ai.label()} ready") if on else "Not set: Data & settings → AI",
-                     used=ai.used, provider=ai.provider()))
+                     used=ai.used, provider=ai.provider(),
+                     routing=(e.cfg().get("ai") or {}).get("routing") is not False,
+                     tasks={k: {"n": v["n"], "avg_s": round(v["secs"] / max(1, v["n"]), 1), "model": v.get("model"),
+                                "tier": v.get("tier"), "error": v.get("error")} for k, v in (getattr(ai, "tasks", {}) or {}).items()}))
     # Telegram
     try:                                                   # 2.52: Kite backup feed + cross-check
         lc_ = e.cfg()["live"]

@@ -111,7 +111,7 @@ def answer(e, question: str, history: list | None = None) -> dict:
     past = "".join(f"\nEarlier Q: {h.get('q', '')[:300]}\nEarlier A: {h.get('a', '')[:600]}" for h in (history or [])[-3:])
     prompt = f"{RULES}\n\nDATA:\n{_compact_json(ctx)}\n{past}\n\nQUESTION: {question}"
     t0 = time.time()
-    text = e.ai.ask(prompt, 700, auto=False)
+    text = e.ai.ask(prompt, 700, auto=False, task="ask")
     if not text:
         raise RuntimeError(e.ai.last_error or "The AI did not answer. Try again in a minute.")
     return {"answer": text, "by": e.ai.label(), "secs": round(time.time() - t0, 1),

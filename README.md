@@ -114,6 +114,20 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## AI router: the right Claude model for each job (2.62)
+
+Mandeep, 11 Nov 2026: "model bhi vo choose karo jo sabse zada capable ho or fit ho or bina bhot zada time liye near to
+accuracy analysis kar sake". Before: all 11 AI jobs used one model (Claude Code's default on the Pro plan, Opus 5.5).
+
+- `rules/ai_models.json`: **fast** = Haiku 5.5, effort low (market pulse, world note, news) with its own daily allowance
+  of 150, apart from the automatic-notes cap; **balanced** = Sonnet 5.5, effort medium (alert "Why?", market brain,
+  India indication, briefs, Ask Stockway, AI chart read); **deep** = Opus 5.5, effort high (research reviews, Lab ideas,
+  ebook reading, the evening analyst). Fable (Claude Code's most capable model) can be set for the deep tier; on some
+  plans it bills usage credits, so it is not the default.
+- A model your plan refuses is skipped for the day and the next one is used (opus → sonnet → haiku → Claude Code's
+  default). An older Claude Code without `--effort` still works. Live setup → AI → "Pick the model per job" (on;
+  off = your one model for everything, as before). System page: which model each job used today and how long it took.
+
 ## Engine eval: the multiverse's verdict on every alert, and on the chart (2.61)
 
 Mandeep, 11 Nov 2026: "sab kuch dekh kar best evaluation line bhi ban rahi hai" (like a chess engine's evaluation).

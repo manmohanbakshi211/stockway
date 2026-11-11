@@ -65,6 +65,7 @@ EDITABLE = {
     "ai.brain_every_min": int,
     "ai.brain_telegram": int,
     "ai.pro_model": str,
+    "ai.routing": bool,
     "ai.pro_auto_per_day": int,
     "ai.daily_limit": int,
     "ai.language": str,

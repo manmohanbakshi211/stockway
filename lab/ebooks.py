@@ -137,7 +137,7 @@ def extract(data_dir, name: str, ai, log=print, should_stop=lambda: False) -> di
         if should_stop():
             break
         log(f"{name}: passage {i + 1} of {len(chunks)} → Claude")
-        out = _json(ai.ask(prompt(name, ch), 1800, auto=False))
+        out = _json(ai.ask(prompt(name, ch), 1800, auto=False, task="ebook"))
         rec["strategies"] += out.get("strategies") or []
         rec["cannot_test"] += out.get("cannot_test") or []
     q = add_ideas(data_dir, rec["strategies"], source=f"ebook:{name}"[:80])

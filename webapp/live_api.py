@@ -270,7 +270,7 @@ def live_chart_ai(sym: str):
               "1) structure and trend across timeframes, 2) where price sits vs the key levels and zones, 3) the best trade setup now with entry, stop and "
               "target levels (or 'no trade' and why), 4) what would change your mind, 5) one risk. Use only the numbers given.\n\n"
               + _compact_json(facts))
-    text = e.ai.ask(prompt, 450, auto=False)
+    text = e.ai.ask(prompt, 450, auto=False, task="chart_read")
     if not text:
         raise HTTPException(502, e.ai.last_error or "AI did not answer.")
     return {"text": text}
@@ -1191,7 +1191,22 @@ def ai_status():
     return {"provider": e.ai.provider(), "label": e.ai.label(), "enabled": e.ai.enabled(), "claude_cli": find_claude_cli(),
             "model": c.get("pro_model") if e.ai.provider() == "claude_pro" else c.get("model"),
             "used": e.ai.used, "used_auto": e.ai.used_auto, "daily_limit": c.get("daily_limit"),
-            "pro_auto_per_day": c.get("pro_auto_per_day") or 12, "last_error": e.ai.last_error}
+            "pro_auto_per_day": c.get("pro_auto_per_day") or 12, "last_error": e.ai.last_error,
+            "routing": c.get("routing") is not False, "tiers": _ai_tiers(), "tasks": dict(getattr(e.ai, "tasks", {}) or {})}
+
+
+def _ai_tiers() -> dict:
+    """2.62: which model each kind of AI job uses (rules/ai_models.json)."""
+    try:
+        from live.notify import ai_models
+        r = ai_models()
+        out = {}
+        for task, tier in (r.get("tasks") or {}).items():
+            out.setdefault(tier, {"model": (r["tiers"].get(tier) or {}).get("model"),
+                                  "effort": (r["tiers"].get(tier) or {}).get("effort"), "tasks": []})["tasks"].append(task)
+        return out
+    except Exception:
+        return {}
 
 
 @router.post("/api/ai/test")

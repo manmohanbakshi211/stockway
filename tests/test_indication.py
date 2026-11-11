@@ -30,7 +30,7 @@ class FakeAI:
     def enabled(self):
         return True
 
-    def ask(self, prompt, max_tokens=400, auto=True, budget=None):
+    def ask(self, prompt, max_tokens=400, auto=True, budget=None, **kw):
         self.calls.append((prompt, budget))
         return self.answer
 

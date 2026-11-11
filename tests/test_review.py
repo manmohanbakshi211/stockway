@@ -14,7 +14,7 @@ class _AI:
     def label(self):
         return "Claude (your Pro plan)"
 
-    def ask(self, prompt, max_tokens=400, auto=True):
+    def ask(self, prompt, max_tokens=400, auto=True, **kw):
         assert auto is False
         self.prompts.append(prompt)
         return "Verdict: noise."

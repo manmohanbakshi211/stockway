@@ -140,7 +140,7 @@ def ai_note(ai, s: dict, prev_note: dict | None) -> dict | None:
               "plan (one sentence: what a disciplined intraday trader should do now). Use only numbers from the data.\n\n"
               f"PREVIOUS NOTE: {_compact_json({k: prev_note.get(k) for k in ('headline', 'bias', 'confidence')}) if prev_note else 'none'}\n"
               f"SNAPSHOT: {_compact_json(s)}")
-    text = ai.ask(prompt, 900)
+    text = ai.ask(prompt, 900, task="brain")
     if not text:
         return None
     try:
