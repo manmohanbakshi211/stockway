@@ -1727,6 +1727,14 @@ class LiveEngine:
                 a["data"]["risk"] = self.risk_for(a, now)
         except Exception as e:
             self.log(f"Risk gate failed: {e}")
+        try:                                         # 2.61: what the multiverse says about signals like this one
+            if a.get("direction") in ("up", "down"):
+                mvv = self._mv_verdict(a, now)
+                if mvv:
+                    a["data"]["mv"] = mvv
+        except Exception as e:
+            if self._every("mv_verdict_err", 600, clock_time=False):
+                self.log(f"Multiverse verdict skipped: {e}")
         # stories: alerts on the same symbol within 30 minutes are one developing story
         s = self.stories.get(a["sym"])
         new_story = not s or ts - s["last"] > STORY_GAP_MIN * 60
@@ -1783,6 +1791,15 @@ class LiveEngine:
         except Exception as e:
             if self._every("confluence_err", 600, clock_time=False):
                 self.log(f"Signals-agree check skipped: {e}")
+
+    def _mv_verdict(self, a, now) -> dict | None:
+        """2.61: the multiverse's verdict on this alert (lab/multiverse.py verdict), from the same facts the test bench
+        records (signal_facts) and the alert's own strength. Information only: nothing decides on it."""
+        from lab.multiverse import _facts_of, verdict
+        ad = a.get("data") or {}
+        tag = {"sev": a.get("severity"), "score": ad.get("score"), "conv": ad.get("conviction"), "focus": ad.get("focus")}
+        facts = _facts_of(self.signal_facts(a["sym"], a["direction"], now), {k: v for k, v in tag.items() if v is not None}, a)
+        return verdict(self.data_dir, a["kind"], facts)
 
     def _confluence_check(self, a, now, lc):
         """2.59 (rules/confluence.json): when `min_kinds` different alert types point the same way on the same symbol

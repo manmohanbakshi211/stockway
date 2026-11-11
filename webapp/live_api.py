@@ -292,6 +292,35 @@ def _fortune():
     return e.fortune
 
 
+@router.get("/api/live/eval/{sym}")
+def live_eval(sym: str, minutes: int = 45):
+    """2.61 engine evaluation: the symbol's alerts of the last `minutes` with the multiverse's verdict on each (signals
+    like it: how they did on the recorded days, the best way to trade them), and the strongest proven side now."""
+    import time as _t
+    e = engine()
+    sym = sym.upper()
+    now = _t.time()
+    items = []
+    for a in list(getattr(e, "alerts_mem", []) or []):
+        if a.get("sym") != sym or a.get("direction") not in ("up", "down") or now - float(a.get("ts") or 0) > minutes * 60:
+            continue
+        mv = (a.get("data") or {}).get("mv")
+        items.append({"id": a.get("id"), "ts": a.get("ts"), "kind": a.get("kind"), "title": a.get("title"),
+                      "direction": a["direction"], "mv": mv})
+    side = {}
+    for d in ("up", "down"):
+        best = [x["mv"]["best"] for x in items if x["direction"] == d and x.get("mv") and x["mv"].get("best")]
+        if best:
+            side[d] = max(best, key=lambda b: b.get("lcb") if b.get("lcb") is not None else -1e9)
+    lean = None
+    up, dn = (side.get("up") or {}).get("lcb"), (side.get("down") or {}).get("lcb")
+    if up is not None and up > 0 and (dn is None or up > dn):
+        lean = "up"
+    elif dn is not None and dn > 0 and (up is None or dn > up):
+        lean = "down"
+    return clean({"sym": sym, "minutes": minutes, "items": items[:20], "side": side, "lean": lean})
+
+
 @router.get("/api/live/fortune/{sym}")
 async def live_fortune(sym: str, tf: str = "15m"):
     """2.36 Fortune chart: ranges for the forming candle and the next few of a timeframe, from the symbol's own history
