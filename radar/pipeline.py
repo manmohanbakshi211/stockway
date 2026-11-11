@@ -46,6 +46,9 @@ def get_data(cfg: dict, demo: bool, use_news: bool, refresh: bool = True, log=pr
         log("  using demo (synthetic) prices")
     else:
         mkt = market.load_all(cfg, refresh=refresh)
+    if cfg.get("radar_index"):                    # 2.67: another index in the target slot (radar/indices.py)
+        from .indices import swap_target
+        mkt = swap_target(mkt, cfg, refresh=refresh, demo=demo)
     if should_stop():
         raise news.Stopped()
     log("Step 2/6: News")
@@ -53,6 +56,8 @@ def get_data(cfg: dict, demo: bool, use_news: bool, refresh: bool = True, log=pr
     if not demo:
         if use_news and cfg["news"].get("use_gdelt"):
             budget = float(cfg["news"].get("train_fetch_budget_min", 0) or 0) * 60
+            if cfg.get("radar_index"):            # 2.67: the main radar already fetched today's news
+                budget = 0
             gd = news.gdelt_daily(cfg, refresh=budget > 0, log=log, should_stop=should_stop,
                                   budget_sec=budget or None)
             if gd.empty:
@@ -138,7 +143,7 @@ def forecast(cfg: dict, demo: bool | None = None, use_news: bool = True, log=pri
         raise RuntimeError("No trained model yet. Train the model first.")
     demo = bundle.get("demo", False) if demo is None else demo
     want_news = use_news and bundle.get("news", False) and not demo
-    if want_news and cfg["news"].get("use_gdelt"):
+    if want_news and cfg["news"].get("use_gdelt") and not cfg.get("radar_index"):
         log("  refreshing this year's news (up to 3 minutes)")
         news.download_gdelt(cfg, log=log, should_stop=should_stop, budget_sec=180)
     mkt, news_daily, _, _ = get_data(cfg, demo, want_news, log=log, should_stop=should_stop)
@@ -177,7 +182,10 @@ def forecast(cfg: dict, demo: bool | None = None, use_news: bool = True, log=pri
     # keep the price file current so the app can grade past forecasts
     bn.to_parquet(out / "banknifty.parquet")
     log("Step 6/6: Telegram")
-    send_telegram(cfg, forecast_text(fc), log)
+    if cfg.get("radar_index"):                    # 2.67: other indices go in one all-indices message (radar/indices.py)
+        log("  sent with the all-indices message")
+    else:
+        send_telegram(cfg, forecast_text(fc), log)
     log(f"Done. {day.date()}: big-move probability {p_big:.0%} "
         f"({'opportunity day' if fc['flag'] else 'normal day'})")
     return fc

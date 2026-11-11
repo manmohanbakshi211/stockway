@@ -1,0 +1,30 @@
+{
+  "about": "Daily Radar indices (radar/indices.py, 2.67). Bullets: each index the radar forecasts (next session's big-move chance). The main entry (Bank Nifty) is the original radar and keeps its own folders, Telegram message and schedule unchanged; every other 'on' index gets its own models (models/indices/<key>) and results (output/indices/<key>), trained and graded the same way, walk-forward by year on days the model never saw. Information only: nothing trades on it. Expiry calendars are dated data (weekday or null, from a date); where an exchange's history is not certain the calendar follows NSE's market-wide monthly expiry and leaves weekly out.",
+  "valid_from": "2026-11-11",
+  "indices": [
+    {"key": "BANKNIFTY", "name": "Bank Nifty", "yahoo": "^NSEBANK", "on": true, "main": true},
+    {"key": "NIFTY", "name": "Nifty 50", "yahoo": "^NSEI", "on": true,
+     "expiry_rules": {"monthly": [{"from": "2015-01-01", "weekday": "THU"}, {"from": "2025-09-01", "weekday": "TUE"}],
+                      "weekly": [{"from": "2015-01-01", "weekday": null}, {"from": "2019-02-11", "weekday": "THU"},
+                                 {"from": "2025-09-01", "weekday": "TUE"}]}},
+    {"key": "FINNIFTY", "name": "Fin Nifty", "yahoo": "NIFTY_FIN_SERVICE.NS", "on": true,
+     "expiry_rules": {"monthly": [{"from": "2015-01-01", "weekday": "THU"}, {"from": "2021-01-11", "weekday": "TUE"}],
+                      "weekly": [{"from": "2015-01-01", "weekday": null}, {"from": "2021-01-11", "weekday": "TUE"},
+                                 {"from": "2024-11-20", "weekday": null}]},
+     "note": "Weekly options Jan 2021 to Nov 2024; before 2021 the market-wide Thursday expiry is used."},
+    {"key": "NIFTYNXT50", "name": "Nifty Next 50", "yahoo": "^NSMIDCP", "on": true,
+     "expiry_rules": {"monthly": [{"from": "2015-01-01", "weekday": "THU"}, {"from": "2025-09-01", "weekday": "TUE"}],
+                      "weekly": [{"from": "2015-01-01", "weekday": null}]},
+     "note": "Monthly contracts only; the market-wide NSE expiry day is used."},
+    {"key": "SENSEX", "name": "Sensex", "yahoo": "^BSESN", "on": true,
+     "expiry_rules": {"monthly": [{"from": "2015-01-01", "weekday": "THU"}, {"from": "2025-09-01", "weekday": "THU"}],
+                      "weekly": [{"from": "2015-01-01", "weekday": null}, {"from": "2023-05-15", "weekday": "FRI"},
+                                 {"from": "2025-01-01", "weekday": "TUE"}, {"from": "2025-09-01", "weekday": "THU"}]},
+     "note": "Weekly options from May 2023 (Friday, Tuesday from Jan 2025, Thursday from Sep 2025); monthly uses the market-wide Thursday expiry."},
+    {"key": "MIDCPNIFTY", "name": "Midcap Select", "yahoo": "NIFTY_MID_SELECT.NS", "on": false,
+     "why_off": "Yahoo has no daily history for it (checked 11 Nov 2026); switch on once a 4+ year daily source is added."},
+    {"key": "BANKEX", "name": "Bankex", "yahoo": "BSE-BANK.BO", "on": false,
+     "why_off": "Yahoo has no daily history for it (checked 11 Nov 2026)."}
+  ],
+  "grand": {"broad_share": 0.6, "telegram": true}
+}

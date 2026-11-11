@@ -7,7 +7,8 @@ const C = {
   ink: "#16212C", muted: "#5E6B78", rule: "#D5DCE3", signal: "#3D2FA8",
   up: "#1E8A5A", down: "#C23B32", amber: "#9A6A12", fog: "#E9EDF1",
 };
-const state = { status: null, page: null, jobSince: 0, jobId: null, pollTimer: null };
+const state = { status: null, page: null, jobSince: 0, jobId: null, pollTimer: null, ridx: "BANKNIFTY", rlist: null };
+try { state.ridx = localStorage.getItem("radarIdx") || "BANKNIFTY"; } catch (_) {}
 
 /* ---------------- helpers */
 async function api(path, opts = {}) {
@@ -74,6 +75,39 @@ const plotLayout = (extra = {}) => Object.assign({
 }, extra);
 const plotCfg = { displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d", "toggleSpikelines"] };
 
+/* ---------------- 2.67: which index the Daily Radar pages show (radar/indices.py) */
+const isMainIdx = () => !state.rlist || (state.rlist.find((x) => x.key === state.ridx) || {}).main !== false;
+const rname = () => ((state.rlist || []).find((x) => x.key === state.ridx) || {}).name || "Bank Nifty";
+const rq = (path) => isMainIdx() ? path : `${path}${path.includes("?") ? "&" : "?"}idx=${encodeURIComponent(state.ridx)}`;
+async function loadIndices() {
+  try { state.rlist = await api("/api/radar/indices"); } catch (_) { state.rlist = null; }
+  const on = (state.rlist || []).filter((x) => x.on);
+  if (on.length && !on.some((x) => x.key === state.ridx)) state.ridx = (on.find((x) => x.main) || on[0]).key;
+  const el = $("#rail-ridx"); if (el) el.textContent = rname();
+}
+async function radarStatus() {
+  if (isMainIdx()) return state.status;
+  try { return await api(rq("/api/status")); } catch (_) { return null; }
+}
+function ridxBar() {
+  const on = (state.rlist || []).filter((x) => x.on);
+  if (on.length < 2) return "";
+  return `<div class="seg ridx-bar" role="group" aria-label="Index">${on.map((x) => `<button data-ridx="${esc(x.key)}" aria-pressed="${x.key === state.ridx}"${x.trained ? "" : ` title="Not trained yet"`}>${esc(x.name)}${x.trained ? "" : " ·"}</button>`).join("")}</div>`;
+}
+function bindRidx(root = main) {
+  root.querySelectorAll("[data-ridx]").forEach((b) => b.addEventListener("click", () => {
+    state.ridx = b.dataset.ridx;
+    try { localStorage.setItem("radarIdx", state.ridx); } catch (_) {}
+    const el = $("#rail-ridx"); if (el) el.textContent = rname();
+    route();
+  }));
+}
+function noIndexModel(title, st) {
+  return `<div class="empty"><h2>${title}: ${esc(rname())} not trained yet</h2>
+    <p>The radar learns ${esc(rname())} from 10 years of daily prices, India VIX and world markets, tested year by year on days it never saw. About a minute per index, in the background.</p>
+    <div class="btn-row"><button class="btn primary" data-train-idx>Train ${esc(rname())}</button><button class="btn" data-train-all>Train all indices</button></div></div>`;
+}
+
 /* ---------------- status + rail */
 async function loadVersion(force = false) {
   const el = $("#rail-version");
@@ -105,7 +139,7 @@ async function loadStatus() {
 
 function demoBanner() {
   const m = state.status && state.status.model;
-  return m && m.demo ? `<div class="banner">You're looking at <b>demo data</b> (synthetic prices). Train on real data in Data &amp; settings to see real Bank Nifty results.</div>` : "";
+  return m && m.demo ? `<div class="banner">You're looking at <b>demo data</b> (synthetic prices). Train on real data in Data &amp; settings to see real ${esc(rname())} results.</div>` : "";
 }
 
 function noModel(title = "No model yet") {
@@ -135,7 +169,11 @@ function bindTrainButtons(root = main) {
     startJob({ kind: "train", demo: k === "demo" });
   }));
   root.querySelectorAll("[data-news]").forEach((b) => b.addEventListener("click", () => startJob({ kind: "news" })));
-  root.querySelectorAll("[data-forecast]").forEach((b) => b.addEventListener("click", () => startJob({ kind: "forecast" })));
+  root.querySelectorAll("[data-forecast]").forEach((b) => b.addEventListener("click", () => startJob(isMainIdx() ? { kind: "forecast" } : { kind: "forecast", idx: state.ridx })));
+  root.querySelectorAll("[data-train-idx]").forEach((b) => b.addEventListener("click", () => startJob({ kind: "train", idx: state.ridx })));
+  root.querySelectorAll("[data-train-all]").forEach((b) => b.addEventListener("click", () => startJob({ kind: "train_indices" })));
+  root.querySelectorAll("[data-forecast-all]").forEach((b) => b.addEventListener("click", () => startJob({ kind: "forecast_all" })));
+  bindRidx(root);
 }
 
 function watchJob() {
@@ -183,7 +221,7 @@ function watchJob() {
         toast(j.kind === "train" ? "Training finished" : j.kind === "news" ? "News download finished" : j.kind === "lab_download" ? "History downloaded. Now run the backtest." : j.kind === "lab_backtest" ? "Backtest finished" : "Forecast updated");
         setTimeout(() => { if (!state.pollTimer) box.hidden = true; }, 6000);
       }
-      await loadStatus();
+      await Promise.all([loadStatus(), loadIndices()]);
       route();
     }
   };
@@ -239,12 +277,19 @@ function driversHTML(drivers) {
   return `<div class="drivers"><div class="drv-legend"><span>Factor</span><span style="text-align:right">Value</span><span>Lowers the chance</span><span>Raises the chance</span><span></span></div>${rows}</div>`;
 }
 
+async function radarGuard(title) {
+  const st = await radarStatus();
+  if (st && st.model) return true;
+  main.innerHTML = `<h1 class="page-title">${title}</h1>${ridxBar()}${isMainIdx() ? noModel() : noIndexModel(title, st)}`;
+  bindTrainButtons(); return false;
+}
+
 async function pageTomorrow() {
-  if (!state.status || !state.status.model) { main.innerHTML = `<h1 class="page-title">Tomorrow</h1>${noModel()}`; bindTrainButtons(); return; }
-  const { forecast: fc, calls } = await api("/api/forecast");
+  if (!(await radarGuard("Tomorrow"))) return;
+  const { forecast: fc, calls } = await api(rq("/api/forecast"));
   if (!fc) {
-    main.innerHTML = `<h1 class="page-title">Tomorrow</h1>${demoBanner()}
-      <div class="empty"><h2>No forecast yet</h2><p>The model is trained. Get the forecast for the next Bank Nifty session.</p>
+    main.innerHTML = `<h1 class="page-title">Tomorrow</h1>${ridxBar()}${demoBanner()}
+      <div class="empty"><h2>No forecast yet</h2><p>The model is trained. Get the forecast for the next ${esc(rname())} session.</p>
       <button class="btn primary" data-forecast>Update forecast</button></div>`;
     bindTrainButtons(); return;
   }
@@ -254,16 +299,16 @@ async function pageTomorrow() {
   const callsRows = calls.map((c) => `<tr class="click" data-day="${c.date}">
       <td>${shortDate(c.date)}</td><td class="r">${pct0(c.prob_big)}</td>
       <td>${c.flag ? "Opportunity" : "Normal"}</td><td class="r">${pct(c.range_pct, 2)}</td><td>${badge(c.outcome)}</td></tr>`).join("");
-  main.innerHTML = `${demoBanner()}
+  main.innerHTML = `${ridxBar()}${demoBanner()}
     <div class="verdict-meta">
       <div class="when">Forecast for <b>${longDate(fc.for_date)}</b>. Updated ${dateTime(fc.made_at)}.</div>
       <button class="btn" data-forecast>Update forecast</button>
     </div>
-    <h1 class="verdict ${fc.flag ? "flagged" : ""}">${verdict}</h1>
+    <h1 class="verdict ${fc.flag ? "flagged" : ""}">${isMainIdx() ? "" : `${esc(rname())}: `}${verdict}</h1>
     <p class="verdict-sub"><b>${pct0(fc.prob_big)}</b> chance that tomorrow's high–low range is among the biggest fifth of the past year. The model flags days above ${pct0(fc.threshold)}.</p>
 
     <div class="ladder" id="ladder">${ladderSVG(fc)}
-      <p class="cap">Expected range from India VIX: about ±${pts(fc.implied_pts)} points (${pct(fc.implied_pct, 2)}) around the last close on ${shortDate(fc.last_date)}. On a big-move day, Bank Nifty usually travels beyond the solid band.</p>
+      <p class="cap">Expected range from India VIX: about ±${pts(fc.implied_pts)} points (${pct(fc.implied_pct, 2)}) around the last close on ${shortDate(fc.last_date)}. On a big-move day, ${esc(rname())} usually travels beyond the solid band.</p>
     </div>
 
     <div class="facts">
@@ -281,7 +326,8 @@ async function pageTomorrow() {
       </div>
     </div>
 
-    <p class="note">How to use it (2.56): on past days the flag was right about 1.8× as often as chance, but buying a straddle on flagged days still lost money after costs, and the direction lean is close to a coin flip. Use the flag to choose how to trade tomorrow (breakout buying on flagged days, smaller or no trades on normal days), not as a trade by itself. It does not feed alerts, Focus or paper trades; the test bench records it with every signal so its value can be measured.</p>
+    ${isMainIdx() ? "" : `<p class="note">${esc(rname())} uses the same radar and the same honest test as Bank Nifty (each year forecast by a model trained only on earlier years); its own record is on Model check. Information only: it does not feed alerts, Focus or paper trades.</p>`}
+    <p class="note"${isMainIdx() ? "" : " hidden"}>How to use it (2.56): on past days the flag was right about 1.8× as often as chance, but buying a straddle on flagged days still lost money after costs, and the direction lean is close to a coin flip. Use the flag to choose how to trade tomorrow (breakout buying on flagged days, smaller or no trades on normal days), not as a trade by itself. It does not feed alerts, Focus or paper trades; the test bench records it with every signal so its value can be measured.</p>
 
     <h2>Why the model thinks so</h2>
     ${driversHTML(fc.drivers)}
@@ -321,9 +367,9 @@ function historySummary(h) {
 }
 
 async function pageHistory() {
-  if (!state.status || !state.status.model) { main.innerHTML = `<h1 class="page-title">History</h1>${noModel()}`; bindTrainButtons(); return; }
-  const h = await api("/api/history");
-  main.innerHTML = `<h1 class="page-title">History</h1>
+  if (!(await radarGuard("History"))) return;
+  const h = await api(rq("/api/history"));
+  main.innerHTML = `<h1 class="page-title">History${isMainIdx() ? "" : `: ${esc(rname())}`}</h1>${ridxBar()}
     <p class="lede">Every big-move day in the data. From the first test year on, each day was predicted by a model that had never seen it. Click any point to see what came before it.</p>
     ${demoBanner()}
     ${historySummary(h)}
@@ -378,6 +424,7 @@ async function pageHistory() {
   main.querySelectorAll("[data-range]").forEach((b) => b.addEventListener("click", () => setRange(b.dataset.range)));
   $("#hist-price").on("plotly_click", (ev) => { if (ev.points && ev.points[0]) openDay(String(ev.points[0].x).slice(0, 10)); });
   main.querySelectorAll("tr[data-day]").forEach((r) => r.onclick = () => openDay(r.dataset.day));
+  bindRidx();
   $("#hist-price").on("plotly_relayout", (ev) => {
     if (ev["xaxis.range[0]"]) Plotly.relayout("hist-prob", { "xaxis.range": [ev["xaxis.range[0]"], ev["xaxis.range[1]"]] });
   });
@@ -385,8 +432,8 @@ async function pageHistory() {
 
 /* ---------------- page: biggest days */
 async function pageBiggest() {
-  if (!state.status || !state.status.model) { main.innerHTML = `<h1 class="page-title">Biggest days</h1>${noModel()}`; bindTrainButtons(); return; }
-  const rows = await api("/api/biggest");
+  if (!(await radarGuard("Biggest days"))) return;
+  const rows = await api(rq("/api/biggest"));
   const render = (onlyMissed) => {
     const list = rows.filter((r) => !onlyMissed || (r.model_prob != null && r.flagged !== 1));
     const result = (r) => r.model_prob == null ? `<span class="muted small">Training years</span>` : badge(r.flagged === 1 ? "Caught" : "Missed");
@@ -402,8 +449,8 @@ async function pageBiggest() {
   };
   const tested = rows.filter((r) => r.model_prob != null);
   const caught = tested.filter((r) => r.flagged === 1).length;
-  main.innerHTML = `<h1 class="page-title">Biggest days</h1>
-    <p class="lede">The ${rows.length} widest-range Bank Nifty days since ${rows.length ? shortDate(rows.map((r) => r.date).sort()[0]) : "the start"}. In the years the model was tested, it flagged ${caught} of ${tested.length} of them the evening before.</p>
+  main.innerHTML = `<h1 class="page-title">Biggest days</h1>${ridxBar()}
+    <p class="lede">The ${rows.length} widest-range ${esc(rname())} days since ${rows.length ? shortDate(rows.map((r) => r.date).sort()[0]) : "the start"}. In the years the model was tested, it flagged ${caught} of ${tested.length} of them the evening before.</p>
     ${demoBanner()}
     <div class="toolbar"><div class="seg" role="group" aria-label="Filter">
       <button data-f="all" aria-pressed="true">All days</button><button data-f="missed">Missed only</button></div></div>
@@ -415,12 +462,13 @@ async function pageBiggest() {
     render(b.dataset.f === "missed");
   }));
   render(false);
+  bindRidx();
 }
 
 /* ---------------- page: drivers */
 async function pageDrivers() {
-  if (!state.status || !state.status.model) { main.innerHTML = `<h1 class="page-title">What drives moves</h1>${noModel()}`; bindTrainButtons(); return; }
-  const f = await api("/api/factors");
+  if (!(await radarGuard("What drives moves"))) return;
+  const f = await api(rq("/api/factors"));
   const maxRate = Math.max(...f.factors.flatMap((r) => [r.high || 0, r.low || 0]), f.base || 0, 0.01);
   const rows = f.factors.map((r) => `<tr>
       <td>${esc(r.label)}</td>
@@ -429,7 +477,7 @@ async function pageDrivers() {
         <i class="hi" style="width:${((r.high || 0) / maxRate) * 100}%"></i><i class="lo" style="width:${((r.low || 0) / maxRate) * 100}%"></i></div></td></tr>`).join("");
   const imp = f.importance.filter((i) => i.value > 0);
   const maxImp = Math.max(...imp.map((i) => i.value), 1e-6);
-  main.innerHTML = `<h1 class="page-title">What drives moves</h1>
+  main.innerHTML = `<h1 class="page-title">What drives moves${isMainIdx() ? "" : `: ${esc(rname())}`}</h1>${ridxBar()}
     <p class="lede">How often a big day followed, depending on what the market looked like the evening before. A big day happens ${pct0(f.base)} of the time on average (dashed line).</p>
     ${demoBanner()}
     <div class="table-wrap"><table>
@@ -442,18 +490,19 @@ async function pageDrivers() {
       <span class="pos" style="border-left:0"><i style="width:${(i.value / maxImp) * 100}%;border-radius:3px"></i></span>
       <span class="eff muted">${(i.value * 100).toFixed(2)}</span></div>`).join("")}</div>
     <p class="note">Measured on test years only: how much prediction quality (AUC, in points ×100) drops when the factor is scrambled.</p>`;
+  bindRidx();
 }
 
 /* ---------------- page: model check */
 async function pageCheck() {
-  if (!state.status || !state.status.model) { main.innerHTML = `<h1 class="page-title">Model check</h1>${noModel()}`; bindTrainButtons(); return; }
-  const p = await api("/api/performance");
+  if (!(await radarGuard("Model check"))) return;
+  const p = await api(rq("/api/performance"));
   const m = p.metrics.big_move, d = p.metrics.up_day;
   const years = Object.keys(m.by_year_auc);
   const btRows = (p.backtest || []).map((r) => `<tr>${Object.entries(r).map(([k, v], i) => `<td class="${i ? "r" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("");
   const btHead = p.backtest && p.backtest[0] ? Object.keys(p.backtest[0]).map((k, i) => `<th class="${i ? "r" : ""}">${esc(k)}</th>`).join("") : "";
   const good = m.auc >= 0.6 && m.lift_vs_random >= 1.5;
-  main.innerHTML = `<h1 class="page-title">Model check</h1>
+  main.innerHTML = `<h1 class="page-title">Model check${isMainIdx() ? "" : `: ${esc(rname())}`}</h1>${ridxBar()}
     <p class="lede">Every number here comes from days the model had never seen: it was trained only on earlier years each time. ${good ? "The big-move signal is clearly better than chance." : "The big-move signal is weak; treat flags with caution."}</p>
     ${demoBanner()}
     <div class="kpis">
@@ -466,10 +515,11 @@ async function pageCheck() {
     <div class="chart"><div id="chk-years" style="height:260px"></div></div>
     <p class="note">If recent years drop toward 0.50, the market has changed and the model needs new factors. Direction score: ${d.auc.toFixed(2)}, which is ${d.auc < 0.56 ? "close to a coin flip, as expected" : "better than usual; verify before trusting it"}.</p>
     <h2>Did buying options on flagged days pay?</h2>
-    <p class="note" style="margin:0 0 12px">Proxy test: buy an at-the-money straddle at 9:15, sell at 3:30, paying the move India VIX priced in plus costs. Positive totals mean Bank Nifty moved more than options expected on those days. Confirm with real option prices before trading.</p>
+    <p class="note" style="margin:0 0 12px">Proxy test: buy an at-the-money straddle at 9:15, sell at 3:30, paying the move India VIX priced in plus costs. Positive totals mean ${esc(rname())} moved more than options expected on those days. Confirm with real option prices before trading.</p>
     <div class="table-wrap"><table><thead><tr>${btHead}</tr></thead><tbody>${btRows}</tbody></table></div>
     <div class="chart" style="margin-top:14px"><div id="chk-eq" style="height:300px"></div></div>
-    <p class="note"><a href="/report" target="_blank" rel="noopener">Open the full printable report</a></p>`;
+    ${isMainIdx() ? `<p class="note"><a href="/report" target="_blank" rel="noopener">Open the full printable report</a></p>` : ""}`;
+  bindRidx();
   Plotly.newPlot("chk-years", [{
     x: years, y: years.map((y) => m.by_year_auc[y]), type: "bar",
     marker: { color: years.map((y) => (m.by_year_auc[y] >= 0.6 ? C.signal : "#A9B4BF")) },
@@ -480,6 +530,56 @@ async function pageCheck() {
     { x: e.all_dates, y: e.all, type: "scattergl", mode: "lines", line: { color: "#A9B4BF", width: 1.4 }, name: "Every day" },
     { x: e.flag_dates, y: e.flag, type: "scattergl", mode: "lines", line: { color: C.signal, width: 2 }, name: "Flagged days only" },
   ], plotLayout({ showlegend: true, legend: { orientation: "h", y: 1.1 }, yaxis: { gridcolor: "#EEF1F4", ticksuffix: "%", title: { text: "Cumulative, % of spot" } } }), plotCfg);
+}
+
+/* ---------------- page: all indices (2.67, radar/indices.py) */
+async function pageGrand() {
+  const g = await api("/api/radar/grand");
+  if (state.page !== "grand") return;
+  const rows = g.rows || [];
+  const trained = rows.filter((r) => r.trained), withFc = rows.filter((r) => r.forecast && r.forecast.for_date === g.for_date);
+  const missing = rows.filter((r) => !r.trained && !r.main);
+  const dayName = g.for_date ? longDate(g.for_date) : null;
+  const meter = (f) => `<div class="meter gmeter"><i class="${f.flag ? "on" : ""}" style="width:${Math.min(100, f.prob_big * 100)}%"></i><span class="thr" style="left:${f.threshold * 100}%"></span></div>`;
+  const rec = (r) => r.record && r.record.graded ? `${r.record.caught} caught · ${r.record.missed} missed · ${r.record.false_alarm} false<br><span class="muted small">${r.record.graded} graded days</span>` : `<span class="muted small">grades build up daily</span>`;
+  const quality = (r) => r.auc == null ? "–" : `<b class="${r.auc >= 0.6 ? "" : "muted"}">${r.auc.toFixed(2)}</b><br><span class="muted small">flagged ${pct0(r.hit_when_flagged)} big vs ${pct0(r.base_rate)}</span>`;
+  const body = rows.map((r) => {
+    const f = r.forecast && r.forecast.for_date === g.for_date ? r.forecast : null;
+    if (!r.trained) return `<tr><td><b>${esc(r.name)}</b></td><td colspan="6" class="muted">${r.error ? `Last try failed: ${esc(r.error)}` : "Not trained yet"}</td></tr>`;
+    if (!f) return `<tr class="click" data-goto="${esc(r.key)}"><td><b>${esc(r.name)}</b></td><td colspan="4" class="muted">No forecast for ${dayName ? shortDate(g.for_date) : "the next session"} yet</td><td class="r">${quality(r)}</td><td>${rec(r)}</td></tr>`;
+    return `<tr class="click" data-goto="${esc(r.key)}">
+      <td><b>${esc(r.name)}</b><br><span class="muted small">${pts(f.last_close)} on ${shortDate(f.last_date)}</span></td>
+      <td>${f.flag ? `<b class="flag-txt">Big day likely</b>` : "Normal"}</td>
+      <td class="r" style="min-width:130px"><b>${pct0(f.prob_big)}</b> <span class="muted small">flag ${pct0(f.threshold)}</span>${meter(f)}</td>
+      <td class="r">±${pct(f.implied_pct, 2)}<br><span class="muted small">±${pts(f.implied_pts)} pts</span></td>
+      <td class="r muted">${f.prob_up >= 0.5 ? "Up" : "Down"} ${pct0(f.prob_up)}</td>
+      <td class="r">${quality(r)}</td>
+      <td>${rec(r)}</td></tr>`;
+  }).join("");
+  const verdict = !withFc.length ? "No forecasts yet"
+    : g.broad ? `${g.flagged} of ${g.forecasts} indices flag a big day: a broad big move is likely`
+    : g.flagged ? `${g.flagged} of ${g.forecasts} indices flag a big day: not broad`
+    : `None of ${g.forecasts} indices flags a big day: a normal session is likely`;
+  main.innerHTML = `<h1 class="page-title">All indices</h1>
+    <p class="lede">The Daily Radar for every major index: the chance that the next session's high–low range is among the biggest fifth of the past year. Each index has its own model, tested year by year on days it never saw. Information only: it does not feed alerts or paper trades.</p>
+    ${dayName ? `<p class="small muted" style="margin:0 0 6px">Forecast for <b>${dayName}</b></p>` : ""}
+    <h2 class="verdict ${g.broad ? "flagged" : ""}" style="font-size:1.35rem;margin:4px 0 14px">${verdict}</h2>
+    <div class="btn-row" style="margin:0 0 16px">
+      <button class="btn primary" data-forecast-all>Update all forecasts</button>
+      <button class="btn" data-train-all>${missing.length ? `Train ${missing.length === 1 ? esc(missing[0].name) : `${missing.length} new indices`}` : "Retrain the other indices"}</button></div>
+    ${missing.length ? `<p class="note" style="margin-top:0">${missing.map((r) => esc(r.name)).join(", ")} ${missing.length === 1 ? "is" : "are"} not trained yet. Training runs in the background, about a minute per index; it also starts by itself after 5 PM.</p>` : ""}
+    <div class="table-wrap"><table class="grand">
+      <thead><tr><th>Index</th><th>Next session</th><th class="r">Big-move chance</th><th class="r">Expected move</th><th class="r">Direction (weak)</th><th class="r">Score on unseen years</th><th>Live record (last 30)</th></tr></thead>
+      <tbody>${body}</tbody></table></div>
+    <p class="note">Score on unseen years: 0.50 is a coin flip; above 0.60 the flag is useful. "Flagged X% big vs Y%": how often a flagged day really was a big day, against any day. Direction is close to a coin flip for every index: use the flag for range (strategy and size), not for side. Click an index for its full page.</p>
+    ${(g.off || []).length ? `<p class="small muted">Not covered yet: ${(g.off || []).map((o) => `<b>${esc(o.name)}</b>: ${esc((o.why || "off").replace(/\.$/, ""))}`).join(". ")}.</p>` : ""}`;
+  main.querySelectorAll("tr[data-goto]").forEach((tr) => tr.addEventListener("click", () => {
+    state.ridx = tr.dataset.goto;
+    try { localStorage.setItem("radarIdx", state.ridx); } catch (_) {}
+    const el = $("#rail-ridx"); if (el) el.textContent = rname();
+    location.hash = "#/tomorrow";
+  }));
+  bindTrainButtons();
 }
 
 /* ---------------- page: data & settings */
@@ -577,7 +677,7 @@ async function openDay(date) {
   drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false");
   $(".drawer-close").focus();
   let d;
-  try { d = await api(`/api/day/${date}`); } catch (e) { body.innerHTML = `<p>${esc(e.message)}</p>`; return; }
+  try { d = await api(rq(`/api/day/${date}`)); } catch (e) { body.innerHTML = `<p>${esc(e.message)}</p>`; return; }
   const kv = (rows, fmt) => rows.length ? `<table class="kv">${rows.map((r) => `<tr><td>${esc(r.label)}</td><td>${fmt(r)}</td></tr>`).join("")}</table>` : `<p class="muted small">Not available for this day.</p>`;
   const cueFmt = (r) => fmtFeature(r.feature, r.value);
   body.innerHTML = `
@@ -608,7 +708,7 @@ $("#drawer").addEventListener("click", (e) => { if (e.target.closest("[data-clos
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
 /* ---------------- router */
-const PAGES = { tomorrow: pageTomorrow, history: pageHistory, biggest: pageBiggest, drivers: pageDrivers, check: pageCheck, data: pageData };
+const PAGES = { tomorrow: pageTomorrow, history: pageHistory, biggest: pageBiggest, drivers: pageDrivers, check: pageCheck, data: pageData, grand: pageGrand };
 async function route() {
   const page = (location.hash.replace("#/", "") || "live").split("?")[0];
   const fn = PAGES[page] || PAGES.live || pageTomorrow;
@@ -618,4 +718,4 @@ async function route() {
   try { await fn(); } catch (e) { main.innerHTML = `<div class="empty"><h2>This page couldn't load</h2><p>${esc(e.message)}</p><button class="btn" onclick="location.reload()">Reload</button></div>`; }
 }
 window.addEventListener("hashchange", () => { route(); main.focus({ preventScroll: true }); });
-document.addEventListener("DOMContentLoaded", async () => { await loadStatus(); loadVersion(); await route(); setInterval(loadStatus, 30000); setInterval(loadVersion, 15 * 60000); });
+document.addEventListener("DOMContentLoaded", async () => { await Promise.all([loadStatus(), loadIndices()]); loadVersion(); await route(); setInterval(loadStatus, 30000); setInterval(loadVersion, 15 * 60000); });
