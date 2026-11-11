@@ -3539,6 +3539,49 @@ function coachBox(c) {
 
 /* ---------------- page: Strategy board (2.30) */
 const REGIMES = [["auto", "Today's day type"], ["all", "All days"], ["trend_up", "Trend up"], ["trend_down", "Trend down"], ["range", "Range"], ["quiet", "Quiet range"], ["volatile", "Volatile"]];
+/* 2.58: the multiverse (lab/multiverse.py): every bench signal down every timeline at once, judged walk-forward */
+async function drawMultiverse() {
+  const el = $("#bd-mv"); if (!el) return;
+  let m; try { m = await api("/api/multiverse"); } catch (e) { el.innerHTML = `<span class="muted small">${esc(e.message)}</span>`; return; }
+  if (state.page !== "board") return;
+  const pc = (v) => v == null ? "–" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}%</span>`;
+  const nf = (v) => v == null ? "–" : Number(v).toLocaleString("en-IN");
+  const head = `<div class="toolbar" style="margin:0"><h3 style="margin:0">Multiverse <span class="muted small">every signal down every timeline at once: which signals × strike × entry time × exit</span></h3>
+    <button class="btn" id="mv-run" title="Replay every recorded day now (runs by itself after each close)">Run now</button></div>`;
+  if (!m.days || !m.days.length) {
+    el.innerHTML = head + `<p class="small muted">${esc(m.note || "Not run yet.")}</p>`;
+  } else {
+    const wt = m.walk_total || {}, lk = m.luck || {}, ch = m.champion || {};
+    const best = (m.best || []).slice(0, 10).map((b) => `<tr><td class="small">${esc(b.words)}</td><td class="r">${nf(b.n)}</td><td class="r">${pc(b.avg)}</td>
+        <td class="r">${b.win != null ? b.win + "%" : "–"}</td><td class="r"><b>${pc(b.lcb)}</b></td><td class="r">${b.green_days ?? "–"} / ${b.days}</td></tr>`).join("");
+    const walk = (m.walk || []).map((w) => `<tr><td class="nw">${esc(w.day)}</td><td class="small">${esc((w.picks[0] || {}).words || "")}</td>
+        <td class="r">${pc(w.best_avg)} <small class="muted">× ${w.best_n}</small></td><td class="r">${pc(w.port_avg)} <small class="muted">× ${w.port_n}</small></td>
+        <td class="r">${pc(w.champ_avg)} <small class="muted">× ${w.champ_n ?? 0}</small></td></tr>`).join("");
+    const reg = (m.by_regime || []).map((r) => `<li><b>${esc(r.name)}</b>: ${r.n ? `${esc(r.words)} · ${pc(r.avg)} a trade × ${nf(r.n)}, lower bound ${pc(r.lcb)}` : `<span class="muted">no signals on such a day yet</span>`}</li>`).join("");
+    const picks = (m.live_picks || []).map((p) => `<li>${esc(p.words)} · ${pc(p.avg)} × ${nf(p.n)}, lower bound ${pc(p.lcb)}</li>`).join("");
+    el.innerHTML = head + `
+      <p class="small">${nf(m.signals)} signals × ${nf(m.filters)} filters × ${nf(m.exits)} exits × ${m.strikes.length} strikes × ${m.delays.length} entry times =
+        <b>${nf(m.timelines)} timelines</b>, judged in ${m.seconds}s · ${m.days.length} recorded day${m.days.length > 1 ? "s" : ""} (${esc(m.days[0])} to ${esc(m.days[m.days.length - 1])}).
+        Net % of the premium after every charge, sold at the bid, 1 lot.</p>
+      <div class="kpis kpi6"><div class="kpi"><b>${pc((m.best[0] || {}).lcb)}</b><span>Best timeline's lower bound</span></div>
+        <div class="kpi"><b>${pc(lk.lcb)}</b><span>Luck line: the best of the same search on shuffled data</span></div>
+        <div class="kpi"><b>${pc(wt.best_avg)}</b><span>Walk-forward pick, on days it never saw (${nf(wt.best_n)} trades)</span></div>
+        <div class="kpi"><b>${pc(wt.port_avg)}</b><span>Its top ${(m.walk[0] || { picks: [] }).picks.length || 5} together (${nf(wt.port_n)} trades)</span></div>
+        <div class="kpi"><b>${pc(wt.champ_avg)}</b><span>The main account's way, same days (${nf(wt.champ_n)} trades)</span></div>
+        <div class="kpi"><b>${(m.live_picks || []).length}</b><span>Live picks for the "Multiverse pick" paper account</span></div></div>
+      ${walk ? `<h4>Walk-forward: each day picked only from the days before it</h4><div class="table-wrap"><table class="mini"><thead><tr><th>Day</th><th>Pick (from earlier days only)</th><th class="r">Pick that day</th><th class="r">Top ${(m.walk[0] || { picks: [] }).picks.length} picks</th><th class="r">Main account's way</th></tr></thead><tbody>${walk}</tbody></table></div>` : `<p class="small muted">Walk-forward starts once there are 3 recorded days.</p>`}
+      <h4>Best timelines so far <span class="muted small">ranked by the lower bound (days, not signals, are the proof)</span></h4>
+      <div class="table-wrap"><table class="mini"><thead><tr><th>Timeline</th><th class="r">Trades</th><th class="r">Avg net</th><th class="r">Won</th><th class="r">Lower bound</th><th class="r">Green days</th></tr></thead><tbody>${best}</tbody></table></div>
+      <h4>Best by day type</h4><ul class="small">${reg}</ul>
+      <h4>Trading now on paper ("Multiverse pick" account)</h4>${picks ? `<ol class="small">${picks}</ol>` : `<p class="small muted">Nothing proven yet: the account takes no trade until a timeline's lower bound is above zero.</p>`}
+      <p class="note">The main account's way here: its alert types and exit (${ch.avg != null ? `${pc(ch.avg)} a trade over ${nf(ch.n)}, won ${ch.win}%` : "–"}), without its risk check and limits.
+        A few days can't prove much: the lower bound uses Student's t on the number of days, and a timeline beating the luck line on one day is still luck until more days agree.
+        Nothing here changes alerts, the main account or the bench. Paper only.</p>`;
+  }
+  const b = $("#mv-run");
+  if (b) b.onclick = async () => { b.disabled = true; try { await post("/api/multiverse/run", {}); toast("Multiverse running: this panel updates when it is done"); setTimeout(drawMultiverse, 20000); } catch (e) { toast(e.message); b.disabled = false; } };
+}
+
 /* 2.45: trade journeys (live/paths.py): every bench signal held to 15:15, peaks, givebacks, bottoms, recoveries */
 async function drawJourneys() {
   const el = $("#bd-paths"); if (!el) return;
@@ -3600,6 +3643,7 @@ async function pageBoard() {
     ${accountsPanel(acc)}
     <div class="panel tight"><h3>Best for you right now <span class="muted small">fits ${rupees(b.capital)}, positive after costs, enough trades</span></h3>
       ${best ? `<ol class="small">${best}</ol>` : `<p class="small muted">Nothing has earned it yet: ${b.n_closed.toLocaleString("en-IN")} bench trades closed so far${b.n_open ? `, ${b.n_open} open` : ""}. A strategy needs at least ${b.min_n} closed trades and a positive average after its uncertainty. The record grows every market day.</p>`}</div>
+    <div class="panel tight" id="bd-mv"></div>
     <div class="panel tight" id="bd-paths"></div>
     <div class="toolbar"><div class="chips" role="group" aria-label="Way of trading">${famChips}</div></div>
     <div class="toolbar"><div class="btn-row">
@@ -3613,6 +3657,7 @@ async function pageBoard() {
       <div class="table-wrap"><table><thead><tr><th>Candle pattern</th><th class="r">All days</th>${keyed ? `<th class="r">This day type</th>` : ""}<th class="r">Today</th><th class="r">1 lot needs</th><th class="r">Rank</th></tr></thead><tbody>${cdlTr}</tbody></table></div></details>` : ""}
     <p class="note">${esc(b.note)} Last ${b.days} days.</p>`;
   bindCapitalBox(() => pageBoard());
+  drawMultiverse();
   drawJourneys();
   main.querySelectorAll("tr[data-bk]").forEach((row) => row.onclick = async () => {      // 2.38: every trade with its date and time
     const nx = row.nextElementSibling;

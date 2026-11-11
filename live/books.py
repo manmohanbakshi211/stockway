@@ -48,8 +48,10 @@ def _unreal(t: dict, state) -> float:
 
 class Books:
     def __init__(self, source: str, store, main_cfg: dict, user_books: dict | None = None, log=print, on_open=None,
-                 risk_for=None):
+                 risk_for=None, data_dir=None):
         self.source, self.store, self.log = source, store, log
+        self.data_dir = Path(data_dir) if data_dir else None      # 2.58: where data/multiverse.json lives
+        self._mv: dict = {}
         self.on_open, self.risk_for = on_open, risk_for
         self.books: dict[str, PaperBook] = {}
         self.specs: dict[str, dict] = {}
@@ -70,6 +72,8 @@ class Books:
                       "min_severity": int((sp.get("pick") or {}).get("min_severity") or 1)}
                 if (sp.get("pick") or {}).get("same_as_main"):    # 2.56: the main account's alerts, only the exit differs
                     pc.update(kinds=main_cfg.get("kinds") or "all", min_severity=int(main_cfg.get("min_severity") or 2))
+                if (sp.get("pick") or {}).get("multiverse"):      # 2.58: the multiverse's live picks decide (any signal)
+                    pc.update(kinds="all", min_severity=1)
                 if (sp.get("pick") or {}).get("mirror_main"):     # 2.56.2: the main account's own trades decide; its
                     pc.update(kinds="all", min_severity=1, max_open=99, max_trades_day=99,    # limits already applied
                               max_daily_loss_pct=100, cooloff_min=0)
@@ -151,6 +155,8 @@ class Books:
         for bid, bk in list(self.books.items()):
             try:
                 sp = self.specs[bid]
+                if (sp.get("pick") or {}).get("multiverse"):
+                    continue                                  # 2.58: takes test-bench signals (offer_multiverse), not alerts
                 mirror = bool((sp.get("pick") or {}).get("mirror_main"))
                 ds = self.day_state(bid, state, now) if (sp.get("day_target_pct") or sp.get("day_stop_pct")
                                                           or sp.get("compound")) else None
@@ -178,6 +184,65 @@ class Books:
             except Exception as e:
                 self.errors[bid] = str(e)
                 self.log(f"Paper account {bid} skipped an alert: {e}")
+        return out
+
+    # ------------------------------------------------------------------ 2.58: the "Multiverse pick" account
+    def has_multiverse(self) -> bool:
+        return any((sp.get("pick") or {}).get("multiverse") for sp in self.specs.values())
+
+    def mv_picks(self) -> list:
+        """The multiverse's live picks (data/multiverse.json), re-read when the file changes."""
+        if not self.data_dir:
+            return []
+        f = self.data_dir / "multiverse.json"
+        try:
+            mt = f.stat().st_mtime
+        except OSError:
+            return []
+        if self._mv.get("mt") != mt:
+            try:
+                self._mv = {"mt": mt, "picks": json.loads(f.read_text()).get("live_picks") or []}
+            except Exception as e:
+                self._mv = {"mt": mt, "picks": [], "error": str(e)}
+        return self._mv.get("picks") or []
+
+    def offer_multiverse(self, a: dict, state, now: dt.datetime, facts: dict, suggest) -> dict:
+        """A test-bench signal: each multiverse account takes it when it matches one of the live picks, with that pick's
+        strike and exit (1 lot, its own account rules). suggest(strike) -> the option to buy. Paper only."""
+        from lab.multiverse import matches
+        out = {}
+        picks = None
+        for bid, bk in list(self.books.items()):
+            sp = self.specs[bid]
+            if not (sp.get("pick") or {}).get("multiverse"):
+                continue
+            try:
+                picks = self.mv_picks() if picks is None else picks
+                kinds = facts.get("_kinds") or [a.get("kind")]
+                p = next((x for x in picks if matches(x.get("filter") or {}, kinds, facts)), None)
+                if p is None:
+                    why = "no live pick matches" if picks else "no live pick yet (multiverse not proven)"
+                else:
+                    opt = suggest(p.get("strike") or "atm")
+                    if not opt:
+                        why = "no live price for the pick's strike"
+                    else:
+                        kind, t, b, st, h = p["exit"]
+                        ex = [t if kind == "tsh" else None, st if st is not None else 95, h if h is not None else 400,
+                              t if kind == "trail" else None, b if kind == "trail" else None]
+                        d = dict(a.get("data") or {})
+                        d.update(risk={"verdict": "PASS", "lots": 1}, factory={"exit": ex}, multiverse=p.get("words"))
+                        a2 = {**a, "option": opt, "severity": max(1, int(a.get("severity") or 1)), "data": d,
+                              "title": f"Multiverse pick: {p.get('words', '')}"[:200]}
+                        before = dict(bk.skipped)
+                        tid = bk.try_open(a2, state, now)
+                        new = [k for k, v in bk.skipped.items() if v > before.get(k, 0)]
+                        why = None if tid else (new[0] if new else "account rules (open trades, trades a day, time)")
+                self._count(bid, now, why)
+                out[bid] = "taken" if why is None else why
+            except Exception as e:
+                self.errors[bid] = str(e)
+                self.log(f"Paper account {bid} skipped a signal: {e}")
         return out
 
     def _count(self, bid, now, why):

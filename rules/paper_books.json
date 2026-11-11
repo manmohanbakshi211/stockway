@@ -1,5 +1,5 @@
 {
-  "about": "2.49: extra paper accounts next to your main one (Mandeep, 10 Nov 2026, points 14 and 15). Each has its own money and its own trades (saved as source '<feed>#<id>', never mixed with the main account, the scorecard or the test bench). Paper only: nothing here can place a real order. 'pick' = which alerts the account takes; 'paper' = its account rules (same names as the main account's); capital null = the same as your main capital. Change the numbers here; old trades keep the rules they were taken with. 2.56: 'exit_style' (a chart exit from lab/exits.py STYLES) gives an account its own exit for every trade; pick.same_as_main takes the main account's alert types and strength. 2.56.2: pick.mirror_main takes exactly the main account's trades (same alert, same lots); the main account's limits decide.",
+  "about": "2.49: extra paper accounts next to your main one (Mandeep, 10 Nov 2026, points 14 and 15). Each has its own money and its own trades (saved as source '<feed>#<id>', never mixed with the main account, the scorecard or the test bench). Paper only: nothing here can place a real order. 'pick' = which alerts the account takes; 'paper' = its account rules (same names as the main account's); capital null = the same as your main capital. Change the numbers here; old trades keep the rules they were taken with. 2.56: 'exit_style' (a chart exit from lab/exits.py STYLES) gives an account its own exit for every trade; pick.same_as_main takes the main account's alert types and strength. 2.56.2: pick.mirror_main takes exactly the main account's trades (same alert, same lots); the main account's limits decide. 2.58: pick.multiverse takes test-bench signals that match the multiverse's live picks (data/multiverse.json), with the pick's strike and exit.",
   "valid_from": "2026-11-11",
   "books": {
     "best": {
@@ -62,6 +62,20 @@
       },
       "exit_style": "chand",
       "paper": {}
+    },
+    "mvpick": {
+      "name": "Multiverse pick",
+      "short": "Takes only the multiverse's proven picks",
+      "explain": "Every evening the multiverse replays every test-bench signal of the recorded days down millions of timelines (which signals, strike, entry time, exit) and keeps only the few whose lower confidence bound is above zero after charges, with days (not signals) as the units of proof. This account takes a live signal only when it matches one of those picks, with the pick's strike and exit, 1 lot, its own money and rules. When nothing is proven it takes nothing. Paper only, on trial: compare it with the main account on Accounts side by side.",
+      "on": true,
+      "capital": null,
+      "pick": {
+        "multiverse": true
+      },
+      "paper": {
+        "max_open": 3,
+        "max_trades_day": 6
+      }
     }
   }
 }
