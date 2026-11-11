@@ -64,6 +64,24 @@ def static_checks(cfg: dict | None = None) -> list:
                       if sc["choices"] else "rules/strikes.json missing or broken: every rule buys ATM (as before 2.57)"))
     except Exception as e:
         out.append(_c("strike_choice", "Lab strike choice", False, f"could not load: {e}"))
+    try:                                             # 2.60: mass search (every single / paired condition at once)
+        from lab import mass as _ms
+        mc = _ms.cfg()
+        out.append(_c("mass_search", "Lab mass search: every fact alone and paired x window x direction x exit, walk-forward",
+                      bool(mc.get("windows")) and bool(mc.get("quantiles")),
+                      f"{len(mc['quantiles'])} thresholds a fact, {len(mc['windows'])} windows, pairs for the best {mc.get('pair_top')}; "
+                      f"runs before each nightly Lab round (1-year and 5-year); the best {mc.get('to_lab')} face the usual three exams"))
+    except Exception as e:
+        out.append(_c("mass_search", "Lab mass search", False, f"could not load: {e}"))
+    try:                                             # 2.59: "Signals agree" alert
+        from live.engine import confluence_cfg
+        cc = confluence_cfg()
+        out.append(_c("confluence", "\"Signals agree\": several alert types the same way on one symbol (pop-up, sound, Telegram)",
+                      bool(cc.get("on")) and int(cc.get("min_kinds") or 0) >= 2 and int(cc.get("severity") or 2) < 3,
+                      f"{cc.get('min_kinds')}+ different alert types within {int(cc.get('window_s') or 0)} s; no Focus, no paper "
+                      f"trade by itself; graded on the test bench" if cc.get("on") else "off (rules/confluence.json)"))
+    except Exception as e:
+        out.append(_c("confluence", "Signals agree", False, f"could not load: {e}"))
     try:                                             # 2.58: the multiverse (every bench signal down every timeline)
         from lab import multiverse as _mv
         mc = _mv.cfg()

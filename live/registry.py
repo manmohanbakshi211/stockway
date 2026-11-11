@@ -33,6 +33,7 @@ KINDS = {
     "vix_jump": {"family": "detector", "label": "VIX jump"},
     "volume_surge": {"family": "detector", "label": "Volume surge", "paper": True},
     "vwap_cross": {"family": "detector", "label": "VWAP cross", "cooldown": 30, "any_direction": True},
+    "confluence": {"family": "detector", "label": "Signals agree"},     # 2.59: rules/confluence.json (it spends its alerts: no cooldown needed)
     "filing": {"family": "info", "label": "Company filing", "cooldown": 5},
     "flat_by": {"family": "info", "label": "Square-off reminder", "cooldown": 999},
     "insider": {"family": "info", "label": "Insider trade", "cooldown": 5},

@@ -81,6 +81,19 @@ class PaperBook:
     def open_trades(self):
         return self.store.trades(status="open", source=self.source)
 
+    def _index_syms(self, alert: dict | None = None) -> set:
+        """Index names: the Lab's index list plus any symbol an alert called an index this session."""
+        s = self.__dict__.setdefault("_idx", set())
+        if not s:
+            try:
+                from lab.data import UNDERLYINGS
+                s.update(UNDERLYINGS)
+            except Exception:
+                s.update({"NIFTY", "BANKNIFTY"})
+        if alert and alert.get("is_index"):
+            s.add(alert["sym"])
+        return s
+
     def try_open(self, alert: dict, state, now: dt.datetime, manual=False, override=False) -> int | None:
         """manual: you clicked Paper trade (needs PASS); override: you confirmed taking a soft BLOCK (1 lot, tagged).
         Automatic trades need PASS, unless aggressive mode is on: then every directional idea is taken (tagged)."""
@@ -104,6 +117,11 @@ class PaperBook:
         cap = int(c.get("aggressive_max_open") or 15) if aggressive else int(c["max_open"])
         if any(t["sym"] == alert["sym"] for t in opens) or (not manual and len(opens) >= cap):
             return None
+        keep = int(c.get("index_slots") or 0)             # 2.59: slots kept for the indices (0 = as before)
+        if keep and not manual and not alert.get("is_index"):
+            idx = self._index_syms(alert)
+            if sum(1 for t in opens if t["sym"] not in idx) >= cap - keep:
+                return self._skip(f"{keep} slot{'s' if keep > 1 else ''} kept for Nifty / Bank Nifty")
         risk = (alert.get("data") or {}).get("risk")
         if not aggressive:
             if self.guard(now)["blocked"]:

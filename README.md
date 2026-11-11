@@ -114,6 +114,40 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Mass search: every fact alone and paired, all at once, on the Lab's years of data (2.60)
+
+Mandeep, 11 Nov 2026: "1000 magzine ... saari mag khali karke best bullet ka pata laga le" and "prove you best".
+
+- **Gun** (`lab/mass.py`): the Lab's bar table (every 5-minute bar of the index option history, its facts, the result
+  of buying the ATM call / put under each exit, after charges) laid out as one block per day × index × direction with
+  64 bars. A rule fires on its first matching bar in its window (the Lab's 1 trade a day), so a whole rule is one AND
+  and one argmax: every fact at 3 thresholds above / below (singles) and the best 60 singles paired with every other,
+  × 4 time windows × each direction and index × each exit. On the old 2-year Nifty / Bank Nifty copy: **879,120 rules
+  in 44 seconds** (the Lab's search tries about 9,000 a night).
+- **The judge:** the search sees only the Lab's train days, ranks by the lower confidence bound; month-by-month
+  walk-forward on the later months (each month's pick from the months before it), next to buying every day with the
+  same exit; the luck line from the same search with each train day's prices swapped with another day's. First run on
+  that copy: best train lower bound ₹468 a trade vs luck ₹255; walk-forward 11 months, 43 trades, +₹363 a trade
+  (+₹15,591) where buying every day lost ₹76,868 over 304 trades; most of it from one month (March 2026): a lead.
+- The best 40 go to the Lab as ideas (source "mass search") and face the usual train / validation / holdout exams and
+  promotion bar: nothing goes live by the mass search alone. Runs before each nightly Lab round on the 1-year and
+  5-year Labs (`lab/proc.py` job `mass`), or Strategy Lab → Mass search → Run now. **Bullets:** `rules/mass.json`.
+  System check `mass_search`.
+
+## "Signals agree" alert and the "Index slot" paper account (2.59)
+
+Mandeep, 11 Nov 2026 (Bank Nifty breakout: new day high 10:29, flag breakout + heavy 60900 PE writing 10:30, no pop-up,
+the main account bought only at 10:42 because its 3 slots were full of stock trades): "jo best ho vo karo".
+
+- **"Signals agree"** (`rules/confluence.json`, kind `confluence`): when 3 different alert types point the same way on
+  the same symbol within 3 minutes, one alert names them, with a pop-up, a sound and Telegram (when set), whatever its
+  strength. It does not change Focus, the risk check or any paper account (the main account doesn't trade this type);
+  the test bench records it, so the multiverse grades it before anything trades it. System check `confluence`.
+- **"Index slot" paper account** (`rules/paper_books.json` → `idxslot`): the main account's alert types and strength,
+  but its last open-trade slot is never filled by a stock (`paper.index_slots: 1`; 0 = as before, the main account
+  is unchanged). Accounts side by side shows whether keeping a slot for the indices pays; switching the main account
+  is Mandeep's call.
+
 ## Multiverse: every signal down every timeline at once, judged honestly (2.58)
 
 Mandeep, 11 Nov 2026: "saari possibilities simultaneously test karke check karke best path as fastest as we can ...

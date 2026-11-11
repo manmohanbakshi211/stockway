@@ -843,6 +843,26 @@ def multiverse_run():
     return {"id": JOBS.start("multiverse", "Multiverse: every signal down every timeline", job)["id"]}
 
 
+# ---- 2.60 mass search (lab/mass.py): every single / paired condition x window x exit, walk-forward by month
+def _mass_dir(lab: str):
+    return ROOT / "data" / "lab5y" if lab == "5y" else ROOT / "data"
+
+
+@app.get("/api/lab/mass")
+def mass_view(lab: str = "1y"):
+    from lab import mass
+    return clean(mass.view(_mass_dir(lab)))
+
+
+@app.post("/api/lab/mass/run")
+def mass_run(lab: str = "1y"):
+    from lab import proc
+
+    def job(log, stop):
+        proc.run("mass", _mass_dir(lab), log=log, should_stop=stop)
+    return {"id": JOBS.start("mass", f"Mass search ({'5-year' if lab == '5y' else '1-year'} Lab)", job)["id"]}
+
+
 # ---- 2.43 strategy files (lab/packs.py): upload a .json, checked against a fixed vocabulary, data only
 @app.get("/api/packs")
 def packs_view():

@@ -1,0 +1,10 @@
+{
+  "about": "2.59 confluence alert (Mandeep, 11 Nov 2026, Bank Nifty breakout at 10:29-10:30: new day high + flag breakout + heavy PE writing in the same minute, but no pop-up because each was strength 2; 'jo best ho vo karo'). When several different alert types point the same way on the same symbol within a few minutes, one 'Signals agree' alert says so with a pop-up, a sound and Telegram (when set). It does not change Focus, the risk check or any paper account's rules (the main account does not trade this alert type); the test bench records it, so the multiverse grades it like every other signal before anything trades it. Change the numbers here.",
+  "valid_from": "2026-11-11",
+  "on": true,
+  "min_kinds": 3,
+  "window_s": 180,
+  "severity": 2,
+  "notify": true,
+  "ignore_kinds": ["confluence", "range_sell", "news", "filing", "insider", "macro", "flat_by", "iv_spike", "vix_drop", "vix_jump"]
+}
