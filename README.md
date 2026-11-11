@@ -114,6 +114,28 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## Day-type forecaster: trend, range or quiet day, from the 09:45 facts (2.66)
+
+`lab/daytype.py` learns from the Lab's bar tables (1-year and 5-year) how the first 30 minutes look on days that end
+as a **trend day** (moved cleanly, wider than a usual day), a **range day** or a **quiet day** (under 60% of a usual
+day's range). Facts used (rules/daytype.json): range so far vs a usual day, how cleanly it has moved so far, gap, VIX,
+days to expiry, opening-range position, distance from yesterday's high / low, CPR width, ADX. Every night each
+candidate model (logistic regression, small gradient-boosted trees) is tested walk-forward by month (a month is
+forecast only by a model trained on the months before) against the usual shares; the best one is the live model.
+
+First test (copies of the Lab tables, 11 Nov 2026): 1-year Lab (Nifty + Bank Nifty, 528 unseen days) 7.3% better than
+the usual shares, the 20% most trend-like mornings trended 36% (all days 31%), the 20% most quiet-looking were quiet 29%
+(all days 11%); 5-year Bank Nifty (631 unseen days) 8.1% better, trend 48% vs 31%, quiet 37% vs 14%. On trend days the
+move by 09:45 already pointed the day's way 78-83% of the time. It does **not** beat "always say range" as a yes/no
+call (range days are 55% of days): read it as odds, not a verdict.
+
+Live: at 09:45 each index gets its odds (Live page under "What works", and the Strategy board), graded at the close
+(data/daytype_live.json). On trial until the walk-forward clears the trust rule and 20+ live days agree. Information
+only: nothing trades on it.
+
+Privacy: from 2.66 every file the app writes under `data/` (models, Lab results, AI reports, paper records) is kept out
+of git, not only the token and database files.
+
 ## Evening AI analyst (2.65)
 
 After the close (after the trade journeys and the multiverse), `live/analyst.py` collects the day on one page (paper

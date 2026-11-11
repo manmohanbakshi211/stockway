@@ -848,6 +848,11 @@ def live_board(regime: str = "auto", days: int = 60, source: str | None = None, 
     out = bench.board(e.store, src, cap, risk, reg, max(1, min(365, days)), today=e.clock.now().date().isoformat(), family=fam)
     out.update(day_type=now_reg.get("label") if e.running else None, day_code=now_reg.get("code") if e.running else None, source=src,
                styles=[{"style": k, "label": v["label"], "family": v["family"]} for k, v in bench.load_styles()[0].items()])
+    try:                                                  # 2.66: the 09:45 day-type forecast (lab/daytype.py), on trial
+        from lab import daytype
+        out["daytype"] = daytype.today(e.data_dir, e.clock.now().date().isoformat())
+    except Exception:
+        out["daytype"] = None
     return clean(out)
 
 

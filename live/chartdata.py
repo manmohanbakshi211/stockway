@@ -136,7 +136,7 @@ class ChartData:
             st = o.get("straddle")
             day_rec[slot - 1] = (o.get("atm_iv"), st / m["spot"] * 100 if st and m.get("spot") else None)
             lib = self._bench_rules() if sym in factory.INDEX_SYMS else self._bench_rules_stocks() if sym in in_play else []
-            if not rules and not lib:
+            if not rules and not lib and sym not in factory.INDEX_SYMS:    # 2.66: the indexes always (day-type forecast)
                 continue
             b = self.five_min(sym, now.date())
             if not b or len(b["c"]) < slot:
@@ -163,6 +163,12 @@ class ChartData:
             f = factory.bar_features(o5, h5, l5, c5, ctx, [np.nan if x is None else x for x in ivs],
                                      [np.nan if x is None else x for x in prem])
             self._add_new_facts(f, sym, now, slot, m, (o5, h5, l5, c5), prem, rules + lib)        # 2.47
+            if sym in factory.INDEX_SYMS:
+                try:                               # 2.66: the 09:45 day-type forecast, graded at the close (on trial)
+                    self._daytype(sym, now, slot, f)
+                except Exception as ex:
+                    if self._rate(f"daytype:{sym}", 1800):
+                        self.e.log(f"Day-type forecast for {sym} skipped: {ex}")
             for r in rules:
                 try:                               # one broken rule or model file is skipped, the rest still run
                     if r.get("ml"):
@@ -308,6 +314,42 @@ class ChartData:
         return out
 
     # ------------------------------------------------------------ 2.47: bigger-timeframe / multi-day and option facts
+    def _daytype(self, sym, now, slot: int, f: dict):
+        """2.66 (lab/daytype.py): once a day per index, the chance of a trend / range / quiet day from the facts of the
+        09:45 bar (the same facts as the Lab's bar table), saved to data/daytype_live.json and graded on the 14:45 bar.
+        Information only: nothing trades on it."""
+        from lab import daytype as DT
+        c = DT.cfg()
+        at = int(c.get("at_tod", 30)) // 5 - 1            # bar index of the forecast bar
+        end = int(c.get("end_tod", 330)) // 5 - 1          # bar index of the grading bar (the Lab's last bar)
+        if slot <= at:
+            return
+        day = now.date().isoformat()
+        rows = getattr(self, "_dt_rows", None)
+        if rows is None:
+            rows = self._dt_rows = DT.live_load(self.e.data_dir)
+        row = next((r for r in rows if r.get("day") == day and r.get("sym") == sym), None)
+        changed = False
+        if row is None:
+            fv = {k: float(v[at]) for k, v in f.items()
+                  if isinstance(v, np.ndarray) and len(v) > at and np.issubdtype(v.dtype, np.number)}
+            from lab import dhan_hist
+            p = DT.predict([self.e.data_dir, dhan_hist.root(self.e.data_dir)], sym, fv)
+            if not p:
+                return
+            row = {"day": day, "sym": sym, "made": now.timestamp(), "late": slot > at + 3, **p}
+            rows.append(row)
+            changed = True
+            pr = p["probs"]
+            self.e.log(f"Day type {sym} (09:45, on trial): trend {pr['trend']:.0f}% (usual {p['usual']['trend']:.0f}%), "
+                       f"range {pr['range']:.0f}%, quiet {pr['quiet']:.0f}%")
+        if not row.get("label") and slot > end:
+            last = {k: float(f[k][end]) for k in ("gap", "day_ret", "day_range") if k in f and len(f[k]) > end}
+            DT.grade(row, last, c)
+            changed = bool(row.get("label"))
+        if changed:
+            DT.live_save(self.e.data_dir, rows)
+
     def _add_new_facts(self, f: dict, sym, now, slot: int, m: dict, bars: tuple, prem: list, rules: list):
         """Adds the 2.47 facts (lab/tfacts.py and the option momentum facts) to f, the same as the Lab's bar table.
         Computed only when a rule here uses one (history is fetched once a day per symbol); NaN otherwise."""

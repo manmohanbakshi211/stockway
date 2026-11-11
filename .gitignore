@@ -33,3 +33,7 @@ data/backups/
 data/lab/
 data/world_cache.json
 data/packs/
+
+# 2.66: everything the app writes under data/ stays on your Mac (models, Lab results, AI reports, paper records)
+data/*
+!data/events_template.csv
