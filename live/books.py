@@ -126,6 +126,14 @@ class Books:
             return "no option idea"
         if d.get("muted"):
             return "demoted by its live record"
+        if p.get("situation"):                          # 2.73: Lab-rule signals the situation picker says fit today
+            if a.get("kind") != "factory":
+                return "not a Strategy Lab rule signal"
+            v = d.get("situation") or {}
+            if v.get("take") is None:
+                return "the situation picker has not learned this rule yet"
+            if not v.get("take"):
+                return "the situation picker skips it today"
         if p.get("focus") and not d.get("focus"):
             return "not a Focus alert"
         if a.get("severity", 0) < int(p.get("min_severity") or 1):

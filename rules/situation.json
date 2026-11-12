@@ -1,0 +1,14 @@
+{
+ "about": "Market situation picker (lab/situation.py, 2.73). Mandeep, 13 Nov 2026: 'system understand the market movement and choose what is the best for making profit as per the market situation'. Every trade of every live Strategy Lab rule is labelled with the market situation at its entry (all known at that bar): the day so far (quiet / range / trend, measured against this symbol's typical day by that time), the trade with or against the day's move, VIX (low / mid / high), expiry (expiry day / 1-2 days / further), the opening gap (up / flat / down), the daily trend (up / down / none). Each rule's average result in each situation is learned on the train + validation days only; a live signal is taken when the rule's expected result in today's situation is above zero (each situation's difference from the rule's own average is shrunk toward zero by shrink_k trades, so a few lucky trades cannot decide). The holdout days check it: all the rules' trades vs only the picked ones. Shown on the Strategy Lab page; the 'Auto pick' paper account takes only the picked Lab-rule alerts. On trial: the main account is unchanged; the picker is trusted only when it beats taking every signal on the holdout days (total and per trade) and then live for min_live_days.",
+ "valid_from": "2026-11-13",
+ "quiet_rel": 0.6,
+ "trend_rel": 0.8,
+ "trend_eff": 0.6,
+ "gap_rel": 0.3,
+ "move_flat_rel": 0.15,
+ "near_expiry_days": 2,
+ "shrink_k": 20,
+ "min_cell_n": 15,
+ "dims": ["day", "move", "vix", "expiry", "gap", "trend"],
+ "trust": {"min_hold_trades": 30, "beat_total": true, "beat_avg": true, "min_live_days": 20}
+}

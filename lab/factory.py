@@ -1057,7 +1057,7 @@ def validate(s: dict, extra_exits=()) -> dict | None:
 class Book:
     """The bar table split into train / validation / holdout by date, with fast rule evaluation."""
 
-    def __init__(self, df: pd.DataFrame, cuts=(0.6, 0.8)):
+    def __init__(self, df: pd.DataFrame, cuts=(0.6, 0.8), feats: list | None = None):
         self.df = df.reset_index(drop=True)
         dates = np.array(sorted(df["date"].unique()))
         self.dates = dates
@@ -1067,7 +1067,9 @@ class Book:
         self.dix = df["date"].map(di).to_numpy()
         self.part = np.where(self.dix < a, 0, np.where(self.dix < b, 1, 2))
         # a bar table from before a fact existed: that fact is unknown (NaN), so rules using it simply can't fire there
-        self.cols = {c: (df[c].to_numpy() if c in df else np.full(len(df), np.nan)) for c in list(FEATURES) + ["dir", "sym"]}
+        # 2.73: feats = only these facts (a lean table for one job, e.g. the situation picker); default every fact
+        self.cols = {c: (df[c].to_numpy() if c in df else np.full(len(df), np.nan))
+                     for c in (list(feats) if feats is not None else list(FEATURES)) + ["dir", "sym"]}
         self.pnl = {r: df["pnl_" + r].to_numpy(dtype=float) for r in all_exits() if "pnl_" + r in df}
         self.pnl.update({c[4:]: df[c].to_numpy(dtype=float) for c in df.columns if c.startswith("pnl_") and "@" in c})
         self.strike_choices = sorted({c.split("@", 1)[1] for c in self.pnl if "@" in c})     # 2.57

@@ -114,6 +114,34 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.73: market situation picker: the right Lab rule for today's market (13 Nov 2026)
+
+Mandeep, 13 Nov 2026: "why we have to select the rules ... the system should understand the market movement and choose
+what is the best for making profit as per the market situation". (Rules were never hand-picked: a rule that passes the
+Lab with moderate / strong evidence goes live by itself and switches off by itself after 15+ losing live trades; the
+tick box is only an override. What was missing: every rule traded on every kind of day.)
+
+- **Gun** (lab/situation.py; settings rules/situation.json): the market situation of any 5-minute bar from facts known
+  at its close: the day so far (quiet / range / trend, against this symbol's typical day by that time; the day-type
+  forecaster's definitions), the trade with or against the day's move, VIX (low / mid / high), expiry (expiry day / 1-2
+  days / further), the opening gap, the daily trend. Each live rule's Lab trades are split by situation; on the train +
+  validation days its average per situation (shrunk toward its own average by 20 trades, so a few lucky trades can't
+  decide); a signal is taken when the expected result in today's situation is above zero. The holdout days check it
+  (every signal vs the picked ones); then it is learned again on all days for live use. Every night after the Lab
+  (Lab job "situation", reading only the columns it needs), once at the first start, or "Learn now".
+- **Live**: each Strategy Lab rule alert carries the picker's verdict (take / skip, expected ₹, why); the new paper
+  account **Auto pick** takes only Lab-rule signals the picker says fit today (1 lot, own money and rules). The main
+  account is unchanged. Strategy Lab page: "Auto pick" panel (holdout proof, each rule's best / worst situations,
+  today's situation of Nifty / Bank Nifty and each rule's verdict now). System & logins: its state.
+- **First result on the Mac's Lab (honest)**: all 83 live Lab rules are ATM straddle sells (paper selling is off since
+  11 Nov, so none of them paper-trades). On the holdout days (11 Jun - 9 Nov 2026) picking did **not** beat taking
+  every signal: 2,276 trades ₹8.51L -> 2,047 picked ₹7.45L. These sells made money in every situation (₹ a trade:
+  expiry day 803, trend day so far 568, range 458, quiet 467; weakest: gap up 363, gap down 376, daily uptrend 312).
+  So the picker stays on trial; the Auto pick account waits for option-buying rules to pass the Lab. VIX could not be
+  used yet (the table has it on a quarter of the bars, none in the learning days).
+- Lab Book gets an optional `feats` (only the facts a job needs); the default is unchanged (Lab regression identical).
+- Tests: test_2_73; full suite; Lab regression identical; headless desktop + phone clean.
+
 ## 2.72: no waiting anywhere: network off the analysis loop, history before the first scan, every pass timed (12 Nov 2026)
 
 Mandeep, 12 Nov 2026 (13:27): "ek baar sabhi jagah puri app mein check karlo aisi delays dobara na aaye". The whole

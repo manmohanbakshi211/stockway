@@ -783,6 +783,36 @@ def lab_scenario_run():
         raise HTTPException(400, str(ex))
 
 
+# ----------------------------------------------------------------- 2.73: market situation picker (lab/situation.py)
+@app.get("/api/lab/situation")
+def lab_situation():
+    """Which live Strategy Lab rule fits which market situation: the holdout proof (every signal vs the picked ones),
+    each rule's best / worst situations, and today's situation of the indices with each rule's verdict."""
+    from lab import factory, situation
+    try:
+        from webapp.live_api import engine as _eng
+        e = _eng()
+        now = dict(getattr(e, "sit_now", None) or {})
+    except Exception:
+        e, now = None, {}
+    meta = {r["id"]: {"rule": r.get("rule")} for r in factory.promoted(ROOT / "data")}
+    out = situation.view(ROOT / "data", now, meta)
+    out["busy"] = bool(getattr(e, "_sit_busy", False)) if e is not None else False
+    return clean(out)
+
+
+@app.post("/api/lab/situation/learn")
+def lab_situation_learn():
+    """Learn the picker now (its own low-priority process; about a minute on the Lab's bar table)."""
+    import threading
+    from webapp.live_api import engine as _eng
+    e = _eng()
+    if getattr(e, "_sit_busy", False):
+        return {"busy": True}
+    threading.Thread(target=e.situation_learn, args=(True,), daemon=True, name="situation-learn").start()
+    return {"started": True}
+
+
 # ----------------------------------------------------------------- Strategy Lab (lab/factory.py, lab/ebooks.py)
 @app.get("/api/factory")
 def factory_view():

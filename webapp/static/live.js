@@ -3167,6 +3167,43 @@ function drawWatchlist(w) {
 }
 
 /* ---------------- page: Strategy Lab (lab/factory.py) */
+/* 2.73 (Mandeep: "system understand the market movement and choose what is the best ... as per the market situation"):
+   the market situation picker on the Strategy Lab page: today's situation, which live rule fits it, the holdout proof. */
+async function labSituation() {
+  const el = $("#lab-sit"); if (!el) return;
+  let v; try { v = await api("/api/lab/situation"); } catch (e) { el.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; return; }
+  const rs = (x) => x == null ? "–" : `<span class="nw ${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : "−"}₹${Math.abs(Math.round(x)).toLocaleString("en-IN")}</span>`;
+  const head = `<h3 style="margin-top:0">Auto pick: the right rule for today's market <span class="pill p-amber">on trial</span></h3>
+    <p class="small" style="margin:0 0 8px">You don't pick rules. Every live rule's Lab trades are split by the market situation at entry (day so far quiet / range / trend, with or against the day's move, VIX, expiry, gap, daily trend). A signal is taken only when that rule makes money <b>in today's situation</b>. Learned on train + validation days, checked on holdout days it never saw. The <b>Auto pick</b> paper account trades it (Paper trades → Accounts); your main account is unchanged.</p>`;
+  if (!v.ready) { el.innerHTML = head + `<p class="small muted">${esc(v.note || "")}</p><button class="btn" id="sit-learn" ${v.busy ? "disabled" : ""}>${v.busy ? "Learning…" : "Learn now"}</button>`; sitBtn(); return; }
+  const o = v.overall || {}, a = o.all || {}, p = o.picked || {};
+  const proof = `<div class="kpis kpi4" style="margin:8px 0">
+      <div class="kpi"><b>${a.n || 0} → ${p.n || 0}</b><span>Holdout trades: every signal → picked</span></div>
+      <div class="kpi"><b>${rs(a.total)} → ${rs(p.total)}</b><span>Holdout total ₹</span></div>
+      <div class="kpi"><b>${rs(a.avg)} → ${rs(p.avg)}</b><span>Per trade</span></div>
+      <div class="kpi"><b>${a.green_pct ?? "–"}% → ${p.green_pct ?? "–"}%</b><span>Green days</span></div></div>
+    <p class="small" style="margin:0 0 8px">${v.beats_holdout ? `<b class="up">Picking by situation beat taking every signal on the holdout days</b> (${esc(v.hold_from)} → ${esc(v.hold_to)}). Next: ${v.trust.min_live_days} live days on the Auto pick account.` : `<b class="down">On the holdout days picking did not beat taking every signal</b> (${esc(v.hold_from)} → ${esc(v.hold_to)}): it stays on trial and the account shows if live days say otherwise.`}</p>`;
+  const now = Object.entries(v.words || {}).map(([s, w]) => `<b>${esc(s)}</b>: ${esc(w || "not read yet")}`).join("<br>");
+  const rows = (v.rules || []).slice(0, 40).map((r) => {
+    if (r.error) return `<tr><td>${esc(r.id)}</td><td colspan="4" class="small down">${esc(r.error)}</td></tr>`;
+    const h = r.hold || {}, nowv = Object.entries(r.now || {}).map(([s, x]) => x.take == null ? "" : `${esc(s)} <span class="pill ${x.take ? "p-up" : "p-down"}" title="${esc(x.why || "")}">${x.take ? "take" : "skip"} ${rs(x.exp)}</span>`).join(" ");
+    return `<tr><td class="small"><b>${esc(r.id)}</b><br><span class="muted">${esc((r.rule || "").slice(0, 110))}${(r.rule || "").length > 110 ? "…" : ""}</span></td>
+      <td class="small">${(r.best || []).map((b) => `${esc(b[0])} ${rs(b[2])} <span class="muted">(${b[1]})</span>`).join("<br>") || "–"}</td>
+      <td class="small">${(r.worst || []).map((b) => `${esc(b[0])} ${rs(b[2])} <span class="muted">(${b[1]})</span>`).join("<br>") || "–"}</td>
+      <td class="small">${(h.all || {}).n || 0} · ${rs((h.all || {}).total)} → <b>${(h.picked || {}).n || 0} · ${rs((h.picked || {}).total)}</b></td>
+      <td class="small">${nowv || `<span class="muted">at its signal</span>`}</td></tr>`; }).join("");
+  el.innerHTML = head + proof + (now ? `<p class="small" style="margin:0 0 8px"><b>Today's situation now</b><br>${now}</p>` : "")
+    + `<div class="table-wrap"><table class="small"><thead><tr><th>Live rule</th><th>Best situations (₹ a trade, trades)</th><th>Worst situations</th><th>Holdout: every signal → picked</th><th>Now</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="small muted" style="margin:6px 0 0">Learned ${v.made ? new Date(v.made * 1000).toLocaleString("en-IN") : "–"} · again every night after the Lab. <button class="btn" id="sit-learn" ${v.busy ? "disabled" : ""}>${v.busy ? "Learning…" : "Learn now"}</button></p>`;
+  sitBtn();
+}
+function sitBtn() {
+  const b = $("#sit-learn"); if (!b) return;
+  b.onclick = async () => { b.disabled = true; b.textContent = "Learning…"; try { await api("/api/lab/situation/learn", { method: "POST" }); } catch (e) { toast(e.message); }
+    const poll = async () => { if (state.page !== "lab") return; let v; try { v = await api("/api/lab/situation"); } catch (_) { return; } if (v.busy) setTimeout(poll, 4000); else labSituation(); };
+    setTimeout(poll, 3000); };
+}
+
 async function pageLab() {
   stopPageTimer();
   const draw = async () => {
@@ -3199,6 +3236,7 @@ async function pageLab() {
           <li><b>Green "Passed all 3"</b> = good enough to paper-trade live. Most rules fail; that is normal and saves money.</li>
           <li><b>Click any strategy or rule</b> to see every stock and index it was tested on, with its result in each exam.</li>
           <li><b>The numbers:</b> trades · average ₹ per trade after charges · <b>t</b> = how sure (2+ strong, 1–2 some, below 1 could be luck) · green = % of days that ended in profit.</li></ol></div>
+      <div class="panel tight" id="lab-sit" style="margin-top:14px"></div>
       <div class="panel tight" id="lab-mass" style="margin-top:14px"></div>
       <div class="panel tight" id="lab-packs" style="margin-top:14px"></div>
       <div class="kpis kpi6" style="margin-top:16px">
@@ -3249,6 +3287,7 @@ async function pageLab() {
     draw5y();
     drawMass();
     drawPacks();
+    labSituation();
     main.querySelectorAll("[data-rexp]").forEach((tr) => tr.onclick = (ev) => { if (ev.target.closest("input,label,a,button")) return;
       const row = main.querySelector(`[data-rrow="${CSS.escape(tr.dataset.rexp)}"]`); if (!row) return;
       row.hidden = !row.hidden; if (!row.hidden && !row.dataset.done) { row.dataset.done = "1"; labRuleDetail(row.firstElementChild, [tr.dataset.rexp], ["1y"]); } });

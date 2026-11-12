@@ -108,6 +108,19 @@ def static_checks(cfg: dict | None = None) -> list:
                       f"batches of {_nr.BATCH} every {_nr.EVERY_S} s in market hours; news alerts stay keyword-based until it proves better"))
     except Exception as e:
         out.append(_c("news_radar", "News radar", False, f"could not load: {e}"))
+    try:                                             # 2.73: the market situation picker (Auto pick account)
+        from lab import situation as _sit
+        sc = _sit.cfg()
+        _root = Path(__file__).resolve().parents[1]
+        info = _sit.load(_root / "data") if (_root / "data").exists() else {}
+        n_r = len([r for r in (info.get("rules") or {}).values() if not r.get("error")])
+        det = (f"learned {time.strftime('%d %b %H:%M', time.localtime(info['made']))}: {n_r} live Lab rules; holdout "
+               + ("picking beat taking every signal" if info.get("beats_holdout") else "picking did not beat taking every signal (on trial)")
+               if info.get("made") and n_r else "learns from the Lab's bar table every night (Strategy Lab page: Learn now)")
+        out.append(_c("situation", "Situation picker: which Lab rule fits today's market (Auto pick paper account)",
+                      bool(sc.get("dims")), det + f"; situations: {', '.join(sc['dims'])}"))
+    except Exception as e:
+        out.append(_c("situation", "Situation picker", False, f"could not load: {e}"))
     try:                                             # 2.70: MindGame (buyer / seller behaviour, on trial)
         from live import mindgame as _mg
         ok_b, later_b, bad_b = _mg.bullets()

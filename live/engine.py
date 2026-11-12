@@ -442,6 +442,7 @@ class LiveEngine:
             pass
         threading.Thread(target=self._paper_watch, args=(token,), daemon=True, name="paper-watch").start()
         threading.Thread(target=self._warm_charts, args=(token,), daemon=True, name="chart-warmup").start()
+        threading.Thread(target=self.situation_learn, args=(False,), daemon=True, name="situation-first").start()
         threading.Thread(target=self._vault_loop, args=(token,), daemon=True, name="data-vault").start()
         threading.Thread(target=self._nextcandle_loop, args=(token,), daemon=True, name="next-candle").start()
         self._loop()
@@ -712,6 +713,23 @@ class LiveEngine:
                     self._guard("Paper accounts fast exits", self.books.update_fast, self.state, now)
                 self.status["paper_watch_ms"] = round((time.time() - t0) * 1000, 1)
             self.stop_evt.wait(max(0.05, ms / 1000 - (time.time() - t0)))
+
+    def situation_learn(self, force: bool = True) -> dict:
+        """2.73: learn the market situation picker now (its own low-priority process); without force only when it has
+        never run here (the nightly Lab keeps it fresh after that)."""
+        from lab import proc
+        if not force and (self.data_dir / "situation.json").exists():
+            return {"skipped": "already learned"}
+        if getattr(self, "_sit_busy", False):
+            return {"busy": True}
+        self._sit_busy = True
+        try:
+            return proc.run("situation", self.data_dir, log=lambda m: self.log(f"Strategy Lab: {m}")) or {}
+        except Exception as e:
+            self.log(f"Situation picker failed: {e}")
+            return {"error": str(e)[:160]}
+        finally:
+            self._sit_busy = False
 
     def _warm_charts(self, token):
         """2.72: earlier days' bars for the Lab rules check, fetched before the first scan (see ChartData.warm)."""
@@ -2593,6 +2611,10 @@ class LiveEngine:
             except Exception as e:
                 log(f"Day-type forecaster failed: {e}")
             proc.run("factory", self.data_dir, log=log, n_random=6000, n_mutate=3000)
+            try:                                          # 2.73: which live rule fits which market situation
+                proc.run("situation", self.data_dir, log=log)
+            except Exception as e:
+                log(f"Situation picker failed: {e}")
             try:
                 proc.run("mlstrat", self.data_dir, log=log)
             except Exception as e:

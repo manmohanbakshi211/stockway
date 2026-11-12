@@ -191,6 +191,18 @@ class ChartData:
             f = factory.bar_features(o5, h5, l5, c5, ctx, [np.nan if x is None else x for x in ivs],
                                      [np.nan if x is None else x for x in prem])
             self._add_new_facts(f, sym, now, slot, m, (o5, h5, l5, c5), prem, rules + lib)        # 2.47
+            sit_info = None
+            try:                                   # 2.73: today's market situation (the picker; information + its account)
+                from lab import situation as SIT
+                sit_info = SIT.load(self.e.data_dir)
+                if sit_info and sym in factory.INDEX_SYMS:
+                    sn = SIT.live_situation(sit_info, f, sym, 0)
+                    mv = (f["day_ret"][-1] or 0) - (f["gap"][-1] or 0) if f.get("day_ret") is not None else 0
+                    sn["_mv"] = 0 if sn.get("day") is None else (1 if mv > 0 else -1 if mv < 0 else 0)
+                    self.e.__dict__.setdefault("sit_now", {})[sym] = sn
+            except Exception as ex:
+                if self._rate(f"sit:{sym}", 1800):
+                    self.e.log(f"Situation for {sym} skipped: {ex}")
             if sym in factory.INDEX_SYMS:
                 try:                               # 2.66: the 09:45 day-type forecast, graded at the close (on trial)
                     self._daytype(sym, now, slot, f)
@@ -242,11 +254,20 @@ class ChartData:
                     continue                       # setting: "any F&O stock" rules only on stocks the Lab tested them on
                 if untested:
                     fac["untested_stock"] = True
+                pick = None
+                if sit_info:                       # 2.73: does this rule fit today's situation? (the Auto pick account)
+                    try:
+                        from lab import situation as SIT
+                        pick = SIT.verdict(sit_info, r["id"], SIT.live_situation(sit_info, f, sym, d))
+                    except Exception:
+                        pick = None
                 emit({"sym": sym, "kind": "factory", "direction": "up" if d > 0 else "down", "severity": 3,
                       "title": f"{sym} Strategy Lab rule {r['id']}: {'BUY call' if d > 0 else 'BUY put'}",
                       "detail": f"{r['rule']} Holdout: {h.get('n', 0)} trades, avg ₹{h.get('avg', 0):,.0f}, green days {h.get('green_pct', 0)}%."
-                                + (f" Note: tested on other F&O stocks, not on {sym} itself." if untested else ""),
-                      "price": m.get("spot"), "data": {"factory": fac}})
+                                + (f" Note: tested on other F&O stocks, not on {sym} itself." if untested else "")
+                                + (f" Situation picker: {'TAKE' if pick['take'] else 'SKIP'} ({SIT.words(pick['situation'])}; {pick['why']})."
+                                   if pick and pick.get("take") is not None else ""),
+                      "price": m.get("spot"), "data": {"factory": fac, **({"situation": pick} if pick else {})}})
             hits = []
             for r in lib:                                  # 2.46: which named strategies fire on this bar (all of them first)
                 try:

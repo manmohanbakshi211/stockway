@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-JOBS = ("factory", "mlstrat", "candlecast", "paths", "multiverse", "mass", "daytype", "radar_indices", "echo")
+JOBS = ("factory", "mlstrat", "candlecast", "paths", "multiverse", "mass", "daytype", "radar_indices", "situation", "echo")
 NICE = 10
 RESULT = "@@RESULT "
 LAST: dict = {}                   # the latest run: how it ran (child / in-process), when, how long (System page)
@@ -56,6 +56,9 @@ def _inproc(job: str, data_dir, log, should_stop, kw: dict):
     if job == "daytype":                                 # 2.66: the 09:45 day-type forecaster (lab/daytype.py)
         from . import daytype
         return daytype.learn(data_dir, log=log)
+    if job == "situation":                               # 2.73: the market situation picker (lab/situation.py)
+        from . import situation
+        return situation.learn(data_dir, log=log, should_stop=should_stop)
     if job == "radar_indices":                           # 2.67: the Daily Radar for every other index (radar/indices.py)
         from radar import indices
         from radar.config import load_config
