@@ -11,7 +11,8 @@ replayed exactly.
 ## Decision
 - The feed process writes every broker message, as received, to an append-only tape: header + records of
   (receive time, kind, length, bytes); kind = market message or control event (connect, disconnect, subscribe).
-- Compressed with zstd, one file per hour per day under `data/tanu/tape/<source>/<YYYY-MM-DD>/`.
+- Compressed with zstd block by block (about one block a second, so a crash loses at most the last block), one file
+  per hour per day under `data/tanu/tape/<source>/<YYYY-MM-DD>/` (format in [DATA](../DATA.md)).
 - Written by a writer thread inside the feed process, so disk speed never slows reading.
 - Bars, chains and features are derived from the tape and can always be rebuilt.
 - End of day: gaps checked against the broker's own 1-min candles; missing minutes filled from them and marked.

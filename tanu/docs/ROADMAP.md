@@ -6,7 +6,7 @@ acceptance checks pass. Order follows the research in claude/tanu_blueprint.md a
 | Phase | What | Acceptance (must all pass) | Status |
 |---|---|---|---|
 | **T0** | Foundation: package, settings, logs, safety guard, doctor, boundary tests, docs | tests green; no Manu ↔ Tanu imports; docs complete | ✅ 0.1.0 |
-| **T1** | Data: tape writer + reader, feed process (tested on a fake broker), 1-min bars from tape, chains, dated facts calendar, gap check + fill, legacy import (5-year Lab tables, recordings, alerts, paper) | a recorded fake day replays byte-for-byte; bars from tape = broker 1-min candles; legacy import counts match | next |
+| **T1** | Data: tape writer + reader (✅ 0.2.0), feed process (tested on a fake broker), 1-min bars from tape, chains, dated facts calendar, gap check + fill, legacy import (5-year Lab tables, recordings, alerts, paper) | a recorded fake day replays byte-for-byte; bars from tape = broker 1-min candles; legacy import counts match | next |
 | **T2** | Costs: spread, slippage, tick size, charges, theta → cost drag per instrument per day; tradeable list | drag per symbol matches the 5-year Lab within tolerance; list published daily | |
 | **T3** | State + setups + engine + evaluator; first bullets: sharp 15-min move on a trend day (with the move), VWAP pullback 11-13, pin at a level 10-11, chandelier exit; no buys against a trend day / on expiry day (shadow) | golden replay test; evaluator passes known-answer tests; each bullet's report (₹ and % per trade, learn vs holdout) | |
 | **T4** | Paper broker + risk + journal + evening AI review; Sniper paper account | fills at bid / ask with delay; every trade has a full footprint; review writes hypotheses to the queue | |

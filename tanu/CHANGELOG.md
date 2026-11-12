@@ -3,6 +3,15 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.2.0] - 2026-11-13
+### Added
+- T1 step 1, tick tape (`tanu/data/tape.py`, ADR-0006): append-only writer on its own thread (callers never wait for
+  the disk), one file per IST hour, restarts open a new file (never overwrite), zstd per block so a crash loses at
+  most the last second, pauses instead of filling the disk; reader, day reader and day summary (silences, control
+  events). Not connected to any broker yet (ADR-0007).
+- Tests: exact round trip of 5,000 binary messages, hour files and restarts, crash recovery, 100,000 writes in under
+  2 s, low-disk pause, day summary.
+
 ## [0.1.0] - 2026-11-13
 ### Added
 - T0 foundation: `tanu/` package beside the legacy app, with no imports either way.
