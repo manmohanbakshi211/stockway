@@ -1,0 +1,8 @@
+{
+  "about": "Tanu's settings (committed defaults). Machine-only overrides go in data/tanu/local.json (not in git); environment variables TANU_<NAME> override both. Changing a default needs Mandeep's say-so and a CHANGELOG line.",
+  "data_dir": "data/tanu",
+  "log_level": "INFO",
+  "log_keep_days": 30,
+  "min_free_disk_gb": 10,
+  "timezone": "Asia/Kolkata"
+}

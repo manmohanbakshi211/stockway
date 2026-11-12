@@ -1,5 +1,17 @@
 # Stockway: rules for anyone (or any AI) changing this code
 
+## 13 Nov 2026: the legacy app is frozen; all new work is in tanu/
+Mandeep: "ab pura manu ka system tanu se replace karna hai ... aaj se samajh lo manu khatam tanu shuru".
+- live/, lab/, webapp/, radar/ ("Manu") get **no new features or patches**. They keep running on the Mac (paper +
+  recordings) only until Tanu's cutover (tanu/docs/adr/0002-replace-legacy-with-tanu.md).
+- All new work goes in **tanu/**, under **tanu/CLAUDE.md** and tanu/docs/. No imports between tanu/ and the legacy
+  code either way; Tanu writes only under data/tanu/ and opens no broker connection before cutover
+  (tanu/docs/adr/0007-no-overlap-with-legacy.md). Tested by tanu/tests/test_tanu_boundaries.py.
+- The rules below still hold for both (safety first); the legacy release rules apply only if the legacy code must be
+  touched at all.
+
+## Legacy rules
+
 - **Never place real orders.** No order, modify or cancel calls to Upstox, Dhan or any broker; no algo trading;
   no access to funds, positions or holdings of a real trading account. Broker APIs are used for market data only.
 - The app's job: clear entry/exit alerts (what, when, why, stop, target) and automatic **paper** trades at the same time.

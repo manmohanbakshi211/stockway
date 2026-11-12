@@ -1,5 +1,8 @@
 # Stockway
 
+> **13 Nov 2026:** this app ("Manu", the legacy code) is frozen. Its replacement, **Tanu**, is being built in
+> [`tanu/`](tanu/README.md) and takes over at cutover. Everything below describes the legacy app.
+
 A Mac app (runs in your browser, on your own computer) with two parts:
 
 - **Live market** – streams Nifty, Bank Nifty, Fin Nifty, Midcap Select and every F&O stock with
