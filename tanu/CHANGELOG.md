@@ -3,6 +3,28 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.5.0] - 2026-11-13
+### Added
+- T3 core:
+  - Day state (`tanu/state/day.py`): normal day range and the share reached by each minute, from earlier days only;
+    quiet / range / trend, with / against.
+  - Setup bullets (`tanu/setups/registry.py`, `library/*.json`): validated one by one (a bad file is skipped and
+    reported); conditions with direction-adjusted and previous-minute features; window; chandelier exit; status
+    shadow by default. First bullets: sharp_move_trend, vwap_pullback_trend, orb15_break, random_baseline.
+  - Engine (`tanu/engine/core.py`): one code path for replay and live; incremental features; signal at a minute's
+    close, fill at the next minute's option open with half the spread + 1 tick; chandelier / premium stop / flat-by
+    exits; charges; deterministic.
+  - Historical option prices from the legacy expired-option files, read in place (`tanu/engine/options.py`); replay
+    driver (`tanu/engine/replay.py`).
+  - Evaluator (`tanu/evaluate/report.py`): learn / holdout, Bonferroni bar, must beat the baseline, reasons kept;
+    `python -m tanu research`.
+- Tests: 58 (registry isolation, point-in-time state, engine fills / exits / determinism, option history, evaluator
+  known answers).
+### Found
+- Research 0001 (`docs/research/0001-first-engine-replay.md`): on 523 days of real 1-minute option prices none of the
+  three candidates passes (sharp move -3.1% learn / +9.9% holdout; VWAP pullback +4.5% (t 0.94) / -1.0%; ORB -4.1% /
+  +1.9%; baseline -3.3% / -0.3%). All stay in shadow. 93% of exits were the chandelier stop: exits are the next lever.
+
 ## [0.4.0] - 2026-11-13
 ### Added
 - T2 costs (`tanu/costs/`, ADR-0008): round trip of an ATM option buy = measured spread + 1 slippage tick + charges

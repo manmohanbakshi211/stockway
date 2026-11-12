@@ -1,0 +1,11 @@
+{
+  "id": "random_baseline",
+  "name": "Baseline: buy at 10:00 with the day's move so far",
+  "why": "Yardstick: what any buy at a fixed time costs; a setup must beat it.",
+  "source": "Tanu",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "window": ["10:00", "10:00"],
+  "when": [["d_move", ">", 0]]
+}

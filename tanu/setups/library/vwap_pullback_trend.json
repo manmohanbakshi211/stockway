@@ -1,0 +1,11 @@
+{
+  "id": "vwap_pullback_trend",
+  "name": "Trend day: pullback to the day's average price, with the move, 11:00-13:00",
+  "why": "5-year research: +4.4% learn / +4.2% holdout a trade in 11:00-13:00 (n 140 / 29). Small sample.",
+  "source": "Tanu research 13 Nov 2026",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "window": ["11:00", "13:00"],
+  "when": [["day", "==", "trend"], ["d_move", ">", 0], ["d_twap_rel", ">=", -0.05], ["d_twap_rel", "<=", 0.08]]
+}

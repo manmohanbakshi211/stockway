@@ -6,6 +6,7 @@
   tape-summary <day> [src]   what a recorded day's tape holds (files, messages, silences)
   bars <day> [src]           build that day's 1-minute bars from its tape
   costs <day>                the day's tradeable list: round-trip cost of each ATM option (on trial)
+  research                   replay every setup over history with option prices and evaluate (learn / holdout)
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
         from . import __version__
         print(__version__)
         return 0
-    if cmd in ("import-legacy", "tape-summary", "bars", "costs"):
+    if cmd in ("import-legacy", "tape-summary", "bars", "costs", "research"):
         from .core import config, log, paths
         s = config.load()
         d = paths.ensure(s)
@@ -32,6 +33,11 @@ def main(argv: list[str] | None = None) -> int:
             from .data import legacy
             rep = legacy.run(paths.LEGACY_DATA, d["base"])
             print(json.dumps(rep["totals"], indent=1))
+            return 0
+        if cmd == "research":
+            from .evaluate.run import research
+            rep = research(d["base"], paths.LEGACY_DATA / "history")
+            print(open(rep["out"] + "/report.md").read())
             return 0
         if len(argv) < 2:
             print(__doc__)

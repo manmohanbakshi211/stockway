@@ -1,0 +1,11 @@
+{
+  "id": "sharp_move_trend",
+  "name": "Sharp 15-min move on a trend day, with the move",
+  "why": "5-year research (claude/chart_research.md): +3.0% learn / +4.6% holdout a trade with a chandelier exit, positive in 5 of 6 years; live sharp_move alerts were the best kind. Not proven (t 1.5).",
+  "source": "Tanu research 13 Nov 2026",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "window": ["09:30", "14:30"],
+  "when": [["day", "==", "trend"], ["d_move", ">", 0], ["d_burst", ">=", 0.3], ["prev:d_burst", "<", 0.3]]
+}

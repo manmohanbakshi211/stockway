@@ -25,7 +25,7 @@ def test_round_trip_is_exact_and_ordered(tmp_path):
     got = list(T.read_day(tmp_path, "upstox", "2026-11-13"))
     assert got[0][1] == T.KIND_CTRL and b'"event":"connect"' in got[0][2]
     assert got[1:] == sent
-    assert st["records"] == 5001 and st["dropped"] == 0 and st["bytes_disk"] < st["bytes_raw"] + 1000
+    assert st["records"] == 5001 and st["dropped"] == 0 and st["bytes_disk"] < st["bytes_raw"] * 1.05 + 4000  # random bytes barely compress
     assert T.header(T.files(tmp_path, "upstox", "2026-11-13")[0])["source"] == "upstox"
 
 

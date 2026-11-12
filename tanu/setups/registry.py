@@ -1,0 +1,72 @@
+"""Setup bullets: one JSON file per setup in tanu/setups/library/. Each is validated on its own; a bad file is skipped
+and reported, never stops the rest (ADR-0003).
+
+A setup says, for each minute and each direction d (+1 = buy calls, -1 = buy puts):
+  when   : all conditions true, each [feature, op, value]; features prefixed "d_" are multiplied by d first
+           (so "d_move > 0" means "with the day's move"); "prev:" before a feature reads the previous minute
+  window : entry minutes allowed, "HH:MM"-"HH:MM"
+  exit   : chandelier trail on the underlying (stop atr_init x ATR, then best price - atr_trail x ATR), a premium stop,
+           and flat by a time
+One trade per setup, symbol, day and direction. Status: shadow | trial | live | retired.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+LIBRARY = Path(__file__).with_name("library")
+OPS = {">": lambda a, b: a > b, ">=": lambda a, b: a >= b, "<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
+       "==": lambda a, b: a == b, "!=": lambda a, b: a != b}
+
+
+class Exit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["chandelier"] = "chandelier"
+    atr_init: float = Field(1.5, gt=0)
+    atr_trail: float = Field(2.5, gt=0)
+    premium_stop_pct: float = Field(-40, lt=0)
+    flat_by: str = "15:15"
+
+
+class Setup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    name: str
+    why: str
+    source: str
+    valid_from: str
+    status: Literal["shadow", "trial", "live", "retired"] = "shadow"
+    symbols: list[str]
+    window: tuple[str, str]
+    when: list[tuple[str, str, float | str]]
+    exit: Exit = Exit()
+
+    @field_validator("when")
+    @classmethod
+    def _ops(cls, v):
+        for f, op, _ in v:
+            if op not in OPS:
+                raise ValueError(f"unknown operator {op!r} in condition on {f!r}")
+        return v
+
+    def window_minutes(self) -> tuple[int, int]:
+        def m(hm):
+            h, mm = hm.split(":")
+            return (int(h) - 9) * 60 + int(mm) - 15
+        return m(self.window[0]), m(self.window[1])
+
+
+def load(folder: Path | str = LIBRARY) -> tuple[list[Setup], list[dict]]:
+    good, bad = [], []
+    for f in sorted(Path(folder).glob("*.json")):
+        try:
+            s = Setup(**json.loads(f.read_text()))
+            if s.id != f.stem:
+                raise ValueError(f"id {s.id!r} must match the file name {f.stem!r}")
+            good.append(s)
+        except Exception as e:
+            bad.append({"file": f.name, "error": str(e)[:300]})
+    return good, bad

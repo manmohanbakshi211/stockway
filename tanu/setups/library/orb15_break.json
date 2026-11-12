@@ -1,0 +1,11 @@
+{
+  "id": "orb15_break",
+  "name": "15-minute opening range break (classic, for comparison)",
+  "why": "The most taught intraday setup; 5-year research found it negative alone (-1.9% / -2.2%). Kept as a yardstick.",
+  "source": "classic",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "window": ["09:30", "14:30"],
+  "when": [["d_or_pos", ">", 0.5], ["prev:d_or_pos", "<=", 0.5]]
+}
