@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import threading
 
 from . import session as SESSION                     # 2.48: the NSE calendar
 from .clock import IST
@@ -57,6 +58,7 @@ class PaperBook:
         self.log = log
         self.on_open = on_open          # 2.48: the engine streams a new trade's option at once (live price from the first second)
         self.skipped: dict = {}         # 2.48: why trades were not taken today (no money, closed market, old quote)
+        self._ulock = threading.RLock()  # 2.71: the fast exit check (every 0.25 s) and the main loop never close a trade twice
 
     def _skip(self, why: str):
         self.skipped[why] = self.skipped.get(why, 0) + 1
@@ -294,7 +296,13 @@ class PaperBook:
         return {"blocked": blocked, "why": why, "booked_today": round(booked, 2), "trades_today": len(today),
                 "loss_limit": round(limit, 0), "risk_per_trade": round(float(c["capital"]) * float(c["risk_pct"]) / 100, 0)}
 
-    def update(self, state, now: dt.datetime, force_close=False):
+    def update(self, state, now: dt.datetime, force_close=False, fast=False):
+        """Exits and live marks of the open trades. fast=True (2.71, the engine's paper watcher, every 0.25 s): the same
+        exit rules on every fresh price; it writes only what changed (peak, plan), not the price itself."""
+        with self._ulock:
+            return self._update(state, now, force_close, fast)
+
+    def _update(self, state, now, force_close, fast):
         c = self.cfg
         closed = []
         for t in self.open_trades():
@@ -342,10 +350,17 @@ class PaperBook:
                     upd["plan"] = _json.dumps(lp.to_dict())
                 if und and und.ltp:
                     upd["und_last"] = und.ltp
-                self.store.update_trade(t["id"], **upd)
+                if fast:                                  # only what the exit rules need later
+                    upd = {k: v for k, v in upd.items() if k in ("peak", "plan") and v != t.get(k)}
+                if upd:
+                    self.store.update_trade(t["id"], **upd)
         return closed
 
     def close_manual(self, tid, state, now, reason: str = "closed by you"):
+        with self._ulock:
+            return self._close_manual(tid, state, now, reason)
+
+    def _close_manual(self, tid, state, now, reason):
         for t in self.open_trades():
             if t["id"] == tid:
                 inst = state.get(t["opt_key"])

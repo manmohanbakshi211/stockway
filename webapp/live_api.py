@@ -458,6 +458,57 @@ async def ws_ticks(ws: WebSocket):
         ST.OPEN["n"] = max(0, ST.OPEN["n"] - 1)
 
 
+@router.websocket("/ws/quotes")
+async def ws_quotes(ws: WebSocket):
+    """2.71: live quotes of any instrument keys (the browser sends {"keys": [...]}: open paper trades' options, the option
+    chain's streamed strikes); the app sends [ltp, bid, ask, oi, time] of those that changed, ~every 0.2 s. Reads the
+    app's own live prices only; nothing new connects to a broker."""
+    import asyncio
+    import json as _json
+    import time as _t
+    from live import stream as ST
+    c = ST.cfg()
+    await ws.accept()
+    if ST.OPEN.get("q", 0) >= int(c.get("max_quote_streams") or 6):
+        await ws.send_json({"error": "too many open pages streaming quotes"})
+        await ws.close()
+        return
+    ST.OPEN["q"] = ST.OPEN.get("q", 0) + 1
+    sub = {"keys": []}
+
+    async def reader():
+        while True:
+            try:
+                m = _json.loads(await ws.receive_text())
+            except (ValueError, TypeError):
+                continue
+            if isinstance(m, dict) and isinstance(m.get("keys"), list):
+                sub["keys"] = [str(x)[:60] for x in m["keys"]][: int(c.get("max_quote_keys") or 300)]
+    task = asyncio.create_task(reader())
+    last, beat = {}, 0.0
+    try:
+        while not task.done():
+            await asyncio.sleep(max(0.1, float(c.get("quotes_ms") or 200) / 1000))
+            try:
+                q = ST.quotes(engine(), sub["keys"])
+            except Exception:
+                q = {}
+            ch = {k: v for k, v in q.items() if last.get(k) != v}
+            now = _t.time()
+            if ch:
+                await ws.send_json({"q": ch})
+                last.update(ch)
+                beat = now
+            elif now - beat >= float(c["heartbeat_s"]):
+                await ws.send_json({"hb": now})
+                beat = now
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        task.cancel()
+        ST.OPEN["q"] = max(0, ST.OPEN.get("q", 1) - 1)
+
+
 @router.websocket("/ws/prices")
 async def ws_prices(ws: WebSocket):
     """2.69: the Live page's prices as fast as the chart's (the browser sends {"syms": [...]}; the app sends the prices

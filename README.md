@@ -114,6 +114,30 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.71: faster live prices: the feed in its own process, fast paper exits, live quotes on the pages (12 Nov 2026)
+
+Mandeep, 12 Nov 2026 (12:44): "paper trading is not fetching the options price as the real movement ... the data coming
+from all the sources should be as fast as possible. Use websockets where it can be." Paper only; market data only.
+
+- **Why it was slow**: the app's log showed the Upstox feed cut every 10-15 minutes in the morning (09:23, 09:33,
+  09:48, 10:02 "Connection reset by peer"; at 09:33 "449 of 449 ... no price update for minutes"; 47 feed errors in
+  the log). The feed's reader shared one Python process with the whole analysis; when the analysis was busy the
+  reader fell behind, Upstox's buffer filled, the server cut the connection and prices froze until it reconnected.
+- **Upstox feed in its own process** (live/feedproc.py, gun): the websocket, pings, reading, decoding and reconnects run
+  in a separate process that does nothing else; the app gets ready ticks through a pipe. Restarted (and
+  re-subscribed) if it dies; the old in-process reader takes over if it cannot run. Setting `live.feed_reader`
+  ("process", or "thread" for the old way). Python also lets the price threads in every 1 ms instead of 5
+  (`live.gil_switch_ms`).
+- **Fast paper exits**: every account's open trades are checked against their stop / target / trail every 0.25 s
+  (`live.paper_watch_ms`), not once per full analysis pass (which can take seconds); only changed peaks are written;
+  a trade is never closed twice (lock).
+- **Live quotes to the pages** (websocket /ws/quotes, ~0.2 s): the Paper trades page's "Now" and P&L move live in place;
+  the option chain's streamed strikes show their live price (dotted underline; "N prices live"); the chain view puts
+  the streamed price, bid / ask, OI and volume on top of its 20-second snapshot.
+- **System & logins**: "Live speed": feed reader mode, pipe delay, Upstox data delay (red above 3 s), paper check time.
+- Tests: test_2_71 (a local Upstox-like websocket server: ticks, re-subscribe, restart after the process dies,
+  fallback); full suite; Lab regression identical; headless desktop + phone clean.
+
 ## 2.70.1: a stock's seconds chart starts at once (12 Nov 2026)
 
 Mandeep, 12 Nov 2026 (KALYANKJIL 15s chart stayed on "No seconds prices yet"): per-second prices were kept for the

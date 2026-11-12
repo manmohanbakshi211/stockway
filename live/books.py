@@ -301,6 +301,15 @@ class Books:
             t["why"][why] += 1
 
     # ------------------------------------------------------------------ every second: exits, day target / stop
+    def update_fast(self, state, now: dt.datetime):
+        """2.71: every account's open trades checked against their exits on every fresh price (the day target / stop of
+        an account stays with the main loop's update)."""
+        for bid, bk in list(self.books.items()):
+            try:
+                bk.update(state, now, fast=True)
+            except Exception as e:
+                self.log(f"{self.specs.get(bid, {}).get('name', bid)}: fast exit check skipped: {e}")
+
     def update(self, state, now: dt.datetime, force_close: bool = False):
         for bid, bk in list(self.books.items()):
             try:

@@ -17,7 +17,8 @@ from pathlib import Path
 from .clock import IST
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "chart_stream.json"
-DEFAULTS = {"every_ms": 100, "max_streams": 8, "heartbeat_s": 5, "reconcile_s": 10, "prices_ms": 200, "max_price_streams": 6}
+DEFAULTS = {"every_ms": 100, "max_streams": 8, "heartbeat_s": 5, "reconcile_s": 10, "prices_ms": 200, "max_price_streams": 6,
+            "quotes_ms": 200, "max_quote_streams": 6, "max_quote_keys": 300, "live_chain_age_s": 120}
 IST_SHIFT = 19800
 INTRADAY_MIN = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60}
 OPEN = {"n": 0, "served": 0, "since": time.time()}
@@ -101,6 +102,53 @@ def prices(e, syms: list) -> dict:
         out[s] = [i.ltp, round((i.ltp / i.cp - 1) * 100, 2) if getattr(i, "cp", None) else None,
                   (i.ltt / 1000) if getattr(i, "ltt", None) else None]
     return out
+
+
+def quotes(e, keys: list) -> dict:
+    """2.71 (Mandeep: paper trades and every price as fast as the market): the latest streamed quote of each instrument
+    key (an option, a stock, an index): [ltp, bid, ask, oi, exchange time (s)]. Only what the live feed streams."""
+    out = {}
+    st = getattr(e, "state", None)
+    if not getattr(e, "running", False) or st is None:
+        return out
+    for k in keys[: int(cfg().get("max_quote_keys") or 300)]:
+        i = st.get(k)
+        if i is None or not getattr(i, "ltp", None):
+            continue
+        out[k] = [i.ltp, getattr(i, "bid", None), getattr(i, "ask", None), getattr(i, "oi", None),
+                  (i.ltt / 1000) if getattr(i, "ltt", None) else getattr(i, "t", None)]
+    return out
+
+
+def live_chain(chain: dict | None, state) -> dict | None:
+    """2.71: the option chain snapshot (REST, refreshed every 20 s) with the live-streamed strikes' price, bid / ask, OI
+    and volume on top, marked live. Strikes the feed does not stream keep the snapshot. The cached chain is not changed."""
+    if not chain or state is None:
+        return chain
+    ref = getattr(state, "last_tick", None) or time.time()
+    age = float(cfg().get("live_chain_age_s") or 120)
+    rows, n = [], 0
+    for r in chain.get("rows") or []:
+        r2 = dict(r)
+        for side in ("CE", "PE"):
+            o = r.get(side)
+            if not o or not o.get("key"):
+                continue
+            i = state.get(o["key"])
+            if i is None or not getattr(i, "ltp", None) or not getattr(i, "t", None) or ref - i.t > age:
+                continue
+            o2 = dict(o)
+            o2.update(ltp=i.ltp, live=True)
+            for k in ("bid", "ask", "oi", "vol"):
+                v = getattr(i, k, None)
+                if v:
+                    o2[k] = v
+            if o2.get("cp"):
+                o2["chg_pct"] = round((i.ltp / o2["cp"] - 1) * 100, 2)
+            r2[side] = o2
+            n += 1
+        rows.append(r2)
+    return {**chain, "rows": rows, "live_n": n}
 
 
 def view() -> dict:

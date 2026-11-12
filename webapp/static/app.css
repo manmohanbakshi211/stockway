@@ -848,3 +848,6 @@ table.grand td { vertical-align: top; }
 table.gh-acc td { vertical-align: top; }
 table.gh-acc details summary { cursor: pointer; }
 @media (max-width: 700px) { table.gh-acc th:nth-child(5), table.gh-acc td:nth-child(5) { display: none; } }
+
+/* 2.71: a price moving live from the quotes stream */
+.q-live { text-decoration: underline dotted rgba(31, 143, 85, .55); text-underline-offset: 3px; }

@@ -237,6 +237,9 @@ def test_engine_builds_the_real_router_with_the_upstox_feed():
     e.log = lambda m: None
     e.state, e.uni = None, None
     e.cfg = lambda: {"live": {}}
+    from live.feedproc import ProcFeed
     r = e._make_router({"access_token": "not-a-real-token"})
-    assert isinstance(r, F.FeedRouter) and isinstance(r.primary, UpstoxFeed)
+    assert isinstance(r, F.FeedRouter) and isinstance(r.primary, ProcFeed)          # 2.71: the feed in its own process
     assert r.mode() in ("shadow", "on", "off") and r.is_open() in (True, False)
+    e.cfg = lambda: {"live": {"feed_reader": "thread"}}                             # the old in-process reader
+    assert isinstance(e._make_router({"access_token": "not-a-real-token"}).primary, UpstoxFeed)

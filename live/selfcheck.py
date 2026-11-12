@@ -419,4 +419,27 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
         out.append(_c("feeds", "Live feeds: Upstox main, Kite backup and cross-check (market data only)", ok, det))
     except Exception as e:
         out.append(_c("feeds", "Live feeds", False, str(e)[:160]))
+    try:                                                   # 2.71: speed: the feed process, the paper watcher, the quotes stream
+        lc = ((engine.cfg() if engine is not None and hasattr(engine, "cfg") else {}) or {}).get("live") or {}
+        prim = getattr(getattr(engine, "feed", None), "primary", None) if engine is not None else None
+        rv = prim.view() if prim is not None and hasattr(prim, "view") else None
+        want = lc.get("feed_reader", "process")
+        if rv is None:
+            ok, det = None, f"Upstox feed reader: {want} (starts with the live scanner)"
+        else:
+            ok = rv.get("mode") == want and (rv.get("alive") is not False)
+            det = (f"Upstox feed reader: {rv.get('mode')}" + (f" (pid {rv['pid']})" if rv.get("pid") else "")
+                   + (f", pipe delay {rv['pipe_ms']} ms" if rv.get("pipe_ms") is not None else "")
+                   + (f", restarted {rv['restarts_10min']}x in 10 min" if rv.get("restarts_10min") else ""))
+        lag = getattr(getattr(engine, "feed", None), "lag_ms", None) if engine is not None else None
+        if lag is not None:
+            det += f"; data delay {lag / 1000:.1f} s"
+            if lag > 3000:
+                ok = False
+        pw = (getattr(engine, "status", {}) or {}).get("paper_watch_ms") if engine is not None else None
+        det += (f"; paper exits checked every {int(lc.get('paper_watch_ms', 250))} ms"
+                + (f" (last check {pw} ms)" if pw is not None else "") + "; quotes stream /ws/quotes for paper trades and the chain")
+        out.append(_c("speed", "Live speed: Upstox feed in its own process, fast paper exits, live quotes to the pages", ok, det))
+    except Exception as e:
+        out.append(_c("speed", "Live speed", False, str(e)[:160]))
     return out

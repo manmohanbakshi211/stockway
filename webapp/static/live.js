@@ -391,7 +391,7 @@ function bindAlertButtons(root) {
   });
 }
 
-function stopPageTimer() { clearTimeout(L.pageTimer); L.pageTimer = null; chStreamStop(); lpStreamStop(); if (typeof CH !== "undefined") clearTimeout(CH.mindTimer); }
+function stopPageTimer() { clearTimeout(L.pageTimer); L.pageTimer = null; chStreamStop(); lpStreamStop(); qStreamStop(); if (typeof CH !== "undefined") clearTimeout(CH.mindTimer); }
 
 /* 2.69 (Mandeep: "jitna fast price chart par chalta hai utna hi fast live feed mein bhi"): the Live page's prices come
    over their own websocket (/ws/prices, ~0.2 s) like the chart's, on top of the 1-second page refresh. */
@@ -419,6 +419,41 @@ function lpStream() {
     Object.entries(d.px).forEach(([sym, a]) => { got[sym] = L.lp[sym] = { p: a[0], c: a[1], tt: a[2], at: Date.now() }; });
     lpApply(got); };
   ws.onclose = () => { if (L.lpWs === ws) { L.lpWs = null; if (state.page === "live") setTimeout(lpStream, 5000); } };
+}
+
+/* 2.71 (Mandeep: "paper trading slow capturing price ... use websockets where it can be"): live quotes of any instrument
+   keys (open paper trades' options, the option chain's streamed strikes) over /ws/quotes, ~every 0.2 s, applied to the
+   cells in place ([data-qk] rows on the Paper page, [data-qx] prices in the chain). The page's own refresh stays as the
+   fallback (and for new / closed trades). */
+function qStreamStop() { if (L.qWs) { try { L.qWs.onclose = null; L.qWs.close(); } catch (_) {} L.qWs = null; L.qKeys = ""; } }
+function qKeysOnPage() { return [...new Set([...document.querySelectorAll("[data-qk],[data-qx]")].map((el) => el.dataset.qk || el.dataset.qx))].filter(Boolean).slice(0, 300); }
+function qApply(only) {
+  const now = Date.now();
+  Object.entries(only || L.qx || {}).forEach(([k, v]) => {
+    if (!v || now - v.at > 8000) return;
+    const sel = CSS.escape(k);
+    document.querySelectorAll(`[data-qx="${sel}"]`).forEach((el) => { el.textContent = fx(v.p); el.classList.add("q-live"); });
+    document.querySelectorAll(`tr[data-qk="${sel}"]`).forEach((tr) => {
+      const entry = +tr.dataset.entry, qty = +tr.dataset.qty, dir = +tr.dataset.dir || 1;
+      const nowEl = tr.querySelector("[data-q=now]"), pnlEl = tr.querySelector("[data-q=pnl]");
+      if (nowEl) nowEl.innerHTML = `${fx(v.p)} ${fpc(entry ? (v.p / entry - 1) * 100 : null, 1)}${v.tt ? `<br><small class="muted" title="Exchange time of this price (live stream)">at ${hms(v.tt)}</small>` : ""}`;
+      if (pnlEl && entry && qty) { const pnl = dir * (v.p - entry) * qty; pnlEl.className = `r ${pnl >= 0 ? "up" : "down"}`; pnlEl.innerHTML = `<b>${rupees(pnl)}</b>`; }
+    });
+  });
+}
+function qStream(page) {
+  if (!window.WebSocket || state.page !== page) return;
+  const keys = qKeysOnPage(), key = keys.join(",");
+  if (!keys.length) return;
+  if (L.qWs && L.qWs.readyState <= 1) { if (key !== L.qKeys && L.qWs.readyState === 1) { L.qKeys = key; L.qWs.send(JSON.stringify({ keys })); } return; }
+  let ws; try { ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/quotes`); } catch (_) { return; }
+  L.qWs = ws; L.qKeys = key; L.qx = L.qx || {};
+  ws.onopen = () => { try { ws.send(JSON.stringify({ keys })); } catch (_) {} };
+  ws.onmessage = (ev) => { let d; try { d = JSON.parse(ev.data); } catch (_) { return; }
+    if (!d.q) return; const got = {};
+    Object.entries(d.q).forEach(([k, a]) => { got[k] = L.qx[k] = { p: a[0], bid: a[1], ask: a[2], oi: a[3], tt: a[4], at: Date.now() }; });
+    qApply(got); };
+  ws.onclose = () => { if (L.qWs === ws) { L.qWs = null; if (state.page === page) setTimeout(() => qStream(page), 5000); } };
 }
 
 /* 2.51 (Mandeep: "websocket for charting, tick-by-tick and price at the same time"): an open chart keeps a websocket to
@@ -789,6 +824,7 @@ async function pageSym() {
       const d = await api(`/api/live/symbol/${encodeURIComponent(sym)}${L.expiry ? `?expiry=${L.expiry}` : ""}`);
       if (d && d.closed) throw new Error(d.message || "No live data yet.");
       drawSym(d, first);
+      qApply(); qStream("sym");                                           // 2.71: streamed strikes move live in place
     } catch (e) {
       if (first) $("#sym-body").innerHTML = `<div class="empty"><h2>${esc(sym)}: option chain needs the live feed</h2><p>${esc(e.message)} The live scanner starts by itself before every NSE session. Meanwhile the chart shows the last session.</p><div class="btn-row"><a class="btn primary" href="#/chart?s=${encodeURIComponent(sym)}">Open last chart</a><a class="btn" href="#/live">Go to Live</a></div></div>`;
     }
@@ -810,7 +846,7 @@ function drawSym(d, first) {
     const bar = `<span class="oibar ${s}" style="width:${((x.oi || 0) / maxOI) * 100}%"></span>`;
     const oiChg = x.oi_chg != null ? `<small class="${x.oi_chg >= 0 ? "up" : "down"}">${x.oi_chg >= 0 ? "+" : ""}${compact(x.oi_chg)}</small>` : "";
     const cells = [`<td class="r oi">${bar}<span>${compact(x.oi)}</span>${oiChg}</td>`, `<td class="r">${compact(x.vol)}</td>`, `<td class="r">${x.iv ? x.iv.toFixed(1) : "–"}</td>`,
-      `<td class="r ltp">${fx(x.ltp)}${x.key ? `<span class="bs"><button class="b" data-bs="${esc(x.key)}" data-d="1" title="Paper BUY 1 lot">B</button><button class="s" data-bs="${esc(x.key)}" data-d="-1" title="Paper SELL (exit if you hold it, else short)">S</button></span>` : ""}</td>`, `<td class="r">${fpc(x.chg_pct, 1)}</td>`, `<td class="r muted">${x.delta != null ? x.delta.toFixed(2) : ""}</td>`];
+      `<td class="r ltp">${x.live && x.key ? `<span data-qx="${esc(x.key)}" class="q-live" title="Live (streamed)">${fx(x.ltp)}</span>` : fx(x.ltp)}${x.key ? `<span class="bs"><button class="b" data-bs="${esc(x.key)}" data-d="1" title="Paper BUY 1 lot">B</button><button class="s" data-bs="${esc(x.key)}" data-d="-1" title="Paper SELL (exit if you hold it, else short)">S</button></span>` : ""}</td>`, `<td class="r">${fpc(x.chg_pct, 1)}</td>`, `<td class="r muted">${x.delta != null ? x.delta.toFixed(2) : ""}</td>`];
     return (s === "CE" ? cells : cells.slice().reverse()).join("");
   };
   const chainRows = rows.map((r) => {
@@ -841,7 +877,7 @@ function drawSym(d, first) {
         <h3 style="margin-top:14px">Alerts</h3><ul class="plain">${d.alerts.slice(0, 6).map((a) => `<li>${hm(a.ts)} ${arrow(a.direction)} ${esc(a.title)}</li>`).join("") || `<li class="muted">None yet today.</li>`}</ul>
         ${d.news.length ? `<h3 style="margin-top:14px">News</h3><ul class="plain">${d.news.slice(0, 5).map((n) => `<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a></li>`).join("")}</ul>` : ""}</div>
     </div>
-    <div class="toolbar" style="margin-top:22px"><h2 style="margin:0">Option chain <span class="muted small">${ch ? "all strikes" : esc(o.oi_scope || "")}${ch ? ` · updated ${hms(ch.fetched)}` : ""}</span></h2>
+    <div class="toolbar" style="margin-top:22px"><h2 style="margin:0">Option chain <span class="muted small">${ch ? "all strikes" : esc(o.oi_scope || "")}${ch ? ` · updated ${hms(ch.fetched)}` : ""}${ch && ch.live_n ? ` · <span class="q-live">${ch.live_n} prices live</span>` : ""}</span></h2>
       <label class="field inline" title="Lots for the B / S paper buttons">Lots <input type="number" id="bs-lots" min="1" max="50" value="${L.bsLots || 1}" style="width:64px"></label>
       <label class="field inline">Expiry <select id="exp-sel">${expiries.filter(Boolean).map((e) => `<option value="${e}" ${e === (ch ? ch.expiry : o.expiry) ? "selected" : ""}>${new Date(e + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</option>`).join("")}</select></label></div>
     <div class="chain-sides"><b class="ce-h">← CALLS (CE)</b><b class="pe-h">PUTS (PE) →</b></div>
@@ -1019,9 +1055,11 @@ async function pagePaper() {
       const p = await api(L.paperBook === "main" ? "/api/live/paper" : `/api/live/paper?book=${encodeURIComponent(L.paperBook)}`);
       if (state.page !== "paper") return;                                 // 2.56.2: you moved on while it loaded: don't draw over the new page
       busy = (p.open || []).length > 0; drawPaper(p, first);
+      qApply(); qStream("paper");                                         // 2.71: live prices / P&L stream in place
     } catch (e) { if (first && state.page === "paper") main.innerHTML = `<div class="empty"><h2>Paper trading</h2><p>${esc(e.message)}</p></div>`; }
     if (state.page !== "paper") return;
-    L.pageTimer = setTimeout(() => tick(false), busy ? 1500 : 3000);     // 2.48: open trades refresh every 1.5 s
+    const live = L.qWs && L.qWs.readyState === 1;                         // streaming: the full refresh can be slower
+    L.pageTimer = setTimeout(() => tick(false), busy ? (live ? 3000 : 1500) : 3000);
   };
   tick(true);
 }
@@ -1099,8 +1137,8 @@ function drawPaper(p, first) {
   };
   const open = p.open.map((t) => {
     const chg = t.last && t.entry ? (t.last / t.entry - 1) * 100 : null;
-    return `<tr><td>${sideTag(t)} <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${sizeLine(t)}${links(t)}</td><td>${stockNow(t)}</td><td>${esc((t.day || "").slice(5))} ${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r">${fx(t.last)} ${fpc(chg, 1)}${t.px_ts ? `<br><small class="muted" title="Exchange time of this price">at ${hms(t.px_ts)}</small>` : ""}</td>
-      <td class="r">${fx(t.target)} / ${fx(t.stop)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}"><b>${rupees(t.unreal)}</b></td><td>${p.book ? `<button class="link-btn" data-close-book="${t.id}">Exit</button>` : `<button class="link-btn" data-close="${t.id}">Exit</button>`}</td></tr>`;
+    return `<tr data-qk="${esc(t.opt_key || "")}" data-entry="${t.entry}" data-qty="${(t.lot || 0) * (t.lots || 0)}" data-dir="${t.dir || 1}"><td>${sideTag(t)} <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${sizeLine(t)}${links(t)}</td><td>${stockNow(t)}</td><td>${esc((t.day || "").slice(5))} ${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r" data-q="now">${fx(t.last)} ${fpc(chg, 1)}${t.px_ts ? `<br><small class="muted" title="Exchange time of this price">at ${hms(t.px_ts)}</small>` : ""}</td>
+      <td class="r">${fx(t.target)} / ${fx(t.stop)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}" data-q="pnl"><b>${rupees(t.unreal)}</b></td><td>${p.book ? `<button class="link-btn" data-close-book="${t.id}">Exit</button>` : `<button class="link-btn" data-close="${t.id}">Exit</button>`}</td></tr>`;
   }).join("");
   // 2.40: the latest 25 closed trades (the rest one tap away), dates short and on one line
   const shortDay = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" }); } catch (_) { return d; } };

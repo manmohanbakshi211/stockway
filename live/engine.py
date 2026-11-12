@@ -4,6 +4,7 @@ from __future__ import annotations
 import collections
 import datetime as dt
 import json
+import sys
 import threading
 import time
 import traceback
@@ -56,6 +57,9 @@ LIVE_DEFAULTS = {
     "keep_recordings_days": 365,          # alert types below this hit rate (30+ cases) are demoted
     "detectors": {},
     "paper": {},
+    "feed_reader": "process",             # 2.71: the Upstox feed in its own process ("thread" = the old in-process reader)
+    "paper_watch_ms": 250,                # 2.71: open paper trades checked against their exits this often (0 = off)
+    "gil_switch_ms": 1,                   # 2.71: how often Python lets the price threads in (default Python: 5)
 }
 STORY_GAP_MIN = 30
 
@@ -426,6 +430,13 @@ class LiveEngine:
         self.set_status("running", f"Live: {len(self.uni.indices)} indices, {len(self.uni.stocks)} stocks, "
                                    f"{len(self.opt_subs)} options streaming")
         token = self._run_token = object()
+        try:                                         # 2.71: price threads get their turn sooner (default 5 ms)
+            sw = float((self.cfg().get("live") or {}).get("gil_switch_ms") or 0)
+            if sw > 0:
+                sys.setswitchinterval(max(0.0005, min(0.005, sw / 1000)))
+        except Exception:
+            pass
+        threading.Thread(target=self._paper_watch, args=(token,), daemon=True, name="paper-watch").start()
         threading.Thread(target=self._vault_loop, args=(token,), daemon=True, name="data-vault").start()
         threading.Thread(target=self._nextcandle_loop, args=(token,), daemon=True, name="next-candle").start()
         self._loop()
@@ -531,7 +542,11 @@ class LiveEngine:
         Kite keys or today's Kite login the router is the Upstox feed exactly as before."""
         from .feeds import FeedRouter
         from .upstox import UpstoxFeed                # 2.56.1: was only imported inside _run, so the router crashed
-        up = UpstoxFeed(tok["access_token"], self._on_ticks, self._feed_status)
+        if (self.cfg().get("live") or {}).get("feed_reader", "process") == "process":   # 2.71: the feed in its own process
+            from .feedproc import ProcFeed
+            up = ProcFeed(tok["access_token"], self._on_ticks, self._feed_status)
+        else:
+            up = UpstoxFeed(tok["access_token"], self._on_ticks, self._feed_status)
         return FeedRouter(up, self._on_ticks, self.log, backup_factory=self._kite_backup,
                           state_get=lambda k: self.state.get(k) if self.state is not None else None,
                           is_open=lambda: SESSION.is_open(dt.datetime.now(IST)),
@@ -631,6 +646,25 @@ class LiveEngine:
             self.feed.unsubscribe(sorted(drop))
         self.opt_subs = want
         self.windows = windows
+
+    def _paper_watch(self, token):
+        """2.71 (Mandeep: paper trading caught price moves slowly): the open paper trades of every account are checked
+        against their stop / target / trail on every fresh price, every paper_watch_ms (0.25 s), not once per full
+        analysis pass (which can take seconds). Only open trades are read; nothing else runs here."""
+        while self._run_token is token and not self.stop_evt.is_set():
+            ms = float((self.cfg().get("live") or {}).get("paper_watch_ms") or 0)
+            if ms <= 0:
+                self.stop_evt.wait(5)
+                continue
+            t0 = time.time()
+            if self.trading_open and self.state is not None:
+                now = self.clock.now()
+                if self.paper:
+                    self._guard("Paper fast exits", self.paper.update, self.state, now, False, True)
+                if self.books is not None:
+                    self._guard("Paper accounts fast exits", self.books.update_fast, self.state, now)
+                self.status["paper_watch_ms"] = round((time.time() - t0) * 1000, 1)
+            self.stop_evt.wait(max(0.05, ms / 1000 - (time.time() - t0)))
 
     def _rank_stocks(self):
         stocks = self.uni.stocks
@@ -2580,6 +2614,12 @@ class LiveEngine:
                     feed["router"] = self.feed.view()
                 except Exception:
                     pass
+            prim = getattr(self.feed, "primary", None)     # 2.71: the Upstox feed process (mode, alive, pipe delay)
+            if prim is not None and hasattr(prim, "view"):
+                try:
+                    feed["reader"] = prim.view()
+                except Exception:
+                    pass
         new = [a for a in self.alerts_mem if a["id"] > since_id][:100]
         ps = self.paper.summary(self.state) if self.paper else None
         cv = self.context.view()
@@ -2857,6 +2897,11 @@ class LiveEngine:
         g = self.gex.get(sym)
         if not g and chain and not expiry:
             g = gex(chain, m["spot"], self.clock.now())
+        try:                                             # 2.71: streamed strikes show their live price, not the snapshot's
+            from .stream import live_chain
+            chain = live_chain(chain, self.state)
+        except Exception:
+            pass
         bars = self.state.bars.get(sym)
         u = self.uni.underlyings[sym]
         keys = {u.key, u.fut_key}
