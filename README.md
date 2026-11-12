@@ -114,6 +114,14 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.70.1: a stock's seconds chart starts at once (12 Nov 2026)
+
+Mandeep, 12 Nov 2026 (KALYANKJIL 15s chart stayed on "No seconds prices yet"): per-second prices were kept for the
+indices only, and a stock's seconds chart never opened its live stream while it was empty, so nothing started them.
+Now opening a 5s / 15s / 30s chart starts that symbol's per-second prices at once (the current price is the first
+candle); the next try (6 s) draws the chart and the stream keeps it live. Seconds history still starts when the chart
+is first opened that day. Tests: test_2_70_1; full suite; Lab regression identical.
+
 ## 2.70: MindGame (buyer / seller scene on every timeframe), 4H and 1W charts (12 Nov 2026)
 
 Mandeep, 12 Nov 2026 (02:50): show the buyer / seller scene on 1m / 3m / 5m on the main chart, and on the charts below

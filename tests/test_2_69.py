@@ -73,12 +73,12 @@ def test_seconds_candles_api_and_price_stream(monkeypatch):
     app = FastAPI()
     app.include_router(live_api.router)
     cl = TestClient(app)
-    r0 = cl.get("/api/live/candles/NIFTY?tf=15s").json()                          # no prices yet: a clear answer
-    assert r0["candles"] == [] and "scanner" in r0["message"]
+    r0 = cl.get("/api/live/candles/FINNIFTY?tf=15s").json()                       # no prices yet: a clear answer
+    assert r0["candles"] == [] and "scanner" in r0["message"]                    # (2.70.1: a priced symbol is seeded at once)
     sb.add("NIFTY", _t(9, 20), 100.0)
     sb.add("NIFTY", _t(9, 20, 20), 101.0)
     r = cl.get("/api/live/candles/NIFTY?tf=15s").json()
-    assert r["tf"] == "15s" and [c["close"] for c in r["candles"]] == [100.0, 101.0]
+    assert r["tf"] == "15s" and [c["close"] for c in r["candles"]] == [100.0, 101.0, 124.5]      # + the price now (2.70.1)
     assert cl.get("/api/live/candles/NIFTY?tf=15s&before=1").json()["candles"] == []
     assert cl.get("/api/live/candles/NIFTY?tf=7s").status_code == 400
     monkeypatch.setattr(ST, "cfg", lambda: {"every_ms": 50, "max_streams": 2, "heartbeat_s": 0.3, "reconcile_s": 10,

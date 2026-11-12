@@ -384,11 +384,18 @@ async def live_candles(sym: str, tf: str = "5m", before: float | None = None, ta
     if tf in SEC_TFS:                                   # 2.69: seconds candles (today, from the app's own prices)
         if before:
             return {"sym": sym.upper(), "tf": tf, "candles": [], "volume": [], "more": False, "has_volume": False}
+        SB.watch[sym.upper()] = time.time()            # 2.70.1: opening the chart starts this symbol's per-second prices
+        try:                                            # (only the indices were kept by default: a stock's seconds chart
+            from live.stream import frame               # stayed empty, as its stream never opened on an empty chart)
+            frame(engine(), sym.upper(), tf)            # its current price, now
+        except Exception:
+            pass
         d = SB.candles(sym.upper(), tf)
         if tail:
             d["candles"] = d["candles"][-int(tail):]
         if not d["candles"] and not tail:
-            d["message"] = "No seconds prices yet: they are kept while the live scanner runs (today only)."
+            d["message"] = ("No seconds prices yet: they are kept while the live scanner runs (today only); this symbol's "
+                            "collection starts now.")
         return clean(d)
     if tf not in MAIN_TFS:
         raise HTTPException(400, f"Timeframe must be one of {', '.join(list(SEC_TFS) + list(MAIN_TFS))}")
