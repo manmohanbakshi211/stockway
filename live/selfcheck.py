@@ -436,9 +436,23 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
             det += f"; data delay {lag / 1000:.1f} s"
             if lag > 3000:
                 ok = False
-        pw = (getattr(engine, "status", {}) or {}).get("paper_watch_ms") if engine is not None else None
+        stt = (getattr(engine, "status", {}) or {}) if engine is not None else {}
+        pw = stt.get("paper_watch_ms")
         det += (f"; paper exits checked every {int(lc.get('paper_watch_ms', 250))} ms"
-                + (f" (last check {pw} ms)" if pw is not None else "") + "; quotes stream /ws/quotes for paper trades and the chain")
+                + (f" (last check {pw} ms)" if pw is not None else "") + "; live quotes (/ws/quotes) and new alerts / paper "
+                "changes (/ws/events) pushed to the pages")
+        if stt.get("loop_p95_ms") is not None:          # 2.72: the analysis pass, the pages' refresh, the network worker
+            det += f"; analysis pass {stt.get('loop_ms')} ms (95% within {stt['loop_p95_ms']} ms)"
+            if stt["loop_p95_ms"] > 5000:
+                ok = False
+            sp = stt.get("slow_parts") or {}
+            if sp.get("parts") and time.time() - sp.get("at", 0) < 900:
+                det += "; last slow pass: " + ", ".join(f"{n} {v} ms" for n, v in sp["parts"])
+        if stt.get("snapshot_ms") is not None:
+            det += f"; page refresh {stt['snapshot_ms']} ms"
+        nw = stt.get("net_worker") or {}
+        if nw:
+            det += f"; network worker: {nw.get('queued', 0)} waiting"
         out.append(_c("speed", "Live speed: Upstox feed in its own process, fast paper exits, live quotes to the pages", ok, det))
     except Exception as e:
         out.append(_c("speed", "Live speed", False, str(e)[:160]))

@@ -111,6 +111,34 @@ class ChartData:
                 "support": o.get("support"), "gamma": g.get("regime"), "flip": g.get("flip"),
                 "call_wall": g.get("call_wall"), "put_wall": g.get("put_wall"), "max_pain": o.get("max_pain")}
 
+    def warm(self, day, stop=None) -> int:
+        """2.72 (delays): the earlier days' 5-minute bars every symbol of the Lab rules check needs (timeframe facts),
+        fetched in a background thread before the first 5-minute slot, so the first scans of the day read them from
+        the cache instead of waiting on the network inside the analysis loop. The same data, only earlier."""
+        from lab import factory
+        rules = list(self.e.factory_rules())
+        try:
+            rules += list(self.e.factory_rules_5y())
+        except Exception:
+            pass
+        rules += list(self._bench_rules() or []) + list(self._bench_rules_stocks() or [])
+        tf = set(factory.TF_FACTS)
+        if not any(c and c[0] in tf for r in rules for c in list(r.get("conds") or []) + list((r.get("then") or {}).get("conds") or [])):
+            return 0
+        syms = ["NIFTY", "BANKNIFTY"]
+        if any(factory.STOCKS in (r.get("syms") or []) or factory.EACH in (r.get("syms") or []) for r in rules) and self.e.uni:
+            syms += [u.symbol for u in self.e.uni.stocks]
+        n = 0
+        for sym in syms:
+            if stop is not None and stop():
+                break
+            try:
+                self._tf_hist(sym, day)
+                n += 1
+            except Exception:
+                pass
+        return n
+
     def _factory(self, now, slot, emit):
         """Promoted Strategy Lab rules on the bar that just closed (Nifty, Bank Nifty): same facts as the backtest."""
         from lab import factory

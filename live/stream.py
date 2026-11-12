@@ -18,7 +18,8 @@ from .clock import IST
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "chart_stream.json"
 DEFAULTS = {"every_ms": 100, "max_streams": 8, "heartbeat_s": 5, "reconcile_s": 10, "prices_ms": 200, "max_price_streams": 6,
-            "quotes_ms": 200, "max_quote_streams": 6, "max_quote_keys": 300, "live_chain_age_s": 120}
+            "quotes_ms": 200, "max_quote_streams": 6, "max_quote_keys": 300, "live_chain_age_s": 120,
+            "events_ms": 200, "max_event_streams": 8}
 IST_SHIFT = 19800
 INTRADAY_MIN = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60}
 OPEN = {"n": 0, "served": 0, "since": time.time()}

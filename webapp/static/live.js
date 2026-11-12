@@ -61,6 +61,33 @@ function livePage() { return ["live", "chart", "world", "desk", "scanner", "sym"
 /* 2.56.2 (live QA 11 Nov): two snapshot loops could run side by side (a page or button started one while another was
    waiting for its answer; each answer takes ~1.5 s, longer than the 1 s pause), so every second asked twice. Now one at a
    time: a second caller shares the answer already on its way. */
+/* 2.72 (Mandeep: "aisi delays dobara na aaye"): new alerts and paper trade changes arrive over /ws/events the moment
+   the app has them (~0.2 s): pop-ups, the alert list and the paper pages update at once; the snapshot refresh stays
+   for everything else and as the fallback. */
+function evStream() {
+  if (!window.WebSocket || L.evWs) return;
+  let ws; try { ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/events`); } catch (_) { return; }
+  L.evWs = ws;
+  ws.onopen = () => { try { ws.send(JSON.stringify({ since: L.lastId || 0 })); } catch (_) {} };
+  ws.onmessage = (ev) => {
+    let d; try { d = JSON.parse(ev.data); } catch (_) { return; }
+    if (d.alerts && d.alerts.length && L.primed) {
+      const fresh = d.alerts.filter((a) => a.id > L.lastId);
+      if (fresh.length) {
+        L.lastId = Math.max(L.lastId, ...fresh.map((a) => a.id));
+        L.alerts = [...fresh, ...L.alerts.filter((a) => !fresh.some((f) => f.id === a.id))].slice(0, 400);
+        fresh.slice().reverse().forEach(notify);
+        try { railLive(); if (state.page === "live") renderLive(); } catch (_) {}
+      }
+    }
+    if (d.pv != null) {
+      try { navPnl(); } catch (_) {}
+      if (typeof L.pageKick === "function") L.pageKick();
+    }
+  };
+  ws.onclose = () => { if (L.evWs === ws) { L.evWs = null; setTimeout(evStream, 5000); } };
+}
+
 function pollSnapshot() {
   if (L.polling) return L.polling;
   L.polling = pollSnapshotOnce().finally(() => { L.polling = null; });
@@ -391,7 +418,7 @@ function bindAlertButtons(root) {
   });
 }
 
-function stopPageTimer() { clearTimeout(L.pageTimer); L.pageTimer = null; chStreamStop(); lpStreamStop(); qStreamStop(); if (typeof CH !== "undefined") clearTimeout(CH.mindTimer); }
+function stopPageTimer() { clearTimeout(L.pageTimer); L.pageTimer = null; L.pageKick = null; chStreamStop(); lpStreamStop(); qStreamStop(); if (typeof CH !== "undefined") clearTimeout(CH.mindTimer); }
 
 /* 2.69 (Mandeep: "jitna fast price chart par chalta hai utna hi fast live feed mein bhi"): the Live page's prices come
    over their own websocket (/ws/prices, ~0.2 s) like the chart's, on top of the 1-second page refresh. */
@@ -1061,6 +1088,7 @@ async function pagePaper() {
     const live = L.qWs && L.qWs.readyState === 1;                         // streaming: the full refresh can be slower
     L.pageTimer = setTimeout(() => tick(false), busy ? (live ? 3000 : 1500) : 3000);
   };
+  L.pageKick = () => { if (state.page === "paper") { clearTimeout(L.pageTimer); L.pageTimer = setTimeout(() => tick(false), 150); } };   // 2.72
   tick(true);
 }
 
@@ -3438,6 +3466,7 @@ async function pageGhanshyam() {
     catch (e) { if (first) $("#gh-main").innerHTML = `<div class="empty"><h2>Ghanshyam</h2><p>${esc(e.message)}</p></div>`; }
     if (state.page === "ghanshyam") L.pageTimer = setTimeout(() => tick(false), 6000);
   };
+  L.pageKick = () => { if (state.page === "ghanshyam") { clearTimeout(L.pageTimer); L.pageTimer = setTimeout(() => tick(false), 150); } };   // 2.72
   tick(true);
 }
 
@@ -3515,7 +3544,7 @@ Object.assign(PAGES, { live: pageLive, scanner: pageScanner, sym: pageSym, alert
   context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk, chart: pageChart, world: pageWorld, insiders: pageInsiders,
   timemachine: pageTimeMachine, ask: pageAsk, watchlist: pageWatchlist, lab: pageLab, ghanshyam: pageGhanshyam });
 window.addEventListener("hashchange", () => { stopPageTimer(); if (!location.hash.startsWith("#/chart") && CH.chart) { CH.chart.remove(); CH.chart = null; } main.classList.toggle("wide", location.hash.startsWith("#/chart")); });
-pollSnapshot();
+pollSnapshot(); evStream();
 aiStatus(true); setInterval(() => aiStatus(true), 5 * 60000);
 
 /* side bar: today's paper P&L (booked + open), every 5 s */

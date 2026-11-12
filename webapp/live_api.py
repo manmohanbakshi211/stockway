@@ -194,7 +194,18 @@ def live_stop():
 # ----------------------------------------------------------------- data
 @router.get("/api/live/snapshot")
 def live_snapshot(since: int = 0):
-    return clean(engine().snapshot(since))
+    t0 = time.perf_counter()
+    e = engine()
+    out = clean(e.snapshot(since))
+    try:                                         # 2.72: how long the pages' main refresh takes (System & logins)
+        ms = (time.perf_counter() - t0) * 1000
+        st = getattr(e, "status", None)
+        if isinstance(st, dict):
+            prev = st.get("snapshot_ms")
+            st["snapshot_ms"] = round(ms if prev is None else 0.8 * prev + 0.2 * ms)
+    except Exception:
+        pass
+    return out
 
 
 @router.get("/api/live/scanner")
@@ -456,6 +467,65 @@ async def ws_ticks(ws: WebSocket):
     finally:
         task.cancel()
         ST.OPEN["n"] = max(0, ST.OPEN["n"] - 1)
+
+
+@router.websocket("/ws/events")
+async def ws_events(ws: WebSocket):
+    """2.72 (Mandeep: no delays anywhere): every open page gets new alerts and paper trade changes pushed at once
+    (~0.2 s) instead of waiting for its next refresh (1-4 s plus the snapshot's own time). The browser sends
+    {"since": last alert id}. Reads the app's own memory only."""
+    import asyncio
+    import json as _json
+    import time as _t
+    from live import paper as PP
+    from live import stream as ST
+    c = ST.cfg()
+    await ws.accept()
+    if ST.OPEN.get("e", 0) >= int(c.get("max_event_streams") or 8):
+        await ws.send_json({"error": "too many open pages"})
+        await ws.close()
+        return
+    ST.OPEN["e"] = ST.OPEN.get("e", 0) + 1
+    sub = {"since": None}
+
+    async def reader():
+        while True:
+            try:
+                m = _json.loads(await ws.receive_text())
+            except (ValueError, TypeError):
+                continue
+            if isinstance(m, dict) and isinstance(m.get("since"), (int, float)):
+                sub["since"] = int(m["since"])
+    task = asyncio.create_task(reader())
+    pv, beat = PP.VER[0], 0.0
+    try:
+        while not task.done():
+            await asyncio.sleep(max(0.1, float(c.get("events_ms") or 200) / 1000))
+            out = {}
+            try:
+                mem = list(getattr(engine(), "alerts_mem", None) or ())[:50]
+            except Exception:
+                mem = []
+            if sub["since"] is None:
+                sub["since"] = mem[0]["id"] if mem else 0
+            new = [a for a in mem if a.get("id", 0) > sub["since"]][:20]
+            if new:
+                out["alerts"] = clean(new)
+                sub["since"] = max(a["id"] for a in new)
+            if PP.VER[0] != pv:
+                pv = out["pv"] = PP.VER[0]
+            now = _t.time()
+            if out:
+                await ws.send_json(out)
+                beat = now
+            elif now - beat >= float(c["heartbeat_s"]):
+                await ws.send_json({"hb": now})
+                beat = now
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        task.cancel()
+        ST.OPEN["e"] = max(0, ST.OPEN.get("e", 1) - 1)
 
 
 @router.websocket("/ws/quotes")

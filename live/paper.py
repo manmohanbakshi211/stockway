@@ -50,6 +50,9 @@ def costs(entry: float, exit: float, qty: int) -> float:
     return round(charge_amount(entry * qty, exit * qty, 2), 2)
 
 
+VER = [0]                               # 2.72: bumps on every paper open / close (the pages refresh at once)
+
+
 class PaperBook:
     def __init__(self, store, source: str, cfg: dict | None = None, log=print, on_open=None):
         self.store = store
@@ -238,6 +241,7 @@ class PaperBook:
                 self.on_open(opt["key"], und_key)
             except Exception as e:
                 self.log(f"Live price for {opt['label']} not started: {e}")
+        VER[0] += 1
         return tid
 
     def need(self, entry: float, lot: int, direction: int, und_px: float | None) -> float:
@@ -383,6 +387,7 @@ class PaperBook:
         if und is not None and getattr(und, "ltp", None):
             upd.update(und_exit=und.ltp, und_last=und.ltp)
         self.store.update_trade(t["id"], **upd)
+        VER[0] += 1
         self.log(f"Paper {'SELL' if d > 0 else 'BUY back'} {t['label']} @ {px:.2f} ({reason}) net ₹{gross - cst:,.0f}")
         return {**t, "exit": px, "reason": reason, "net": gross - cst}
 

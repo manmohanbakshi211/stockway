@@ -114,6 +114,31 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.72: no waiting anywhere: network off the analysis loop, history before the first scan, every pass timed (12 Nov 2026)
+
+Mandeep, 12 Nov 2026 (13:27): "ek baar sabhi jagah puri app mein check karlo aisi delays dobara na aaye". The whole
+app checked for places where prices, alerts or paper trades could wait. Paper only; market data only; the analysis
+itself is unchanged (same rules, same data, only not waiting).
+
+- **Network off the analysis loop**: the option chains of the indices (every 3-6 min) and the next-expiry chains were
+  fetched inside the loop, and every newly streamed option (strike window moves, a new paper trade) waited for a REST
+  quote first; a slow answer or a busy Upstox limit (it can wait minutes) held up alerts and paper exits. Now they
+  run in one background worker (each job queued once); a new option streams at once and its REST quote never
+  overwrites a newer live price; an expired login still stops the scanner as before.
+- **History before the first scan**: the earlier days' 5-minute bars the Lab rules need (timeframe facts) were fetched
+  on the first 5-minute scan of the day, symbol by symbol, inside the loop. Now fetched in a background thread right
+  when the scanner starts (same data, earlier).
+- **Every analysis pass timed**: a pass of 2 s or more records (and logs, at most every 5 min) its slowest parts;
+  System & logins shows the pass time, 95% time, the last slow pass, the pages' refresh time and the network worker.
+- **Delay warning**: prices more than 5 s behind Upstox for 30 s -> a warning on the app, in the log and on Telegram
+  (once), and an all-clear when back. Slow passes (95% above 5 s) are logged with their slowest parts.
+- **Pushed to the pages** (websocket /ws/events, ~0.2 s): new alerts (pop-up, sound, Live page) and paper trade
+  opens / closes (Paper trades and Ghanshyam pages refresh at once; the P&L in the menu). Before: the next refresh
+  (1-4 s) plus the snapshot's own time (~1.5 s). The snapshot's paper summary is worked out at most once a second.
+- Already fast (checked): chart (/ws/ticks), Live page prices (/ws/prices), paper and chain quotes (/ws/quotes), the
+  Upstox feed (own process, 2.71), Telegram (own thread), Dhan order book and Kite backup (websockets).
+- Tests: test_2_72; full suite; Lab regression identical; headless desktop + phone clean.
+
 ## 2.71: faster live prices: the feed in its own process, fast paper exits, live quotes on the pages (12 Nov 2026)
 
 Mandeep, 12 Nov 2026 (12:44): "paper trading is not fetching the options price as the real movement ... the data coming

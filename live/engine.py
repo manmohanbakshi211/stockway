@@ -193,6 +193,10 @@ class LiveEngine:
         self.prev = {}
         self.cool = {}
         self.alerts_mem = collections.deque(maxlen=500)
+        self._perm_err = None                        # 2.72: a login error met by the background network worker
+        self._prof: dict = {}                        # 2.72: seconds each part of the current analysis pass took
+        self._loop_hist = collections.deque(maxlen=300)
+        self.paper_ver = 0                           # 2.72: bumps when a paper trade opens / closes (pages refresh at once)
         self.windows = {}
         self.opt_subs = set()
         self.full_chains = {}
@@ -437,11 +441,55 @@ class LiveEngine:
         except Exception:
             pass
         threading.Thread(target=self._paper_watch, args=(token,), daemon=True, name="paper-watch").start()
+        threading.Thread(target=self._warm_charts, args=(token,), daemon=True, name="chart-warmup").start()
         threading.Thread(target=self._vault_loop, args=(token,), daemon=True, name="data-vault").start()
         threading.Thread(target=self._nextcandle_loop, args=(token,), daemon=True, name="next-candle").start()
         self._loop()
 
-    def _seed(self, quotes: dict):
+    # ------------------------------------------------------------ 2.72: network work off the analysis loop
+    def _bg(self, name: str, fn, *args) -> bool:
+        """Upstox REST work the analysis loop used to wait for (option chains, quote seeds for new subscriptions) runs
+        in one background worker, so a slow answer or a busy rate limit never holds up alerts and paper exits. The same
+        job is never queued twice."""
+        import queue as _q
+        if not hasattr(self, "_bg_q"):
+            self._bg_q, self._bg_lock, self._bg_pending = _q.Queue(), threading.Lock(), set()
+            threading.Thread(target=self._bg_worker, daemon=True, name="net-worker").start()
+        with self._bg_lock:
+            if name in self._bg_pending:
+                return False
+            self._bg_pending.add(name)
+        self._bg_q.put((name, fn, args))
+        return True
+
+    def _bg_worker(self):
+        while True:
+            name, fn, args = self._bg_q.get()
+            t0 = time.time()
+            try:
+                fn(*args)
+            except PermissionError as e:
+                self._perm_err = e                       # the loop raises it (log in again), as before
+            except Exception as e:
+                if self._every(f"bg_err:{name.split(':')[0]}", 300, clock_time=False):
+                    self.log(f"{name.split(':')[0].replace('_', ' ').capitalize()} {name.split(':')[1] if ':' in name else ''} "
+                             f"failed (background): {e}")
+            finally:
+                with self._bg_lock:
+                    self._bg_pending.discard(name)
+                self.status["net_worker"] = {"last": name.split(":")[0], "ms": round((time.time() - t0) * 1000),
+                                             "queued": self._bg_q.qsize()}
+
+    def _seed_later(self, keys, why: str):
+        """Quotes for newly streamed instruments, fetched in the background; a price the live feed already sent after the
+        request is never overwritten by the (older) REST quote."""
+        keys = sorted(k for k in keys if k)
+        if not keys or self.rest is None:
+            return
+        t_req = self.clock.ts()
+        self._bg(f"seed:{why}:{hash(tuple(keys))}", lambda: self._seed(self.rest.quotes(keys), newer_than=t_req))
+
+    def _seed(self, quotes: dict, newer_than: float | None = None):
         ticks, base = [], {}
         for k, q in quotes.items():
             cp = q.get("prev_close_price") or ((q.get("last_price") or 0) - (q.get("net_change") or 0)) or None
@@ -454,6 +502,10 @@ class LiveEngine:
                 t["ltt"] = int(ltt)
             if is_market_hours(self.clock.now()):
                 t.update(day_o=o.get("open"), day_h=o.get("high"), day_l=o.get("low"))
+            if newer_than is not None:                   # 2.72: the live feed already sent a newer price: keep it
+                i = self.state.get(k)
+                if i is not None and getattr(i, "t", None) and i.t >= newer_than:
+                    continue
             ticks.append(t)
         self.state.set_baselines(base)
         self.state.apply(ticks, self.clock.ts())
@@ -635,13 +687,8 @@ class LiveEngine:
                         want.add(o.key)
         add, drop = want - self.opt_subs, self.opt_subs - want
         if add:
-            try:
-                self._seed(self.rest.quotes(sorted(add)))
-            except PermissionError:
-                raise
-            except Exception as e:
-                self.log(f"Option baselines failed: {e}")
             self.feed.subscribe(sorted(add), "option_greeks")
+            self._seed_later(add, "options")                 # 2.72: the REST baselines no longer hold up the loop
         if drop:
             self.feed.unsubscribe(sorted(drop))
         self.opt_subs = want
@@ -665,6 +712,16 @@ class LiveEngine:
                     self._guard("Paper accounts fast exits", self.books.update_fast, self.state, now)
                 self.status["paper_watch_ms"] = round((time.time() - t0) * 1000, 1)
             self.stop_evt.wait(max(0.05, ms / 1000 - (time.time() - t0)))
+
+    def _warm_charts(self, token):
+        """2.72: earlier days' bars for the Lab rules check, fetched before the first scan (see ChartData.warm)."""
+        try:
+            t0 = time.time()
+            n = self.charts.warm(self.clock.now().date(), stop=lambda: self._run_token is not token)
+            if n:
+                self.log(f"Chart history ready for {n} symbols in {time.time() - t0:.0f} s (before the first scan)")
+        except Exception as e:
+            self.log(f"Chart history warm-up skipped: {e}")
 
     def _rank_stocks(self):
         stocks = self.uni.stocks
@@ -750,6 +807,10 @@ class LiveEngine:
         last_minute = None
         while not self.stop_evt.is_set():
             t0 = time.time()
+            self._prof = {}
+            if self._perm_err is not None:               # 2.72: the background worker met an expired login
+                e_, self._perm_err = self._perm_err, None
+                raise e_
             now = self.clock.now()
             mins = minutes_since_open(now)
             if self.source == "sim":
@@ -788,32 +849,26 @@ class LiveEngine:
                     raise
                 except Exception as e:
                     self.log(f"Re-centering failed: {e}")
-            for u in self.uni.indices:
+            for u in self.uni.indices:                   # 2.72: fetched in the background worker (never holds up the loop)
                 if self._every(f"chain:{u.symbol}", 180 if u.symbol in ("NIFTY", "BANKNIFTY") else 360):
-                    try:
-                        self.chain(u.symbol, max_age=0)
-                    except PermissionError:
-                        raise
-                    except Exception as e:
-                        self.log(f"Option chain {u.symbol} failed: {e}")
+                    self._bg(f"option_chain:{u.symbol}", self.chain, u.symbol, 0)
             for sym in ("NIFTY", "BANKNIFTY"):
                 if sym in self.uni.underlyings and self._every(f"next:{sym}", 600):
-                    try:
-                        self._next_expiry_chain(sym)
-                    except PermissionError:
-                        raise
-                    except Exception as e:
-                        self.log(f"Next-expiry chain {sym} failed: {e}")
+                    self._bg(f"next_expiry_chain:{sym}", self._next_expiry_chain, sym)
             if self.dguard is not None:              # before the alerts: a suspect price holds its symbol's alerts
                 self._guard("Data quality guard", self.dguard.check, now)
             open_ = self.trading_open                # 2.48: no alert, paper or bench trade outside an open session
+            t1 = time.perf_counter()
             self._compute_all(now, mins, emit=open_, lc=lc)
+            self._prof["Analysis of every symbol"] = time.perf_counter() - t1
             if open_:
+                t1 = time.perf_counter()
                 try:
                     self.charts.scan(now, lambda a, now=now, lc=lc: self._emit_safe(a, now, lc))
                 except Exception as e:
                     if self._every("setup_err", 300, clock_time=False):
                         self.log(f"Setup scan error: {e}")
+                self._prof["Setup / Lab rules scan"] = time.perf_counter() - t1
             if self.cdl is not None and open_:
                 self._guard("Candle scanner", self.cdl.tick, now)
             if self._every("vault_bars", 1800):
@@ -879,7 +934,7 @@ class LiveEngine:
             if self._every("ai_pulse", pulse_every, clock_time=False) \
                     and self.ai.enabled() and mins >= 5:
                 threading.Thread(target=self._ai_pulse, daemon=True).start()
-            self.status["loop_ms"] = round((time.time() - t0) * 1000)
+            self._loop_done(time.time() - t0)
             self.stop_evt.wait(max(0.2, 1.0 - (time.time() - t0)))
 
     def _end_of_day(self, now, mins):
@@ -947,6 +1002,10 @@ class LiveEngine:
     def _watchdog(self, now):
         if not self.feed or self.source == "sim" or not is_market_hours(now):
             return
+        try:                                             # 2.72: prices behind Upstox, or the analysis passes slow
+            self._delay_watch()
+        except Exception:
+            pass
         age = time.time() - self.feed.last_msg if self.feed.last_msg else None
         if age is not None and age > 20 and not self.watch["stalled"]:
             self.watch.update(stalled=True, since=time.time())
@@ -956,6 +1015,35 @@ class LiveEngine:
             self.watch.update(stalled=False, since=None)
             self.status.pop("warning", None)
             self.telegram.send("✅ Stockway: live data is back.")
+
+    def _delay_watch(self):
+        """2.72 (Mandeep: "aisi delays dobara na aaye"): a warning on the System page, in the log and on Telegram (once)
+        when live prices fall more than 5 s behind Upstox for 30 s, or when the analysis passes are slow (95% of the last
+        5 minutes above 5 s); and an all-clear when it is back."""
+        w = self.watch
+        lag = getattr(self.feed, "lag_ms", None)
+        now = time.time()
+        if lag is not None and lag > 5000:
+            w.setdefault("lag_since", now)
+            if now - w["lag_since"] >= 30 and not w.get("lag_warned"):
+                w["lag_warned"] = True
+                msg = f"Live prices are {lag / 1000:.0f} s behind Upstox"
+                self.status["warning"] = msg
+                self.log(f"Delay: {msg} (System & logins: Live speed)")
+                self.telegram.send(f"⚠️ Stockway: {msg}. Paper exits and alerts use these prices.")
+        else:
+            w.pop("lag_since", None)
+            if w.get("lag_warned") and lag is not None and lag < 2000:
+                w["lag_warned"] = False
+                if str(self.status.get("warning", "")).startswith("Live prices are"):
+                    self.status.pop("warning", None)
+                self.log("Delay: live prices are on time again")
+                self.telegram.send("✅ Stockway: live prices are on time again.")
+        p95 = self.status.get("loop_p95_ms")
+        if p95 and p95 > 5000 and len(self._loop_hist) >= 60 and self._every("slow_p95_log", 600, clock_time=False):
+            sp = self.status.get("slow_parts") or {}
+            self.log(f"Delay: analysis passes slow (95% within {p95 / 1000:.1f} s); slowest parts: "
+                     + ", ".join(f"{n} {v / 1000:.1f} s" for n, v in sp.get("parts") or []))
 
     def _vix(self):
         v = self.state.get(VIX_KEY) if self.state else None
@@ -1031,8 +1119,22 @@ class LiveEngine:
             if self._every(f"emiterr:{a.get('kind')}", 300, clock_time=False):
                 self.log(f"Alert {a.get('kind')} {a.get('sym')} skipped: {e}")
 
+    def _loop_done(self, dur: float):
+        """2.72: how long one analysis pass took, its slow-pass rate and, when slow, which parts took the time (shown on
+        the System page; logged at most every 5 minutes). Nothing about the analysis changes."""
+        self.status["loop_ms"] = round(dur * 1000)
+        self._loop_hist.append(dur)
+        h = sorted(self._loop_hist)
+        self.status["loop_p95_ms"] = round(h[int(0.95 * (len(h) - 1))] * 1000) if h else None
+        if dur >= 2.0:
+            top = sorted(self._prof.items(), key=lambda x: -x[1])[:3]
+            self.status["slow_parts"] = {"at": time.time(), "ms": round(dur * 1000), "parts": [[n, round(v * 1000)] for n, v in top]}
+            if self._every("slow_pass_log", 300, clock_time=False):
+                self.log(f"Slow analysis pass: {dur:.1f} s (slowest: " + ", ".join(f"{n} {v:.1f} s" for n, v in top) + ")")
+
     def _guard(self, name, fn, *args):
         """Run one part of the loop; if it fails, log it (at most every 5 min) and keep the scanner running."""
+        t0 = time.perf_counter()
         try:
             return fn(*args)
         except PermissionError:
@@ -1040,6 +1142,9 @@ class LiveEngine:
         except Exception as e:
             if self._every(f"guard:{name}", 300, clock_time=False):
                 self.log(f"{name} error (scanner keeps running): {e}")
+        finally:
+            if threading.current_thread().name == "live-engine":      # 2.72: time per part of the analysis pass
+                self._prof[name] = self._prof.get(name, 0.0) + time.perf_counter() - t0
 
     def _big_prints(self, now, lc):
         prints = list(self.state.prints)
@@ -1564,12 +1669,9 @@ class LiveEngine:
         refresh, so an open trade's price could lag). Kept while the trade is open (the window adds open trades)."""
         if not key or key in self.opt_subs or not self.feed:
             return
-        try:
-            self._seed(self.rest.quotes([key]))
-        except Exception as e:
-            self.log(f"Quote for {key} failed: {e}")
         self.feed.subscribe([key], "option_greeks")
         self.opt_subs.add(key)
+        self._seed_later([key], "paper")                     # 2.72: in the background (the trade's own price is live)
 
     def paper_open(self, key: str, direction: int, lots: int = 1) -> dict:
         """Paper Buy/Sell of one option from the option chain or the chart. Paper only: nothing reaches a broker."""
@@ -2621,7 +2723,15 @@ class LiveEngine:
                 except Exception:
                     pass
         new = [a for a in self.alerts_mem if a["id"] > since_id][:100]
-        ps = self.paper.summary(self.state) if self.paper else None
+        ps = None
+        if self.paper:                                   # 2.72: at most once a second (every open page asks every second)
+            from .paper import VER as _PV
+            memo = getattr(self, "_snap_ps", None)
+            if memo and memo[0] == _PV[0] and time.time() - memo[1] < 1.0:
+                ps = memo[2]
+            else:
+                ps = self.paper.summary(self.state)
+                self._snap_ps = (_PV[0], time.time(), ps)
         cv = self.context.view()
         return {"status": {**self.status, "running": self.running, "logged_in": bool(self.tokens.load()),
                            "feed": feed, "ticks": self.state.tick_count if self.state else 0},
