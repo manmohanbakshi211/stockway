@@ -5,6 +5,7 @@
   import-legacy              copy the legacy app's data into Tanu (legacy files only read)
   tape-summary <day> [src]   what a recorded day's tape holds (files, messages, silences)
   bars <day> [src]           build that day's 1-minute bars from its tape
+  costs <day>                the day's tradeable list: round-trip cost of each ATM option (on trial)
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
         from . import __version__
         print(__version__)
         return 0
-    if cmd in ("import-legacy", "tape-summary", "bars"):
+    if cmd in ("import-legacy", "tape-summary", "bars", "costs"):
         from .core import config, log, paths
         s = config.load()
         d = paths.ensure(s)
@@ -36,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
             print(__doc__)
             return 2
         day, src = argv[1], (argv[2] if len(argv) > 2 else "upstox")
+        if cmd == "costs":
+            return _costs(day, d)
         if cmd == "tape-summary":
             from .data import tape
             print(json.dumps(tape.summary(d["tape"], src, day), indent=1, default=str))
@@ -45,6 +48,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print(__doc__)
     return 0 if cmd in ("help", "-h", "--help") else 2
+
+
+def _costs(day: str, d: dict) -> int:
+    import pandas as pd
+
+    from .core import paths
+    from .costs import measure, tradeable
+    from .data import instruments
+    chains = next((p for p in (d["base"] / "chains" / f"{day}.parquet",
+                               d["base"] / "imports" / "legacy" / "chains" / f"{day}.parquet") if p.exists()), None)
+    if chains is None:
+        print(f"No option-chain snapshots for {day}")
+        return 1
+    inst = sorted((d["base"] / "instruments").glob("*.json.gz")) or sorted((paths.LEGACY_DATA / "instruments").glob("NSE_*.json.gz"))
+    lots = {s: u["lot"] for s, u in instruments.underlyings(instruments.load(inst[-1])).items()} if inst else {}
+    lab_path = paths.LEGACY_DATA / "lab5y" / "lab" / "factory_bars.parquet"
+    lab = measure.lab_drag(lab_path) if lab_path.exists() else None
+    items = tradeable.build(day, measure.day_spreads(pd.read_parquet(chains), day), lots, lab=lab)
+    out = tradeable.write(day, items, d["base"] / "costs")
+    print(f"{sum(i['tradeable'] for i in items)} of {len(items)} tradeable -> {out}")
+    return 0
 
 
 if __name__ == "__main__":

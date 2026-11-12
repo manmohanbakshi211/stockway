@@ -7,7 +7,7 @@ professional option trader and a senior engineer would build it. It replaces the
 | | |
 |---|---|
 | Owner | Mandeep (product decisions, defaults, go-live) |
-| Status | T0 done; T1 data mostly done (v0.3.0: tape, feed on a fake broker, bars, gaps, facts, legacy import). Legacy app still runs until cutover (see [ROADMAP](docs/ROADMAP.md)). |
+| Status | T0 done; T1 data mostly done; T2 costs done (v0.4.0: measured round-trip cost and daily tradeable list, on trial). Legacy app still runs until cutover (see [ROADMAP](docs/ROADMAP.md)). |
 | Version | [`VERSION`](VERSION) · changes in [`CHANGELOG.md`](CHANGELOG.md) |
 
 ## What it will do

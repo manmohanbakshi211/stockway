@@ -1,0 +1,15 @@
+{
+  "about": "Cost model and tradeable-list thresholds (bullet, dated). On trial from 13 Nov 2026 (the first entry applies to every past day too, so history is judged by the same rules): the list is computed and shown, it does not yet block any alert or paper trade. Changing a value needs Mandeep's say-so and a CHANGELOG line.",
+  "entries": [
+    {
+      "valid_from": "2000-01-01",
+      "hold_min": 60,
+      "extra_slip_ticks": 1,
+      "tick": 0.05,
+      "max_round_trip_pct": 6.0,
+      "max_spread_pct": 2.0,
+      "min_snapshots": 3,
+      "why": "Round trip = spread + 1 extra tick + charges + 60 minutes of ATM theta. 6% is about twice the Nifty / Bank Nifty round trip seen in the 5-year Lab (random buy -1.7% to -3.1%); a setup must beat the cost before it can earn."
+    }
+  ]
+}

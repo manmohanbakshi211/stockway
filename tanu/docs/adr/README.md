@@ -12,3 +12,4 @@ supersedes it. Template: copy [0000-template.md](0000-template.md).
 | [0005](0005-evidence-before-trust.md) | Promotion protocol: costs, walk-forward, holdout, shadow | Accepted |
 | [0006](0006-tick-tape.md) | Raw tick tape as the source of truth for replay | Accepted |
 | [0007](0007-no-overlap-with-legacy.md) | No overlap with the legacy app before cutover | Accepted |
+| [0008](0008-costs-are-measured.md) | Option costs are measured from live quotes, not assumed | Accepted |

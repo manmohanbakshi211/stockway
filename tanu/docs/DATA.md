@@ -13,6 +13,7 @@ to Tanu.
 | `history/<SYM>.parquet`, `history/daily/<SYM>.parquet` | imported 1-minute index history, daily stock history | Parquet zstd | T1 ✅ |
 | `bars/legacy/<day>.parquet` | imported legacy 1-minute bars (key = symbol, `src="legacy"`) | Parquet zstd | T1 ✅ |
 | `imports/legacy/{minutes,chains,live}/` + `report.json` | imported legacy minute snapshots, chains, live.db tables; the import report | Parquet zstd | T1 ✅ |
+| `costs/tradeable_<day>.json`, `costs/all_days.parquet` | round-trip cost per underlying and the tradeable list (on trial) | JSON / Parquet | T2 ✅ |
 | `store/` | small transactional state: alerts, paper trades, journal | SQLite | T4 |
 | `local.json` | this machine's setting overrides | JSON | T0 ✅ |
 

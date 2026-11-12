@@ -3,6 +3,21 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.4.0] - 2026-11-13
+### Added
+- T2 costs (`tanu/costs/`, ADR-0008): round trip of an ATM option buy = measured spread + 1 slippage tick + charges
+  (dated rates) + theta for the holding time (square-root rule); daily tradeable list with reasons (round trip > 6%,
+  spread > 2%, too few quotes, unknown lot). On trial: shown, not enforced. Thresholds in `tanu/costs/rules.json`.
+- Instrument list (`tanu/data/instruments.py`): Upstox's public NSE file -> lot, tick and expiries per underlying.
+- CLI: `python -m tanu costs <day>`.
+- Tests: 52.
+### Found (Mac data, 7 days 4-12 Nov, 224 underlyings)
+- Measured round trip (60 min hold): Bank Nifty 1.7%, Midcap Select 1.9%, BSE / MCX / HAL / Apollo / ICICI / TCS /
+  M&M / Trent ~2.0-2.2%, Nifty 3.2% (weekly theta; expiry day 19%), SBIN 2.3%, Reliance 2.4%, Tata Steel 3.5%, ITC 3.8%.
+  168 of 224 tradeable on at least half the days; illiquid ones (Nifty Next 50, Kaynes, Idea, Yes Bank) excluded.
+- The legacy Lab overstated stock option costs (assumed ₹0.25 / 1% slippage per side): e.g. Tata Steel -15.3% there vs
+  3.5% measured. Rank agreement 0.60. Earlier advice that stock option buying costs 2-19% a trade is withdrawn.
+
 ## [0.3.0] - 2026-11-13
 ### Added
 - T1 data layer, part 2:
