@@ -8,11 +8,12 @@ to Tanu.
 |---|---|---|---|
 | `logs/` | structured logs | JSON lines, daily files | T0 ✅ |
 | `tape/<source>/<YYYY-MM-DD>/HH[-n].tape` | every broker message as received (ADR-0006) | blocks of records, zstd per block | T1 ✅ writer + reader |
-| `bars/<YYYY-MM-DD>.parquet` | 1-min OHLCV + OI per instrument, from the tape; filled gaps marked | Parquet zstd | T1 |
+| `bars/<source>/<YYYY-MM-DD>.parquet` | 1-min bars per instrument from the tape (`src="tape"`), gaps filled from broker candles (`src="broker"`) | Parquet zstd | T1 ✅ |
 | `chains/<YYYY-MM-DD>.parquet` | option chain snapshots | Parquet zstd | T1 |
-| `facts/` | dated facts: lot sizes, expiries, charges, holidays, events (`valid_from`) | JSON / CSV | T1 |
+| `history/<SYM>.parquet`, `history/daily/<SYM>.parquet` | imported 1-minute index history, daily stock history | Parquet zstd | T1 ✅ |
+| `bars/legacy/<day>.parquet` | imported legacy 1-minute bars (key = symbol, `src="legacy"`) | Parquet zstd | T1 ✅ |
+| `imports/legacy/{minutes,chains,live}/` + `report.json` | imported legacy minute snapshots, chains, live.db tables; the import report | Parquet zstd | T1 ✅ |
 | `store/` | small transactional state: alerts, paper trades, journal | SQLite | T4 |
-| `imports/` | copies of legacy data in Tanu's format + an import report | Parquet | T1 |
 | `local.json` | this machine's setting overrides | JSON | T0 ✅ |
 
 ## Tape format (built: `tanu/data/tape.py`, ADR-0006)
@@ -33,6 +34,10 @@ to Tanu.
 | `data/history/<SYM>/minutes.parquet` | 1-min index / stock history since 2022 | |
 | `data/recordings/upstox_<day>_*.parquet` | per-minute snapshots, chains, metrics, candles, bars, news since 28 Oct 2026 | 12 Nov 09:07-10:02 missing; bars before 14:10 lost |
 | `data/live.db` | alerts, outcomes, paper trades, plan outcomes, mind reads | read with `?mode=ro` |
+
+## Dated facts (in git: `tanu/facts/`)
+`charges.json` (option charges), `lots.json` (index lots), `calendar.json` (sessions, holidays, special sessions).
+Each entry has `valid_from`; `tanu.data.facts.Facts` returns the value valid on a given day.
 
 ## Rules
 - Point-in-time: a value is stored with the time it became known; nothing uses later data.

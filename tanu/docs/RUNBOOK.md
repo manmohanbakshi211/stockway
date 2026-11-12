@@ -15,6 +15,9 @@ How to run, check and fix Tanu. Until cutover the legacy app is what runs on mar
 python -m tanu doctor            # machine check (exit code 1 on any FAIL)
 python -m tanu version
 python -m pytest tanu/tests -q   # Tanu's tests
+python -m tanu import-legacy     # copy the legacy app's data into data/tanu (legacy files only read; re-run safe)
+python -m tanu tape-summary 2026-11-13   # what a day's tape holds (after cutover)
+python -m tanu bars 2026-11-13           # build that day's 1-minute bars from its tape
 ```
 
 ## Where to look

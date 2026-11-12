@@ -1,0 +1,7 @@
+{
+  "about": "Index option lot sizes (bullet, dated). Live trading takes the lot from the broker's instrument list; these are for history and checks. Copied from the legacy rules/lots.json on 13 Nov 2026; add an entry with its date when NSE changes a lot.",
+  "lots": {
+    "NIFTY": [{"valid_from": "2000-01-01", "lot": 65}],
+    "BANKNIFTY": [{"valid_from": "2000-01-01", "lot": 30}]
+  }
+}

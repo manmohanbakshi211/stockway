@@ -1,0 +1,13 @@
+{
+  "about": "When NSE F&O trades (bullet, dated). regular: a normal day's session; holidays by year; special: extra or changed sessions with the exchange circular. Copied from the legacy rules/market_calendar.json and rules/health.json on 13 Nov 2026.",
+  "regular": [{"valid_from": "2000-01-01", "open": "09:15", "close": "15:30", "weekdays": [0, 1, 2, 3, 4]}],
+  "holidays": {
+    "2026": ["2026-01-26", "2026-03-03", "2026-03-26", "2026-03-31", "2026-04-03", "2026-04-14", "2026-05-01",
+             "2026-05-28", "2026-06-26", "2026-09-14", "2026-10-02", "2026-10-20", "2026-11-10", "2026-11-24",
+             "2026-12-25"]
+  },
+  "special": [
+    {"date": "2026-11-08", "name": "Diwali Muhurat trading", "open": "14:20", "close": "15:40",
+     "source": "NSE circular FAOP76940 (142/2026): F&O pre-open 14:05, normal market 14:20-15:40"}
+  ]
+}
