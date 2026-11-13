@@ -50,6 +50,8 @@ class Position:
     stop: float | None = None
     best: float | None = None
     peak: float | None = None
+    trough: float | None = None
+    und_exit: float | None = None
     exit_t: float | None = None
     exit: float | None = None
     reason: str | None = None
@@ -91,6 +93,14 @@ class Engine:
         self.open: list[Position] = []
         self.closed: list[Position] = []
         self.signals: list[dict] = []
+        self.listeners: list = []           # objects with on_fill(engine, position) / on_close(engine, position)
+
+    def _emit(self, what: str, p: Position) -> None:
+        for li in self.listeners:
+            try:
+                getattr(li, what)(self, p)
+            except Exception as e:                      # a listener (account, journal) can never stop the engine
+                p.state.setdefault("listener_errors", []).append(f"{type(li).__name__}.{what}: {e}")
 
     # ---------------------------------------------------------------- day lifecycle
     def start_day(self, sym: str, day: str, ctx: DayContext) -> None:
@@ -108,6 +118,8 @@ class Engine:
             p.reason = p.reason or "no_exit_price"
             self.open.remove(p)
             self.closed.append(p)
+            if p.entry is not None:
+                self._emit("on_close", p)
 
     # ---------------------------------------------------------------- bars
     def on_bar(self, sym: str, t: float, o: float, h: float, l: float, c: float) -> None:
@@ -204,16 +216,19 @@ class Engine:
                 atr = st.atr or (st.hi - st.lo) / 3
                 p.stop = spot - p.d * ex.atr_init * atr
                 p.best = spot
-                p.peak = p.entry
+                p.peak = p.trough = p.entry
+                self._emit("on_fill", p)
             if ob is None:
                 continue
+            p.trough = min(p.trough, ob[2])
             atr = st.atr or (st.hi - st.lo) / 3
             reason, px = self._exit_reason(p, ex, t, m, h, l, ob)
             if reason:
                 p.exit_t, p.exit = t, max(px * (1 - sp / 2) - self.tick, 0.0)
-                p.reason = reason
+                p.reason, p.und_exit = reason, c
                 self.open.remove(p)
                 self.closed.append(p)
+                self._emit("on_close", p)
                 continue
             p.peak = max(p.peak, ob[1])
             p.best = max(p.best, h) if p.d > 0 else min(p.best, l)
@@ -250,7 +265,10 @@ class Engine:
             row = {"setup": p.setup, "sym": p.sym, "day": p.day, "d": p.d, "side": p.side, "strike": p.strike,
                    "entry_t": p.entry_t, "exit_t": p.exit_t, "entry": p.entry, "exit": p.exit, "reason": p.reason,
                    **{f"at_{k}": v for k, v in p.state.items() if k in ("day", "rel", "burst", "twap_rel", "m")}}
+            if p.entry and p.peak is not None:
+                row.update(mfe_pct=round((p.peak / p.entry - 1) * 100, 2), mae_pct=round((p.trough / p.entry - 1) * 100, 2))
             if p.entry and p.exit is not None:
+                row["minutes"] = round((p.exit_t - p.entry_t) / 60)
                 lot = self.lots.get(p.sym) or self.facts.lot(p.sym, p.day) or 1
                 charges = self.facts.option_charges(p.entry, p.exit, lot, p.day)
                 row.update(lot=lot, pnl_rs=round((p.exit - p.entry) * lot - charges, 2),

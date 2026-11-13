@@ -3,6 +3,23 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.7.0] - 2026-11-13
+### Added
+- T4 paper side:
+  - Paper accounts (`tanu/paper/accounts.py`, `accounts.json` bullet): listeners on the engine; each decides at the
+    fill whether it takes the trade. `shadow` takes every signal (grading); `sniper` takes only setups on trial / live,
+    index only, 1 lot, ₹1L, max 1 open, 3 trades a day, stop at -3% of capital or after 2 losses in a row, premium
+    <= 30% of capital, one position per direction in the index group, no entry after 14:30. Every refusal is journaled
+    with its reason. Paper only (ADR-0001).
+  - Journal (`tanu/journal/store.py`, SQLite `data/tanu/store/journal.db`): every trade with its footprint (state at
+    entry, best / worst option price, minutes, costs, exit reason, underlying in / out); idempotent on replays.
+  - Evening review (`tanu/journal/review.py`, `python -m tanu review <day>`): per account P&L, by setup / day type /
+    exit, best and worst trade, "went green then closed red" and "never moved" losers, refusals; questions to
+    `research/hypotheses.jsonl` (never straight to live). Deterministic; an AI write-up can sit on top later.
+  - Engine hooks `on_fill` / `on_close` for listeners; a failing listener is recorded on the position, never stops
+    the engine; best and worst option price tracked per trade. `tanu research` now fills the journal.
+- Tests: 67.
+
 ## [0.6.1] - 2026-11-13
 ### Found
 - Research 0002 (`docs/research/0002-exit-search.md`), run on the Mac: 56 combinations (4 entries x 7 exits x 2

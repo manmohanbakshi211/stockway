@@ -18,6 +18,10 @@ python -m pytest tanu/tests -q   # Tanu's tests
 python -m tanu import-legacy     # copy the legacy app's data into data/tanu (legacy files only read; re-run safe)
 python -m tanu tape-summary 2026-11-13   # what a day's tape holds (after cutover)
 python -m tanu bars 2026-11-13           # build that day's 1-minute bars from its tape
+python -m tanu costs 2026-11-12          # that day's measured option costs and tradeable list
+python -m tanu research                  # replay all setups over history (fills the journal), learn / holdout report
+python -m tanu search                    # setups x exits x filters, ledger-controlled
+python -m tanu review 2026-11-13         # evening review of the paper accounts
 ```
 
 ## Where to look

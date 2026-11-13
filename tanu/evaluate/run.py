@@ -13,6 +13,8 @@ from ..core import log
 from ..engine import replay
 from ..engine.core import Engine
 from ..engine.options import OptionHistory
+from ..journal.store import Journal
+from ..paper.accounts import Accounts
 from ..setups import registry
 from . import report
 
@@ -25,6 +27,8 @@ def research(base: Path | str, legacy_history: Path | str, syms=("NIFTY", "BANKN
     good, bad = registry.load() if setups is None else (setups, [])
     oh = OptionHistory(legacy_history)
     eng = Engine(good, oh, spread_pct=SPREAD_PCT)
+    journal = Journal(base / "store" / "journal.db")          # every replayed trade, per paper account, with footprints
+    eng.listeners.append(Accounts(journal))
     for sym in syms:
         hist = base / "history" / f"{sym}.parquet"
         if not hist.exists():

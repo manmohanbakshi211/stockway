@@ -14,7 +14,8 @@ to Tanu.
 | `bars/legacy/<day>.parquet` | imported legacy 1-minute bars (key = symbol, `src="legacy"`) | Parquet zstd | T1 ✅ |
 | `imports/legacy/{minutes,chains,live}/` + `report.json` | imported legacy minute snapshots, chains, live.db tables; the import report | Parquet zstd | T1 ✅ |
 | `costs/tradeable_<day>.json`, `costs/all_days.parquet` | round-trip cost per underlying and the tradeable list (on trial) | JSON / Parquet | T2 ✅ |
-| `store/` | small transactional state: alerts, paper trades, journal | SQLite | T4 |
+| `store/journal.db` | paper trades with footprints (per account) and refused signals with reasons | SQLite | T4 ✅ |
+| `journal/review_<day>.{md,json}`, `research/hypotheses.jsonl` | evening reviews and the questions they raise | Markdown / JSON | T4 ✅ |
 | `local.json` | this machine's setting overrides | JSON | T0 ✅ |
 
 ## Tape format (built: `tanu/data/tape.py`, ADR-0006)

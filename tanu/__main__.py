@@ -8,6 +8,7 @@
   costs <day>                the day's tradeable list: round-trip cost of each ATM option (on trial)
   research                   replay every setup over history with option prices and evaluate (learn / holdout)
   search                     every setup x every exit variant x every filter (setups/exits.json), ledger-controlled
+  review <day>               the evening review of the paper accounts for that day (from the journal)
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
         from . import __version__
         print(__version__)
         return 0
-    if cmd in ("import-legacy", "tape-summary", "bars", "costs", "research", "search"):
+    if cmd in ("import-legacy", "tape-summary", "bars", "costs", "research", "search", "review"):
         from .core import config, log, paths
         s = config.load()
         d = paths.ensure(s)
@@ -51,6 +52,11 @@ def main(argv: list[str] | None = None) -> int:
         day, src = argv[1], (argv[2] if len(argv) > 2 else "upstox")
         if cmd == "costs":
             return _costs(day, d)
+        if cmd == "review":
+            from .journal import review
+            from .journal.store import Journal
+            print(review.write(review.daily(Journal(d["base"] / "store" / "journal.db"), day), d["base"]).read_text())
+            return 0
         if cmd == "tape-summary":
             from .data import tape
             print(json.dumps(tape.summary(d["tape"], src, day), indent=1, default=str))
