@@ -3,6 +3,14 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.6.1] - 2026-11-13
+### Found
+- Research 0002 (`docs/research/0002-exit-search.md`), run on the Mac: 56 combinations (4 entries x 7 exits x 2
+  filters), 36,736 trades on 523 days of real option prices; k = 42, bar t >= 3.24. Nothing passes. Best: VWAP
+  pullback + wide chandelier +5.36% learn (t 1.05), -0.17% holdout. Exit type barely matters (-1.3% to -2.2% learn
+  per type). Skipping expiry day helped in 36 of 56 comparisons (median +0.5 points): kept as a shadow filter.
+  Next edge sources: option-side flow, order flow, in-play stocks, breadth (from the tick tape).
+
 ## [0.6.0] - 2026-11-13
 ### Added
 - Exit variants (`tanu/setups/registry.py` Exit, engine `_exit_reason`): besides the chandelier stop on the
