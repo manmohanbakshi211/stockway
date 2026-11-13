@@ -15,3 +15,4 @@ supersedes it. Template: copy [0000-template.md](0000-template.md).
 | [0008](0008-costs-are-measured.md) | Option costs are measured from live quotes, not assumed | Accepted |
 | [0009](0009-cutover.md) | How Tanu takes over the market day: one switch, gates, port 8765, secrets, rehearsal, rollback | Accepted (switch off) |
 | [0010](0010-option-selling-versions.md) | Every setup has a buying and a selling version; four paper accounts at ₹5 lakh | Accepted |
+| [0011](0011-multi-leg-structures.md) | Multi-leg structures (iron condor, straddle) as their own bullets on real option prices; fifth paper account | Accepted (replay only) |

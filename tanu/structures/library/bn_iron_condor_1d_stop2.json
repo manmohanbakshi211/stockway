@@ -1,0 +1,13 @@
+{
+  "id": "bn_iron_condor_1d_stop2",
+  "name": "Bank Nifty iron condor, one session before expiry, stop at 2x the credit",
+  "why": "Same as bn_iron_condor_1d with a stop: buy everything back when the loss reaches twice the credit received. A separate idea (counted).",
+  "source": "Legacy Stockway research, Mandeep 13 Nov 2026",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["BANKNIFTY"],
+  "entry": {"dte": 1, "at": "15:15"},
+  "legs": [{"action": "sell", "side": "CE", "pct": 1.0}, {"action": "buy", "side": "CE", "pct": 2.0},
+           {"action": "sell", "side": "PE", "pct": -1.0}, {"action": "buy", "side": "PE", "pct": -2.0}],
+  "exit": {"at": "expiry", "stop_x_credit": 2}
+}

@@ -152,6 +152,35 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
         return {"days": days[:60], "day": day, "kind": kind, "accounts": mine, "account_info": info, "trades": rows,
                 "review": rev}
 
+    def latest_structures_report() -> dict:
+        r = base / "research"
+        runs = sorted(p for p in r.glob("structures_*") if (p / "report.json").exists()) if r.exists() else []
+        if not runs:
+            return {}
+        rep = _json(runs[-1] / "report.json", {}) or {}
+        return {"run": runs[-1].name, "k": rep.get("k"), "t_bar": rep.get("t_bar"),
+                "rows": {x["setup"]: x for x in rep.get("setups", [])}}
+
+    @app.get("/api/structures")
+    def structures_view(limit: int = 40):
+        from ..structures import registry as SRG
+        good, bad = SRG.load()
+        j = journal()
+        rows = j.structures() if j else []
+        rep = latest_structures_report()
+        summ = []
+        for st in good:
+            mine = [r for r in rows if r["structure"] == st.id]
+            pnl = [r["pnl_rs"] for r in mine if r["pnl_rs"] is not None]
+            ev = rep.get("rows", {}).get(st.id) or {}
+            summ.append({"id": st.id, "name": st.name, "status": st.status, "why": st.why, "symbols": st.symbols,
+                         "trades": len(pnl), "won_pct": round(sum(p > 0 for p in pnl) / len(pnl) * 100, 1) if pnl else None,
+                         "pnl_rs": round(sum(pnl), 0) if pnl else 0, "per_trade": round(sum(pnl) / len(pnl), 0) if pnl else None,
+                         "learn": ev.get("learn"), "hold": ev.get("hold"), "passes": ev.get("passes"),
+                         "why_not": ev.get("why_not", [])})
+        return {"structures": summ, "bad": bad, "trades": rows[:limit], "run": rep.get("run"), "k": rep.get("k"),
+                "t_bar": rep.get("t_bar")}
+
     @app.get("/api/trade")
     def trade(account: str, setup: str, sym: str, day: str, d: int, entry_t: float):
         j = journal()

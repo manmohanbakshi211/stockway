@@ -1,0 +1,12 @@
+{
+  "id": "straddle_sell_920",
+  "name": "Short ATM straddle every session, 09:20 to 15:15, stop at 30% of the credit",
+  "why": "Legacy app Lab (Oct 2026): of 48,000 rules only straddle selling showed moderate / strong evidence out of sample (needs Rs 1-2 lakh margin). The common intraday form: sell the ATM call and put at 09:20, buy back at 15:15, stop when the loss is 30% of the premium received.",
+  "source": "Legacy Stockway Strategy Lab (roadmap part K-M), Mandeep 13 Nov 2026",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "entry": {"dte": null, "at": "09:20"},
+  "legs": [{"action": "sell", "side": "CE", "pct": 0}, {"action": "sell", "side": "PE", "pct": 0}],
+  "exit": {"at": "15:15", "stop_x_credit": 0.3}
+}

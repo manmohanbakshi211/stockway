@@ -110,7 +110,7 @@ async function today() {
 
 // ---------------------------------------------------------------- Setups
 async function setups() {
-  const d = await get("/api/setups");
+  const [d, st] = await Promise.all([get("/api/setups"), get("/api/structures").catch(() => null)]);
   const num = (label, part) => `<span><span class="muted">${label}</span> <b>${pct(part.avg_pct)}</b>
       <span class="muted small">(${part.n || 0} trades)</span></span>`;
   const part = (label, b, n) => {
@@ -129,10 +129,39 @@ async function setups() {
     <p class="muted">A setup trades on paper only after it wins on days it never saw, after costs, beyond luck.
       Ideas tried so far: ${d.ideas_tried}. The more ideas tried, the higher the bar.</p>
     <div class="rows">${d.setups.map(row).join("")}</div>
+    ${st && st.structures.length ? `<h2>Multi-leg structures</h2>
+      <p class="muted small">Iron condors and straddles, entered by the calendar; judged on return on margin, above zero
+        beyond luck${st.t_bar ? ` (t ≥ ${st.t_bar})` : ""}.</p>
+      <div class="rows">${st.structures.map((x) => `<div class="row">
+        <div class="row-head"><b>${esc(x.name)}</b> <span class="status ${esc(x.status)}">${esc(x.status)}</span></div>
+        ${x.learn ? `<div class="nums">${num("Tuning days", x.learn)}${num("Unseen days", x.hold || {})}</div>
+          <p class="small">${x.passes ? "Passed." : esc(plain((x.why_not || []).join("; ")))} <span class="muted">₹ a trade: ${x.per_trade != null ? money(x.per_trade) : "–"} (return on margin above).</span></p>`
+          : `<p class="small muted">Not tested yet.</p>`}
+        <p class="small muted">${esc(x.why)}</p></div>`).join("")}</div>` : ""}
     ${d.bad.length ? `<h2>Setup files with errors</h2><ul class="plain">${d.bad.map((b) => `<li>${esc(b.file)}: <span class="warn">${esc(b.error)}</span></li>`).join("")}</ul>` : ""}`;
 }
 
 // ---------------------------------------------------------------- Journal
+async function multileg() {
+  const d = await get("/api/structures").catch(() => null);
+  if (!d || !d.structures.length) return "";
+  const legs = (t) => t.legs.map((x) => `${x.action === "sell" ? "S" : "B"} ${x.strike} ${x.side}`).join(" · ");
+  return `<h2>Multi-leg selling (iron condor, straddle)</h2>
+    <p class="muted small">Entered by the calendar and held to expiry or a time, every structure graded on real option prices. Capital ₹5L.</p>
+    <div class="scroll"><table class="ledger"><thead><tr><th>Structure</th><th class="num">Trades</th><th class="num wide">Won</th>
+      <th class="num">Total</th><th class="num">Per trade</th></tr></thead><tbody>
+      ${d.structures.map((s) => `<tr><td>${esc(s.name)}<div class="small muted">${esc((s.symbols || []).join(", "))} ·
+        <span class="status ${esc(s.status)}">${esc(s.status)}</span>${s.passes ? " · passed" : s.learn ? " · not proven" : ""}</div></td>
+        <td class="num">${s.trades}</td><td class="num wide">${s.won_pct ?? "–"}${s.won_pct != null ? "%" : ""}</td>
+        <td class="num">${money(s.pnl_rs)}</td><td class="num">${s.per_trade != null ? money(s.per_trade) : "–"}</td></tr>`).join("")}
+    </tbody></table></div>
+    ${d.trades.length ? `<h3>Latest multi-leg trades</h3><div class="scroll"><table class="ledger"><tbody>
+      ${d.trades.slice(0, 15).map((t) => `<tr><td class="small">${esc(t.day)}<div class="muted">${esc(t.sym)}</div></td>
+        <td class="small">${esc(t.structure)}<div class="muted">${esc(legs(t))}</div></td>
+        <td class="num">${money(t.pnl_rs)}<div class="small muted">${esc(t.reason)}</div></td></tr>`).join("")}
+      </tbody></table></div>` : ""}`;
+}
+
 async function journal(params) {
   const q = new URLSearchParams(params || {});
   const kind = q.get("kind") === "sell" ? "sell" : "buy";
@@ -141,10 +170,11 @@ async function journal(params) {
   const tabs = `<div class="seg" role="tablist" aria-label="Paper trading">
       <a role="tab" href="#journal?kind=buy" aria-selected="${kind === "buy"}">Option buying</a>
       <a role="tab" href="#journal?kind=sell" aria-selected="${kind === "sell"}">Option selling</a></div>`;
+  const ml = kind === "sell" ? await multileg() : "";
   if (!d.trades || !d.days.length) {
     view.innerHTML = `<h1>Paper trades</h1>${tabs}<div class="empty">${kind === "sell"
       ? "No option-selling trades yet. Every setup has a selling version; its paper trades appear here."
-      : "No trades in the journal yet. Every paper trade will appear here with its full footprint."}</div>`;
+      : "No trades in the journal yet. Every paper trade will appear here with its full footprint."}</div>${ml}`;
     return;
   }
   const acc = q.get("account") || "";
@@ -163,7 +193,8 @@ async function journal(params) {
     <tbody>${d.trades.map((t, i) => `<tr class="tap" data-i="${i}" tabindex="0"><td>${hm(t.entry_t)}</td>
       <td>${esc(t.setup.replace("@sell", "").split("__")[0])}<br><span class="muted small">${kind === "sell" ? "sold " : ""}${esc(t.sym)} ${t.strike} ${esc(t.side)}, ${esc(acctShort(t.account))}</span></td>
       <td class="num">${money(t.pnl_rs)}<br><span class="muted small">${pct(t.pct)}</span></td>
-      <td class="num wide">${pct(t.mfe_pct)}</td><td class="small wide">${esc(t.reason)} ${hm(t.exit_t)}</td></tr>`).join("")}</tbody></table></div>`;
+      <td class="num wide">${pct(t.mfe_pct)}</td><td class="small wide">${esc(t.reason)} ${hm(t.exit_t)}</td></tr>`).join("")}</tbody></table></div>
+    ${ml}`;
   const go = () => {
     const p = { day: document.getElementById("j-day").value, kind };
     const a = document.getElementById("j-acc").value;

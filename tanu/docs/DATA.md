@@ -15,6 +15,8 @@ to Tanu.
 | `imports/legacy/{minutes,chains,live}/` + `report.json` | imported legacy minute snapshots, chains, live.db tables; the import report | Parquet zstd | T1 ✅ |
 | `costs/tradeable_<day>.json`, `costs/all_days.parquet` | round-trip cost per underlying and the tradeable list (on trial) | JSON / Parquet | T2 ✅ |
 | `store/journal.db` | paper trades with footprints (per account; `kind` buy / sell, `margin` for sold options) and refused signals with reasons | SQLite | T4 ✅, 0.12.0 |
+| `store/journal.db` table `structures` | multi-leg paper trades (account `shadow_multileg`): structure, day, expiry, credit, charges, ₹ P&L, margin, % on margin, worst point, legs (JSON) | SQLite | 0.13.0 |
+| `research/structures_<ts>/` | `python -m tanu structures`: trades.json, report.json, report.md | JSON / Markdown | 0.13.0 |
 | `research/_steps/` | chunk plan, carried engine state and trade parts of `research-steps` | JSON / Parquet | 0.12.0 ✅ |
 | `journal/review_<day>.{md,json}`, `research/hypotheses.jsonl` | evening reviews and the questions they raise | Markdown / JSON | T4 ✅ |
 | `local.json` | this machine's setting overrides (`live`, `web_port` after cutover) | JSON | T0 ✅ |

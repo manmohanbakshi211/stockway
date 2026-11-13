@@ -38,6 +38,7 @@ python -m tanu rehearse 2026-11-06       # a past day through the whole live pat
 python -m tanu cutover                   # live switch ON (Mandeep's go; the old app must be closed)
 python -m tanu cutover --undo            # live switch OFF (rollback)
 python -m tanu research-steps plan 40    # the research replay in chunks (then: step ... until done; finish)
+python -m tanu structures               # iron condor / straddle structures on real option prices (report + journal)
 ```
 
 ## Where to look

@@ -120,7 +120,7 @@ def test_four_accounts_at_five_lakh_and_selling_accounts_take_only_sold_options(
     spec = json.loads(SPEC.read_text())
     assert {a["id"]: (a["kind"], a["capital"]) for a in spec["accounts"]} == {
         "shadow": ("buy", 500000), "sniper": ("buy", 500000), "shadow_sell": ("sell", 500000),
-        "sniper_sell": ("sell", 500000)}
+        "sniper_sell": ("sell", 500000), "shadow_multileg": ("multileg", 500000)}
     j = Journal(tmp_path / "j.db")
     price = lambda m, k, side: max(100.0 - 2 * max(m - 11, 0), 40.0) if side == "PE" else 100.0
     _run(_setup(), price, journal=j)

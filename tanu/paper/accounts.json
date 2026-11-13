@@ -33,6 +33,15 @@
       "risk": {}
     },
     {
+      "id": "shadow_multileg",
+      "name": "Shadow multi-leg: every iron condor / straddle entry of every structure (grading only)",
+      "kind": "multileg",
+      "setups": "all",
+      "capital": 500000,
+      "lots": 1,
+      "risk": {}
+    },
+    {
       "id": "sniper_sell",
       "name": "Sniper selling: index, only setups on trial or live, strict risk and margin",
       "kind": "sell",

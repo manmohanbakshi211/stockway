@@ -3,6 +3,24 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.13.0] - 2026-11-13
+### Added
+- Multi-leg option structures (ADR-0011, Mandeep: "haan kardo add"). Gun: `tanu/structures/` (registry, runner,
+  research): entries by the expiry calendar (n sessions before expiry, or every session at a time), legs as % from
+  spot, fills at the next minute's open with half the measured spread and a tick, valued every minute at the cost to
+  close, exits on stop (n x credit), take (% of credit), a time, or expiry (intrinsic value from the index close).
+  Margin: wing width - credit for defined risk, notional x margin share otherwise.
+- Bullets (shadow): `bn_iron_condor_1d`, `bn_iron_condor_1d_stop2`, `nifty_iron_condor_1d` (the legacy Lab's one
+  result, now to be checked with Tanu's costs and holdout), `straddle_sell_920`, `straddle_sell_expiry_day`.
+- `python -m tanu structures`: replays them on the real option history, learn / holdout with the luck bar for the
+  structures tried (the evaluator now takes `baseline=None`: no random yardstick for calendar trades).
+- Fifth paper account `shadow_multileg` (₹5,00,000); journal table `structures`; `/api/structures`; the Option
+  selling tab and the Setups page show each structure and its latest trades with their legs.
+### Not yet
+- Live paper entries for structures (replay only); the real-option run on the Mac.
+### Checked
+- Earlier setups' results unchanged (evaluator default unchanged). Tests: 111. Headless check at 390 / 1280 px.
+
 ## [0.12.0] - 2026-11-13
 ### Added
 - Option selling for every setup (ADR-0010, Mandeep): the engine sells an option against every signal (a put when

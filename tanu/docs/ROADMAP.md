@@ -15,6 +15,7 @@ acceptance checks pass. Order follows the research in claude/tanu_blueprint.md a
 | **0.10.0** | Mandeep's gap-down idea (research 0003): morning features + 2 shadow setups; real-option test on the Mac next | pre-test on index ✅; research / search on the Mac | built, shadow |
 | **0.11.0** | 5 EMA video (research 0004): timeframe EMA alerts, rr exit, re-entries (gun) + 2 shadow setups | index pre-test ✅ (claim not met); research on the Mac | built, shadow |
 | **0.12.0** | Option selling version of every setup + 4 paper accounts at ₹5L + Selling tab; 10 EMA video (research 0005) | real-option research on the Mac ✅ (nothing passes; selling loses less) | built, shadow |
+| **0.13.0** | Multi-leg structures (ADR-0011): iron condor + straddle bullets, fifth paper account, journal table, app sections | real-option run on the Mac | built, shadow, replay only |
 | **T6** | Video Lab: link / file → transcript → idea cards (gun vs bullet) → tests (history, recordings, shadow) | every card recorded with its result, failed ones kept | |
 | **T7** | Stock options on the low-cost list, "in play" days only | passes ADR-0005 | |
 | **T8+** | Swing / positional, investing (cash stocks), ETF, mutual funds as horizon plugins | same protocol | |

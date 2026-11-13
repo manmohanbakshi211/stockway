@@ -14,6 +14,7 @@
   rehearse <day>             play a past day through the whole live path (fake broker) and check it against replay
   cutover [--undo]           turn the live switch on (Mandeep's go only) or off again
   research-steps plan|step|finish   the research replay in chunks (for shells with a time limit)
+  structures                 replay the multi-leg structures (iron condor, straddle) on real option prices
 """
 from __future__ import annotations
 
@@ -53,6 +54,19 @@ def main(argv: list[str] | None = None) -> int:
         d = paths.ensure(s)
         log.setup(d["logs"], s.log_level, s.log_keep_days)
         print(cutover(d["base"], undo="--undo" in argv[1:], s=s))
+        return 0
+    if cmd == "structures":
+        from .core import config, log, paths
+        from .structures import research as SR
+        s = config.load()
+        d = paths.ensure(s)
+        log.setup(d["logs"], s.log_level, s.log_keep_days)
+        rep = SR.run(d["base"], paths.LEGACY_DATA / "history")
+        print(json.dumps({"out": rep.get("out"), "trades": rep.get("trades"), "skipped": rep.get("skipped"),
+                          "k": rep.get("k"), "t_bar": rep.get("t_bar"),
+                          "structures": [{"id": r["setup"], "learn": r["learn"], "hold": r["hold"],
+                                          "rs_per_trade": r["rs_per_trade"], "passes": r.get("passes"),
+                                          "why_not": r.get("why_not")} for r in rep.get("setups", [])]}, default=str))
         return 0
     if cmd == "research-steps":
         from .core import config, log, paths

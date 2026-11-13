@@ -1,0 +1,12 @@
+{
+  "id": "straddle_sell_expiry_day",
+  "name": "Short ATM straddle on expiry day, 09:20 to 15:15, stop at 30% of the credit",
+  "why": "The expiry-day form of the straddle sell: time decay is fastest on the last day. A separate idea (counted).",
+  "source": "Legacy Stockway Strategy Lab, Mandeep 13 Nov 2026",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "entry": {"dte": 0, "at": "09:20"},
+  "legs": [{"action": "sell", "side": "CE", "pct": 0}, {"action": "sell", "side": "PE", "pct": 0}],
+  "exit": {"at": "15:15", "stop_x_credit": 0.3}
+}
