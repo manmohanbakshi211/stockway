@@ -183,11 +183,13 @@ def test_every_source_reads_into_its_cache_and_one_failure_does_not_stop_the_res
 
 def test_a_failed_read_keeps_the_last_good_data(tmp_path):
     c = collector(tmp_path)
-    c.refresh(["fii_dii"])
+    c.refresh(["fii_dii", "participant_oi"])
     c.http.transport.fail.add("fiidiiTradeReact")
     assert c.refresh(["fii_dii"], force=True) == {"fii_dii": False}
     x = c.cached("fii_dii")
     assert x["ok"] is False and x["data"]["FII"]["net"] == -2500
+    c.now = lambda: NOW + 301                                         # every_s is 1800, but a failure retries in 5 min
+    assert c.due("fii_dii") and not c.due("participant_oi")
 
 
 def test_alerts_only_for_new_items_after_the_first_read(tmp_path):

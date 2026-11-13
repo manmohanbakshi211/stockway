@@ -12,6 +12,9 @@ All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.c
   empty folder, no session, no MCP, no API key in its environment. Model tiers and budgets in `ai/models.json`
   (ask balanced, morning balanced, evening deep; opus -> sonnet -> haiku fallback).
 - After the switch-over: notes at 08:45 and 16:05 on trading days, also on Telegram; before it, "Write ... now".
+### Fixed
+- Market page: a source whose read failed is tried again within 5 minutes (was: only after its normal interval,
+  up to 6 hours for NSE's daily files).
 ### Checked
 - Tests: 133 (8 new: no tools / empty folder / no keys in the environment, fallback, API path, budgets, no secrets in
   the snapshot, notes, routes). Headless: Today with an answer and System at 390 / 1280 px, no errors.

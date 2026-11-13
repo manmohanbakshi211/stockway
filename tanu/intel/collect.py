@@ -78,6 +78,8 @@ class Collector:
     def due(self, sid: str) -> bool:
         c = self.cached(sid)
         every = self.spec["sources"].get(sid, {}).get("every_s", 600)
+        if c.get("ok") is False:                         # a failed read is tried again within 5 minutes
+            every = min(every, 300)
         last = c.get("tried_at") or c.get("at") or 0
         return self.now() - float(last) >= every
 
