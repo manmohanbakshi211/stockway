@@ -3,6 +3,19 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.15.0] - 2026-11-13
+### Added
+- Tanu's AI (ADR-0013, Mandeep: "ai wala system toh chahiye hi hai"), read-only: "Ask Tanu" on the Today page
+  (Hinglish works) and the morning / evening notes, answered only from a snapshot of Tanu's own data (live day,
+  paper accounts, research verdicts, Market page sources, alerts, the symbols asked about). Claude Code on the Mac
+  (your Claude plan) or a Claude API key, chosen on the System page. Claude Code runs with every tool off, in an
+  empty folder, no session, no MCP, no API key in its environment. Model tiers and budgets in `ai/models.json`
+  (ask balanced, morning balanced, evening deep; opus -> sonnet -> haiku fallback).
+- After the switch-over: notes at 08:45 and 16:05 on trading days, also on Telegram; before it, "Write ... now".
+### Checked
+- Tests: 133 (8 new: no tools / empty folder / no keys in the environment, fallback, API path, budgets, no secrets in
+  the snapshot, notes, routes). Headless: Today with an answer and System at 390 / 1280 px, no errors.
+
 ## [0.14.0] - 2026-11-13
 ### Added
 - Market page (ADR-0012, Mandeep: World, market insider, watchlist and market context on one page with tabs):

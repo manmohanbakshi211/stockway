@@ -68,8 +68,64 @@ function liveBlock(L) {
       : `<p class="muted">No signals yet today.</p>`}`;
 }
 
+// ---------------------------------------------------------------- Ask Tanu (AI, read-only)
+function md(text) {        // the AI's text: escaped first, then bullets and **bold** only
+  const lines = esc(text).split(/\n/);
+  let html = "", list = false;
+  for (const raw of lines) {
+    const ln = raw.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+    const m = ln.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/);
+    if (m) { if (!list) { html += "<ul class=\"plain\">"; list = true; } html += `<li>${m[1]}</li>`; continue; }
+    if (list) { html += "</ul>"; list = false; }
+    if (ln.trim()) html += `<p>${ln.replace(/^#+\s*/, "")}</p>`;
+  }
+  return html + (list ? "</ul>" : "");
+}
+
+function askBlock(ai) {
+  if (!ai) return "";
+  const notes = ai.notes || [];
+  return `<h2>Ask Tanu</h2>
+    ${ai.available ? `<form class="inline-form ask" id="ask-form"><input name="q" maxlength="1000" autocomplete="off"
+        placeholder="e.g. aaj Bank Nifty mein kya chal raha hai?" aria-label="Question"><button type="submit">Ask</button></form>
+      <p class="muted small">Answers come only from Tanu's own data. AI: ${esc(ai.label)}. Paper only: it never places a trade.</p>`
+      : `<div class="empty">AI is not set up yet. On the System page choose Claude (your plan on this Mac) or save a Claude API key.</div>`}
+    <div id="ask-out"></div>
+    <h2>Notes</h2>
+    ${notes.length ? notes.slice(0, 2).map((n) => `<div class="detail note"><p class="muted small">${esc(n.kind === "morning" ? "Morning note" : "Evening note")},
+      ${esc(n.day)}${n.at ? ", written " + esc(String(n.at).slice(11, 16)) : ""}</p>${md(n.text)}</div>`).join("")
+      : `<p class="muted">No notes yet.${ai.available ? "" : " They start once AI is set up."}</p>`}
+    ${ai.available ? `<div class="controls"><button type="button" class="ghost" data-note="morning">Write the morning note now</button>
+      <button type="button" class="ghost" data-note="evening">Write the evening note now</button><span class="msg small" id="note-msg" role="status"></span></div>` : ""}`;
+}
+
+function wireAsk() {
+  const f = document.getElementById("ask-form"), out = document.getElementById("ask-out");
+  if (f) f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const q = (new FormData(f).get("q") || "").toString().trim();
+    if (!q) return;
+    const btn = f.querySelector("button");
+    btn.disabled = true;
+    out.innerHTML = `<div class="detail"><p class="muted">Thinking… (up to a couple of minutes)</p></div>`;
+    try {
+      const r = await post("/api/ai/ask", { question: q });
+      out.innerHTML = `<div class="detail note"><p class="muted small">${esc(r.question)}</p>${md(r.answer)}
+        <p class="muted small">${esc(r.model)}, ${r.secs} s</p></div>`;
+    } catch (e) { out.innerHTML = `<div class="detail"><p class="warn">${esc(e.message)}</p></div>`; }
+    btn.disabled = false;
+  };
+  view.querySelectorAll("[data-note]").forEach((b) => (b.onclick = async () => {
+    const msg = document.getElementById("note-msg");
+    msg.textContent = "Writing… (up to a few minutes)";
+    view.querySelectorAll("[data-note]").forEach((x) => (x.disabled = true));
+    try { await post("/api/ai/note", { kind: b.dataset.note }); route(); }
+    catch (e) { msg.textContent = e.message; msg.className = "msg small warn"; view.querySelectorAll("[data-note]").forEach((x) => (x.disabled = false)); }
+  }));
+}
+
 async function today() {
-  const [d, L] = await Promise.all([get("/api/today"), get("/api/live").catch(() => null)]);
+  const [d, L, ai] = await Promise.all([get("/api/today"), get("/api/live").catch(() => null), get("/api/ai").catch(() => null)]);
   document.getElementById("ver").textContent = "v" + d.version;
   const accl = d.account_list || [];
   const st = d.setups || {};
@@ -86,6 +142,7 @@ async function today() {
     <h1>${esc(d.headline)}</h1>
     <p class="muted">${d.live ? "Live paper trading." : "Not live yet: the old app still runs the market until the switch-over."}
       ${d.journal_day ? "Latest journal day: " + esc(d.journal_day) + "." : ""}</p>
+    ${askBlock(ai)}
     ${liveBlock(L)}
     <h2>Paper accounts${d.journal_day ? `, ${esc(d.journal_day)}` : ""}</h2>
     <p class="muted small">Capital ${money((accl[0] || {}).capital || 500000)} in each account. Shadow takes every signal of
@@ -106,6 +163,7 @@ async function today() {
     <h2>Questions from the reviews</h2>
     ${(d.questions || []).length ? `<ul class="plain">${d.questions.map((q) => `<li>${esc(q.day)}: ${esc(q.idea)}
       <span class="muted">(${esc(q.evidence)})</span></li>`).join("")}</ul>` : `<p class="muted">None yet.</p>`}`;
+  wireAsk();
 }
 
 // ---------------------------------------------------------------- Setups
@@ -507,14 +565,30 @@ function wireForms() {
   }));
 }
 
+function aiSetup(ai) {
+  if (!ai) return "";
+  return `<h2>AI (Ask Tanu and the notes)</h2>
+    <div class="rows"><div class="row"><div class="row-head"><b>${esc(ai.label)}</b>
+      <span class="status ${ai.available ? "live" : ""}">${ai.available ? "Ready" : "To do"}</span></div>
+      <p class="muted small">Claude Code on this Mac: ${ai.claude_code_found ? "found (it uses your Claude plan's login)" : "not found (install it, then type claude in Terminal once to log in)"}.
+        Claude API key: ${ai.api_key_saved ? "saved" : "not saved"}. Today: ${Object.entries((ai.usage || {}).tiers || {}).map(([k, v]) => `${esc(k)} ${v}`).join(", ") || "not used yet"}.</p>
+      <form class="form" data-form="ai">
+        <label>Use<select name="provider"><option value="claude_code" ${ai.provider === "claude_code" ? "selected" : ""}>Claude, your plan (Claude Code on this Mac)</option>
+          <option value="api" ${ai.provider === "api" ? "selected" : ""}>Claude API key</option><option value="off" ${ai.provider === "off" ? "selected" : ""}>Off</option></select></label>
+        <label>Claude API key (only for "Claude API key")<input name="api_key" type="password" autocomplete="off"></label>
+        <p class="muted small">The AI sees only Tanu's market data, paper trades and test results: never a key, a file or your accounts.</p>
+        <button type="submit">Save</button><span class="msg small" role="status"></span></form></div></div>`;
+}
+
 async function system() {
-  const [d, u] = await Promise.all([get("/api/system"), get("/api/setup").catch(() => null)]);
+  const [d, u, ai] = await Promise.all([get("/api/system"), get("/api/setup").catch(() => null), get("/api/ai").catch(() => null)]);
   const mark = { ok: "OK", warn: "Check", fail: "Fix" };
   const mb = (b) => (b / 1e6).toFixed(b < 1e7 ? 1 : 0) + " MB";
   view.innerHTML = `<h1>System</h1>
     <p class="muted">Version ${esc(d.version)}. Free disk ${d.free_gb} GB. Tanu reads market data only and never places an order.</p>
     ${location.hash.includes("login=ok") ? `<p class="up">Logged in with Upstox.</p>` : location.hash.includes("login=failed") ? `<p class="down">Upstox login did not finish. Try again.</p>` : ""}
     ${setupBlock(u)}
+    ${aiSetup(ai)}
     <h2>Checks</h2>
     <div class="scroll"><table class="ledger"><tbody>${d.checks.map((c) => `<tr><td>${esc(c.check)}</td>
       <td class="${c.status === "ok" ? "" : c.status === "warn" ? "warn" : "down"}">${mark[c.status]}</td><td class="small">${esc(c.why)}</td></tr>`).join("")}

@@ -39,7 +39,7 @@ def _latest(folder: Path, pattern: str) -> Path | None:
 
 
 def create_app(base: Path | str, legacy_history: Path | str | None = None, *, settings=None, keeper=None,
-               telegram=None, supervisor=None, collector=None) -> FastAPI:
+               telegram=None, supervisor=None, collector=None, ai=None) -> FastAPI:
     from ..brokers.upstox.auth import TokenKeeper, redirect_uri
     from ..core import config
     from ..notify.telegram import Telegram
@@ -70,6 +70,10 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
     from ..intel.collect import Collector
     book = AlertBook(base / "live" / "alerts")
     intel = collector or getattr(supervisor, "collector", None) or Collector(base, on_alert=book.add)
+    from ..ai import notes as ai_notes
+    from ..ai.client import AI, AIError
+    from ..ai.context import ask_prompt, snapshot
+    brain = ai or getattr(supervisor, "ai", None) or AI(base, sec)
 
     def account_info() -> list[dict]:
         from ..paper.accounts import SPEC
@@ -233,6 +237,45 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
         syms = intel.set_watch(body.get("symbols") or [])
         intel.refresh_async(["watchlist"], force=True)
         return {"symbols": syms}
+
+    @app.get("/api/ai")
+    def ai_status(request: Request):
+        guard(request, write=False)
+        return {**brain.status(), "notes": ai_notes.latest(base, 4)}
+
+    @app.post("/api/ai/ask")
+    async def ai_ask(request: Request):
+        guard(request)
+        q = str((await request.json()).get("question") or "").strip()
+        if not q:
+            raise HTTPException(400, "Type a question.")
+        import anyio
+        try:
+            r = await anyio.to_thread.run_sync(lambda: brain.ask(ask_prompt(q, snapshot(base, intel, q, book)), job="ask"))
+        except AIError as e:
+            raise HTTPException(400, str(e))
+        return {"question": q[:1000], "answer": r["text"], "model": r["model"], "secs": r["secs"]}
+
+    @app.post("/api/ai/note")
+    async def ai_note(request: Request):
+        guard(request)
+        kind = str((await request.json()).get("kind") or "")
+        import anyio
+        try:
+            return await anyio.to_thread.run_sync(lambda: ai_notes.write(kind, base, brain, intel, book))
+        except (AIError, ValueError) as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/setup/ai")
+    async def setup_ai(request: Request):
+        guard(request)
+        b = await request.json()
+        try:
+            brain.save(str(b.get("provider") or ""), b.get("api_key"))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"saved": True, "message": "Saved. " + ("AI is ready." if brain.available() else "AI is not ready yet."),
+                **{k: v for k, v in brain.status().items() if k != "usage"}}
 
     @app.get("/api/live")
     def live():

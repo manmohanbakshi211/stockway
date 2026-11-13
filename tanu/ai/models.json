@@ -1,0 +1,12 @@
+{
+  "about": "Which AI model does which job (bullet, dated). Copied from the legacy router (rules/ai_models.json, 11 Nov 2026: 'model bhi vo choose karo jo sabse zada capable ho or fit ho'). Tiers: fast for quick classification, balanced for answers, deep for the slow evening note. 'model' is the Claude Code alias (your Claude plan on the Mac), 'api_model' the Claude API model (if an API key is saved instead). budget_per_day caps automatic use; a question you ask is never refused for budget but is counted. If a model is not on your plan, the next one in 'fallback' is tried and remembered for the day.",
+  "valid_from": "2026-11-13",
+  "tiers": {
+    "fast":     {"model": "haiku",  "effort": "low",    "timeout": 60,  "budget_per_day": 250, "api_model": "claude-haiku-5-5"},
+    "balanced": {"model": "sonnet", "effort": "medium", "timeout": 150, "budget_per_day": 60,  "api_model": "claude-sonnet-5-5"},
+    "deep":     {"model": "opus",   "effort": "high",   "timeout": 420, "budget_per_day": 6,   "api_model": "claude-opus-5-5"}
+  },
+  "fallback": {"opus": "sonnet", "sonnet": "haiku", "haiku": ""},
+  "jobs": {"ask": "balanced", "morning": "balanced", "evening": "deep"},
+  "notes_at": {"morning": "08:45", "evening": "16:05"}
+}

@@ -13,6 +13,11 @@ How to run, check and fix Tanu. Until cutover the legacy app is what runs on mar
    **Log in with Upstox**. Tanu starts the feed by itself at 08:50 once logged in.
 5. Rollback any time: close Tanu, `python -m tanu cutover --undo`, double-click Start Radar.
 
+## AI (ADR-0013)
+- System page, "AI": choose "Claude, your plan" (needs Claude Code on the Mac, logged in once: open Terminal, type
+  `claude`, log in) or paste a Claude API key. Then Today has "Ask Tanu" and the notes.
+- After the switch-over the morning note comes at 08:45 and the evening note at 16:05 (also on Telegram).
+
 ## Daily (after cutover)
 | When | Do | Check |
 |---|---|---|

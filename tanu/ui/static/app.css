@@ -151,3 +151,7 @@ h3 { font-size: 15px; margin: 14px 0 6px; }
 .facts .down { color: var(--down); }
 .facts b span { font-size: inherit; }
 .ledger td.nowrap { white-space: nowrap; overflow-wrap: normal; }
+button.ghost { background: none; color: var(--pen); border: 1px solid var(--pen); }
+button:disabled { opacity: .55; cursor: default; }
+.note ul.plain li { margin: 2px 0; }
+.ask input { min-width: 0; }

@@ -213,7 +213,10 @@ class Supervisor:
         self.stop = threading.Event()
         from ..detect.book import AlertBook
         from ..intel.collect import Collector
-        self.collector = Collector(self.base, on_alert=AlertBook(self.base / "live" / "alerts").add)
+        self.book = AlertBook(self.base / "live" / "alerts")
+        self.collector = Collector(self.base, on_alert=self.book.add)
+        from ..ai.client import AI
+        self.ai = AI(self.base, self.secrets)
 
     def web(self, port_check: bool = True):
         import uvicorn
@@ -249,6 +252,7 @@ class Supervisor:
             print("Another Tanu is already live.")
             return 1
         threading.Thread(target=self.collector.run_forever, args=(self.stop,), daemon=True, name="tanu-intel").start()
+        threading.Thread(target=self._notes, daemon=True, name="tanu-ai-notes").start()
         try:
             self._days()
         except KeyboardInterrupt:
@@ -259,6 +263,25 @@ class Supervisor:
             lock.release()
             server.should_exit = True
         return 0
+
+    def _notes(self) -> None:
+        """After the switch-over: the morning and evening AI notes at their times on trading days (models.json),
+        also sent to Telegram. A failure is logged and tried again a few minutes later."""
+        from ..ai import notes
+        retry: dict[str, float] = {}
+        while not self.stop.is_set():
+            now = dt.datetime.now(IST)
+            for kind, at in self.ai.spec.get("notes_at", {}).items():
+                if time.time() < retry.get(kind, 0) or not self.ai.available():
+                    continue
+                if notes.due(kind, self.base, now, at, self.facts.session(now.date().isoformat()) is not None):
+                    try:
+                        r = notes.write(kind, self.base, self.ai, self.collector, self.book, user=False)
+                        self.telegram.send(f"Tanu {kind} note ({r['day']}):\n{r['text'][:3500]}")
+                    except Exception as e:
+                        retry[kind] = time.time() + 600
+                        _log.warning("ai_note_failed", kind=kind, error=str(e)[:200])
+            self.stop.wait(60)
 
     def _set(self, mode: str, *why: str) -> None:
         if self.state.get("mode") != mode or self.state.get("why") != list(why):

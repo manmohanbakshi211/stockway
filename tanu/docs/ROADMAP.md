@@ -17,7 +17,7 @@ acceptance checks pass. Order follows the research in claude/tanu_blueprint.md a
 | **0.12.0** | Option selling version of every setup + 4 paper accounts at ₹5L + Selling tab; 10 EMA video (research 0005) | real-option research on the Mac ✅ (nothing passes; selling loses less) | built, shadow |
 | **0.13.0** | Multi-leg structures (ADR-0011): iron condor + straddle bullets, fifth paper account, journal table, app sections | real-option run on the Mac | built, shadow, replay only |
 | **0.14.0** | Market page (Context, World, Insiders, Watchlist, News, Alerts) from public sources + display-only detectors (ADR-0012) | sources answer on the Mac (`python -m tanu intel`); detectors in a rehearsal | built, display only |
-| **0.15.0** | Tanu's AI: Ask Tanu, morning and evening notes, headline reading (read-only, never trades) | answers only from Tanu's data; graded like any idea | next |
+| **0.15.0** | Tanu's AI (ADR-0013): Ask Tanu, morning and evening notes (read-only, never trades); headline reading next | Claude Code on the Mac answers; notes on trading days | built |
 | **T6** | Video Lab: link / file → transcript → idea cards (gun vs bullet) → tests (history, recordings, shadow) | every card recorded with its result, failed ones kept | |
 | **T7** | Stock options on the low-cost list, "in play" days only | passes ADR-0005 | |
 | **T8+** | Swing / positional, investing (cash stocks), ETF, mutual funds as horizon plugins | same protocol | |

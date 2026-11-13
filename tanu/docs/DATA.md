@@ -15,6 +15,7 @@ to Tanu.
 | `imports/legacy/{minutes,chains,live}/` + `report.json` | imported legacy minute snapshots, chains, live.db tables; the import report | Parquet zstd | T1 ✅ |
 | `costs/tradeable_<day>.json`, `costs/all_days.parquet` | round-trip cost per underlying and the tradeable list (on trial) | JSON / Parquet | T2 ✅ |
 | `store/journal.db` | paper trades with footprints (per account; `kind` buy / sell, `margin` for sold options) and refused signals with reasons | SQLite | T4 ✅, 0.12.0 |
+| `ai/notes/<day>_<morning|evening>.{md,json}`, `ai/usage.json`, `ai/sandbox/` | AI notes, today's AI use, Claude Code's empty folder | Markdown / JSON | 0.15.0 |
 | `intel/<source>.json`, `intel/watchlist_symbols.json` | the Market page's public sources (last good data, time, error) and Mandeep's watchlist | JSON | 0.14.0 |
 | `live/alerts/<day>.jsonl` | display-only alerts (detectors on the live day, new items from the sources); `rehearsal/<day>/alerts/` for a rehearsal | JSON lines | 0.14.0 |
 | `store/journal.db` table `structures` | multi-leg paper trades (account `shadow_multileg`): structure, day, expiry, credit, charges, ₹ P&L, margin, % on margin, worst point, legs (JSON) | SQLite | 0.13.0 |
@@ -22,7 +23,7 @@ to Tanu.
 | `research/_steps/` | chunk plan, carried engine state and trade parts of `research-steps` | JSON / Parquet | 0.12.0 ✅ |
 | `journal/review_<day>.{md,json}`, `research/hypotheses.jsonl` | evening reviews and the questions they raise | Markdown / JSON | T4 ✅ |
 | `local.json` | this machine's setting overrides (`live`, `web_port` after cutover) | JSON | T0 ✅ |
-| `secrets/{upstox_app,upstox_token,telegram}.json` | typed in on the System page; folder 0700, files 0600; never shown back | JSON | 0.9.0 ✅ |
+| `secrets/{upstox_app,upstox_token,telegram,ai}.json` | typed in on the System page; folder 0700, files 0600; never shown back | JSON | 0.9.0 ✅ |
 | `instruments/<day>_{NSE,BSE}.json.gz` | the broker's instrument list of the day (public file) | gzip JSON | 0.9.0 ✅ |
 | `live/status.json`, `live/eod_<day>.json`, `live/live.lock` | the live day for the app (every minute), end-of-day report, one-live-Tanu lock | JSON | 0.9.0 ✅ |
 | `live/chains/<day>.parquet` | option quotes every minute (sym, ts, expiry, side, strike, bid, ask, ltp, oi, iv, spot) for measured costs | Parquet zstd | 0.9.0 ✅ |

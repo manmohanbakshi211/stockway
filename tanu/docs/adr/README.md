@@ -17,3 +17,4 @@ supersedes it. Template: copy [0000-template.md](0000-template.md).
 | [0010](0010-option-selling-versions.md) | Every setup has a buying and a selling version; four paper accounts at ₹5 lakh | Accepted |
 | [0011](0011-multi-leg-structures.md) | Multi-leg structures (iron condor, straddle) as their own bullets on real option prices; fifth paper account | Accepted (replay only) |
 | [0012](0012-market-page-and-display-only-detectors.md) | One Market page from public sources (tabs); detectors shown only, never traded | Accepted |
+| [0013](0013-ai-read-only.md) | Tanu's AI is read-only: Ask Tanu and daily notes from Tanu's own data; no tools, no secrets | Accepted |
