@@ -3,6 +3,21 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.6.0] - 2026-11-13
+### Added
+- Exit variants (`tanu/setups/registry.py` Exit, engine `_exit_reason`): besides the chandelier stop on the
+  underlying, a premium trail (armed after a gain, exits a set % below the option's best), a time stop, a "no move"
+  exit (out when the option has not gained X% within N minutes); premium-stop fills now respect a gap through the
+  level. New feature `dte` (days to the contract's expiry) for filters.
+- `tanu/setups/exits.json` (bullet): 7 exit variants x 2 filters (all days, no expiry day).
+- Controlled search (`tanu/evaluate/search.py`, `python -m tanu search`): every entry x exit x filter replayed once,
+  each judged against the yardstick with the same exit and filter; every idea ever tried goes to
+  `data/tanu/research/ledger.jsonl` and the pass bar uses the ledger's total, so more tries make passing harder.
+- Tests: 62 (exit rules and fill levels, variants file, same-exit yardstick, search + ledger raising the bar).
+### Pending
+- The real-data run needs the Mac (the legacy option files live there): 4 entries x 7 exits x 2 filters = 56
+  combinations, k = 42 ideas, pass bar t >= 3.2.
+
 ## [0.5.0] - 2026-11-13
 ### Added
 - T3 core:

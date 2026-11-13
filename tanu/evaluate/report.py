@@ -29,27 +29,35 @@ def stats(x) -> dict:
 
 
 def evaluate(trades: pd.DataFrame, baseline: str = "random_baseline", min_trades: int = 30, min_hold: int = 10,
-             hold_frac: float = 0.2) -> dict:
+             hold_frac: float = 0.2, k: int | None = None) -> dict:
+    """baseline: the yardstick setup id, or its prefix: for a search id "entry__exit__filter" the yardstick is
+    "<baseline>__exit__filter" (same exit and filter). k: number of ideas tried (default: the setups here)."""
     t = trades.dropna(subset=["pct"]).copy()
     days = sorted(t["day"].unique())
     if not days:
         return {"days": 0, "setups": []}
     cut = days[int(len(days) * (1 - hold_frac))]
     t["part"] = np.where(t["day"] >= cut, "hold", "learn")
-    tested = [s for s in t["setup"].unique() if s != baseline]
-    k = max(1, len(tested))
+    def base_of(s: str) -> str:
+        return baseline + s[s.index("__"):] if "__" in s else baseline
+
+    is_base = lambda s: s == baseline or s.startswith(baseline + "__")
+    tested = [s for s in t["setup"].unique() if not is_base(s)]
+    k = max(1, k or len(tested))
     t_bar = round(NormalDist().inv_cdf(1 - 0.05 / (2 * k)), 2)
-    base = {p: stats(t[(t["setup"] == baseline) & (t["part"] == p)]["pct"]) for p in ("learn", "hold")}
-    out = {"days": len(days), "first": days[0], "last": days[-1], "holdout_from": cut, "t_bar": t_bar,
-           "baseline": base, "setups": []}
+    bases = {b: {p: stats(t[(t["setup"] == b) & (t["part"] == p)]["pct"]) for p in ("learn", "hold")}
+             for b in {base_of(s) for s in t["setup"].unique()}}
+    out = {"days": len(days), "first": days[0], "last": days[-1], "holdout_from": cut, "t_bar": t_bar, "k": k,
+           "baseline": bases.get(baseline, {}), "setups": []}
     for s, g in t.groupby("setup"):
+        base = bases.get(base_of(s), {})
         L, H = stats(g[g["part"] == "learn"]["pct"]), stats(g[g["part"] == "hold"]["pct"])
         row = {"setup": s, "learn": L, "hold": H, "rs_per_trade": round(float(g["pnl_rs"].mean()), 0),
                "by_year": {y: stats(gg["pct"]) for y, gg in g.groupby(g["day"].str[:4])},
                "by_sym": {y: stats(gg["pct"]) for y, gg in g.groupby("sym")},
                "exits": g["reason"].value_counts().to_dict()}
-        if s != baseline:
-            beats = all(row[p].get("avg_pct", -1e9) > base[p].get("avg_pct", -1e9) for p in ("learn", "hold"))
+        if not is_base(s):
+            beats = all(row[p].get("avg_pct", -1e9) > base.get(p, {}).get("avg_pct", -1e9) for p in ("learn", "hold"))
             row["passes"] = bool(L.get("n", 0) >= min_trades and L.get("avg_pct", -1) > 0 and L.get("t", 0) >= t_bar
                                  and H.get("n", 0) >= min_hold and H.get("avg_pct", -1) > 0 and beats)
             why = []
@@ -73,7 +81,7 @@ def evaluate(trades: pd.DataFrame, baseline: str = "random_baseline", min_trades
 
 def markdown(rep: dict) -> str:
     lines = [f"Replayed {rep['days']} days ({rep.get('first')} to {rep.get('last')}); holdout from {rep.get('holdout_from')}; "
-             f"pass bar t >= {rep.get('t_bar')}.", "", "| Setup | Learn n / avg / t | Holdout n / avg | ₹ / trade | Verdict |",
+             f"ideas tried k = {rep.get('k')}, pass bar t >= {rep.get('t_bar')}.", "", "| Setup | Learn n / avg / t | Holdout n / avg | ₹ / trade | Verdict |",
              "|---|---|---|---|---|"]
     for r in rep["setups"]:
         L, H = r["learn"], r["hold"]

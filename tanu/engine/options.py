@@ -43,6 +43,11 @@ class OptionHistory:
                     return f
         return None
 
+    def expiry(self, sym: str, day: str) -> str | None:
+        """The expiry date of the contract used on that day (the file's name), or None."""
+        f = self.file_for(sym, day)
+        return f.stem[4:] if f else None
+
     def days(self, sym: str) -> set[str]:
         out = set()
         for _, f in self._list(sym):

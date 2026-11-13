@@ -23,11 +23,21 @@ OPS = {">": lambda a, b: a > b, ">=": lambda a, b: a >= b, "<": lambda a, b: a <
 
 
 class Exit(BaseModel):
+    """type chandelier: stop on the underlying (atr_init x ATR, then best - atr_trail x ATR); premium / time: no
+    underlying stop. Every type also has: a premium stop, an optional premium trail (after the option is up
+    trail_after_pct, exit if it falls prem_trail_pct from its best), an optional time stop (max_minutes), an optional
+    "no move" exit (after no_move_min minutes the option never got no_move_gain_pct up), and flat by a time."""
     model_config = ConfigDict(extra="forbid")
-    type: Literal["chandelier"] = "chandelier"
+    name: str = "chandelier"
+    type: Literal["chandelier", "premium", "time"] = "chandelier"
     atr_init: float = Field(1.5, gt=0)
     atr_trail: float = Field(2.5, gt=0)
     premium_stop_pct: float = Field(-40, lt=0)
+    prem_trail_pct: float | None = Field(None, gt=0, lt=100)
+    trail_after_pct: float = Field(10, ge=0)
+    max_minutes: int | None = Field(None, gt=0)
+    no_move_min: int | None = Field(None, gt=0)
+    no_move_gain_pct: float = Field(5, ge=0)
     flat_by: str = "15:15"
 
 

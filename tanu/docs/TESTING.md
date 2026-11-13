@@ -12,7 +12,7 @@ Test files are named `test_tanu_*.py` so they never clash with legacy test names
 | Unit | one function's contract | settings load order, URL guard |
 | Boundary | architecture rules hold | no Manu ↔ Tanu imports; writes only under data/tanu |
 | Safety | ADR-0001 holds | trading / account URLs blocked; no order calls in source |
-| Known-answer (T3) | the evaluator is right | synthetic data with a planted edge must be found; pure noise must not pass |
+| Known-answer (T3) | the evaluator is right | synthetic data with a planted edge must be found; pure noise must not pass; adding ideas raises the bar (ledger) |
 | Golden replay (T1/T3) | determinism (ADR-0004) | a recorded fake day replays to the same bars, signals and paper trades |
 | Fake broker (T1) | feed + tape end to end | local websocket server speaking the broker format; disconnects and resubscribes |
 | UI (T5) | pages work | headless browser: no console errors, no sideways scroll at 390 px |

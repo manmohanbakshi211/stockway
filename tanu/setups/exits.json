@@ -1,0 +1,17 @@
+{
+  "about": "Exit variants (bullet) tried by `python -m tanu search` on every entry setup. Each variant is a full exit spec (tanu/setups/registry.py Exit). Adding one adds to the number of ideas tried, which raises the pass bar for everything (ADR-0005).",
+  "valid_from": "2026-11-13",
+  "exits": [
+    {"name": "chand_tight", "type": "chandelier", "atr_init": 1.5, "atr_trail": 2.5, "premium_stop_pct": -40},
+    {"name": "chand_wide", "type": "chandelier", "atr_init": 3.0, "atr_trail": 4.0, "premium_stop_pct": -40},
+    {"name": "chand_wide_nomove", "type": "chandelier", "atr_init": 3.0, "atr_trail": 4.0, "premium_stop_pct": -40, "no_move_min": 20, "no_move_gain_pct": 5},
+    {"name": "prem_trail_20", "type": "premium", "premium_stop_pct": -30, "prem_trail_pct": 20, "trail_after_pct": 15},
+    {"name": "prem_trail_30", "type": "premium", "premium_stop_pct": -40, "prem_trail_pct": 30, "trail_after_pct": 20},
+    {"name": "time_30", "type": "time", "premium_stop_pct": -35, "max_minutes": 30},
+    {"name": "time_60", "type": "time", "premium_stop_pct": -40, "max_minutes": 60}
+  ],
+  "filters": [
+    {"name": "all_days", "when": []},
+    {"name": "no_expiry_day", "when": [["dte", ">", 0]]}
+  ]
+}

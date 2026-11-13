@@ -49,6 +49,7 @@ class Position:
     und_entry: float | None = None
     stop: float | None = None
     best: float | None = None
+    peak: float | None = None
     exit_t: float | None = None
     exit: float | None = None
     reason: str | None = None
@@ -70,6 +71,7 @@ class SymState:
     bar5: list = field(default_factory=list)
     atr: float | None = None
     prev_feat: dict = field(default_factory=dict)
+    dte: int | None = None
     traded: set = field(default_factory=set)
 
 
@@ -92,7 +94,11 @@ class Engine:
 
     # ---------------------------------------------------------------- day lifecycle
     def start_day(self, sym: str, day: str, ctx: DayContext) -> None:
-        self.sym[sym] = SymState(sym=sym, ctx=ctx, day=day, atr=self.carry_atr.get(sym))
+        dte = None
+        if hasattr(self.opt, "expiry"):
+            exp = self.opt.expiry(sym, day)
+            dte = (dt.date.fromisoformat(exp) - dt.date.fromisoformat(day)).days if exp else None
+        self.sym[sym] = SymState(sym=sym, ctx=ctx, day=day, atr=self.carry_atr.get(sym), dte=dte)
 
     def end_day(self, sym: str) -> None:
         st = self.sym.pop(sym, None)
@@ -135,7 +141,7 @@ class Engine:
         rng = (st.hi - st.lo) / pc * 100
         move = (c - st.open_) / pc * 100
         day, rel, sign = classify(rng, move, m, st.ctx)
-        f = {"m": m, "day": day, "rel": rel, "move": sign}
+        f = {"m": m, "day": day, "rel": rel, "move": sign, "dte": st.dte}
         f["burst"] = ((c - st.closes[0]) / pc * 100 / med) if len(st.closes) == 16 and med else None
         f["twap_rel"] = ((c - st.twap_sum / st.n) / pc * 100 / med) if med else None
         f["or_pos"] = ((c - (st.or_hi + st.or_lo) / 2) / (st.or_hi - st.or_lo)) if m >= 15 and st.or_hi > st.or_lo else None
@@ -198,22 +204,44 @@ class Engine:
                 atr = st.atr or (st.hi - st.lo) / 3
                 p.stop = spot - p.d * ex.atr_init * atr
                 p.best = spot
+                p.peak = p.entry
             if ob is None:
                 continue
             atr = st.atr or (st.hi - st.lo) / 3
-            hit_stop = (l <= p.stop) if p.d > 0 else (h >= p.stop)
-            prem_stop = ob[2] <= p.entry * (1 + ex.premium_stop_pct / 100)
-            flat = m >= hm_to_min(ex.flat_by)
-            if hit_stop or prem_stop or flat:
-                px = p.entry * (1 + ex.premium_stop_pct / 100) if (prem_stop and not hit_stop) else ob[3]
+            reason, px = self._exit_reason(p, ex, t, m, h, l, ob)
+            if reason:
                 p.exit_t, p.exit = t, max(px * (1 - sp / 2) - self.tick, 0.0)
-                p.reason = "stop" if hit_stop else "premium_stop" if prem_stop else "flat_by"
+                p.reason = reason
                 self.open.remove(p)
                 self.closed.append(p)
                 continue
+            p.peak = max(p.peak, ob[1])
             p.best = max(p.best, h) if p.d > 0 else min(p.best, l)
             trail = p.best - p.d * ex.atr_trail * atr
             p.stop = max(p.stop, trail) if p.d > 0 else min(p.stop, trail)
+
+    @staticmethod
+    def _exit_reason(p: Position, ex, t: float, m: int, h: float, l: float, ob) -> tuple[str | None, float]:
+        """First exit that triggers in this minute, and the option price it fills at (before the spread). Level
+        exits (premium stop / trail) fill at their level; the others at the minute's close."""
+        o_, oh, ol, oc = ob
+        if ex.type == "chandelier" and ((l <= p.stop) if p.d > 0 else (h >= p.stop)):
+            return "stop", oc
+        stop_lvl = p.entry * (1 + ex.premium_stop_pct / 100)
+        if ol <= stop_lvl:
+            return "premium_stop", min(stop_lvl, o_)
+        if ex.prem_trail_pct and p.peak >= p.entry * (1 + ex.trail_after_pct / 100):
+            lvl = p.peak * (1 - ex.prem_trail_pct / 100)
+            if ol <= lvl:
+                return "premium_trail", min(lvl, o_)
+        age = (t - p.entry_t) / 60
+        if ex.no_move_min and age >= ex.no_move_min and max(p.peak, oh) < p.entry * (1 + ex.no_move_gain_pct / 100):
+            return "no_move", oc
+        if ex.max_minutes and age >= ex.max_minutes:
+            return "time", oc
+        if m >= hm_to_min(ex.flat_by):
+            return "flat_by", oc
+        return None, 0.0
 
     # ---------------------------------------------------------------- results
     def trades(self) -> list[dict]:
