@@ -13,6 +13,7 @@
   run                        what Start Tanu runs: the app, and after cutover the live market day (ADR-0009)
   rehearse <day>             play a past day through the whole live path (fake broker) and check it against replay
   cutover [--undo]           turn the live switch on (Mandeep's go only) or off again
+  research-steps plan|step|finish   the research replay in chunks (for shells with a time limit)
 """
 from __future__ import annotations
 
@@ -52,6 +53,22 @@ def main(argv: list[str] | None = None) -> int:
         d = paths.ensure(s)
         log.setup(d["logs"], s.log_level, s.log_keep_days)
         print(cutover(d["base"], undo="--undo" in argv[1:], s=s))
+        return 0
+    if cmd == "research-steps":
+        from .core import config, log, paths
+        from .evaluate import steps
+        s = config.load()
+        d = paths.ensure(s)
+        log.setup(d["logs"], s.log_level, s.log_keep_days)
+        what = argv[1] if len(argv) > 1 else "step"
+        if what == "plan":
+            out = steps.plan(d["base"], paths.LEGACY_DATA / "history", days_per_step=int(argv[2]) if len(argv) > 2 else 60)
+        elif what == "finish":
+            out = steps.finish(d["base"])
+            out = {k: out[k] for k in ("out", "days", "trades", "steps", "k", "t_bar") if k in out}
+        else:
+            out = steps.step(d["base"])
+        print(json.dumps(out, default=str))
         return 0
     if cmd == "rehearse":
         from .core import config, log, paths

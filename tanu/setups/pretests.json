@@ -63,6 +63,20 @@
       "what": "both sides with the video's minimum stop (about Rs 30-40 on the option = 70 index points)",
       "result": "Nifty sell +0.05R (target 6%, mostly flat at close), buy -0.02R; Bank Nifty +0.02R / -0.01R: dropped",
       "research": "0004"
+    },
+    {
+      "id": "pretest:ema10_fixed_1to2",
+      "date": "2026-11-13",
+      "what": "10 EMA video: 5-min opposite-colour candle off the EMA, break entry, stop = EMA, 1:2, both directions",
+      "result": "Nifty won 39.6% / 39.7% (long / short), +0.09R, +2.7 / +2.2 pts; Bank Nifty +0.02 / +0.03R, +3.3 / +2.7 pts (before option costs); became setup ema10_trend_5m",
+      "research": "0005"
+    },
+    {
+      "id": "pretest:ema10_trail_after_1to2",
+      "date": "2026-11-13",
+      "what": "same, after 1:2 hold and exit on a 5-min close through the EMA",
+      "result": "Nifty +0.12R (+3.6 / +2.4 pts), Bank Nifty +0.05R (+5.1 / +4.2 pts): small gain, not built yet",
+      "research": "0005"
     }
   ]
 }

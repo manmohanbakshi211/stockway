@@ -71,8 +71,8 @@ def search(base: Path | str, legacy_history: Path | str, syms=("NIFTY", "BANKNIF
     research_dir = base / "research"
     research_dir.mkdir(parents=True, exist_ok=True)
     led = research_dir / "ledger.jsonl"
-    tried = ledger_ids(led) | {s.id for s in setups} | pretest_ids()
-    k = len([i for i in tried if not i.startswith(BASELINE + "__")])
+    tried = ledger_ids(led) | {s.id for s in setups} | {s.id + "@sell" for s in setups if s.sell.on} | pretest_ids()
+    k = len([i for i in tried if not (i.startswith(BASELINE + "__") or i == BASELINE + "@sell")])
     rep = report.evaluate(trades, baseline=BASELINE, k=k) if len(trades) else {"days": 0, "setups": [], "k": k}
     rep.update(combos=len(setups), seconds=round(time.time() - t0))
     run_id = dt.datetime.now().strftime("%Y-%m-%d_%H%M")

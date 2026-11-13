@@ -61,6 +61,7 @@ class Position:
     exit_t: float | None = None
     exit: float | None = None
     reason: str | None = None
+    kind: str = "buy"                       # "buy": bought option; "sell": sold option (setup id "<id>@sell")
 
 
 @dataclass
@@ -148,6 +149,7 @@ class Engine:
         for a in st.tfs:
             sig, stop = a.on_bar(m, o, h, l, c)
             feat[a.key], feat[a.key + "_stop"] = sig, stop
+            feat[a.pkey], feat[a.pkey + "_stop"] = a.pull
         self._manage(st, t, m, h, l, c)
         self._signals(st, t, m, c, feat)
         st.prev_feat = feat
@@ -224,19 +226,51 @@ class Engine:
                 self.signals.append(sig)
                 if s.exit.type == "rr":
                     sig["stop_level"] = feat.get(s.exit.stop_feature)
+                if s.exit.type == "rr" and (sig["stop_level"] is None or (c - sig["stop_level"]) * d <= 0):
+                    sig["skipped"] = "no valid stop level" if strike is not None else "no option prices"
+                    continue
+                if s.sell.on:
+                    self._sell(s, st, t, c, d, sig)
                 if strike is None:
                     sig["skipped"] = "no option prices"
-                    continue
-                if s.exit.type == "rr" and (sig["stop_level"] is None or (c - sig["stop_level"]) * d <= 0):
-                    sig["skipped"] = "no valid stop level"
                     continue
                 p = Position(setup=s.id, sym=st.sym, day=st.day, d=d, strike=strike, side=side, signal_t=t, state=sig)
                 self.open.append(p)
                 self._emit("on_signal", p)                       # live alerts go out at the signal, before the fill
 
+    def _sell(self, s: Setup, st: SymState, t: float, c: float, d: int, sig: dict) -> None:
+        """The selling version of this signal: sell a put when the view is up, a call when it is down."""
+        sid = s.id + "@sell"
+        if any(p.setup == sid and p.sym == st.sym and p.d == d for p in self.open):
+            return                                               # one position at a time per version
+        side = "PE" if d > 0 else "CE"
+        strikes = self.opt.strikes(st.sym, st.day, t, side) if hasattr(self.opt, "strikes") else []
+        if not strikes:
+            sig["sell_skipped"] = "no option prices"
+            return
+        plan = s.sell
+        if plan.strike == "at_stop":
+            atr = st.atr or (st.hi - st.lo) / 3
+            lvl = sig.get("stop_level")
+            lvl = lvl if lvl is not None else c - d * s.exit.atr_init * atr
+            far = [k for k in strikes if (k <= lvl if d > 0 else k >= lvl)]
+            strike = max(far) if (far and d > 0) else (min(far) if far else None)
+        else:
+            atm = min(strikes, key=lambda k: (abs(k - c), k))
+            beyond = sorted([k for k in strikes if (k < atm if d > 0 else k > atm)], reverse=d > 0)
+            strike = atm if plan.otm_steps == 0 else (beyond[plan.otm_steps - 1] if len(beyond) >= plan.otm_steps else None)
+        if strike is None:
+            sig["sell_skipped"] = "no strike that far out"
+            return
+        p = Position(setup=sid, sym=st.sym, day=st.day, d=d, strike=strike, side=side, signal_t=t, state=dict(sig),
+                     kind="sell")
+        self.open.append(p)
+        self._emit("on_signal", p)
+
     # ---------------------------------------------------------------- positions
     def _setup(self, sid: str) -> Setup:
-        return next(s for s in self.setups if s.id == sid)
+        base = sid[:-5] if sid.endswith("@sell") else sid
+        return next(s for s in self.setups if s.id == base)
 
     def _manage(self, st: SymState, t: float, m: int, h: float, l: float, c: float) -> None:
         sp = self.spread_pct.get(st.sym, 0.5) / 100
@@ -246,7 +280,10 @@ class Engine:
             if p.entry is None:                                  # fill at this minute's option open
                 if ob is None:
                     continue
-                p.entry_t, p.entry = t, ob[0] * (1 + sp / 2) + self.tick
+                if p.kind == "sell":                             # sold: receive the bid side, minus a tick
+                    p.entry_t, p.entry = t, max(ob[0] * (1 - sp / 2) - self.tick, 0.05)
+                else:
+                    p.entry_t, p.entry = t, ob[0] * (1 + sp / 2) + self.tick
                 spot = p.state["spot"]                           # the stop is set from the signal bar, not this one
                 p.und_entry = spot
                 atr = st.atr or (st.hi - st.lo) / 3
@@ -261,9 +298,13 @@ class Engine:
                 continue
             p.trough = min(p.trough, ob[2])
             atr = st.atr or (st.hi - st.lo) / 3
-            reason, px = self._exit_reason(p, ex, t, m, h, l, ob)
+            if p.kind == "sell":
+                reason, px = self._sell_exit(p, ex, self._setup(p.setup).sell, t, m, h, l, ob)
+            else:
+                reason, px = self._exit_reason(p, ex, t, m, h, l, ob)
             if reason:
-                p.exit_t, p.exit = t, max(px * (1 - sp / 2) - self.tick, 0.0)
+                p.exit_t = t
+                p.exit = px * (1 + sp / 2) + self.tick if p.kind == "sell" else max(px * (1 - sp / 2) - self.tick, 0.0)
                 p.reason, p.und_exit = reason, c
                 self.open.remove(p)
                 self.closed.append(p)
@@ -301,20 +342,45 @@ class Engine:
             return "flat_by", oc
         return None, 0.0
 
+    @staticmethod
+    def _sell_exit(p: Position, ex, plan, t: float, m: int, h: float, l: float, ob) -> tuple[str | None, float]:
+        """Exits of a sold option (buy-back price before the spread): the setup's underlying stop / target first,
+        then the premium stop (premium up premium_stop_pct, filled at that level or the open if it gapped over),
+        the premium target (premium down premium_target_pct), the setup's time stop, flat_by."""
+        o_, oh, ol, oc = ob
+        if ex.type in ("chandelier", "rr") and ((l <= p.stop) if p.d > 0 else (h >= p.stop)):
+            return "stop", oc
+        if ex.type == "rr" and ((h >= p.state["target_level"]) if p.d > 0 else (l <= p.state["target_level"])):
+            return "target", oc
+        up = p.entry * (1 + plan.premium_stop_pct / 100)
+        if oh >= up:
+            return "premium_stop", max(up, o_)
+        down = p.entry * (1 - plan.premium_target_pct / 100)
+        if ol <= down:
+            return "premium_target", min(down, o_)
+        if ex.max_minutes and (t - p.entry_t) / 60 >= ex.max_minutes:
+            return "time", oc
+        if m >= hm_to_min(plan.flat_by):
+            return "flat_by", oc
+        return None, 0.0
+
     # ---------------------------------------------------------------- results
     def trades(self) -> list[dict]:
         out = []
         for p in self.closed:
-            row = {"setup": p.setup, "sym": p.sym, "day": p.day, "d": p.d, "side": p.side, "strike": p.strike,
+            row = {"setup": p.setup, "kind": p.kind, "sym": p.sym, "day": p.day, "d": p.d, "side": p.side, "strike": p.strike,
                    "entry_t": p.entry_t, "exit_t": p.exit_t, "entry": p.entry, "exit": p.exit, "reason": p.reason,
                    **{f"at_{k}": v for k, v in p.state.items() if k in ("day", "rel", "burst", "twap_rel", "m")}}
+            sg = -1 if p.kind == "sell" else 1                   # a sold option gains when its price falls
             if p.entry and p.peak is not None:
-                row.update(mfe_pct=round((p.peak / p.entry - 1) * 100, 2), mae_pct=round((p.trough / p.entry - 1) * 100, 2))
+                best, worst = (p.trough, p.peak) if sg < 0 else (p.peak, p.trough)
+                row.update(mfe_pct=round(sg * (best / p.entry - 1) * 100, 2), mae_pct=round(sg * (worst / p.entry - 1) * 100, 2))
             if p.entry and p.exit is not None:
                 row["minutes"] = round((p.exit_t - p.entry_t) / 60)
                 lot = self.lots.get(p.sym) or self.facts.lot(p.sym, p.day) or 1
-                charges = self.facts.option_charges(p.entry, p.exit, lot, p.day)
-                row.update(lot=lot, pnl_rs=round((p.exit - p.entry) * lot - charges, 2),
-                           pct=round(((p.exit - p.entry) * lot - charges) / (p.entry * lot) * 100, 3))
+                buy_px, sell_px = (p.exit, p.entry) if sg < 0 else (p.entry, p.exit)
+                charges = self.facts.option_charges(buy_px, sell_px, lot, p.day)
+                pnl = sg * (p.exit - p.entry) * lot - charges
+                row.update(lot=lot, pnl_rs=round(pnl, 2), pct=round(pnl / (p.entry * lot) * 100, 3))
             out.append(row)
         return out

@@ -17,5 +17,5 @@ Mandeep: "abhi jaisa light hai theek hai, heavy nahi chahiye, but UX achha karna
 |---|---|
 | Today | market state (index day type, with / against), radar of instruments "in play", open paper trades, today's P&L, new alert cards; 0.9.0: the Live block (minute of the day, feed, index prices, open paper trades, today's signals with status) |
 | Setups | each setup: status (shadow / trial / live / retired), results learn vs holdout vs live, which situations it works in |
-| Journal | every paper trade with its footprint; replay the chart around it; the evening review |
+| Journal | every paper trade with its footprint; replay the chart around it; the evening review; 0.12.0: Option buying / Option selling tabs |
 | System | feed, tape, disk, gaps, delays, logs (searchable), versions; 0.9.0: switch-over setup (Upstox key, Telegram, live switch, daily login), secrets never shown back |

@@ -87,6 +87,11 @@ class OptionHistory:
             return None
         return min(strikes, key=lambda k: (abs(k - spot), k))
 
+    def strikes(self, sym: str, day: str, t: float, side: str) -> list[float]:
+        """Strikes of that side with a price in minute t (for picking an out-of-the-money strike to sell)."""
+        d = self._load_day(sym, day)
+        return sorted(set(d[1].get((int(t), side), []))) if d is not None else []
+
     def bar(self, sym: str, day: str, strike: float, side: str, t: float):
         d = self._load_day(sym, day)
         return None if d is None else d[0].get((float(strike), side, int(t)))

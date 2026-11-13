@@ -14,7 +14,8 @@ to Tanu.
 | `bars/legacy/<day>.parquet` | imported legacy 1-minute bars (key = symbol, `src="legacy"`) | Parquet zstd | T1 ✅ |
 | `imports/legacy/{minutes,chains,live}/` + `report.json` | imported legacy minute snapshots, chains, live.db tables; the import report | Parquet zstd | T1 ✅ |
 | `costs/tradeable_<day>.json`, `costs/all_days.parquet` | round-trip cost per underlying and the tradeable list (on trial) | JSON / Parquet | T2 ✅ |
-| `store/journal.db` | paper trades with footprints (per account) and refused signals with reasons | SQLite | T4 ✅ |
+| `store/journal.db` | paper trades with footprints (per account; `kind` buy / sell, `margin` for sold options) and refused signals with reasons | SQLite | T4 ✅, 0.12.0 |
+| `research/_steps/` | chunk plan, carried engine state and trade parts of `research-steps` | JSON / Parquet | 0.12.0 ✅ |
 | `journal/review_<day>.{md,json}`, `research/hypotheses.jsonl` | evening reviews and the questions they raise | Markdown / JSON | T4 ✅ |
 | `local.json` | this machine's setting overrides (`live`, `web_port` after cutover) | JSON | T0 ✅ |
 | `secrets/{upstox_app,upstox_token,telegram}.json` | typed in on the System page; folder 0700, files 0600; never shown back | JSON | 0.9.0 ✅ |
@@ -43,7 +44,8 @@ to Tanu.
 | `data/live.db` | alerts, outcomes, paper trades, plan outcomes, mind reads | read with `?mode=ro` |
 
 ## Dated facts (in git: `tanu/facts/`)
-`charges.json` (option charges), `lots.json` (index lots), `calendar.json` (sessions, holidays, special sessions).
+`charges.json` (option charges), `lots.json` (index lots), `calendar.json` (sessions, holidays, special sessions),
+`margins.json` (margin share of notional for a sold option: an estimate for paper selling accounts).
 Each entry has `valid_from`; `tanu.data.facts.Facts` returns the value valid on a given day.
 
 ## Rules

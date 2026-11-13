@@ -22,7 +22,9 @@ def test_empty_data_gives_clear_empty_states(tmp_path):
     c = TestClient(create_app(tmp_path))
     t = c.get("/api/today").json()
     assert t["headline"] == "No paper trades recorded yet." and t["accounts"] == {} and t["tradeable"]["count"] == 0
-    assert c.get("/api/journal").json() == {"days": [], "trades": []}
+    j = c.get("/api/journal").json()
+    assert j["days"] == [] and j["trades"] == [] and j["kind"] == "buy" and j["accounts"] == ["shadow", "sniper"]
+    assert c.get("/api/journal?kind=sell").json()["accounts"] == ["shadow_sell", "sniper_sell"]
     s = c.get("/api/setups").json()
     assert s["ideas_tried"] == len(pretest_ids()) and all(x["best"] is None for x in s["setups"])
     assert c.get("/api/system").status_code == 200

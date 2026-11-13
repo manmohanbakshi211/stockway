@@ -105,7 +105,8 @@ def test_search_runs_every_combo_and_the_ledger_raises_the_bar(tmp_path):
     rep = SR.search(tmp_path, tmp_path, syms=("NIFTY",), entries=entries, options=FakeOpts(spot))
     v = json.loads(SR.VARIANTS.read_text())
     n_combo = 2 * len(v["exits"]) * len(v["filters"])
-    assert rep["combos"] == n_combo and rep["k"] == n_combo // 2 + len(SR.pretest_ids())
+    # ideas: the non-yardstick combos, their selling versions, and the pre-tested ideas
+    assert rep["combos"] == n_combo and rep["k"] == 2 * (n_combo // 2) + len(SR.pretest_ids())
     led = tmp_path / "research" / "ledger.jsonl"
     assert len(led.read_text().splitlines()) == len(rep["setups"])
     t = pd.read_parquet(rep["out"] + "/trades.parquet")
@@ -114,4 +115,4 @@ def test_search_runs_every_combo_and_the_ledger_raises_the_bar(tmp_path):
     p2 = tmp_path / "v2.json"
     p2.write_text(json.dumps(v2))
     rep2 = SR.search(tmp_path, tmp_path, syms=("NIFTY",), entries=entries, variants_path=p2, options=FakeOpts(spot))
-    assert rep2["k"] == rep["k"] + len(v["filters"]) and rep2["t_bar"] > rep["t_bar"]          # more ideas, higher bar
+    assert rep2["k"] == rep["k"] + 2 * len(v["filters"]) and rep2["t_bar"] > rep["t_bar"]      # + buy and sell ideas

@@ -1,0 +1,11 @@
+{
+  "about": "Margin to hold one SOLD option, as a share of the notional (strike-side index level x lot), for paper selling accounts (bullet, dated). An estimate of exchange SPAN + exposure for a naked short index option, not a broker quote; used only to check that a paper selling account has room. Update with a dated entry when Mandeep's broker shows a different number.",
+  "margins": {
+    "NIFTY": [{"valid_from": "2000-01-01", "pct_of_notional": 0.12}],
+    "BANKNIFTY": [{"valid_from": "2000-01-01", "pct_of_notional": 0.12}],
+    "FINNIFTY": [{"valid_from": "2000-01-01", "pct_of_notional": 0.12}],
+    "MIDCPNIFTY": [{"valid_from": "2000-01-01", "pct_of_notional": 0.12}],
+    "SENSEX": [{"valid_from": "2000-01-01", "pct_of_notional": 0.12}],
+    "*": [{"valid_from": "2000-01-01", "pct_of_notional": 0.20}]
+  }
+}

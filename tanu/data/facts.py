@@ -27,6 +27,8 @@ class Facts:
         f = Path(folder)
         self._charges = json.loads((f / "charges.json").read_text())["entries"]
         self._lots = json.loads((f / "lots.json").read_text())["lots"]
+        m = f / "margins.json"
+        self._margins = json.loads(m.read_text())["margins"] if m.exists() else {}
         cal = json.loads((f / "calendar.json").read_text())
         self._regular = cal["regular"]
         self._holidays = {_d(x) for ys in cal.get("holidays", {}).values() for x in ys}
@@ -37,6 +39,11 @@ class Facts:
         if e is None:
             raise LookupError(f"no charges valid on {on}")
         return {k: v for k, v in e.items() if k not in ("valid_from", "source")}
+
+    def margin_pct(self, sym: str, on) -> float | None:
+        """Share of the notional blocked to hold one sold option (estimate, facts/margins.json)."""
+        e = _pick(self._margins.get(sym) or self._margins.get("*", []), _d(on))
+        return float(e["pct_of_notional"]) if e else None
 
     def lot(self, sym: str, on) -> int | None:
         e = _pick(self._lots.get(sym, []), _d(on))

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS trades (
   account TEXT, setup TEXT, sym TEXT, day TEXT, d INTEGER, side TEXT, strike REAL,
   entry_t REAL, exit_t REAL, entry REAL, exit REAL, lots INTEGER, lot INTEGER, qty INTEGER,
   charges REAL, pnl_rs REAL, pct REAL, reason TEXT, mfe_pct REAL, mae_pct REAL, minutes REAL,
-  und_entry REAL, und_exit REAL, state TEXT,
+  und_entry REAL, und_exit REAL, state TEXT, kind TEXT, margin REAL,
   PRIMARY KEY (account, setup, sym, day, d, entry_t));
 CREATE TABLE IF NOT EXISTS blocked (
   account TEXT, setup TEXT, sym TEXT, day TEXT, d INTEGER, t REAL, reason TEXT,
@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS blocked (
 CREATE INDEX IF NOT EXISTS trades_day ON trades(day);
 """
 COLS = ["account", "setup", "sym", "day", "d", "side", "strike", "entry_t", "exit_t", "entry", "exit", "lots", "lot",
-        "qty", "charges", "pnl_rs", "pct", "reason", "mfe_pct", "mae_pct", "minutes", "und_entry", "und_exit", "state"]
+        "qty", "charges", "pnl_rs", "pct", "reason", "mfe_pct", "mae_pct", "minutes", "und_entry", "und_exit", "state",
+        "kind", "margin"]
 
 
 class Journal:
@@ -30,6 +31,11 @@ class Journal:
         self.lock = threading.Lock()
         self.db = sqlite3.connect(str(self.path), check_same_thread=False)
         self.db.executescript(SCHEMA)
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(trades)")}
+        for col, typ in (("kind", "TEXT"), ("margin", "REAL")):      # journals from before 0.12.0
+            if col not in have:
+                self.db.execute(f"ALTER TABLE trades ADD COLUMN {col} {typ}")
+        self.db.commit()
 
     def trade(self, row: dict) -> None:
         r = dict(row)
@@ -56,6 +62,7 @@ class Journal:
             rows = [dict(zip(names, r)) for r in cur.fetchall()]
         for r in rows:
             r["state"] = json.loads(r["state"] or "{}")
+            r["kind"] = r.get("kind") or "buy"
         return rows
 
     def blocked_rows(self, day: str | None = None) -> list[dict]:

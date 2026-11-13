@@ -2,8 +2,10 @@
 it takes that trade (its setups and its risk rules), and journals the trade or the refusal with the reason. Paper
 only: nothing here can reach a broker (ADR-0001).
 
+An account is "buy" (takes bought options) or "sell" (takes the sold-option version "<id>@sell" of each signal).
 Risk rules (all optional): max_open, max_trades_day, daily_loss_pct (of capital: stop for the day), stop_after_losses
-(consecutive losing trades: stop for the day), max_premium_pct (premium paid <= this % of capital), one_per_group (no
+(consecutive losing trades: stop for the day), max_premium_pct (premium paid <= this % of capital), max_margin_pct
+(selling: margin of all open sold options <= this % of capital; margin from facts/margins.json), one_per_group (no
 two open positions in the same direction in one group, e.g. Nifty and Bank Nifty), no_entry_after ("HH:MM")."""
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ class Account:
     def __init__(self, spec: dict, journal: Journal, groups: dict | None = None, facts: Facts | None = None):
         self.spec, self.journal, self.facts = spec, journal, facts or Facts()
         self.id, self.risk = spec["id"], spec.get("risk", {})
+        self.kind = spec.get("kind", "buy")
         self.group_of = {s: g for g, syms in (groups or {}).items() for s in syms}
         self.day = None
         self.open: dict[int, dict] = {}
@@ -43,6 +46,12 @@ class Account:
     def _lot(self, engine, p) -> int:
         return engine.lots.get(p.sym) or self.facts.lot(p.sym, p.day) or 1
 
+    def margin(self, engine, p) -> float:
+        """Margin blocked by a sold option (paper estimate): notional x margin share."""
+        pct = self.facts.margin_pct(p.sym, p.day) or 0.2
+        spot = p.und_entry or p.state.get("spot") or p.strike
+        return spot * self._lot(engine, p) * self.spec.get("lots", 1) * pct
+
     def refusal(self, engine, p) -> str | None:
         r = self.risk
         if self.spec.get("symbols") and p.sym not in self.spec["symbols"]:
@@ -59,8 +68,12 @@ class Account:
         if r.get("max_trades_day") is not None and self.trades_today >= r["max_trades_day"]:
             return f"already {self.trades_today} trades today (max {r['max_trades_day']})"
         paid = p.entry * self._lot(engine, p) * self.spec.get("lots", 1)
-        if r.get("max_premium_pct") is not None and paid > self.spec["capital"] * r["max_premium_pct"] / 100:
+        if self.kind == "buy" and r.get("max_premium_pct") is not None and paid > self.spec["capital"] * r["max_premium_pct"] / 100:
             return f"premium ₹{paid:,.0f} is over {r['max_premium_pct']}% of capital"
+        if self.kind == "sell" and r.get("max_margin_pct") is not None:
+            used = sum(o.get("margin", 0) for o in self.open.values()) + self.margin(engine, p)
+            if used > self.spec["capital"] * r["max_margin_pct"] / 100:
+                return f"margin ₹{used:,.0f} would be over {r['max_margin_pct']}% of capital"
         if r.get("one_per_group"):
             g = self.group_of.get(p.sym)
             if g and any(o["group"] == g and o["d"] == p.d for o in self.open.values()):
@@ -68,7 +81,10 @@ class Account:
         return None
 
     def on_fill(self, engine, p) -> None:
-        setup = next((s for s in engine.setups if s.id == p.setup), None)
+        if getattr(p, "kind", "buy") != self.kind:
+            return
+        base = p.setup[:-5] if p.setup.endswith("@sell") else p.setup
+        setup = next((s for s in engine.setups if s.id == base), None)
         if setup is None or not self.wants(setup.status, setup.id):
             return
         if p.day != self.day:
@@ -77,23 +93,29 @@ class Account:
         if why:
             self.journal.blocked(self.id, p.setup, p.sym, p.day, p.d, p.entry_t, why)
             return
-        self.open[id(p)] = {"group": self.group_of.get(p.sym), "d": p.d}
+        self.open[id(p)] = {"group": self.group_of.get(p.sym), "d": p.d,
+                            "margin": self.margin(engine, p) if self.kind == "sell" else 0.0}
         self.trades_today += 1
 
     def on_close(self, engine, p) -> None:
-        if self.open.pop(id(p), None) is None:
+        held = self.open.pop(id(p), None)
+        if held is None:
             return
         lot, lots = self._lot(engine, p), self.spec.get("lots", 1)
         qty = lot * lots
-        row = {"account": self.id, "setup": p.setup, "sym": p.sym, "day": p.day, "d": p.d, "side": p.side,
+        sg = -1 if self.kind == "sell" else 1                       # a sold option gains when its price falls
+        row = {"account": self.id, "setup": p.setup, "kind": self.kind, "margin": round(held.get("margin", 0.0)),
+               "sym": p.sym, "day": p.day, "d": p.d, "side": p.side,
                "strike": p.strike, "entry_t": p.entry_t, "exit_t": p.exit_t, "entry": p.entry, "exit": p.exit,
                "lots": lots, "lot": lot, "qty": qty, "reason": p.reason, "und_entry": p.und_entry, "und_exit": p.und_exit,
                "state": {k: v for k, v in p.state.items() if k in ("day", "rel", "burst", "twap_rel", "m", "spot")}}
         if p.exit is not None:
-            ch = self.facts.option_charges(p.entry, p.exit, qty, p.day)
-            pnl = (p.exit - p.entry) * qty - ch
+            buy_px, sell_px = (p.exit, p.entry) if sg < 0 else (p.entry, p.exit)
+            ch = self.facts.option_charges(buy_px, sell_px, qty, p.day)
+            pnl = sg * (p.exit - p.entry) * qty - ch
+            best, worst = (p.trough, p.peak) if sg < 0 else (p.peak, p.trough)
             row.update(charges=ch, pnl_rs=round(pnl, 2), pct=round(pnl / (p.entry * qty) * 100, 3),
-                       mfe_pct=round((p.peak / p.entry - 1) * 100, 2), mae_pct=round((p.trough / p.entry - 1) * 100, 2),
+                       mfe_pct=round(sg * (best / p.entry - 1) * 100, 2), mae_pct=round(sg * (worst / p.entry - 1) * 100, 2),
                        minutes=round((p.exit_t - p.entry_t) / 60, 1))
             self.pnl_today += pnl
             self.losses_in_row = self.losses_in_row + 1 if pnl < 0 else 0

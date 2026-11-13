@@ -28,6 +28,11 @@ async function post(url, body) {
   return j;
 }
 
+const ACCT = { shadow: "Shadow (all setups)", sniper: "Sniper (proven setups)", shadow_sell: "Shadow (all setups)",
+  sniper_sell: "Sniper (proven setups)" };
+function acctLabel(id) { return ACCT[id] || id; }
+function acctShort(id) { return (ACCT[id] || id).split(" (")[0]; }
+
 function fail(e) {
   view.innerHTML = `<h1>This screen could not load</h1><p class="muted">${esc(e.message)}</p>
     <p class="muted">Check that Tanu is running (python -m tanu web), then reload.</p>`;
@@ -66,20 +71,27 @@ function liveBlock(L) {
 async function today() {
   const [d, L] = await Promise.all([get("/api/today"), get("/api/live").catch(() => null)]);
   document.getElementById("ver").textContent = "v" + d.version;
-  const acc = Object.entries(d.accounts || {});
+  const accl = d.account_list || [];
   const st = d.setups || {};
+  const acctTable = (kind, title) => {
+    const rows = accl.filter((a) => a.kind === kind);
+    return `<h3>${title}</h3><div class="scroll"><table class="ledger"><thead><tr><th>Account</th><th class="num">Trades</th>
+      <th class="num wide">Won</th><th class="num">P&amp;L</th><th class="num">On capital</th><th class="num wide">Per trade</th></tr></thead><tbody>
+      ${rows.map((a) => `<tr><td>${esc(acctShort(a.id))}</td>
+        <td class="num">${a.trades}</td><td class="num wide">${a.win_pct ?? "–"}${a.win_pct != null ? "%" : ""}</td>
+        <td class="num">${money(a.pnl_rs)}</td><td class="num">${pct(a.return_pct)}</td>
+        <td class="num wide">${pct(a.avg_pct)}</td></tr>`).join("")}</tbody></table></div>`;
+  };
   view.innerHTML = `
     <h1>${esc(d.headline)}</h1>
     <p class="muted">${d.live ? "Live paper trading." : "Not live yet: the old app still runs the market until the switch-over."}
       ${d.journal_day ? "Latest journal day: " + esc(d.journal_day) + "." : ""}</p>
     ${liveBlock(L)}
-    <h2>Paper accounts</h2>
-    ${acc.length ? `<div class="scroll"><table class="ledger"><thead><tr><th>Account</th><th class="num">Trades</th>
-      <th class="num">Won</th><th class="num">P&amp;L</th><th class="num wide">Per trade</th></tr></thead><tbody>
-      ${acc.map(([a, s]) => `<tr><td>${esc(a)}</td><td class="num">${s.trades}</td><td class="num">${s.win_pct ?? "–"}%</td>
-        <td class="num">${money(s.pnl_rs)}</td><td class="num wide">${pct(s.avg_pct)}</td></tr>`).join("")}
-      </tbody></table></div>`
-      : `<div class="empty">No paper trades yet. Run a replay (python -m tanu research) or wait for the switch-over.</div>`}
+    <h2>Paper accounts${d.journal_day ? `, ${esc(d.journal_day)}` : ""}</h2>
+    <p class="muted small">Capital ${money((accl[0] || {}).capital || 500000)} in each account. Shadow takes every signal of
+      every setup (grading); Sniper only setups that passed the tests.</p>
+    ${accl.length ? acctTable("buy", "Option buying") + acctTable("sell", "Option selling")
+      : `<div class="empty">No paper accounts set up.</div>`}
     <h2>Setups</h2>
     <div class="facts">
       <div><b>${st.live || 0}</b><span>live</span></div><div><b>${st.trial || 0}</b><span>on trial</span></div>
@@ -101,16 +113,18 @@ async function setups() {
   const d = await get("/api/setups");
   const num = (label, part) => `<span><span class="muted">${label}</span> <b>${pct(part.avg_pct)}</b>
       <span class="muted small">(${part.n || 0} trades)</span></span>`;
-  const row = (s) => {
-    const b = s.best;
+  const part = (label, b, n) => {
     const verdict = !b ? "Not tested yet." : b.passes ? "Passed." : (plain((b.why_not || []).join("; ")) || "Yardstick for the others.");
-    return `<div class="row">
-      <div class="row-head"><b>${esc(s.name)}</b> <span class="status ${esc(s.status)}">${esc(s.status)}</span></div>
+    return `<div class="version"><span class="vlabel">${label}</span>
       ${b ? `<div class="nums">${num("Tuning days", b.learn)}${num("Unseen days", b.hold)}</div>
-        <p class="small">${esc(verdict)} <span class="muted">Best of ${s.variants_tested} versions: ${esc(variant(b.variant))}.</span></p>`
-        : `<p class="small muted">${esc(verdict)}</p>`}
-      <p class="small muted">${esc(s.why)}</p></div>`;
+        <p class="small">${esc(verdict)} <span class="muted">Best of ${n} version${n === 1 ? "" : "s"}: ${esc(variant(b.variant))}.</span></p>`
+        : `<p class="small muted">${esc(verdict)}</p>`}</div>`;
   };
+  const row = (s) => `<div class="row">
+      <div class="row-head"><b>${esc(s.name)}</b> <span class="status ${esc(s.status)}">${esc(s.status)}</span></div>
+      ${part("Buying the option", s.best, s.variants_tested)}
+      ${part("Selling the option", s.best_sell, s.sell_variants_tested)}
+      <p class="small muted">${esc(s.why)}</p></div>`;
   view.innerHTML = `<h1>Setups and their evidence</h1>
     <p class="muted">A setup trades on paper only after it wins on days it never saw, after costs, beyond luck.
       Ideas tried so far: ${d.ideas_tried}. The more ideas tried, the higher the bar.</p>
@@ -121,28 +135,37 @@ async function setups() {
 // ---------------------------------------------------------------- Journal
 async function journal(params) {
   const q = new URLSearchParams(params || {});
+  const kind = q.get("kind") === "sell" ? "sell" : "buy";
+  q.set("kind", kind);
   const d = await get("/api/journal?" + q);
+  const tabs = `<div class="seg" role="tablist" aria-label="Paper trading">
+      <a role="tab" href="#journal?kind=buy" aria-selected="${kind === "buy"}">Option buying</a>
+      <a role="tab" href="#journal?kind=sell" aria-selected="${kind === "sell"}">Option selling</a></div>`;
   if (!d.trades || !d.days.length) {
-    view.innerHTML = `<h1>Journal</h1><div class="empty">No trades in the journal yet. Every paper trade will appear here with its full footprint.</div>`;
+    view.innerHTML = `<h1>Paper trades</h1>${tabs}<div class="empty">${kind === "sell"
+      ? "No option-selling trades yet. Every setup has a selling version; its paper trades appear here."
+      : "No trades in the journal yet. Every paper trade will appear here with its full footprint."}</div>`;
     return;
   }
   const acc = q.get("account") || "";
   const rev = d.review && d.review.accounts ? d.review.accounts : {};
-  view.innerHTML = `<h1>Journal</h1>
+  view.innerHTML = `<h1>Paper trades</h1>${tabs}
+    <p class="muted small">${kind === "sell" ? "Selling: an option is sold against each signal (a put when the view is up, a call when it is down); profit when its price falls. Capital ₹5L per account; margin is an estimate."
+      : "Buying: the option in the signal's direction is bought; profit when its price rises. Capital ₹5L per account."}</p>
     <div class="controls">
       <select id="j-day" aria-label="Day">${d.days.map((x) => `<option ${x === d.day ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>
-      <select id="j-acc" aria-label="Account"><option value="">All accounts</option>${d.accounts.map((a) => `<option ${a === acc ? "selected" : ""}>${esc(a)}</option>`).join("")}</select>
+      <select id="j-acc" aria-label="Account"><option value="">All ${kind === "sell" ? "selling" : "buying"} accounts</option>${d.accounts.map((a) => `<option value="${esc(a)}" ${a === acc ? "selected" : ""}>${esc(acctLabel(a))}</option>`).join("")}</select>
     </div>
-    ${Object.entries(rev).map(([a, r]) => `<p><b>${esc(a)}</b>: ${r.summary.trades} trades, ${money(r.summary.pnl_rs)};
+    ${Object.entries(rev).map(([a, r]) => `<p><b>${esc(acctLabel(a))}</b>: ${r.summary.trades} trades, ${money(r.summary.pnl_rs)};
       losers that were up 10%+ first: ${r.green_then_red} of ${r.losers}; never moved 3%: ${r.never_moved}.</p>`).join("")}
     <div id="detail"></div>
     <div class="scroll"><table class="ledger"><thead><tr><th>In</th><th>Setup</th><th class="num">P&amp;L</th><th class="num wide">Best</th><th class="wide">Exit</th></tr></thead>
     <tbody>${d.trades.map((t, i) => `<tr class="tap" data-i="${i}" tabindex="0"><td>${hm(t.entry_t)}</td>
-      <td>${esc(t.setup.split("__")[0])}<br><span class="muted small">${esc(t.sym)} ${t.strike} ${esc(t.side)}, ${esc(t.account)}</span></td>
+      <td>${esc(t.setup.replace("@sell", "").split("__")[0])}<br><span class="muted small">${kind === "sell" ? "sold " : ""}${esc(t.sym)} ${t.strike} ${esc(t.side)}, ${esc(acctShort(t.account))}</span></td>
       <td class="num">${money(t.pnl_rs)}<br><span class="muted small">${pct(t.pct)}</span></td>
       <td class="num wide">${pct(t.mfe_pct)}</td><td class="small wide">${esc(t.reason)} ${hm(t.exit_t)}</td></tr>`).join("")}</tbody></table></div>`;
   const go = () => {
-    const p = { day: document.getElementById("j-day").value };
+    const p = { day: document.getElementById("j-day").value, kind };
     const a = document.getElementById("j-acc").value;
     if (a) p.account = a;
     journal(p).catch(fail);
@@ -178,8 +201,10 @@ async function showTrade(t) {
     const d = await get("/api/trade?" + q);
     const s = d.trade.state || {};
     box.innerHTML = `<div class="detail">
-      <p><b>${esc(t.sym)} ${t.strike} ${esc(t.side)}</b>, ${esc(t.setup.split("__")[0])}: in ${hm(t.entry_t)} at ₹${t.entry.toFixed(2)},
-        out ${hm(t.exit_t)} at ₹${(t.exit ?? 0).toFixed(2)} (${esc(t.reason)}). ${money(t.pnl_rs)} after ₹${Math.round(t.charges || 0)} charges.</p>
+      <p><b>${esc(t.sym)} ${t.strike} ${esc(t.side)}</b>, ${esc(t.setup.replace("@sell", "").split("__")[0])}:
+        ${t.kind === "sell" ? `sold ${hm(t.entry_t)} at ₹${t.entry.toFixed(2)}, bought back ${hm(t.exit_t)} at ₹${(t.exit ?? 0).toFixed(2)}`
+          : `in ${hm(t.entry_t)} at ₹${t.entry.toFixed(2)}, out ${hm(t.exit_t)} at ₹${(t.exit ?? 0).toFixed(2)}`}
+        (${esc(t.reason)}). ${money(t.pnl_rs)} after ₹${Math.round(t.charges || 0)} charges${t.kind === "sell" && t.margin ? `; margin about ${money(t.margin)}` : ""}.</p>
       <p class="muted small">At entry the day was ${esc(s.day || "?")}${s.rel ? `, ${Number(s.rel).toFixed(1)}× its normal range so far` : ""}.
         Best point ${pct(t.mfe_pct)}, worst ${pct(t.mae_pct)}, held ${t.minutes ?? "–"} min.</p>
       <h2>${esc(t.sym)} that day</h2>
@@ -268,7 +293,8 @@ function route() {
   document.querySelectorAll(".tabs a").forEach((a) => a.toggleAttribute("aria-current", a.dataset.tab === (screens[name] ? name : "today")));
   document.querySelectorAll(".tabs a[aria-current]").forEach((a) => a.setAttribute("aria-current", "page"));
   view.innerHTML = `<p class="muted">Loading…</p>`;
-  fn().catch(fail);
+  const qs = location.hash.slice(1).split("?")[1] || "";
+  fn(Object.fromEntries(new URLSearchParams(qs))).catch(fail);
 }
 window.addEventListener("hashchange", route);
 get("/api/today").then((d) => (document.getElementById("ver").textContent = "v" + d.version)).catch(() => {});

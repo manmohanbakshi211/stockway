@@ -1,24 +1,46 @@
 {
-  "about": "Paper accounts (bullet, dated). Paper only: no account here ever sends an order (ADR-0001). An account takes a signal only from setups it accepts and only when its risk rules allow; every refusal is journaled with the reason. Changing an account's money or limits needs Mandeep's say-so and a CHANGELOG line.",
+  "about": "Paper accounts (bullet, dated). Paper only: no account here ever sends an order (ADR-0001). Buying accounts take the bought-option version of each signal, selling accounts the sold-option version (setup id '<id>@sell'). An account takes a signal only from setups it accepts and only when its risk rules allow; every refusal is journaled with the reason. Capital Rs 5,00,000 each (Mandeep, 13 Nov 2026). Changing an account's money or limits needs Mandeep's say-so and a CHANGELOG line.",
   "valid_from": "2026-11-13",
   "groups": {"index": ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"]},
   "accounts": [
     {
       "id": "shadow",
-      "name": "Shadow: every signal of every setup (grading only)",
+      "name": "Shadow buying: every signal of every setup, option bought (grading only)",
+      "kind": "buy",
       "setups": "all",
-      "capital": 10000000,
+      "capital": 500000,
       "lots": 1,
       "risk": {}
     },
     {
       "id": "sniper",
-      "name": "Sniper: index, only setups on trial or live, strict risk",
+      "name": "Sniper buying: index, only setups on trial or live, strict risk",
+      "kind": "buy",
       "setups": "trial+live",
       "symbols": ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"],
-      "capital": 100000,
+      "capital": 500000,
       "lots": 1,
       "risk": {"max_open": 1, "max_trades_day": 3, "daily_loss_pct": 3, "stop_after_losses": 2, "max_premium_pct": 30,
+               "one_per_group": true, "no_entry_after": "14:30"}
+    },
+    {
+      "id": "shadow_sell",
+      "name": "Shadow selling: every signal of every setup, option sold against it (grading only)",
+      "kind": "sell",
+      "setups": "all",
+      "capital": 500000,
+      "lots": 1,
+      "risk": {}
+    },
+    {
+      "id": "sniper_sell",
+      "name": "Sniper selling: index, only setups on trial or live, strict risk and margin",
+      "kind": "sell",
+      "setups": "trial+live",
+      "symbols": ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"],
+      "capital": 500000,
+      "lots": 1,
+      "risk": {"max_open": 2, "max_trades_day": 3, "daily_loss_pct": 3, "stop_after_losses": 2, "max_margin_pct": 80,
                "one_per_group": true, "no_entry_after": "14:30"}
     }
   ]

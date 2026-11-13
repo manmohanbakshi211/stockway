@@ -39,9 +39,12 @@ def evaluate(trades: pd.DataFrame, baseline: str = "random_baseline", min_trades
     cut = days[int(len(days) * (1 - hold_frac))]
     t["part"] = np.where(t["day"] >= cut, "hold", "learn")
     def base_of(s: str) -> str:
-        return baseline + s[s.index("__"):] if "__" in s else baseline
+        """Same exit, filter and version: "x__e__f@sell" -> "<baseline>__e__f@sell", "x@sell" -> "<baseline>@sell"."""
+        if "__" in s:
+            return baseline + s[s.index("__"):]
+        return baseline + "@sell" if s.endswith("@sell") else baseline
 
-    is_base = lambda s: s == baseline or s.startswith(baseline + "__")
+    is_base = lambda s: s in (baseline, baseline + "@sell") or s.startswith(baseline + "__")
     tested = [s for s in t["setup"].unique() if not is_base(s)]
     k = max(1, k or len(tested))
     t_bar = round(NormalDist().inv_cdf(1 - 0.05 / (2 * k)), 2)
@@ -57,7 +60,9 @@ def evaluate(trades: pd.DataFrame, baseline: str = "random_baseline", min_trades
                "by_sym": {y: stats(gg["pct"]) for y, gg in g.groupby("sym")},
                "exits": g["reason"].value_counts().to_dict()}
         if not is_base(s):
-            beats = all(row[p].get("avg_pct", -1e9) > base.get(p, {}).get("avg_pct", -1e9) for p in ("learn", "hold"))
+            has_base = (base.get("learn") or {}).get("n", 0) > 0
+            beats = has_base and all(row[p].get("avg_pct", -1e9) > base.get(p, {}).get("avg_pct", -1e9)
+                                       for p in ("learn", "hold"))     # no yardstick in the run: cannot pass
             row["passes"] = bool(L.get("n", 0) >= min_trades and L.get("avg_pct", -1) > 0 and L.get("t", 0) >= t_bar
                                  and H.get("n", 0) >= min_hold and H.get("avg_pct", -1) > 0 and beats)
             why = []
@@ -71,7 +76,9 @@ def evaluate(trades: pd.DataFrame, baseline: str = "random_baseline", min_trades
                 why.append(f"only {H.get('n', 0)} holdout trades")
             elif H.get("avg_pct", -1) <= 0:
                 why.append("holdout average not above 0")
-            if not beats:
+            if not has_base:
+                why.append(f"no yardstick ({base_of(s)}) in this run")
+            elif not beats:
                 why.append("does not beat the baseline")
             row["why_not"] = why
         out["setups"].append(row)

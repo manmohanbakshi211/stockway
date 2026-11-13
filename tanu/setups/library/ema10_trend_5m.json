@@ -1,0 +1,15 @@
+{
+  "id": "ema10_trend_5m",
+  "name": "10 EMA trend pullback (5-min): opposite-colour candle that stays off the 10 EMA, enter on its break",
+  "why": "YouTube video sent by Mandeep, 13 Nov 2026 ('10 EMA', Anant Ladha with Pushkar Raj Thakur): above the 10 EMA a red candle not touching it is the trigger, the next candle breaking its high = buy; below, a green candle not touching it, break of its low = sell; stop = the 10 EMA; target 1:2. Option selling: sell the out-of-the-money option at the 10 EMA level, premium stop 15-30%. Claims: 3 of 4-5 trades right, 1:7-1:10 easily. Index pre-test 2022-2026 (research 0005): won 37-40%, 1:2 reached 28-30%, +2.2 to +3.3 index points a trade before option costs. Not proven.",
+  "source": "Video: 10 EMA strategy (Mandeep 13 Nov 2026), Tanu research 0005",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "window": ["09:20", "14:45"],
+  "when": [["d_epull_5m_10", ">", 0]],
+  "exit": {"name": "ema_stop_1to2", "type": "rr", "stop_feature": "epull_5m_10_stop", "target_r": 2,
+           "premium_stop_pct": -60, "flat_by": "15:15"},
+  "max_per_day": 5,
+  "sell": {"strike": "at_stop", "premium_stop_pct": 30, "premium_target_pct": 50}
+}

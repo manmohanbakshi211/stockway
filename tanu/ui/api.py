@@ -65,6 +65,12 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
     def journal() -> Journal | None:
         return Journal(jpath) if jpath.exists() else None
 
+    def account_info() -> list[dict]:
+        from ..paper.accounts import SPEC
+        spec = _json(SPEC, {}) or {}
+        return [{"id": a["id"], "name": a.get("name", a["id"]), "kind": a.get("kind", "buy"), "capital": a.get("capital")}
+                for a in spec.get("accounts", [])]
+
     def latest_report() -> dict:
         r = base / "research"
         runs = sorted([p for p in r.glob("*") if p.is_dir() and (p / "report.json").exists()]) if r.exists() else []
@@ -88,10 +94,15 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
         hyp_f = base / "research" / "hypotheses.jsonl"
         hyps = [json.loads(x) for x in hyp_f.read_text().splitlines()[-5:]] if hyp_f.exists() else []
         passed = [k for k, v in latest_report().items() if v.get("passes")]
+        summ = {a: x["summary"] for a, x in (rev or {}).get("accounts", {}).items()}
+        accts = []
+        for a in account_info():
+            sm = summ.get(a["id"]) or {"trades": 0, "pnl_rs": 0.0, "win_pct": None, "avg_pct": None}
+            accts.append({**a, **sm, "return_pct": round(sm["pnl_rs"] / a["capital"] * 100, 2) if a["capital"] else None})
         return {"version": __version__, "live": s.live,
                 "headline": _headline(rev, setups, passed),
                 "journal_day": day,
-                "accounts": {a: x["summary"] for a, x in (rev or {}).get("accounts", {}).items()},
+                "accounts": summ, "account_list": accts,
                 "setups": dict(Counter(s.status for s in setups)), "setups_passing": passed, "bad_setups": bad,
                 "tradeable": {"day": cj.get("day"), "count": len(items), "of": len(cj.get("items", [])),
                               "cheapest": [{"sym": i["sym"], "round_trip_pct": i["cost"]["total_pct"]} for i in items[:8]]},
@@ -102,33 +113,44 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
         good, bad = registry.load()
         res = latest_report()
         out = []
+        def pick(rows):
+            b = max(rows.values(), key=lambda v: v["learn"].get("avg_pct") or -999) if rows else None
+            return None if b is None else {"variant": b["setup"], "learn": b["learn"], "hold": b["hold"],
+                                           "passes": b.get("passes"), "why_not": b.get("why_not", []),
+                                           "t_bar": b.get("t_bar"), "run": b.get("run")}
         for s in good:
             mine = {k: v for k, v in res.items() if k == s.id or k.startswith(s.id + "__")}
-            best = max(mine.values(), key=lambda v: v["learn"].get("avg_pct") or -999) if mine else None
+            buy = {k: v for k, v in mine.items() if not k.endswith("@sell")}
+            sell = {k: v for k, v in mine.items() if k.endswith("@sell")} | ({s.id + "@sell": res[s.id + "@sell"]}
+                                                                           if s.id + "@sell" in res else {})
             out.append({"id": s.id, "name": s.name, "status": s.status, "why": s.why, "source": s.source,
-                        "symbols": s.symbols, "window": s.window, "variants_tested": len(mine),
-                        "best": None if best is None else {"variant": best["setup"], "learn": best["learn"],
-                                                           "hold": best["hold"], "passes": best.get("passes"),
-                                                           "why_not": best.get("why_not", []), "t_bar": best.get("t_bar"),
-                                                           "run": best.get("run")}})
+                        "symbols": s.symbols, "window": s.window, "variants_tested": len(buy),
+                        "sell_variants_tested": len(sell), "best": pick(buy), "best_sell": pick(sell),
+                        "sell_plan": s.sell.model_dump()})
         led = base / "research" / "ledger.jsonl"
         ids = {json.loads(x)["id"] for x in led.read_text().splitlines() if x.strip()} if led.exists() else set()
         from ..evaluate.search import pretest_ids
         ids |= pretest_ids()
-        k = len([i for i in ids if not i.startswith("random_baseline__")])     # yardsticks are not ideas
+        k = len([i for i in ids if not (i.startswith("random_baseline__") or i == "random_baseline@sell")])  # yardsticks
         return {"setups": out, "bad": bad, "ideas_tried": k}
 
     @app.get("/api/journal")
-    def journal_rows(day: str | None = None, account: str | None = None, limit: int = 200):
+    def journal_rows(day: str | None = None, account: str | None = None, kind: str = "buy", limit: int = 200):
+        """kind: "buy" (bought options) or "sell" (the option-selling section)."""
         j = journal()
+        info = account_info()
+        mine = [a["id"] for a in info if a["kind"] == kind]
         if not j:
-            return {"days": [], "trades": []}
-        all_rows = j.trades(account=account)
+            return {"days": [], "trades": [], "kind": kind, "accounts": mine, "account_info": info}
+        all_rows = [r for r in j.trades(account=account) if r.get("kind", "buy") == kind]
         days = sorted({t["day"] for t in all_rows}, reverse=True)
         day = day or (days[0] if days else None)
         rows = [r for r in all_rows if r["day"] == day][:limit]
-        return {"days": days[:60], "day": day, "accounts": sorted({t["account"] for t in all_rows}), "trades": rows,
-                "review": review.daily(j, day) if day else None}
+        rev = review.daily(j, day) if day else None
+        if rev:
+            rev = {**rev, "accounts": {a: x for a, x in rev.get("accounts", {}).items() if a in mine}}
+        return {"days": days[:60], "day": day, "kind": kind, "accounts": mine, "account_info": info, "trades": rows,
+                "review": rev}
 
     @app.get("/api/trade")
     def trade(account: str, setup: str, sym: str, day: str, d: int, entry_t: float):
@@ -245,8 +267,10 @@ def _headline(rev, setups, passed) -> str:
         parts.append("Sniper is waiting: no setup has passed the tests yet")
     else:
         parts.append("Sniper took no trades")
+    ss = rev["accounts"].get("shadow_sell", {}).get("summary")
     if sh and sh["trades"]:
-        parts.append(f"shadow graded {sh['trades']} signals ({sh['win_pct']}% won)")
+        parts.append(f"shadow graded {sh['trades']} bought options ({sh['win_pct']}% won)"
+                     + (f" and {ss['trades']} sold ({ss['win_pct']}% won)" if ss and ss["trades"] else ""))
     return "; ".join(parts) + "."
 
 

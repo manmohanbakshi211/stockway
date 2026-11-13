@@ -51,6 +51,21 @@ class Exit(BaseModel):
         return self
 
 
+class SellPlan(BaseModel):
+    """The option-selling version of a setup (0.12.0): on a signal in direction d the engine also sells an option
+    against it (d > 0: sell a put, d < 0: sell a call), as setup id "<id>@sell". It exits on the setup's own underlying
+    stop / target (the view is wrong / done), when the premium rises premium_stop_pct (loss), when it has fallen
+    premium_target_pct (profit kept), after the setup's max_minutes, or at flat_by. Strike: "otm" = otm_steps strikes
+    out of the money from the ATM (0 = ATM); "at_stop" = the strike nearest the setup's stop level on the far side."""
+    model_config = ConfigDict(extra="forbid")
+    on: bool = True
+    strike: Literal["otm", "at_stop"] = "otm"
+    otm_steps: int = Field(1, ge=0, le=10)
+    premium_stop_pct: float = Field(30, gt=0)
+    premium_target_pct: float = Field(50, gt=0, lt=100)
+    flat_by: str = "15:15"
+
+
 class Setup(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
@@ -64,6 +79,7 @@ class Setup(BaseModel):
     when: list[tuple[str, str, float | str]]
     exit: Exit = Exit()
     max_per_day: int = Field(1, ge=1, le=10)     # entries per symbol, day and direction (one open at a time)
+    sell: SellPlan = SellPlan()                  # its option-selling version (id "<id>@sell")
 
     @field_validator("when")
     @classmethod

@@ -3,6 +3,29 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.12.0] - 2026-11-13
+### Added
+- Option selling for every setup (ADR-0010, Mandeep): the engine sells an option against every signal (a put when
+  the view is up, a call when down) as setup "<id>@sell"; per-setup `sell` plan (strike otm n / at the stop level,
+  premium stop %, premium target %, flat by; on by default). Short fills and charges (STT on the sell side), exits on
+  the setup's underlying stop / target, premium stop / target, time, flat-by.
+- Paper accounts: shadow, sniper (buying) and shadow_sell, sniper_sell (selling), ₹5,00,000 each (was ₹1 crore /
+  ₹1 lakh: Mandeep's say-so). Margin estimate `facts/margins.json` (12% of notional for index options);
+  sniper_sell keeps open margin under 80% of capital. Journal: `kind` and `margin` columns (old journals upgrade).
+- Evaluation: selling versions are judged against `random_baseline@sell`; both versions count as ideas tried; a
+  version whose yardstick is missing cannot pass.
+- The "10 EMA" video (research 0005): gun `epull_<tf>m_<n>` pullback trigger candle (`engine/tf.py`); bullet
+  `ema10_trend_5m` (stop = EMA, 1:2, up to 5 a day; selling version at the EMA strike).
+- App: the paper-trades page has Option buying / Option selling tabs; Today shows the four accounts with return on
+  capital; Setups shows each setup's buying and selling evidence. Alert cards for selling versions.
+- `python -m tanu research-steps plan|step|finish`: the research replay in chunks with the engine's carried state
+  saved between them (same trades as one run; for the Mac's time-limited shell).
+### Results (real option prices, 524 days, research 0005)
+- Nothing passes, buying or selling. Selling loses less on every setup (e.g. 10 EMA -₹98 vs -₹229 a trade; random
+  baseline -₹155 vs -₹349) but stays negative after costs.
+### Checked
+- Golden: all earlier buying trades identical. Tests: 104. Headless check at 390 / 1280 px.
+
 ## [0.11.0] - 2026-11-13
 ### Added
 - The "5 EMA" video (sent by Mandeep), research 0004. Gun vs bullet split first:
