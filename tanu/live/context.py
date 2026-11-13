@@ -2,7 +2,8 @@
 - minutes(sym): the symbol's 1-minute history from every source Tanu has (imported history, legacy bars, Tanu's own
   tape bars, broker-filled bars), one row per minute, newest source first;
 - day_context(...): the DayContext replay would build for that day (only earlier days used);
-- warm_atr(...): the ATR the engine carries into the day, from the last few days (as a multi-day replay would)."""
+- warm(...): what the engine carries into the day (ATR, higher-timeframe EMAs), from the last few days, as a
+  multi-day replay would."""
 from __future__ import annotations
 
 import datetime as dt
@@ -60,17 +61,24 @@ def day_context(mins: pd.DataFrame, day: str):
 
 
 class _NoOptions:
-    pass
+    """No option prices: signals during the warm-up are skipped, only the day state matters."""
+
+    def atm(self, *a):
+        return None
+
+    def bar(self, *a):
+        return None
 
 
-def warm_atr(mins: pd.DataFrame, sym: str, day: str, days: int = 2) -> float | None:
-    """Replays the last `days` days before `day` through an engine with no setups and returns the ATR it carries."""
+def warm(mins: pd.DataFrame, sym: str, day: str, days: int = 2, setups=()) -> tuple[float | None, dict]:
+    """Replays the last `days` days before `day` (no trades) and returns what the engine carries into `day`:
+    (ATR, {(sym, tf, n): EMA} for the timeframes the setups use)."""
     all_days, T, O, H, L, C = replay.day_arrays(mins)
     idx = [i for i, d in enumerate(all_days) if d < day][-days:]
     if not idx:
-        return None
+        return None, {}
     ctxs = build_contexts(all_days, H, L, C)
-    eng = Engine([], _NoOptions())
+    eng = Engine(list(setups), _NoOptions())
     for i in idx:
         d = all_days[i]
         if d not in ctxs:
@@ -79,4 +87,8 @@ def warm_atr(mins: pd.DataFrame, sym: str, day: str, days: int = 2) -> float | N
         for k in range(N_MIN):
             eng.on_bar(sym, float(T[i, k]), O[i, k], H[i, k], L[i, k], C[i, k])
         eng.end_day(sym)
-    return eng.carry_atr.get(sym)
+    return eng.carry_atr.get(sym), dict(eng.carry_ema)
+
+
+def warm_atr(mins: pd.DataFrame, sym: str, day: str, days: int = 2) -> float | None:
+    return warm(mins, sym, day, days)[0]

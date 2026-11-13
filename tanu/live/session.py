@@ -44,9 +44,10 @@ class Session:
         self.engine = Engine(self.setups, LiveOptions(self.u), spread_pct=SPREAD_PCT, facts=self.facts, lots=lot_map)
         for s, (c, mins) in self.ctx.items():
             if warm_days:
-                a = context.warm_atr(mins, s, day, warm_days)
+                a, ema = context.warm(mins, s, day, warm_days, self.setups)
                 if a:
                     self.engine.carry_atr[s] = a
+                self.engine.carry_ema.update(ema)
         self.journal = Journal(journal_path)
         self.accounts = Accounts(self.journal, facts=self.facts)
         self.engine.listeners.append(self.accounts)

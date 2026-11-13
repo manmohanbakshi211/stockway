@@ -1,0 +1,14 @@
+{
+  "id": "ema5_buy_15m",
+  "name": "5 EMA buying side (buy call): 15-min alert candle below the 5 EMA, enter when its high breaks",
+  "why": "YouTube video sent by Mandeep, 13 Nov 2026 ('5 EMA', presenter Subhashish): 15-min alert candle closes below the 5 EMA without touching it; next candle breaks its high -> buy; stop = alert low; target 1:3; up to 3 entries a day. Claim: 60-70% accuracy. Index pre-test 2022-2026 (research 0004): target first only 15% (both), about 0 R before option costs. Expected to fail; graded so the answer is on record.",
+  "source": "Video: 5 EMA scalping (Mandeep 13 Nov 2026), Tanu research 0004",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "window": ["09:30", "14:45"],
+  "when": [["d_long", ">", 0], ["d_ealert_15m_5", ">", 0]],
+  "exit": {"name": "alert_low_1to3", "type": "rr", "stop_feature": "ealert_15m_5_stop", "target_r": 3,
+           "premium_stop_pct": -60, "flat_by": "15:15"},
+  "max_per_day": 3
+}

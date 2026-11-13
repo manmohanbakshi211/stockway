@@ -48,6 +48,11 @@ class Alerts:
         st = engine.sym.get(p.sym)
         atr = (st.atr or (st.hi - st.lo) / 3) if st else None
         stop = p.state["spot"] - p.d * s.exit.atr_init * atr if atr else None
+        target = "Target: trailing exit, the exit card will come"
+        if s.exit.type == "rr" and p.state.get("stop_level") is not None:     # fixed stop level, R-multiple target
+            stop = p.state["stop_level"]
+            tgt = p.state["spot"] + p.d * s.exit.target_r * abs(p.state["spot"] - stop)
+            target = f"Target: {p.sym} {tgt:,.0f} (1:{s.exit.target_r:g})"
         ob = engine.opt.bar(p.sym, p.day, p.strike, p.side, p.signal_t)
         lines = [f"ENTRY (paper) {p.sym} {p.strike:g} {p.side} at {_hm(p.signal_t + 60)}",
                  f"Setup: {s.name} [{s.status}]",
@@ -55,7 +60,7 @@ class Alerts:
                  f"Option last: ₹{ob[3]:.2f}" if ob else "Option price: next minute's open",
                  f"Stop: {p.sym} {'below' if p.d > 0 else 'above'} {stop:,.0f} or premium {s.exit.premium_stop_pct:g}%"
                  if stop else f"Stop: premium {s.exit.premium_stop_pct:g}%",
-                 "Target: trailing exit, the exit card will come",
+                 target,
                  self.evidence.get(p.setup, "")]
         self._send("\n".join(x for x in lines if x))
 

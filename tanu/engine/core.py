@@ -10,6 +10,8 @@ Features per minute m (all known at the close of minute m):
   Morning (0.10.0, % of the previous close): gap (09:15 open vs previous close), first5 (close of the first 5-minute
   candle, 09:19, vs previous close; from 09:19), first5_body (that candle's close - open; negative = red),
   vs_first5 (now vs that candle's close). long = 1, so d_long is the direction (d_long > 0: calls only).
+  Higher timeframes (0.11.0, tanu.engine.tf): ealert_<tf>m_<n> / ealert_<tf>m_<n>_stop, built only when a setup
+  names them.
 Fills: a signal at the close of minute m fills at the option's open of minute m+1, paying half the spread plus one
 tick; exits receive half the spread minus one tick; charges at the day's rates. Theta is inside the option prices.
 """
@@ -22,6 +24,7 @@ from dataclasses import dataclass, field
 from ..data.facts import Facts
 from ..setups.registry import OPS, Setup
 from ..state.day import DayContext, classify
+from .tf import EmaAlerts, needed
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 OPEN_MIN = 9 * 60 + 15
@@ -77,8 +80,9 @@ class SymState:
     atr: float | None = None
     prev_feat: dict = field(default_factory=dict)
     dte: int | None = None
-    traded: set = field(default_factory=set)
-    c5: float | None = None                     # close of the first 5-minute candle (minute 4, 09:19)
+    traded: collections.Counter = field(default_factory=collections.Counter)
+    c5: float | None = None
+    tfs: list = field(default_factory=list)        # EmaAlerts trackers the setups ask for                     # close of the first 5-minute candle (minute 4, 09:19)
 
 
 class Engine:
@@ -97,6 +101,9 @@ class Engine:
         self.open: list[Position] = []
         self.closed: list[Position] = []
         self.signals: list[dict] = []
+        self.carry_ema: dict[tuple, float] = {}
+        names = [c[0] for s in setups for c in s.when] + [s.exit.stop_feature for s in setups]
+        self.tf_needed = sorted(needed(names))
         self.listeners: list = []           # objects with any of on_signal / on_fill / on_close(engine, position)
 
     def _emit(self, what: str, p: Position) -> None:
@@ -115,12 +122,16 @@ class Engine:
         if hasattr(self.opt, "expiry"):
             exp = self.opt.expiry(sym, day)
             dte = (dt.date.fromisoformat(exp) - dt.date.fromisoformat(day)).days if exp else None
-        self.sym[sym] = SymState(sym=sym, ctx=ctx, day=day, atr=self.carry_atr.get(sym), dte=dte)
+        self.sym[sym] = SymState(sym=sym, ctx=ctx, day=day, atr=self.carry_atr.get(sym), dte=dte,
+                                 tfs=[EmaAlerts(tf, n, self.carry_ema.get((sym, tf, n))) for tf, n in self.tf_needed])
 
     def end_day(self, sym: str) -> None:
         st = self.sym.pop(sym, None)
         if st and st.atr:
             self.carry_atr[sym] = st.atr
+        for a in (st.tfs if st else []):
+            if a.ema is not None:
+                self.carry_ema[(sym, a.tf, a.n)] = a.ema
         for p in [p for p in self.open if p.sym == sym]:      # anything still open (no prices): closed unfilled
             p.reason = p.reason or "no_exit_price"
             self.open.remove(p)
@@ -134,6 +145,9 @@ class Engine:
         m = minute_of(t)
         self._update(st, m, o, h, l, c)
         feat = self._features(st, m, c)
+        for a in st.tfs:
+            sig, stop = a.on_bar(m, o, h, l, c)
+            feat[a.key], feat[a.key + "_stop"] = sig, stop
         self._manage(st, t, m, h, l, c)
         self._signals(st, t, m, c, feat)
         st.prev_feat = feat
@@ -190,7 +204,9 @@ class Engine:
             if not (a <= m <= b):
                 continue
             for d in (1, -1):
-                if (s.id, d) in st.traded:
+                if st.traded[(s.id, d)] >= s.max_per_day:
+                    continue
+                if s.max_per_day > 1 and any(p.setup == s.id and p.sym == st.sym and p.d == d for p in self.open):
                     continue
                 ok = True
                 for name, op, val in s.when:
@@ -200,14 +216,19 @@ class Engine:
                         break
                 if not ok:
                     continue
-                st.traded.add((s.id, d))
+                st.traded[(s.id, d)] += 1
                 side = "CE" if d > 0 else "PE"
                 strike = self.opt.atm(st.sym, st.day, t, c, side)
                 sig = {"setup": s.id, "sym": st.sym, "day": st.day, "d": d, "t": t, "m": m, "spot": c,
                        **{k: feat[k] for k in ("day", "rel", "burst", "twap_rel")}}
                 self.signals.append(sig)
+                if s.exit.type == "rr":
+                    sig["stop_level"] = feat.get(s.exit.stop_feature)
                 if strike is None:
                     sig["skipped"] = "no option prices"
+                    continue
+                if s.exit.type == "rr" and (sig["stop_level"] is None or (c - sig["stop_level"]) * d <= 0):
+                    sig["skipped"] = "no valid stop level"
                     continue
                 p = Position(setup=s.id, sym=st.sym, day=st.day, d=d, strike=strike, side=side, signal_t=t, state=sig)
                 self.open.append(p)
@@ -230,6 +251,9 @@ class Engine:
                 p.und_entry = spot
                 atr = st.atr or (st.hi - st.lo) / 3
                 p.stop = spot - p.d * ex.atr_init * atr
+                if ex.type == "rr":                              # fixed stop level and an R-multiple target
+                    p.stop = p.state["stop_level"]
+                    p.state["target_level"] = spot + p.d * ex.target_r * abs(spot - p.stop)
                 p.best = spot
                 p.peak = p.trough = p.entry
                 self._emit("on_fill", p)
@@ -247,6 +271,8 @@ class Engine:
                 continue
             p.peak = max(p.peak, ob[1])
             p.best = max(p.best, h) if p.d > 0 else min(p.best, l)
+            if ex.type == "rr":                                  # fixed levels: no trail
+                continue
             trail = p.best - p.d * ex.atr_trail * atr
             p.stop = max(p.stop, trail) if p.d > 0 else min(p.stop, trail)
 
@@ -255,8 +281,10 @@ class Engine:
         """First exit that triggers in this minute, and the option price it fills at (before the spread). Level
         exits (premium stop / trail) fill at their level; the others at the minute's close."""
         o_, oh, ol, oc = ob
-        if ex.type == "chandelier" and ((l <= p.stop) if p.d > 0 else (h >= p.stop)):
+        if ex.type in ("chandelier", "rr") and ((l <= p.stop) if p.d > 0 else (h >= p.stop)):
             return "stop", oc
+        if ex.type == "rr" and ((h >= p.state["target_level"]) if p.d > 0 else (l <= p.state["target_level"])):
+            return "target", oc
         stop_lvl = p.entry * (1 + ex.premium_stop_pct / 100)
         if ol <= stop_lvl:
             return "premium_stop", min(stop_lvl, o_)

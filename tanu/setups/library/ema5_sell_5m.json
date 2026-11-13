@@ -1,0 +1,14 @@
+{
+  "id": "ema5_sell_5m",
+  "name": "5 EMA selling side (buy put): 5-min alert candle above the 5 EMA, enter when its low breaks",
+  "why": "YouTube video sent by Mandeep, 13 Nov 2026 ('5 EMA', presenter Subhashish): alert candle closes above the 5 EMA without touching it; next candle breaks its low -> short; stop = alert high; target 1:3; up to 3 entries a day. Claim: 60-70% accuracy. Index pre-test 2022-2026 (research 0004): target first only 25% (Nifty) / 23% (Bank Nifty), +1.3 / +1.9 index points a trade before option costs. Not proven.",
+  "source": "Video: 5 EMA scalping (Mandeep 13 Nov 2026), Tanu research 0004",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "window": ["09:20", "14:45"],
+  "when": [["d_long", "<", 0], ["d_ealert_5m_5", ">", 0]],
+  "exit": {"name": "alert_high_1to3", "type": "rr", "stop_feature": "ealert_5m_5_stop", "target_r": 3,
+           "premium_stop_pct": -60, "flat_by": "15:15"},
+  "max_per_day": 3
+}

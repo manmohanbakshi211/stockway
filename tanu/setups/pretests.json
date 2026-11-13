@@ -1,9 +1,68 @@
 {
   "about": "Ideas looked at on index data before (or instead of) becoming setups. They count as ideas tried in the search's pass bar (ADR-0005), so a quick look at many versions cannot sneak a lucky one through. One line per idea; never delete.",
   "ideas": [
-    {"id": "pretest:gap_down_call_920", "date": "2026-11-13", "what": "gap-down, big red first 5-min candle, call at 09:20", "result": "Nifty 35% / Bank Nifty 50% target first (+0.4% before -0.3%); became setup gap_down_call_920 (yardstick of the idea)", "research": "0003"},
-    {"id": "pretest:gap_down_green_925", "date": "2026-11-13", "what": "same, plus the 09:20 candle closes green, call at 09:25", "result": "Nifty 3 of 16, Bank Nifty 8 of 15: dropped", "research": "0003"},
-    {"id": "pretest:gap_down_hammer_925", "date": "2026-11-13", "what": "same, plus the 09:20 candle makes a new low and closes in its top 40%, call at 09:25", "result": "Nifty 0 of 5, Bank Nifty 2 of 8: dropped", "research": "0003"},
-    {"id": "pretest:gap_down_reclaim_930", "date": "2026-11-13", "what": "same, plus back above the first candle's close by 09:30, call", "result": "Nifty 5 of 14, Bank Nifty 11 of 16; became setup gap_down_reversal", "research": "0003"}
+    {
+      "id": "pretest:gap_down_call_920",
+      "date": "2026-11-13",
+      "what": "gap-down, big red first 5-min candle, call at 09:20",
+      "result": "Nifty 35% / Bank Nifty 50% target first (+0.4% before -0.3%); became setup gap_down_call_920 (yardstick of the idea)",
+      "research": "0003"
+    },
+    {
+      "id": "pretest:gap_down_green_925",
+      "date": "2026-11-13",
+      "what": "same, plus the 09:20 candle closes green, call at 09:25",
+      "result": "Nifty 3 of 16, Bank Nifty 8 of 15: dropped",
+      "research": "0003"
+    },
+    {
+      "id": "pretest:gap_down_hammer_925",
+      "date": "2026-11-13",
+      "what": "same, plus the 09:20 candle makes a new low and closes in its top 40%, call at 09:25",
+      "result": "Nifty 0 of 5, Bank Nifty 2 of 8: dropped",
+      "research": "0003"
+    },
+    {
+      "id": "pretest:gap_down_reclaim_930",
+      "date": "2026-11-13",
+      "what": "same, plus back above the first candle's close by 09:30, call",
+      "result": "Nifty 5 of 14, Bank Nifty 11 of 16; became setup gap_down_reversal",
+      "research": "0003"
+    },
+    {
+      "id": "pretest:ema5_sell_5m_next",
+      "date": "2026-11-13",
+      "what": "5 EMA video, selling side: 5-min alert above the EMA, break of its low, stop alert high, 1:3, max 3 a day (alert lasts one candle)",
+      "result": "Nifty 3,202 trades: target 24.6% / SL 70.9%, +0.06R, +1.3 pts; Bank Nifty +0.02R, +1.9 pts (before option costs); became setup ema5_sell_5m",
+      "research": "0004"
+    },
+    {
+      "id": "pretest:ema5_sell_5m_sticky",
+      "date": "2026-11-13",
+      "what": "same, alert stays until a candle closes below the EMA",
+      "result": "same as the one-candle rule (+0.06R / +0.03R): dropped",
+      "research": "0004"
+    },
+    {
+      "id": "pretest:ema5_buy_15m_next",
+      "date": "2026-11-13",
+      "what": "5 EMA video, buying side: 15-min alert below the EMA, break of its high, stop alert low, 1:3, max 3 a day",
+      "result": "target 15% / SL 61-63%, -0.01R both indices; became setup ema5_buy_15m",
+      "research": "0004"
+    },
+    {
+      "id": "pretest:ema5_buy_15m_sticky",
+      "date": "2026-11-13",
+      "what": "same, sticky alert",
+      "result": "about 0R: dropped",
+      "research": "0004"
+    },
+    {
+      "id": "pretest:ema5_min_risk_70",
+      "date": "2026-11-13",
+      "what": "both sides with the video's minimum stop (about Rs 30-40 on the option = 70 index points)",
+      "result": "Nifty sell +0.05R (target 6%, mostly flat at close), buy -0.02R; Bank Nifty +0.02R / -0.01R: dropped",
+      "research": "0004"
+    }
   ]
 }

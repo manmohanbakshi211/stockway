@@ -6,8 +6,10 @@ A setup says, for each minute and each direction d (+1 = buy calls, -1 = buy put
            (so "d_move > 0" means "with the day's move"); "prev:" before a feature reads the previous minute
   window : entry minutes allowed, "HH:MM"-"HH:MM"
   exit   : chandelier trail on the underlying (stop atr_init x ATR, then best price - atr_trail x ATR), a premium stop,
-           and flat by a time
-One trade per setup, symbol, day and direction. Status: shadow | trial | live | retired.
+           and flat by a time; or type "rr": stop at an underlying level taken from a feature at the signal
+           (stop_feature), target at target_r x that risk
+One trade per setup, symbol, day and direction (max_per_day allows re-entries, one position at a time).
+Status: shadow | trial | live | retired.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 LIBRARY = Path(__file__).with_name("library")
 OPS = {">": lambda a, b: a > b, ">=": lambda a, b: a >= b, "<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
@@ -29,7 +31,7 @@ class Exit(BaseModel):
     "no move" exit (after no_move_min minutes the option never got no_move_gain_pct up), and flat by a time."""
     model_config = ConfigDict(extra="forbid")
     name: str = "chandelier"
-    type: Literal["chandelier", "premium", "time"] = "chandelier"
+    type: Literal["chandelier", "premium", "time", "rr"] = "chandelier"
     atr_init: float = Field(1.5, gt=0)
     atr_trail: float = Field(2.5, gt=0)
     premium_stop_pct: float = Field(-40, lt=0)
@@ -39,6 +41,14 @@ class Exit(BaseModel):
     no_move_min: int | None = Field(None, gt=0)
     no_move_gain_pct: float = Field(5, ge=0)
     flat_by: str = "15:15"
+    stop_feature: str | None = None              # type rr: feature holding the underlying stop level at the signal
+    target_r: float | None = Field(None, gt=0)   # type rr: target = entry + direction x target_r x risk
+
+    @model_validator(mode="after")
+    def _rr(self):
+        if self.type == "rr" and (not self.stop_feature or not self.target_r):
+            raise ValueError("exit type rr needs stop_feature and target_r")
+        return self
 
 
 class Setup(BaseModel):
@@ -53,6 +63,7 @@ class Setup(BaseModel):
     window: tuple[str, str]
     when: list[tuple[str, str, float | str]]
     exit: Exit = Exit()
+    max_per_day: int = Field(1, ge=1, le=10)     # entries per symbol, day and direction (one open at a time)
 
     @field_validator("when")
     @classmethod

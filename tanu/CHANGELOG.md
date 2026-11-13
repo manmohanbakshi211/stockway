@@ -3,6 +3,20 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.11.0] - 2026-11-13
+### Added
+- The "5 EMA" video (sent by Mandeep), research 0004. Gun vs bullet split first:
+  - Gun: `engine/tf.py` higher-timeframe candles with an EMA and the alert-candle rule (features
+    `ealert_<tf>m_<n>`, `ealert_<tf>m_<n>_stop`, any timeframe / period by name, EMA carried across days and into
+    live days); exit type `rr` (stop at a level from the signal, target at R x risk, no trail); setting
+    `max_per_day` (re-entries, one position at a time). Alert cards show the fixed stop and the 1:3 target.
+  - Bullets (shadow): `ema5_sell_5m` (buy PE, 5-min) and `ema5_buy_15m` (buy CE, 15-min), 1:3, max 3 a day.
+  - `pretests.json`: 5 more versions looked at (k grows by 5).
+- Index pre-test 2022-2026: target first 24.6% / 23.4% (sell, Nifty / Bank Nifty), 15% (buy), not the claimed
+  60-70%; +1.3 / +1.9 index points a trade before costs against ~7 / ~21 points of option costs.
+### Checked
+- Golden: all 6,616 earlier trades identical (full history, synthetic options). Tests: 93.
+
 ## [0.10.0] - 2026-11-13
 ### Added
 - Mandeep's 13 Nov chart idea ("9:20 par call"), research 0003:
