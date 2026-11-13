@@ -1,0 +1,12 @@
+# Tanu's own packages (installed into .venv-tanu by "Start Tanu.command"; the old app's .venv is never touched).
+numpy>=1.24
+pandas>=2.0
+pyarrow>=12
+pydantic>=2.5
+fastapi>=0.110
+uvicorn>=0.29
+websocket-client>=1.8
+protobuf>=4.25
+websockets>=12          # the rehearsal's local fake broker
+pytest>=8               # Tanu's tests (python -m pytest tanu/tests)
+httpx>=0.27             # needed by the web tests

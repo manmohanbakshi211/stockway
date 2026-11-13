@@ -3,6 +3,31 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.9.0] - 2026-11-13
+### Added
+- Cutover pieces (ADR-0009), all off until the live switch (Mandeep's go):
+  - `tanu/live/`: universe planner (bullet `universe.json`: 5 indices, all F&O stocks, nearest-expiry options around
+    the money, inside Upstox's per-connection limits, re-centred after a 2-strike move); streaming minute bars (same
+    as the tape rebuild); live option book with OptionHistory's interface; the live loop (one engine step per closed
+    minute, exchange-time bars, 2 s grace, carry-forward like replay, chain snapshots for measured costs, status file);
+    day context and carried ATR exactly as replay; morning backfill from broker candles for a late start; session;
+    supervisor `python -m tanu run` (gates, daily cycle, feed restart on a new login, end-of-day jobs).
+  - Upstox token keeper (`brokers/upstox/auth.py`): app key / secret typed into the System page, daily login through
+    Upstox's page, token until 03:30; secrets in `data/tanu/secrets/` (0700 / 0600), never shown back.
+  - Telegram alerts (`notify/`): entry / exit cards for trial / live setups only; system warnings; day summary.
+  - Rehearsal `python -m tanu rehearse <day>`: a past day through fake broker websocket -> feed process -> tape ->
+    bars -> engine -> accounts, checked against replay. Real Mac data: 23 Oct, 27 Oct (expiry), 6 Nov: same trades,
+    tape rebuilds the index bars, 0 late ticks.
+  - `python -m tanu cutover [--undo]`; settings `live` (default false) and `legacy_port` (8765).
+  - App: Today shows the live day (minute, feed, index prices, open paper trades, signals with status); System has
+    the switch-over setup (Upstox key, Telegram, switch, daily login). Setup routes refuse other web pages.
+  - "Start Tanu.command": its own environment (.venv-tanu, `tanu/requirements.txt`), never the old app's .venv.
+- Engine listeners may implement only the events they need; new `on_signal` event (alerts at the signal, before the
+  fill). Trades unchanged (golden tests).
+- Instrument list: BSE file too (SENSEX options).
+- Tests: 80 (live bars = tape rebuild, universe limits, live loop = replay, late start, full rehearsal over a
+  websocket, token keeper, alerts, Telegram, setup route guards, gates and switch).
+
 ## [0.8.0] - 2026-11-13
 ### Added
 - T5 light app (`tanu/ui/`, `python -m tanu web`, http://127.0.0.1:8790; the legacy app keeps 8765): four screens.

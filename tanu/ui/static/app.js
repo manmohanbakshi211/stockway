@@ -1,4 +1,4 @@
-// Tanu UI: four screens, read-only. No libraries; charts are plain SVG.
+// Tanu UI: four screens. Read-only except the live setup on System (saved on this Mac only). No libraries.
 "use strict";
 
 const view = document.getElementById("view");
@@ -21,14 +21,50 @@ async function get(url) {
   return j;
 }
 
+async function post(url, body) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Tanu": "1" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || j.detail || `${url} answered ${r.status}`);
+  return j;
+}
+
 function fail(e) {
   view.innerHTML = `<h1>This screen could not load</h1><p class="muted">${esc(e.message)}</p>
     <p class="muted">Check that Tanu is running (python -m tanu web), then reload.</p>`;
 }
 
 // ---------------------------------------------------------------- Today
+function liveBlock(L) {
+  if (!L || (!L.switch && !L.fresh)) return "";
+  const st = L.status, sup = L.supervisor;
+  if (!st || !L.fresh) {
+    return `<h2>Live</h2><div class="empty">${esc((sup && sup.why && sup.why[0]) || "Waiting for the market. Live numbers appear here from 09:15.")}</div>`;
+  }
+  const f = st.feed || {};
+  const spots = Object.entries(st.spots || {}).filter(([, v]) => v);
+  const sig = (st.signals || []).slice().reverse();
+  const opens = st.open || [];
+  return `<h2>Live</h2>
+    <div class="facts">
+      <div><b>${st.done ? "Closed" : `${st.minute}/${st.of}`}</b><span>${st.done ? "day done" : "minutes of the day"}</span></div>
+      <div><b class="${f.connected ? "" : "down"}">${f.connected ? "On" : "Off"}</b><span>feed${f.last_msg_ago_s != null ? `, last price ${f.last_msg_ago_s}s ago` : ""}</span></div>
+      ${spots.map(([k, v]) => `<div><b>${Number(v).toLocaleString("en-IN")}</b><span>${esc(k)}</span></div>`).join("")}
+    </div>
+    <h2>Open paper trades</h2>
+    ${opens.length ? `<div class="scroll"><table class="ledger"><tbody>${opens.map((p) => `<tr><td>${esc(p.sym)} ${p.strike} ${esc(p.side)}
+      <div class="small muted">${esc(p.setup)}</div></td><td class="num">${p.entry != null ? "₹" + p.entry.toFixed(2) : "filling"}<div class="small muted">bought</div></td>
+      <td class="num">${p.last != null ? "₹" + Number(p.last).toFixed(2) : "–"}<div class="small muted">now</div></td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted">None open.</p>`}
+    <h2>Signals today</h2>
+    ${sig.length ? `<div class="scroll"><table class="ledger"><tbody>${sig.map((x) => `<tr><td class="small">${hm(x.t + 60)}</td>
+      <td>${esc(x.sym)} ${x.d > 0 ? "up" : "down"} <span class="status ${esc(x.status)}">${esc(x.status)}</span>
+      <div class="small muted">${esc(x.setup)}${x.skipped ? " · " + esc(x.skipped) : ""}</div></td></tr>`).join("")}</tbody></table></div>
+      <p class="muted small">Shadow signals are graded only; alerts reach your phone only for setups on trial or live.</p>`
+      : `<p class="muted">No signals yet today.</p>`}`;
+}
+
 async function today() {
-  const d = await get("/api/today");
+  const [d, L] = await Promise.all([get("/api/today"), get("/api/live").catch(() => null)]);
   document.getElementById("ver").textContent = "v" + d.version;
   const acc = Object.entries(d.accounts || {});
   const st = d.setups || {};
@@ -36,6 +72,7 @@ async function today() {
     <h1>${esc(d.headline)}</h1>
     <p class="muted">${d.live ? "Live paper trading." : "Not live yet: the old app still runs the market until the switch-over."}
       ${d.journal_day ? "Latest journal day: " + esc(d.journal_day) + "." : ""}</p>
+    ${liveBlock(L)}
     <h2>Paper accounts</h2>
     ${acc.length ? `<div class="scroll"><table class="ledger"><thead><tr><th>Account</th><th class="num">Trades</th>
       <th class="num">Won</th><th class="num">P&amp;L</th><th class="num wide">Per trade</th></tr></thead><tbody>
@@ -157,12 +194,58 @@ async function showTrade(t) {
 }
 
 // ---------------------------------------------------------------- System
+function setupBlock(u) {
+  if (!u) return "";
+  const up = u.upstox || {}, tg = u.telegram || {};
+  const step = (done, title, body) => `<div class="row"><div class="row-head"><b>${title}</b>
+    <span class="status ${done ? "live" : ""}">${done ? "Done" : "To do"}</span></div>${body}</div>`;
+  return `<h2>Switch-over setup</h2>
+    <p class="muted small">Saved only on this Mac (never shown again, never sent anywhere except Upstox / Telegram).</p>
+    <div class="rows">
+      ${step(up.app_saved, "Upstox app key and secret", `${up.app_saved ? `<p class="muted small">Saved. To change, enter new ones.</p>` : ""}
+        <form class="form" data-form="upstox">
+        <label>API key<input name="api_key" type="password" autocomplete="off" required></label>
+        <label>API secret<input name="api_secret" type="password" autocomplete="off" required></label>
+        <p class="muted small">From the Upstox developer page (your app). Its redirect URL must be ${esc(u.redirect_uri)}</p>
+        <button type="submit">Save</button><span class="msg small" role="status"></span></form>`)}
+      ${step(tg.saved, "Telegram alerts", `<form class="form" data-form="telegram">
+        <label>Bot token<input name="bot_token" type="password" autocomplete="off" required></label>
+        <label>Chat id<input name="chat_id" inputmode="numeric" autocomplete="off" required></label>
+        <button type="submit">Save and send a test</button><span class="msg small" role="status"></span></form>
+        ${tg.last_error ? `<p class="warn small">Last send failed: ${esc(tg.last_error)}</p>` : ""}`)}
+      ${step(u.switch, "Live switch", u.switch ? `<p class="small">On. Tanu runs the market; the old app stays closed.</p>`
+        : `<p class="muted small">Off until your go. ${u.legacy_running ? "The old app is running now." : ""}</p>`)}
+      ${step(up.logged_in, "Daily Upstox login", up.logged_in
+        ? `<p class="small">Logged in${up.user ? " as " + esc(up.user) : ""}, valid till ${esc((up.expires_at || "").slice(11, 16))} tomorrow.</p>`
+        : u.switch ? `<p><a class="button" href="/upstox/login">Log in with Upstox</a></p>`
+        : `<p class="muted small">Opens after the switch-over.</p>`)}
+    </div>`;
+}
+
+function wireForms() {
+  document.querySelectorAll("form[data-form]").forEach((f) => f.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const msg = f.querySelector(".msg");
+    const body = Object.fromEntries(new FormData(f).entries());
+    msg.textContent = "Saving…";
+    try {
+      const r = await post(`/api/setup/${f.dataset.form}`, body);
+      f.reset();
+      msg.textContent = r.message || "Saved.";
+      setTimeout(route, 1200);
+    } catch (e) { msg.textContent = e.message; msg.className = "msg small warn"; }
+  }));
+}
+
 async function system() {
-  const d = await get("/api/system");
+  const [d, u] = await Promise.all([get("/api/system"), get("/api/setup").catch(() => null)]);
   const mark = { ok: "OK", warn: "Check", fail: "Fix" };
   const mb = (b) => (b / 1e6).toFixed(b < 1e7 ? 1 : 0) + " MB";
   view.innerHTML = `<h1>System</h1>
     <p class="muted">Version ${esc(d.version)}. Free disk ${d.free_gb} GB. Tanu reads market data only and never places an order.</p>
+    ${location.hash.includes("login=ok") ? `<p class="up">Logged in with Upstox.</p>` : location.hash.includes("login=failed") ? `<p class="down">Upstox login did not finish. Try again.</p>` : ""}
+    ${setupBlock(u)}
+    <h2>Checks</h2>
     <div class="scroll"><table class="ledger"><tbody>${d.checks.map((c) => `<tr><td>${esc(c.check)}</td>
       <td class="${c.status === "ok" ? "" : c.status === "warn" ? "warn" : "down"}">${mark[c.status]}</td><td class="small">${esc(c.why)}</td></tr>`).join("")}
     </tbody></table></div>
@@ -174,6 +257,7 @@ async function system() {
     ${d.logs.length ? `<div class="scroll"><table class="ledger"><tbody>${d.logs.map((l) => `<tr><td class="small">${esc((l.ts || "").slice(11, 19))}</td>
       <td class="small ${l.level === "ERROR" ? "down" : l.level === "WARNING" ? "warn" : ""}">${esc(l.comp)}: ${esc(l.event)}</td></tr>`).join("")}</tbody></table></div>`
       : `<p class="muted">No log lines yet.</p>`}`;
+  wireForms();
 }
 
 // ---------------------------------------------------------------- router

@@ -29,3 +29,15 @@ Thresholds are settings; breaches log a WARNING and send one Telegram message (n
 
 ## Daily gap report (planned, T1)
 After the close: minutes missing per symbol, feed down time, slow passes, instruments without updates.
+
+## Live events (0.9.0)
+| Component | Events |
+|---|---|
+| supervisor | `web_started`, `view_only` (with the gate reasons), `supervisor_state` (idle / login / live / eod), `cutover_switch`, `backfilled_morning`, `feed_restarted_with_new_login`, `feed_restarted_after_pause`, `instruments_download_failed`, `eod_done`, `eod_bars_failed` |
+| session | `session_ready` (indices, traded, stocks, options, setups, notes), `session_started` (subscribed per mode), `feed_silent` (WARNING), `session_stopped` |
+| live | `subscriptions_changed`, `live_day_done` (ticks, messages, minutes, late ticks, bars) |
+| universe | `universe_trimmed` (WARNING: keys dropped to stay inside Upstox limits) |
+| upstox_auth | `upstox_app_saved`, `upstox_logged_in` (expiry only, never the token) |
+| telegram / alerts | `telegram_saved`, `telegram_failed`, `telegram_queue_full`, `alert_failed` |
+| rehearsal | `rehearsal_done` (day, passed, trades) |
+The live status for the app is `data/tanu/live/status.json` (rewritten every minute).

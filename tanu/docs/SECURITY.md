@@ -9,6 +9,9 @@
 | Malicious downloaded file runs code | downloads (videos, books, data) are data only: parsed, never executed; kept in their own folder |
 | A third-party package misbehaves | dependencies pinned in requirements.txt; new ones need an ADR |
 | Data loss | tape is append-only; raw data never edited; derived data rebuildable |
+| Another web page (or a DNS trick) uses Tanu's setup routes | routes answer only to Host 127.0.0.1 / localhost on Tanu's port, refuse a foreign Origin and need the X-Tanu header (a cross-site page cannot send it without a preflight Tanu never approves) |
+| A forged Upstox callback | the login `state` is random per login and checked; the code is exchanged only for the app saved on this Mac |
+| Two live feeds / two token keepers | gates: legacy port 8765 must be silent, one live lock, switch on (ADR-0009) |
 
 ## Secrets
 - Never in code, settings files, logs, git, issues or chat: Upstox / Kite / Dhan tokens, API secrets, PINs, TOTP keys,
@@ -16,6 +19,9 @@
 - Files (gitignored, never read or copied by Claude): `data/upstox_token.json`, `data/kite_token.json`, `data/dhan_*`,
   `user_settings.json`.
 - Kite / Dhan keys are entered by Mandeep on the Mac only.
+- Tanu's own secrets (ADR-0009): typed by Mandeep into the System page on the Mac; saved in `data/tanu/secrets/`
+  (folder 0700, files 0600: `upstox_app`, `upstox_token`, `telegram`); the app only says "saved", never shows them;
+  Tanu never reads the legacy app's token or settings files.
 
 ## Reporting
 Anything that looks like an order call, a token in a log, or an unexpected network destination: stop, log it as

@@ -107,3 +107,11 @@ select { font: inherit; color: var(--ink); background: var(--sheet); border: 1px
 ul.plain { padding-left: 18px; margin: 6px 0; }
 @media (prefers-reduced-motion: no-preference) { .detail { animation: open .18s ease-out; } }
 @keyframes open { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* live setup forms */
+.form { display: grid; gap: 8px; margin-top: 8px; max-width: 420px; }
+.form label { display: grid; gap: 2px; font-size: 14px; color: var(--muted); }
+input { font: inherit; color: var(--ink); background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius-s); padding: 8px 10px; width: 100%; }
+button, .button { font: inherit; font-weight: 600; color: #fff; background: var(--pen); border: 0; border-radius: var(--radius-s); padding: 9px 14px;
+  cursor: pointer; text-decoration: none; display: inline-block; justify-self: start; }
+.msg { color: var(--muted); }

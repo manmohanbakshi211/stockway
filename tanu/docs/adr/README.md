@@ -13,3 +13,4 @@ supersedes it. Template: copy [0000-template.md](0000-template.md).
 | [0006](0006-tick-tape.md) | Raw tick tape as the source of truth for replay | Accepted |
 | [0007](0007-no-overlap-with-legacy.md) | No overlap with the legacy app before cutover | Accepted |
 | [0008](0008-costs-are-measured.md) | Option costs are measured from live quotes, not assumed | Accepted |
+| [0009](0009-cutover.md) | How Tanu takes over the market day: one switch, gates, port 8765, secrets, rehearsal, rollback | Accepted (switch off) |

@@ -41,12 +41,17 @@ computed.
 Horizon plugins (later): intraday options (first), swing / positional, investing (fundamentals + factors), ETF / MF.
 They reuse layers 0-4 and 6-9; only setups and holding horizons differ.
 
-## 3. Processes (target)
-| Process | Does | Why separate |
+## 3. Processes (0.9.0)
+| Process / thread | Does | Why separate |
 |---|---|---|
-| `tanu-feed` | websocket, decode, tape writer | never falls behind the broker, whatever the analysis does |
-| `tanu-engine` | state, setups, paper, journal | heavy work cannot slow the feed |
-| `tanu-web` | UI + API | pages cannot slow trading logic |
+| `tanu-feed` (process) | websocket, decode, tape writer | never falls behind the broker, whatever the analysis does |
+| supervisor (`python -m tanu run`) | gates, daily cycle, live loop (minute bars -> engine -> accounts -> journal -> alerts), end-of-day jobs | one place decides when anything touches the broker (ADR-0009) |
+| `tanu-minute-clock` (thread) | closes each minute 2 s after it ends (wall clock live, exchange time in a rehearsal) | the engine steps on time even in a quiet minute |
+| `tanu-web` (thread) | UI + API on 127.0.0.1 | pages cannot slow trading logic |
+| `tanu-telegram` (thread) | queued alerts, one a second | a slow phone API never blocks the engine |
+
+Live path = replay path (ADR-0004): `live/universe` -> `data/feed` -> `live/bars` -> `live/options` + `engine/core`
+-> `paper/accounts` -> `journal/store` -> `notify/alerts`; checked by `python -m tanu rehearse <day>`.
 Talk over local pipes / files; each process logs with its own component name and the same run id scheme.
 
 ## 4. Boundaries and rules

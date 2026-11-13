@@ -16,6 +16,8 @@ Test files are named `test_tanu_*.py` so they never clash with legacy test names
 | Golden replay (T1/T3) | determinism (ADR-0004) | a recorded fake day replays to the same bars, signals and paper trades |
 | Fake broker (T1) | feed + tape end to end | local websocket server speaking the broker format; disconnects and resubscribes |
 | UI (T5) | pages work | headless browser: no console errors, no sideways scroll at 390 px |
+| Live = replay (0.9.0) | the live loop gives the same trades as replay | ticks of a day through the live loop vs history replay of the day; a late start with morning backfill |
+| Rehearsal (0.9.0) | the whole live path | fake broker websocket -> feed process -> tape -> bars -> engine -> accounts == replay; tape rebuilds the bars; also run on real Mac days (`python -m tanu rehearse <day>`) |
 
 ## Rules
 - Every bug fix comes with a test that failed before the fix.

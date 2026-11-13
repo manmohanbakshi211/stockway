@@ -93,13 +93,16 @@ class Engine:
         self.open: list[Position] = []
         self.closed: list[Position] = []
         self.signals: list[dict] = []
-        self.listeners: list = []           # objects with on_fill(engine, position) / on_close(engine, position)
+        self.listeners: list = []           # objects with any of on_signal / on_fill / on_close(engine, position)
 
     def _emit(self, what: str, p: Position) -> None:
         for li in self.listeners:
+            fn = getattr(li, what, None)                # a listener implements only the events it needs
+            if fn is None:
+                continue
             try:
-                getattr(li, what)(self, p)
-            except Exception as e:                      # a listener (account, journal) can never stop the engine
+                fn(self, p)
+            except Exception as e:                      # a listener (account, journal, alert) can never stop the engine
                 p.state.setdefault("listener_errors", []).append(f"{type(li).__name__}.{what}: {e}")
 
     # ---------------------------------------------------------------- day lifecycle
@@ -195,8 +198,9 @@ class Engine:
                 if strike is None:
                     sig["skipped"] = "no option prices"
                     continue
-                self.open.append(Position(setup=s.id, sym=st.sym, day=st.day, d=d, strike=strike, side=side,
-                                          signal_t=t, state=sig))
+                p = Position(setup=s.id, sym=st.sym, day=st.day, d=d, strike=strike, side=side, signal_t=t, state=sig)
+                self.open.append(p)
+                self._emit("on_signal", p)                       # live alerts go out at the signal, before the fill
 
     # ---------------------------------------------------------------- positions
     def _setup(self, sid: str) -> Setup:

@@ -16,7 +16,12 @@ to Tanu.
 | `costs/tradeable_<day>.json`, `costs/all_days.parquet` | round-trip cost per underlying and the tradeable list (on trial) | JSON / Parquet | T2 ✅ |
 | `store/journal.db` | paper trades with footprints (per account) and refused signals with reasons | SQLite | T4 ✅ |
 | `journal/review_<day>.{md,json}`, `research/hypotheses.jsonl` | evening reviews and the questions they raise | Markdown / JSON | T4 ✅ |
-| `local.json` | this machine's setting overrides | JSON | T0 ✅ |
+| `local.json` | this machine's setting overrides (`live`, `web_port` after cutover) | JSON | T0 ✅ |
+| `secrets/{upstox_app,upstox_token,telegram}.json` | typed in on the System page; folder 0700, files 0600; never shown back | JSON | 0.9.0 ✅ |
+| `instruments/<day>_{NSE,BSE}.json.gz` | the broker's instrument list of the day (public file) | gzip JSON | 0.9.0 ✅ |
+| `live/status.json`, `live/eod_<day>.json`, `live/live.lock` | the live day for the app (every minute), end-of-day report, one-live-Tanu lock | JSON | 0.9.0 ✅ |
+| `live/chains/<day>.parquet` | option quotes every minute (sym, ts, expiry, side, strike, bid, ask, ltp, oi, iv, spot) for measured costs | Parquet zstd | 0.9.0 ✅ |
+| `rehearsal/<day>/` | a rehearsal's own tape, journal, status, trades (live vs replay) and report | mixed | 0.9.0 ✅ |
 
 ## Tape format (built: `tanu/data/tape.py`, ADR-0006)
 - File: header `TANUTAPE2\n` + one JSON line (`source`, `day`, `created`, `format`), then blocks.

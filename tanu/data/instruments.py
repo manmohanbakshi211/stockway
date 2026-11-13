@@ -11,6 +11,7 @@ from pathlib import Path
 from ..core import safety
 
 UPSTOX_NSE = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
+UPSTOX_BSE = "https://assets.upstox.com/market-quote/instruments/exchange/BSE.json.gz"   # SENSEX options
 
 
 def download(dest: Path | str, url: str = UPSTOX_NSE, timeout: float = 60) -> Path:
@@ -38,7 +39,7 @@ def underlyings(rows: list[dict]) -> dict[str, dict]:
     ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
     out: dict = {}
     for r in rows:
-        if r.get("segment") != "NSE_FO" or r.get("instrument_type") not in ("CE", "PE"):
+        if r.get("segment") not in ("NSE_FO", "BSE_FO") or r.get("instrument_type") not in ("CE", "PE"):
             continue
         s = r.get("underlying_symbol") or r.get("name")
         u = out.setdefault(s, {"key": r.get("underlying_key"), "is_index": r.get("underlying_type") == "INDEX",

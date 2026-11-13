@@ -163,9 +163,11 @@ class FeedProcess:
         self.connected, self.msgs, self.last_msg, self.lag_ms = False, 0, 0.0, None
         self.proc = self.cmd_q = None
         self.restarts: list = []
+        self.gave_up = False
 
     def start(self) -> None:
         self.stop_flag.clear()
+        self.gave_up = False
         self._spawn()
 
     def _spawn(self) -> None:
@@ -253,6 +255,7 @@ class FeedProcess:
         now = time.time()
         self.restarts = [x for x in self.restarts if now - x < 600] + [now]
         if len(self.restarts) > self.RESTARTS:
+            self.gave_up = True
             _log.error("feed_gave_up", restarts=len(self.restarts))
             return
         _log.warning("feed_restarting")

@@ -1,0 +1,11 @@
+{
+  "about": "What the live feed watches (bullet, dated). Indices and every F&O stock with its nearest-expiry options around the money, inside Upstox's per-connection limits (standard plan, Nov 2026: one connection may hold ltpc 2000 + option_greeks 2000 + full 1500 keys when modes are mixed). If the plan does not fit, stock options are dropped first (most expensive stocks first) and the drop is logged. Changing this needs a CHANGELOG line.",
+  "valid_from": "2026-11-13",
+  "indices": ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"],
+  "index_strikes_each_side": 10,
+  "stock_strikes_each_side": 1,
+  "stocks": "all",
+  "recenter_after_strikes": 2,
+  "modes": {"index": "full", "index_option": "full", "stock": "full", "stock_option": "option_greeks"},
+  "limits": {"full": 1500, "option_greeks": 2000, "ltpc": 2000}
+}

@@ -6,7 +6,8 @@ Mandeep: "ab pura manu ka system tanu se replace karna hai ... aaj se samajh lo 
   recordings) only until Tanu's cutover (tanu/docs/adr/0002-replace-legacy-with-tanu.md).
 - All new work goes in **tanu/**, under **tanu/CLAUDE.md** and tanu/docs/. No imports between tanu/ and the legacy
   code either way; Tanu writes only under data/tanu/ and opens no broker connection before cutover
-  (tanu/docs/adr/0007-no-overlap-with-legacy.md). Tested by tanu/tests/test_tanu_boundaries.py.
+  (tanu/docs/adr/0007-no-overlap-with-legacy.md); the switch-over is ADR-0009 ("Start Tanu.command", `python -m tanu
+  cutover` only on Mandeep's go). Tested by tanu/tests/test_tanu_boundaries.py and test_tanu_live.py.
 - The rules below still hold for both (safety first); the legacy release rules apply only if the legacy code must be
   touched at all.
 

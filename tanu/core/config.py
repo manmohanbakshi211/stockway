@@ -26,7 +26,9 @@ class Settings(BaseModel):
     log_keep_days: int = Field(30, ge=1, le=3650)
     min_free_disk_gb: float = Field(10, ge=0)
     timezone: str = "Asia/Kolkata"
-    web_port: int = Field(8790, ge=1024, le=65535)     # the legacy app uses 8765: never the same port
+    web_port: int = Field(8790, ge=1024, le=65535)     # 8765 (the Upstox redirect URL's port) only after cutover
+    live: bool = False                                 # the cutover switch (ADR-0009): only `python -m tanu cutover` sets it
+    legacy_port: int = Field(8765, ge=1024, le=65535)  # the legacy app's port: Tanu never goes live while it answers
 
     @field_validator("log_level")
     @classmethod

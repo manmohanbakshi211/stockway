@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .core import config, paths
 
-PACKAGES = ("numpy", "pandas", "pyarrow", "pydantic", "fastapi", "websocket", "google.protobuf")
+PACKAGES = ("numpy", "pandas", "pyarrow", "pydantic", "fastapi", "uvicorn", "websocket", "google.protobuf")
 
 
 def checks(s: config.Settings | None = None) -> list[dict]:

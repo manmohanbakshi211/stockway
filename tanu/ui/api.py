@@ -1,5 +1,8 @@
-"""The web API behind the four screens. Read-only: it only reads Tanu's own files (and legacy option files in place
-for trade charts); it never writes, never reaches a broker, and binds to 127.0.0.1 (see `python -m tanu web`)."""
+"""The web API behind the four screens, on 127.0.0.1 only. Screens are read-only: they read Tanu's own files (and
+legacy option files in place for trade charts). The only writes are the live setup on the System page: the Upstox app
+key / secret, the daily Upstox login and the Telegram details, saved as secrets on this machine (never shown back).
+Those routes refuse requests from other web pages (Origin / Host / X-Tanu checks) and the Upstox login answers only
+after cutover (settings `live`, ADR-0009)."""
 from __future__ import annotations
 
 import datetime as dt
@@ -9,11 +12,12 @@ from collections import Counter
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
+from ..core.secrets import Secrets
 from ..journal import review
 from ..journal.store import Journal
 from ..setups import registry
@@ -34,10 +38,29 @@ def _latest(folder: Path, pattern: str) -> Path | None:
     return fs[-1] if fs else None
 
 
-def create_app(base: Path | str, legacy_history: Path | str | None = None) -> FastAPI:
+def create_app(base: Path | str, legacy_history: Path | str | None = None, *, settings=None, keeper=None,
+               telegram=None, supervisor=None) -> FastAPI:
+    from ..brokers.upstox.auth import TokenKeeper, redirect_uri
+    from ..core import config
+    from ..notify.telegram import Telegram
     base = Path(base)
     app = FastAPI(title="Tanu", docs_url=None, redoc_url=None)
     jpath = base / "store" / "journal.db"
+    s = settings or config.load()
+    sec = Secrets(base)
+    keeper = keeper or TokenKeeper(sec)
+    telegram = telegram or Telegram(sec)
+    hosts = {f"127.0.0.1:{s.web_port}", f"localhost:{s.web_port}"}
+
+    def guard(request: Request, write: bool = True) -> None:
+        """Only this machine's own app page may use the setup routes (no other web page, no DNS tricks)."""
+        if request.headers.get("host") not in hosts:
+            raise HTTPException(403, "Open Tanu at http://127.0.0.1:%d" % s.web_port)
+        origin = request.headers.get("origin")
+        if origin and origin.split("://", 1)[-1] not in hosts:
+            raise HTTPException(403, "Request from another web page refused.")
+        if write and request.headers.get("x-tanu") != "1":
+            raise HTTPException(403, "Request refused.")
 
     def journal() -> Journal | None:
         return Journal(jpath) if jpath.exists() else None
@@ -65,7 +88,7 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None) -> Fa
         hyp_f = base / "research" / "hypotheses.jsonl"
         hyps = [json.loads(x) for x in hyp_f.read_text().splitlines()[-5:]] if hyp_f.exists() else []
         passed = [k for k, v in latest_report().items() if v.get("passes")]
-        return {"version": __version__, "live": False,
+        return {"version": __version__, "live": s.live,
                 "headline": _headline(rev, setups, passed),
                 "journal_day": day,
                 "accounts": {a: x["summary"] for a, x in (rev or {}).get("accounts", {}).items()},
@@ -130,6 +153,69 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None) -> Fa
         return {"version": __version__, "checks": checks(), "sizes": sizes,
                 "free_gb": round(shutil.disk_usage(base if base.exists() else Path(".")).free / 1e9, 1),
                 "import": {"at": imp.get("at"), "totals": imp.get("totals")}, "logs": tail[::-1]}
+
+    @app.get("/api/live")
+    def live():
+        st = _json(base / "live" / "status.json", None)
+        fresh = bool(st) and (dt.datetime.now(IST) - dt.datetime.fromisoformat(st["at"])).total_seconds() < 120
+        return {"switch": s.live, "status": st, "fresh": fresh,
+                "supervisor": getattr(supervisor, "state", None) if supervisor else None}
+
+    @app.get("/api/setup")
+    def setup(request: Request):
+        guard(request, write=False)
+        from ..live.app import port_in_use
+        legacy = s.web_port != s.legacy_port and port_in_use(s.legacy_port)
+        up = keeper.status()
+        return {"switch": s.live, "web_port": s.web_port, "legacy_running": legacy,
+                "redirect_uri": redirect_uri(s.legacy_port), "upstox": up,
+                "telegram": {"saved": telegram.configured(), "sent": telegram.sent, "failed": telegram.failed,
+                             "last_error": telegram.last_error},
+                "mode": getattr(supervisor, "state", None) if supervisor else None}
+
+    @app.post("/api/setup/upstox")
+    async def setup_upstox(request: Request):
+        guard(request)
+        b = await request.json()
+        try:
+            keeper.save_app(b.get("api_key", ""), b.get("api_secret", ""))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"ok": True, "upstox": keeper.status()}
+
+    @app.post("/api/setup/telegram")
+    async def setup_telegram(request: Request):
+        guard(request)
+        b = await request.json()
+        try:
+            telegram.save(b.get("bot_token", ""), b.get("chat_id", ""))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        ok, why = telegram.send_now("Tanu is connected. Alerts for setups on trial or live will come here.")
+        return {"ok": ok, "message": "Test message sent." if ok else f"Saved, but the test message failed: {why}"}
+
+    @app.get("/upstox/login")
+    def upstox_login(request: Request):
+        guard(request, write=False)
+        if not s.live:
+            raise HTTPException(409, "Upstox login opens only after the switch-over (cutover).")
+        try:
+            return RedirectResponse(keeper.start_login(s.legacy_port), status_code=302)
+        except PermissionError as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/upstox/callback")
+    def upstox_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+        guard(request, write=False)
+        if not s.live:
+            raise HTTPException(409, "Upstox login opens only after the switch-over (cutover).")
+        if error or not code:
+            return RedirectResponse("/#system?login=failed", status_code=302)
+        try:
+            keeper.finish_login(code, state or "", s.legacy_port)
+        except PermissionError:
+            return RedirectResponse("/#system?login=failed", status_code=302)
+        return RedirectResponse("/#system?login=ok", status_code=302)
 
     @app.get("/")
     def index():

@@ -10,6 +10,9 @@
   search                     every setup x every exit variant x every filter (setups/exits.json), ledger-controlled
   review <day>               the evening review of the paper accounts for that day (from the journal)
   web                        open the app on this machine only (http://127.0.0.1:<web_port>, default 8790)
+  run                        what Start Tanu runs: the app, and after cutover the live market day (ADR-0009)
+  rehearse <day>             play a past day through the whole live path (fake broker) and check it against replay
+  cutover [--undo]           turn the live switch on (Mandeep's go only) or off again
 """
 from __future__ import annotations
 
@@ -36,9 +39,34 @@ def main(argv: list[str] | None = None) -> int:
         d = paths.ensure(s)
         log.setup(d["logs"], s.log_level, s.log_keep_days)
         log.get("web").info("web_started", port=s.web_port)
-        uvicorn.run(create_app(d["base"], paths.LEGACY_DATA / "history"), host="127.0.0.1", port=s.web_port,
+        uvicorn.run(create_app(d["base"], paths.LEGACY_DATA / "history", settings=s), host="127.0.0.1", port=s.web_port,
                     log_level="warning")
         return 0
+    if cmd == "run":
+        from .live.app import Supervisor
+        return Supervisor().run()
+    if cmd == "cutover":
+        from .core import config, log, paths
+        from .live.app import cutover
+        s = config.load()
+        d = paths.ensure(s)
+        log.setup(d["logs"], s.log_level, s.log_keep_days)
+        print(cutover(d["base"], undo="--undo" in argv[1:], s=s))
+        return 0
+    if cmd == "rehearse":
+        from .core import config, log, paths
+        from .live.rehearse import rehearse
+        if len(argv) < 2:
+            print(__doc__)
+            return 2
+        s = config.load()
+        d = paths.ensure(s)
+        log.setup(d["logs"], s.log_level, s.log_keep_days)
+        rep = rehearse(argv[1], d["base"], paths.LEGACY_DATA / "history")
+        print(json.dumps({k: v for k, v in rep.items() if k != "differences"}, indent=1, default=str))
+        if rep["differences"]:
+            print("differences:", json.dumps(rep["differences"][:5], indent=1, default=str))
+        return 0 if rep["passed"] else 1
     if cmd in ("import-legacy", "tape-summary", "bars", "costs", "research", "search", "review"):
         from .core import config, log, paths
         s = config.load()
@@ -82,24 +110,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _costs(day: str, d: dict) -> int:
-    import pandas as pd
-
     from .core import paths
-    from .costs import measure, tradeable
-    from .data import instruments
-    chains = next((p for p in (d["base"] / "chains" / f"{day}.parquet",
-                               d["base"] / "imports" / "legacy" / "chains" / f"{day}.parquet") if p.exists()), None)
-    if chains is None:
-        print(f"No option-chain snapshots for {day}")
-        return 1
-    inst = sorted((d["base"] / "instruments").glob("*.json.gz")) or sorted((paths.LEGACY_DATA / "instruments").glob("NSE_*.json.gz"))
-    lots = {s: u["lot"] for s, u in instruments.underlyings(instruments.load(inst[-1])).items()} if inst else {}
-    lab_path = paths.LEGACY_DATA / "lab5y" / "lab" / "factory_bars.parquet"
-    lab = measure.lab_drag(lab_path) if lab_path.exists() else None
-    items = tradeable.build(day, measure.day_spreads(pd.read_parquet(chains), day), lots, lab=lab)
-    out = tradeable.write(day, items, d["base"] / "costs")
-    print(f"{sum(i['tradeable'] for i in items)} of {len(items)} tradeable -> {out}")
-    return 0
+    from .costs import daily
+    out, msg = daily.run(day, d["base"], paths.LEGACY_DATA)
+    print(msg)
+    return 0 if out else 1
 
 
 if __name__ == "__main__":
