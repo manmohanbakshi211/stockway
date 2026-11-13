@@ -1,0 +1,9 @@
+{
+  "about": "Ideas looked at on index data before (or instead of) becoming setups. They count as ideas tried in the search's pass bar (ADR-0005), so a quick look at many versions cannot sneak a lucky one through. One line per idea; never delete.",
+  "ideas": [
+    {"id": "pretest:gap_down_call_920", "date": "2026-11-13", "what": "gap-down, big red first 5-min candle, call at 09:20", "result": "Nifty 35% / Bank Nifty 50% target first (+0.4% before -0.3%); became setup gap_down_call_920 (yardstick of the idea)", "research": "0003"},
+    {"id": "pretest:gap_down_green_925", "date": "2026-11-13", "what": "same, plus the 09:20 candle closes green, call at 09:25", "result": "Nifty 3 of 16, Bank Nifty 8 of 15: dropped", "research": "0003"},
+    {"id": "pretest:gap_down_hammer_925", "date": "2026-11-13", "what": "same, plus the 09:20 candle makes a new low and closes in its top 40%, call at 09:25", "result": "Nifty 0 of 5, Bank Nifty 2 of 8: dropped", "research": "0003"},
+    {"id": "pretest:gap_down_reclaim_930", "date": "2026-11-13", "what": "same, plus back above the first candle's close by 09:30, call", "result": "Nifty 5 of 14, Bank Nifty 11 of 16; became setup gap_down_reversal", "research": "0003"}
+  ]
+}

@@ -12,6 +12,7 @@ acceptance checks pass. Order follows the research in claude/tanu_blueprint.md a
 | **T4** | ✅ 0.7.0 paper accounts + risk + journal + deterministic evening review (AI write-up later); Sniper account (takes trial / live setups only) | fills at bid / ask with delay; every trade has a full footprint; review writes hypotheses to the queue | |
 | **T5** | ✅ 0.8.0 light app: Today · Setups · Journal (trade charts) · System; `tanu web` on 8790 | headless check: no console errors, no sideways scroll at phone width; each screen loads < 1 s | |
 | **Cutover** | ✅ 0.9.0 built: live loop, token keeper, universe, alerts, supervisor, rehearsal, Start Tanu. Left: the switch (Mandeep's go) and one clean live day | rehearsal = replay on real days ✅ (3 days); one full market day: no gaps, no errors, tape = broker candles; Mandeep's go | built, switch off |
+| **0.10.0** | Mandeep's gap-down idea (research 0003): morning features + 2 shadow setups; real-option test on the Mac next | pre-test on index ✅; research / search on the Mac | built, shadow |
 | **T6** | Video Lab: link / file → transcript → idea cards (gun vs bullet) → tests (history, recordings, shadow) | every card recorded with its result, failed ones kept | |
 | **T7** | Stock options on the low-cost list, "in play" days only | passes ADR-0005 | |
 | **T8+** | Swing / positional, investing (cash stocks), ETF, mutual funds as horizon plugins | same protocol | |

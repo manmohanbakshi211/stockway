@@ -21,6 +21,7 @@ from . import report
 from .run import SPREAD_PCT
 
 VARIANTS = Path(__file__).resolve().parents[1] / "setups" / "exits.json"
+PRETESTS = Path(__file__).resolve().parents[1] / "setups" / "pretests.json"
 BASELINE = "random_baseline"
 _log = log.get("search")
 
@@ -45,6 +46,14 @@ def ledger_ids(path: Path) -> set[str]:
     return {json.loads(line)["id"] for line in path.read_text().splitlines() if line.strip()}
 
 
+def pretest_ids(path: Path = PRETESTS) -> set[str]:
+    """Ideas looked at on index data before becoming (or instead of) setups: they count as tried."""
+    try:
+        return {i["id"] for i in json.loads(Path(path).read_text())["ideas"]}
+    except FileNotFoundError:
+        return set()
+
+
 def search(base: Path | str, legacy_history: Path | str, syms=("NIFTY", "BANKNIFTY"), entries=None,
            variants_path: Path = VARIANTS, options=None) -> dict:
     base, t0 = Path(base), time.time()
@@ -62,7 +71,7 @@ def search(base: Path | str, legacy_history: Path | str, syms=("NIFTY", "BANKNIF
     research_dir = base / "research"
     research_dir.mkdir(parents=True, exist_ok=True)
     led = research_dir / "ledger.jsonl"
-    tried = ledger_ids(led) | {s.id for s in setups}
+    tried = ledger_ids(led) | {s.id for s in setups} | pretest_ids()
     k = len([i for i in tried if not i.startswith(BASELINE + "__")])
     rep = report.evaluate(trades, baseline=BASELINE, k=k) if len(trades) else {"days": 0, "setups": [], "k": k}
     rep.update(combos=len(setups), seconds=round(time.time() - t0))

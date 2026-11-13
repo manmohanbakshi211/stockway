@@ -7,6 +7,9 @@ Features per minute m (all known at the close of minute m):
   m (minute of the session), day / rel / move (tanu.state.day.classify), burst (15-minute move / normal day range),
   twap_rel (distance from the day's average price / normal day range), or_pos (position vs the 15-minute opening
   range, +-0.5 at its edges). Direction-adjusted copies: d_move, d_burst, d_twap_rel, d_or_pos.
+  Morning (0.10.0, % of the previous close): gap (09:15 open vs previous close), first5 (close of the first 5-minute
+  candle, 09:19, vs previous close; from 09:19), first5_body (that candle's close - open; negative = red),
+  vs_first5 (now vs that candle's close). long = 1, so d_long is the direction (d_long > 0: calls only).
 Fills: a signal at the close of minute m fills at the option's open of minute m+1, paying half the spread plus one
 tick; exits receive half the spread minus one tick; charges at the day's rates. Theta is inside the option prices.
 """
@@ -75,6 +78,7 @@ class SymState:
     prev_feat: dict = field(default_factory=dict)
     dte: int | None = None
     traded: set = field(default_factory=set)
+    c5: float | None = None                     # close of the first 5-minute candle (minute 4, 09:19)
 
 
 class Engine:
@@ -141,6 +145,8 @@ class Engine:
         st.twap_sum += c
         st.n += 1
         st.closes.append(c)
+        if m == 4:
+            st.c5 = c
         if m < 15:
             st.or_hi, st.or_lo = max(st.or_hi, h), min(st.or_lo, l)
         st.bar5.append((h, l, c))
@@ -160,6 +166,11 @@ class Engine:
         f["burst"] = ((c - st.closes[0]) / pc * 100 / med) if len(st.closes) == 16 and med else None
         f["twap_rel"] = ((c - st.twap_sum / st.n) / pc * 100 / med) if med else None
         f["or_pos"] = ((c - (st.or_hi + st.or_lo) / 2) / (st.or_hi - st.or_lo)) if m >= 15 and st.or_hi > st.or_lo else None
+        f["gap"] = (st.open_ - pc) / pc * 100
+        f["first5"] = (st.c5 - pc) / pc * 100 if st.c5 is not None else None
+        f["first5_body"] = (st.c5 - st.open_) / pc * 100 if st.c5 is not None else None
+        f["vs_first5"] = (c - st.c5) / pc * 100 if st.c5 is not None else None
+        f["long"] = 1.0
         return f
 
     @staticmethod

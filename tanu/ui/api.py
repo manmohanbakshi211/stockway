@@ -113,6 +113,8 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
                                                            "run": best.get("run")}})
         led = base / "research" / "ledger.jsonl"
         ids = {json.loads(x)["id"] for x in led.read_text().splitlines() if x.strip()} if led.exists() else set()
+        from ..evaluate.search import pretest_ids
+        ids |= pretest_ids()
         k = len([i for i in ids if not i.startswith("random_baseline__")])     # yardsticks are not ideas
         return {"setups": out, "bad": bad, "ideas_tried": k}
 

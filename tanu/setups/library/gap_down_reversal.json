@@ -1,0 +1,12 @@
+{
+  "id": "gap_down_reversal",
+  "name": "Gap-down reversal: call when price climbs back above the first 5-minute candle's close",
+  "why": "Mandeep, 13 Nov 2026 (Nifty and Bank Nifty bounced from 09:20 after a gap-down). Index pre-test 2022-2026 (research 0003): Bank Nifty 11 of 16 days hit +0.4% before -0.3% when back above the first candle's close by 09:30; Nifty 5 of 14. Small sample, 3 versions looked at: not proven.",
+  "source": "Mandeep 13 Nov 2026 (chart), Tanu research 0003",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "window": ["09:20", "10:00"],
+  "when": [["d_long", ">", 0], ["first5", "<=", -0.6], ["first5_body", "<=", -0.3],
+           ["vs_first5", ">", 0], ["prev:vs_first5", "<=", 0]]
+}

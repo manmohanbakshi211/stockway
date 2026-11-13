@@ -3,6 +3,7 @@ import json
 
 from fastapi.testclient import TestClient
 
+from tanu.evaluate.search import pretest_ids
 from tanu.journal.store import Journal
 from tanu.ui.api import create_app
 
@@ -23,7 +24,7 @@ def test_empty_data_gives_clear_empty_states(tmp_path):
     assert t["headline"] == "No paper trades recorded yet." and t["accounts"] == {} and t["tradeable"]["count"] == 0
     assert c.get("/api/journal").json() == {"days": [], "trades": []}
     s = c.get("/api/setups").json()
-    assert s["ideas_tried"] == 0 and all(x["best"] is None for x in s["setups"])
+    assert s["ideas_tried"] == len(pretest_ids()) and all(x["best"] is None for x in s["setups"])
     assert c.get("/api/system").status_code == 200
     assert c.get("/api/trade", params={"account": "a", "setup": "s", "sym": "N", "day": "d", "d": 1, "entry_t": 1}).status_code == 404
 
@@ -47,7 +48,7 @@ def test_screens_read_journal_research_and_costs(tmp_path):
     assert t["tradeable"] == {"day": "2026-11-12", "count": 1, "of": 2, "cheapest": [{"sym": "BANKNIFTY", "round_trip_pct": 1.68}]}
     s = c.get("/api/setups").json()
     sm = next(x for x in s["setups"] if x["id"] == "sharp_move_trend")
-    assert s["ideas_tried"] == 2 and sm["best"]["hold"]["avg_pct"] == 1.7 and sm["variants_tested"] == 1
+    assert s["ideas_tried"] == 2 + len(pretest_ids()) and sm["best"]["hold"]["avg_pct"] == 1.7 and sm["variants_tested"] == 1
     jr = c.get("/api/journal").json()
     assert jr["day"] == "2026-11-13" and len(jr["trades"]) == 2 and jr["review"]["accounts"]["shadow"]["green_then_red"] == 1
     tr = c.get("/api/trade", params={"account": "shadow", "setup": _row()["setup"], "sym": "NIFTY", "day": "2026-11-13",

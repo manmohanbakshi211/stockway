@@ -1,0 +1,11 @@
+{
+  "id": "gap_down_call_920",
+  "name": "Gap-down, big red first candle: call at 09:20 (no confirmation)",
+  "why": "Mandeep, 13 Nov 2026: what the chart showed today. Index pre-test 2022-2026 (research 0003): Nifty 35% / Bank Nifty 50% of such days hit +0.4% before -0.3%. Expected to fail; graded with real option prices so the answer is on record.",
+  "source": "Mandeep 13 Nov 2026 (chart), Tanu research 0003",
+  "valid_from": "2026-11-13",
+  "status": "shadow",
+  "symbols": ["NIFTY", "BANKNIFTY"],
+  "window": ["09:19", "09:19"],
+  "when": [["d_long", ">", 0], ["first5", "<=", -0.6], ["first5_body", "<=", -0.3]]
+}

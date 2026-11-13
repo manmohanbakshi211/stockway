@@ -3,6 +3,21 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.10.0] - 2026-11-13
+### Added
+- Mandeep's 13 Nov chart idea ("9:20 par call"), research 0003:
+  - Gun: morning features in the engine: `gap`, `first5` (first 5-minute candle close vs previous close),
+    `first5_body`, `vs_first5`, and `long` (d_long > 0 = calls only). Known only from 09:19.
+  - Bullets (shadow, calls only, Nifty and Bank Nifty): `gap_down_call_920` (the plain 09:20 call, expected to
+    fail, on record) and `gap_down_reversal` (back above the first candle's close, 09:20-10:00).
+  - `setups/pretests.json`: versions looked at on index data count as ideas tried in the search's pass bar;
+    the Setups page counts them too.
+- Index pre-test 2022-2026: plain 09:20 call after a gap-down wins 35% (Nifty) / 50% (Bank Nifty) of such days;
+  only Bank Nifty's "back above the first candle's close" looked interesting (11 of 16). Not proven.
+### Checked
+- Golden: all 6,498 trades of the existing setups identical before and after (full history, synthetic options).
+- Tests: 84.
+
 ## [0.9.0] - 2026-11-13
 ### Added
 - Cutover pieces (ADR-0009), all off until the live switch (Mandeep's go):
