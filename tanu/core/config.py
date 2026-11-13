@@ -26,6 +26,7 @@ class Settings(BaseModel):
     log_keep_days: int = Field(30, ge=1, le=3650)
     min_free_disk_gb: float = Field(10, ge=0)
     timezone: str = "Asia/Kolkata"
+    web_port: int = Field(8790, ge=1024, le=65535)     # the legacy app uses 8765: never the same port
 
     @field_validator("log_level")
     @classmethod

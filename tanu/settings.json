@@ -4,5 +4,6 @@
   "log_level": "INFO",
   "log_keep_days": 30,
   "min_free_disk_gb": 10,
-  "timezone": "Asia/Kolkata"
+  "timezone": "Asia/Kolkata",
+  "web_port": 8790
 }

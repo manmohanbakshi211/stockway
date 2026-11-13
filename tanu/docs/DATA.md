@@ -46,3 +46,4 @@ Each entry has `valid_from`; `tanu.data.facts.Facts` returns the value valid on 
 - Facts that change are dated; old dates keep old values.
 - Derived data (bars, features) can always be rebuilt from the tape / history; never edit raw data.
 - Retention: logs `log_keep_days`; tape by free disk (`min_free_disk_gb`); everything else kept.
+- SQLite files (the journal) stay on a local disk: on a shared / network mount SQLite fails (seen 13 Nov 2026).

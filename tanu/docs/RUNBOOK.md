@@ -22,6 +22,7 @@ python -m tanu costs 2026-11-12          # that day's measured option costs and 
 python -m tanu research                  # replay all setups over history (fills the journal), learn / holdout report
 python -m tanu search                    # setups x exits x filters, ledger-controlled
 python -m tanu review 2026-11-13         # evening review of the paper accounts
+python -m tanu web                       # the app on this machine only: http://127.0.0.1:8790
 ```
 
 ## Where to look

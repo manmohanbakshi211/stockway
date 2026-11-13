@@ -12,7 +12,7 @@ Mandeep: "abhi jaisa light hai theek hai, heavy nahi chahiye, but UX achha karna
 6. **Fast:** each screen under 1 s; live numbers pushed over websockets, not polled.
 7. **Phone first:** 390 px wide, no sideways scroll, thumb-reachable actions.
 
-## Screens
+## Screens (built in 0.8.0, `tanu/ui/`)
 | Screen | Shows |
 |---|---|
 | Today | market state (index day type, with / against), radar of instruments "in play", open paper trades, today's P&L, new alert cards |

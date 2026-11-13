@@ -9,6 +9,7 @@
   research                   replay every setup over history with option prices and evaluate (learn / holdout)
   search                     every setup x every exit variant x every filter (setups/exits.json), ledger-controlled
   review <day>               the evening review of the paper accounts for that day (from the journal)
+  web                        open the app on this machine only (http://127.0.0.1:<web_port>, default 8790)
 """
 from __future__ import annotations
 
@@ -25,6 +26,18 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "version":
         from . import __version__
         print(__version__)
+        return 0
+    if cmd == "web":
+        import uvicorn
+
+        from .core import config, log, paths
+        from .ui.api import create_app
+        s = config.load()
+        d = paths.ensure(s)
+        log.setup(d["logs"], s.log_level, s.log_keep_days)
+        log.get("web").info("web_started", port=s.web_port)
+        uvicorn.run(create_app(d["base"], paths.LEGACY_DATA / "history"), host="127.0.0.1", port=s.web_port,
+                    log_level="warning")
         return 0
     if cmd in ("import-legacy", "tape-summary", "bars", "costs", "research", "search", "review"):
         from .core import config, log, paths

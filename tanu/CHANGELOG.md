@@ -3,6 +3,23 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.8.0] - 2026-11-13
+### Added
+- T5 light app (`tanu/ui/`, `python -m tanu web`, http://127.0.0.1:8790; the legacy app keeps 8765): four screens.
+  - Today: one-line answer, paper accounts, setups by status, cheapest options to buy, questions from the reviews.
+  - Setups: each setup's evidence (tuning days vs unseen days, best of N versions in plain words, why it has not
+    passed), ideas tried so far.
+  - Journal: trades by day and account in a ruled ledger; tap a trade for its footprint and charts of the
+    underlying that day and the option around the trade.
+  - System: machine checks, data sizes, import totals, latest log lines.
+  Read-only API, binds to this machine only, no outside links (works offline), light / dark, bottom tabs on phones.
+- Setting `web_port` (default 8790, never the legacy 8765).
+- Headless check (Playwright, real Mac data copy): 4 screens at 390 px and 1280 px, no console errors, no sideways
+  scroll. Tests: 70.
+### Found
+- SQLite cannot run on the VM's shared folder mount (disk I/O error); on the Mac itself it is fine. Rule added to
+  DATA: the journal stays on a local disk.
+
 ## [0.7.0] - 2026-11-13
 ### Added
 - T4 paper side:

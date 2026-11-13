@@ -7,7 +7,7 @@ professional option trader and a senior engineer would build it. It replaces the
 | | |
 |---|---|
 | Owner | Mandeep (product decisions, defaults, go-live) |
-| Status | T0 done; T1 data mostly done; T2 costs done; T3 engine + evaluator + controlled search done (research 0001 / 0002: no setup passes yet); T4 paper accounts + risk + journal + review done (v0.7.0). Legacy app still runs until cutover (see [ROADMAP](docs/ROADMAP.md)). |
+| Status | T0 done; T1 data mostly done; T2 costs done; T3 engine + evaluator + controlled search done (research 0001 / 0002: no setup passes yet); T4 paper accounts + risk + journal + review done; T5 light app done (v0.8.0, `python -m tanu web`). Legacy app still runs until cutover (see [ROADMAP](docs/ROADMAP.md)). |
 | Version | [`VERSION`](VERSION) · changes in [`CHANGELOG.md`](CHANGELOG.md) |
 
 ## What it will do
