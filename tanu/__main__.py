@@ -15,6 +15,7 @@
   cutover [--undo]           turn the live switch on (Mandeep's go only) or off again
   research-steps plan|step|finish   the research replay in chunks (for shells with a time limit)
   structures                 replay the multi-leg structures (iron condor, straddle) on real option prices
+  intel [source ...]         read the Market page's public sources once now and say which answered (display only)
 """
 from __future__ import annotations
 
@@ -68,6 +69,17 @@ def main(argv: list[str] | None = None) -> int:
                                           "rs_per_trade": r["rs_per_trade"], "passes": r.get("passes"),
                                           "why_not": r.get("why_not")} for r in rep.get("setups", [])]}, default=str))
         return 0
+    if cmd == "intel":
+        from .core import config, log, paths
+        from .detect.book import AlertBook
+        from .intel.collect import Collector
+        s = config.load()
+        d = paths.ensure(s)
+        log.setup(d["logs"], s.log_level, s.log_keep_days)
+        c = Collector(d["base"], on_alert=AlertBook(d["base"] / "live" / "alerts").add)
+        ok = c.refresh(argv[1:] or None, force=True)
+        print(json.dumps({k: ("ok" if v else c.cached(k).get("error")) for k, v in ok.items()}, indent=1))
+        return 0 if ok and all(ok.values()) else 1
     if cmd == "research-steps":
         from .core import config, log, paths
         from .evaluate import steps

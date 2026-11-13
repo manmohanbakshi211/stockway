@@ -1,0 +1,24 @@
+{
+  "about": "Display-only detectors (bullet, dated; Mandeep 13 Nov 2026: 'abhi rakho sirf dikhane ke liye'). Thresholds per detector, 'index' / 'stock' where they differ; cooldown_min = how long the same alert (symbol + kind + direction) stays quiet. Severity: 1 worth a look, 2 important, 3 act-now level. Copied from the legacy detectors (live/detectors.py, 13 Nov 2026) where Tanu has the same data; 'pace' is a stock's 5-minute volume against its own median 5-minute volume so far today (Tanu keeps no normal-volume history yet). None of these alerts places, feeds or changes a paper trade (ADR-0012).",
+  "valid_from": "2026-11-13",
+  "default_cooldown_min": 15,
+  "detectors": {
+    "sharp_move":      {"on": true, "z": 4.0, "z_top": 6.5, "min_pct": {"index": 0.2, "stock": 0.6}, "cooldown_min": 10},
+    "orb":             {"on": true, "after_min": 15, "margin_pct": {"index": 0.05, "stock": 0.15}, "min_pace": 1.2, "cooldown_min": 390},
+    "day_extreme":     {"on": true, "after_min": 30, "min_pace": 1.5, "cooldown_min": 30},
+    "vwap_cross":      {"on": true, "after_min": 30, "min_pace": 2.0, "cooldown_min": 30},
+    "volume_surge":    {"on": true, "after_min": 30, "pace": 3.0, "move_pct": 1.5, "cooldown_min": 60},
+    "unusual_options": {"on": true, "after_min": 15, "min_value_rs": {"index": 50000000, "stock": 500000},
+                        "top_value_rs": {"index": 250000000, "stock": 5000000}, "x_pace": 4.0, "x_pace_top": 8.0,
+                        "cooldown_min": 30},
+    "oi_buildup":      {"on": true, "after_min": 20, "window_min": 15, "oi_pct": 5.0, "px_pct": {"index": 0.15, "stock": 0.5},
+                        "cooldown_min": 45},
+    "oi_wall":         {"on": true, "after_min": 20, "lead": 1.1, "cooldown_min": 30},
+    "pcr_shift":       {"on": true, "after_min": 20, "shift": 0.25, "cooldown_min": 60},
+    "iv_spike":        {"on": true, "after_min": 20, "window_min": 15, "pts": 2.0, "cooldown_min": 45},
+    "candles":         {"on": true, "after_min": 15, "min_body_vs_avg": 0.8, "stocks_min_pace": 1.5, "cooldown_min": 15},
+    "patterns":        {"on": true, "after_min": 45, "tol_pct": {"index": 0.15, "stock": 0.4}, "min_gap_candles": 4,
+                        "cooldown_min": 60}
+  },
+  "intel_cooldown_min": {"news": 0, "filing": 0, "insider": 0, "fii_dii": 0, "macro": 60}
+}

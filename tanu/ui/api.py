@@ -39,7 +39,7 @@ def _latest(folder: Path, pattern: str) -> Path | None:
 
 
 def create_app(base: Path | str, legacy_history: Path | str | None = None, *, settings=None, keeper=None,
-               telegram=None, supervisor=None) -> FastAPI:
+               telegram=None, supervisor=None, collector=None) -> FastAPI:
     from ..brokers.upstox.auth import TokenKeeper, redirect_uri
     from ..core import config
     from ..notify.telegram import Telegram
@@ -64,6 +64,12 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
 
     def journal() -> Journal | None:
         return Journal(jpath) if jpath.exists() else None
+
+    from ..detect.book import AlertBook
+    from ..intel import views as market_views
+    from ..intel.collect import Collector
+    book = AlertBook(base / "live" / "alerts")
+    intel = collector or getattr(supervisor, "collector", None) or Collector(base, on_alert=book.add)
 
     def account_info() -> list[dict]:
         from ..paper.accounts import SPEC
@@ -206,6 +212,27 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
         return {"version": __version__, "checks": checks(), "sizes": sizes,
                 "free_gb": round(shutil.disk_usage(base if base.exists() else Path(".")).free / 1e9, 1),
                 "import": {"at": imp.get("at"), "totals": imp.get("totals")}, "logs": tail[::-1]}
+
+    @app.get("/api/market")
+    def market(tab: str = "context", day: str | None = None, min_sev: int = 2, sym: str | None = None,
+               kind: str | None = None):
+        """The Market page: one tab at a time from cached public sources (a stale source is read again in the
+        background). Display only."""
+        if tab == "alerts":
+            st = _json(base / "live" / "status.json", None) or {}
+            return {"tab": "alerts", "live": s.live, "detect": st.get("detect"),
+                    **book.view(day, max(1, min(3, min_sev)), sym, kind)}
+        if tab not in market_views.VIEWS:
+            raise HTTPException(404, f"No tab {tab}")
+        return market_views.tab(intel, tab, live=_json(base / "live" / "status.json", None))
+
+    @app.post("/api/market/watchlist")
+    async def watchlist(request: Request):
+        guard(request)
+        body = await request.json()
+        syms = intel.set_watch(body.get("symbols") or [])
+        intel.refresh_async(["watchlist"], force=True)
+        return {"symbols": syms}
 
     @app.get("/api/live")
     def live():

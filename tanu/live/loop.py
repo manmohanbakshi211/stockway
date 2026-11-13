@@ -30,8 +30,9 @@ _log = log.get("live")
 class LiveLoop:
     def __init__(self, engine, universe, contexts: dict, day: str, *, out_dir: Path | str, feed=None,
                  clock: str = "wall", grace_s: float = 2.0, facts: Facts | None = None, chain_every: int = 1,
-                 now=time.time):
+                 now=time.time, detect=None):
         self.eng, self.u, self.day, self.feed = engine, universe, day, feed
+        self.detect = detect                              # display-only detectors (ADR-0012); never trade
         self.opts = engine.opt
         self.clock, self.grace, self.now = clock, grace_s, now
         self.out = Path(out_dir)
@@ -147,6 +148,12 @@ class LiveLoop:
                 self.started.add(s)
             self.eng.on_bar(s, float(t), o, h, l, c)
             self.last_c[s] = c
+        if self.detect is not None:
+            try:
+                self.detect.on_minute(t, rows, self.bars.last)
+            except Exception as e:                        # a detector can never stop the live day
+                self.counts["detect_errors"] = self.counts.get("detect_errors", 0) + 1
+                _log.warning("detect_minute_failed", error=str(e)[:200])
         if m % self.chain_every == 0:
             self._snapshot(t + 60)
         self.next_m = m + 1
@@ -231,7 +238,9 @@ class LiveLoop:
         return {"day": self.day, "at": dt.datetime.fromtimestamp(self.now(), IST).isoformat(timespec="seconds"),
                 "clock": self.clock, "minute": self.next_m, "of": self.n_min, "done": self.done,
                 "traded": self.traded, "spots": {s: self.spots.get(s) for s in self.u.indices}, "counts": self.counts,
-                "feed": feed, "signals": sig[-50:], "open": opens, "closed_today": len(e.closed)}
+                "feed": feed, "signals": sig[-50:], "open": opens, "closed_today": len(e.closed),
+                "detect": ({**getattr(self.detect, "counts", {}), "failed": getattr(self.detect, "failed", {})}
+                           if self.detect is not None else None)}
 
     def write_status(self) -> None:
         p = self.out / "status.json"

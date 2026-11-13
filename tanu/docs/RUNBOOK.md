@@ -39,6 +39,7 @@ python -m tanu cutover                   # live switch ON (Mandeep's go; the old
 python -m tanu cutover --undo            # live switch OFF (rollback)
 python -m tanu research-steps plan 40    # the research replay in chunks (then: step ... until done; finish)
 python -m tanu structures               # iron condor / straddle structures on real option prices (report + journal)
+python -m tanu intel                    # read the Market page's public sources once now; prints which answered
 ```
 
 ## Where to look

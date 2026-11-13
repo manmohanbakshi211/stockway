@@ -1,4 +1,4 @@
-// Tanu UI: four screens. Read-only except the live setup on System (saved on this Mac only). No libraries.
+// Tanu UI: five screens. Read-only except the live setup on System (saved on this Mac only). No libraries.
 "use strict";
 
 const view = document.getElementById("view");
@@ -249,6 +249,220 @@ async function showTrade(t) {
   }
 }
 
+// ---------------------------------------------------------------- Market (public information, display only)
+const MTABS = [["context", "Context"], ["world", "World"], ["insiders", "Insiders"], ["watchlist", "Watchlist"],
+  ["news", "News"], ["alerts", "Alerts"]];
+const cls = (x) => (x > 0 ? "up" : x < 0 ? "down" : "");
+const chg = (x) => (x == null ? "–" : `<span class="${cls(x)}">${x > 0 ? "+" : ""}${Number(x).toFixed(2)}%</span>`);
+const num2 = (x, d = 2) => (x == null ? "–" : Number(x).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d }));
+const cr = (x) => (x == null ? "–" : `<span class="${cls(x)}">${x < 0 ? "−" : ""}₹${Math.abs(x).toLocaleString("en-IN", { maximumFractionDigits: Math.abs(x) < 100 ? 2 : 0 })} Cr</span>`);
+const ago = (s) => (s == null ? "never" : s < 90 ? "just now" : s < 5400 ? Math.round(s / 60) + " min ago" : s < 172800 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago");
+const link = (href, text) => (/^https?:\/\//.test(href || "") ? `<a class="news-title" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : esc(text));
+const when = (ts) => (ts ? new Date(ts * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }) : "");
+let marketTimer = null;
+
+function spark(line, up) {
+  if (!line || line.length < 3) return "";
+  const lo = Math.min(...line), hi = Math.max(...line), W = 72, H = 22;
+  const pts = line.map((v, i) => `${(i / (line.length - 1) * W).toFixed(1)},${(H - 2 - (v - lo) / Math.max(hi - lo, 1e-9) * (H - 4)).toFixed(1)}`).join(" ");
+  return `<svg class="spark ${up ? "up" : "down"}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><polyline points="${pts}"/></svg>`;
+}
+
+function sourcesNote(src) {
+  const bad = Object.values(src || {}).filter((s) => s.ok === false || s.stale || s.ok == null);
+  if (!bad.length) return "";
+  return `<ul class="plain sources">${bad.map((s) => `<li>${esc(s.name)}: ${s.ok == null ? (s.busy ? "reading now…" : "not read yet")
+    : s.ok === false ? `last read failed (${esc(s.error || "")})${s.age_s != null ? `; showing what was read ${ago(s.age_s)}` : ""}`
+    : `from ${ago(s.age_s)}`}</li>`).join("")}</ul>`;
+}
+
+function fiiBlock(f) {
+  if (!f || !f.FII) return `<div class="empty">FII / DII figures not read yet (NSE publishes them after the close).</div>`;
+  return `<div class="facts"><div><b>${cr(f.FII.net)}</b><span>FII / FPI net, ${esc(f.FII.date)}</span></div>
+    <div><b>${cr((f.DII || {}).net)}</b><span>DII net</span></div></div>`;
+}
+
+function poiBlock(p) {
+  if (!p || !(p.rows || []).length) return `<div class="empty">Participant positions not read yet.</div>`;
+  const k = (x) => (x == null ? "–" : Math.round(x).toLocaleString("en-IN"));
+  return `<p class="muted small">Index futures and options, contracts, ${esc(p.date)} (change on the day).</p>
+    <div class="scroll"><table class="ledger"><thead><tr><th>Who</th><th class="num">Futures long</th><th class="num">Futures net</th>
+    <th class="num wide">Calls net</th><th class="num wide">Puts net</th></tr></thead><tbody>${p.rows.map((r) => `<tr><td>${esc(r.who)}</td>
+    <td class="num">${r.fut_long_pct ?? "–"}%</td><td class="num"><span class="${cls(r.fut_net)}">${k(r.fut_net)}</span>
+    <div class="small muted">${r.fut_net_chg != null ? (r.fut_net_chg > 0 ? "+" : "") + k(r.fut_net_chg) : ""}</div></td>
+    <td class="num wide">${k(r.call_net)}</td><td class="num wide">${k(r.put_net)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+const M = {
+  context(d) {
+    const g = d.gift_nifty, b = d.ban;
+    return `<h2>Before and during the day</h2>
+      <div class="facts">${g ? `<div><b>${num2(g.last, 1)}</b><span>GIFT Nifty ${chg(g.chg_pct)}</span></div>` : ""}
+        ${(d.cues || []).map((c) => `<div><b>${num2(c.last)}</b><span>${esc(c.name)} ${chg(c.chg_pct)}</span></div>`).join("")
+          || `<div><b>–</b><span>World prices not read yet</span></div>`}</div>
+      <h2>FII and DII cash</h2>${fiiBlock(d.fii_dii)}
+      <h2>Who holds index futures and options</h2>${poiBlock(d.participant_oi)}
+      <h2>F&amp;O ban</h2>${b ? `<p>${b.ban.length ? b.ban.map(esc).join(", ") : "No stock in the ban"} <span class="muted small">(${esc(b.date)})</span></p>
+        ${b.near.length ? `<p class="muted small">Near the limit: ${b.near.map(([s, p]) => `${esc(s)} ${p}%`).join(", ")}</p>` : ""}` : `<div class="empty">Not read yet.</div>`}
+      <h2>High-impact events, next 24 hours</h2>
+      ${(d.calendar_soon || []).length ? `<div class="scroll"><table class="ledger"><tbody>${d.calendar_soon.map((e) => `<tr>
+        <td class="small nowrap">${esc(e.time.slice(5, 16).replace("T", " "))}</td><td>${esc(e.country)} ${esc(e.title)}
+        <div class="small muted">${e.forecast ? `forecast ${esc(e.forecast)}, ` : ""}${e.previous ? `previous ${esc(e.previous)}` : ""}</div></td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="muted">None.</p>`}
+      <h2>Results this week (F&amp;O stocks)</h2>
+      ${(d.results_week || []).length ? `<div class="scroll"><table class="ledger"><tbody>${d.results_week.map((e) => `<tr>
+        <td class="small nowrap">${esc(e.date.slice(5))}</td><td><b>${esc(e.sym)}</b> <span class="small muted">${esc(e.purpose)}</span></td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="muted">None listed.</p>`}
+      <h2>Company filings that matter</h2>${filingsTable(d.filings)}`;
+  },
+  world(d) {
+    return `${(d.groups || []).map((g) => `<h2>${esc(g.group)}</h2><div class="scroll"><table class="ledger"><tbody>
+      ${g.rows.map((r) => `<tr><td>${esc(r.name)}${r.stale ? ` <span class="small muted">(old)</span>` : ""}</td>
+        <td class="num">${num2(r.last)}</td><td class="num">${chg(r.chg_pct)}</td><td class="wide">${spark(r.line, r.chg_pct >= 0)}</td></tr>`).join("")}
+      </tbody></table></div>`).join("") || `<div class="empty">World prices not read yet.</div>`}
+      ${(d.adr || []).length ? `<h2>Indian ADRs vs NSE</h2><div class="scroll"><table class="ledger"><tbody>${d.adr.map((a) => `<tr>
+        <td>${esc(a.nse)}</td><td class="num">₹${num2(a.implied_inr)}<div class="small muted">ADR in ₹</div></td>
+        <td class="num">₹${num2(a.nse_inr)}<div class="small muted">NSE</div></td><td class="num">${chg(a.premium_pct)}<div class="small muted">premium</div></td></tr>`).join("")}
+        </tbody></table></div>` : ""}
+      <h2>Economic calendar this week</h2>
+      ${(d.calendar || []).length ? `<div class="scroll"><table class="ledger"><tbody>${d.calendar.map((e) => `<tr>
+        <td class="small nowrap">${esc(e.time.slice(5, 16).replace("T", " "))}</td><td>${esc(e.country)} ${esc(e.title)}
+        <div class="small muted">${esc(e.impact)}${e.forecast ? `, forecast ${esc(e.forecast)}` : ""}${e.previous ? `, previous ${esc(e.previous)}` : ""}</div></td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="muted">Not read yet.</p>`}
+      <h2>World news</h2>${newsList(d.news)}`;
+  },
+  insiders(d) {
+    const f = d.fii_dii;
+    return `<h2>FII and DII cash</h2>${fiiBlock(f)}
+      ${f && (f.history || []).length > 1 ? `<div class="scroll"><table class="ledger"><thead><tr><th>Day</th><th class="num">FII</th><th class="num">DII</th></tr></thead><tbody>
+        ${f.history.slice(0, 10).map((h) => `<tr><td class="small nowrap">${esc(h.date)}</td><td class="num">${cr(h.fii)}</td><td class="num">${cr(h.dii)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      <h2>Who holds index futures and options</h2>${poiBlock(d.participant_oi)}
+      <h2>Insider trades, last ${d.insider_days} days</h2>
+      <p class="muted small">Promoters, directors and key managers buying or selling in the market, ₹50 lakh and more (SEBI disclosures on NSE).
+        Public information filed after the trade.${d.insider_left ? ` ${d.insider_left} more filings still to read.` : ""}</p>
+      ${(d.insider_net || []).length ? `<h3>Net by stock</h3><div class="scroll"><table class="ledger"><tbody>${d.insider_net.map((r) => `<tr>
+        <td><b>${esc(r.sym)}</b> <span class="small muted">${r.trades} trade${r.trades === 1 ? "" : "s"}</span></td><td class="num">${cr(r.net_cr)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      ${(d.insiders || []).length ? `<h3>Latest</h3><div class="scroll"><table class="ledger"><tbody>${d.insiders.slice(0, 60).map((x) => `<tr>
+        <td class="small nowrap">${esc((x.traded || x.filed || "").slice(5, 10))}</td>
+        <td><b>${esc(x.sym)}</b> <span class="${x.side === "Buy" ? "up" : "down"}">${esc(x.side)}</span>
+          <div class="small muted">${esc(x.person)}, ${esc(x.category)}${x.after_pct != null ? `, holds ${num2(x.after_pct)}%` : ""}</div></td>
+        <td class="num">₹${num2(x.value / 1e7)} Cr</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty">No insider trades read yet.</div>`}
+      <h2>Bulk and block deals</h2>
+      ${(d.deals || []).length ? `<div class="scroll"><table class="ledger"><tbody>${d.deals.slice(0, 40).map((x) => `<tr>
+        <td><b>${esc(x.sym)}</b> <span class="${/^b/i.test(x.side || "") ? "up" : "down"}">${esc(x.side)}</span>
+          <div class="small muted">${esc(x.client)}, ${esc(x.type)}, ${esc(x.date)}</div></td>
+        <td class="num">₹${num2(x.value_cr)} Cr<div class="small muted">at ₹${num2(x.price)}</div></td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="muted">None read today.</p>`}`;
+  },
+  watchlist(d) {
+    return `<form class="inline-form" id="w-add"><input name="sym" placeholder="Add a symbol, e.g. TATAMOTORS" aria-label="Symbol"
+        autocomplete="off" autocapitalize="characters" maxlength="20"><button type="submit">Add</button></form>
+      <div class="chips">${d.symbols.map((s) => `<span class="chip">${esc(s)}<button type="button" data-rm="${esc(s)}" aria-label="Remove ${esc(s)}">×</button></span>`).join("")}</div>
+      <div class="scroll"><table class="ledger"><tbody>${d.rows.map((r) => `<tr>
+        <td><b>${esc(r.sym)}</b>${r.ban ? ` <span class="down small">F&amp;O ban</span>` : r.mwpl_pct >= 80 ? ` <span class="warn small">${r.mwpl_pct}% of limit</span>` : ""}
+          <div class="small muted">${r.next_event ? `${esc(r.next_event.date.slice(5))} ${esc(r.next_event.purpose)}` : ""}
+          ${r.insider_net_cr != null ? ` insiders ${cr(r.insider_net_cr)} in 30 days` : ""}</div>
+          ${r.filing ? `<div class="small">${esc(r.filing.label)}: ${link(r.filing.link, (r.filing.desc || "").slice(0, 80))}</div>` : ""}
+          ${(r.news || []).map((n) => `<div class="small">${link(n.link, n.title)}</div>`).join("")}</td>
+        <td class="num">${r.last != null ? num2(r.last) : "–"}<div class="small">${chg(r.chg_pct)}</div></td>
+        <td class="wide">${spark(r.line, r.chg_pct >= 0)}</td></tr>`).join("")}</tbody></table></div>`;
+  },
+  news(d) {
+    return `<h2>Indian market news</h2>${newsList(d.items)}
+      <h2>Company filings that matter</h2>${filingsTable(d.filings)}`;
+  },
+};
+
+function newsList(items) {
+  if (!(items || []).length) return `<p class="muted">Not read yet.</p>`;
+  const tone = { 1: `<span class="up small">positive words</span>`, "-1": `<span class="down small">negative words</span>` };
+  return `<div class="scroll"><table class="ledger"><tbody>${items.slice(0, 60).map((n) => `<tr><td class="small nowrap">${esc(when(n.ts))}</td>
+    <td>${link(n.link, n.title)}<div class="small muted">${esc(n.source)}${n.impact === "high" ? ", high impact" : ""} ${tone[n.tone] || ""}</div></td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+function filingsTable(items) {
+  if (!(items || []).length) return `<p class="muted">None read yet.</p>`;
+  return `<div class="scroll"><table class="ledger"><tbody>${items.slice(0, 40).map((x) => `<tr><td class="small nowrap">${esc((x.time || "").slice(0, 17))}</td>
+    <td><b>${esc(x.sym)}</b> <span class="${cls(x.tone)}">${esc(x.label)}</span><div class="small">${link(x.link, (x.desc || "").slice(0, 120))}</div></td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+async function alertsTab(params) {
+  const q = new URLSearchParams({ tab: "alerts", min_sev: params.min_sev || "2" });
+  ["day", "sym", "kind"].forEach((k) => params[k] && q.set(k, params[k]));
+  const d = await get("/api/market?" + q);
+  const kinds = Object.entries(d.counts.by_kind || {}).sort((a, b) => b[1] - a[1]);
+  const sevName = { 1: "worth a look", 2: "important", 3: "act-now level" };
+  const body = !d.day ? `<div class="empty">No alerts yet. The detectors (sharp move, unusual options, OI build-up, IV spike, VWAP,
+      opening range, candles, patterns) run on Tanu's live day after the switch-over. News, filings, insider trades, FII / DII and big
+      world moves appear here once the Market page has read them twice.</div>`
+    : `<div class="controls">
+        <select id="a-day" aria-label="Day">${d.days.slice().reverse().map((x) => `<option ${x === d.day ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>
+        <select id="a-sev" aria-label="Which alerts"><option value="3" ${params.min_sev === "3" ? "selected" : ""}>Act-now level only</option>
+          <option value="2" ${!params.min_sev || params.min_sev === "2" ? "selected" : ""}>Important and up</option>
+          <option value="1" ${params.min_sev === "1" ? "selected" : ""}>All</option></select>
+        <select id="a-kind" aria-label="Kind"><option value="">Every kind</option>${kinds.map(([k, n]) => `<option value="${esc(k)}" ${k === params.kind ? "selected" : ""}>${esc(k.replace(/_/g, " "))} (${n})</option>`).join("")}</select>
+      </div>
+      <p class="muted small">${d.counts.all.toLocaleString("en-IN")} alerts on ${d.counts.symbols} symbols; showing ${d.shown.toLocaleString("en-IN")}.
+        Shown only: alerts never place or change a paper trade.${d.detect && Object.keys(d.detect.failed || {}).length ? ` Switched off after an error today: ${esc(Object.keys(d.detect.failed).join(", "))}.` : ""}</p>
+      ${d.alerts.length ? `<div class="scroll"><table class="ledger"><tbody>${d.alerts.map((a) => `<tr><td class="small nowrap">${esc(a.at.slice(11, 16))}</td>
+        <td><span class="sev s${a.severity}" title="${esc(sevName[a.severity])}">${a.severity}</span> <span class="${a.direction === "up" ? "up" : a.direction === "down" ? "down" : ""}">${esc(a.title)}</span>
+          <div class="small muted">${esc(a.detail)}${a.data && a.data.link ? " " + link(a.data.link, "open") : ""}</div></td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="muted">None at this level.</p>`}`;
+  return { html: body, wire: () => {
+    const go = () => {
+      const p = { tab: "alerts", day: document.getElementById("a-day").value, min_sev: document.getElementById("a-sev").value };
+      const k = document.getElementById("a-kind").value;
+      if (k) p.kind = k;
+      location.hash = "market?" + new URLSearchParams(p);
+    };
+    ["a-day", "a-sev", "a-kind"].forEach((id) => { const el = document.getElementById(id); if (el) el.onchange = go; });
+  } };
+}
+
+async function market(params) {
+  clearTimeout(marketTimer);
+  const tab = MTABS.some(([k]) => k === params.tab) ? params.tab : "context";
+  const nav = `<div class="subtabs" role="tablist" aria-label="Market">${MTABS.map(([k, label]) =>
+    `<a role="tab" href="#market?tab=${k}" aria-selected="${k === tab}">${label}</a>`).join("")}</div>`;
+  let html, wire = () => {}, reading = [];
+  if (tab === "alerts") {
+    const a = await alertsTab(params);
+    html = a.html;
+    wire = a.wire;
+  } else {
+    const d = await get("/api/market?tab=" + tab);
+    reading = d.reading || [];
+    html = M[tab](d) + sourcesNote(d.sources);
+    if (tab === "watchlist") wire = () => wireWatch(d.symbols);
+  }
+  if ((location.hash.slice(1) || "").split("?")[0] !== "market") return;
+  view.innerHTML = `<h1>Market</h1>
+    <p class="muted small">Public information (NSE, NSE IX, Yahoo Finance, ForexFactory, news feeds), shown only: nothing here places or changes a trade.</p>
+    ${nav}${html}`;
+  wire();
+  const sel = view.querySelector('.subtabs a[aria-selected="true"]');
+  if (sel) sel.scrollIntoView({ block: "nearest", inline: "center" });
+  const again = reading.length ? 5000 : 60000;              // fresh data a few seconds after a background read
+  marketTimer = setTimeout(() => {
+    const busy = document.activeElement && document.activeElement.tagName === "INPUT";
+    if ((location.hash.slice(1) || "").startsWith("market") && !busy) market(params).catch(() => {});
+  }, again);
+}
+
+function wireWatch(symbols) {
+  const save = async (list) => { await post("/api/market/watchlist", { symbols: list }); setTimeout(route, 2500); };
+  const f = document.getElementById("w-add");
+  if (f) f.onsubmit = (ev) => {
+    ev.preventDefault();
+    const s = (new FormData(f).get("sym") || "").toString().trim().toUpperCase();
+    if (s) save([...symbols, s]).catch((e) => { f.insertAdjacentHTML("beforeend", `<span class="warn small">${esc(e.message)}</span>`); });
+  };
+  view.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => save(symbols.filter((x) => x !== b.dataset.rm)).catch(() => {})));
+}
+
 // ---------------------------------------------------------------- System
 function setupBlock(u) {
   if (!u) return "";
@@ -317,7 +531,7 @@ async function system() {
 }
 
 // ---------------------------------------------------------------- router
-const screens = { today, setups, journal, system };
+const screens = { today, market, setups, journal, system };
 function route() {
   const name = (location.hash.slice(1) || "today").split("?")[0];
   const fn = screens[name] || today;

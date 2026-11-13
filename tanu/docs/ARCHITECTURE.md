@@ -37,6 +37,8 @@ computed.
 | 8 | paper + risk | bid/ask fills, delay, stop/target/trail/time exits, daily loss stop, correlated exposure | evaluation |
 | 9 | journal | every trade's footprint: state + features at entry, best/worst point, exit reason, costs | — |
 | 10 | review | evening AI review → hypotheses to the research queue (never straight to live) | live trading |
+| side | structures (0.13.0) | multi-leg option trades entered by the expiry calendar (iron condor, straddle), replayed on real option prices (ADR-0011) | signals |
+| side | intel + detect (0.14.0) | public market information for the Market page; display-only detectors on the live day; the alert book (ADR-0012) | setups, accounts, brokers |
 
 Horizon plugins (later): intraday options (first), swing / positional, investing (fundamentals + factors), ETF / MF.
 They reuse layers 0-4 and 6-9; only setups and holding horizons differ.
@@ -49,6 +51,7 @@ They reuse layers 0-4 and 6-9; only setups and holding horizons differ.
 | `tanu-minute-clock` (thread) | closes each minute 2 s after it ends (wall clock live, exchange time in a rehearsal) | the engine steps on time even in a quiet minute |
 | `tanu-web` (thread) | UI + API on 127.0.0.1 | pages cannot slow trading logic |
 | `tanu-telegram` (thread) | queued alerts, one a second | a slow phone API never blocks the engine |
+| `tanu-intel` (thread) | after the switch-over: reads the Market page's public sources on their schedule (before it, only while the page is open) | a slow website never blocks the live day |
 
 Live path = replay path (ADR-0004): `live/universe` -> `data/feed` -> `live/bars` -> `live/options` + `engine/core`
 -> `paper/accounts` -> `journal/store` -> `notify/alerts`; checked by `python -m tanu rehearse <day>`.

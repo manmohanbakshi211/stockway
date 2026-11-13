@@ -57,8 +57,13 @@ class Session:
             self.alerts = Alerts(sender, self.accounts, evidence=evidence)
             self.engine.listeners.append(self.alerts)
         self.feed = FeedProcess(token, url=url, tape_dir=tape_dir, min_free_gb=min_free_gb)
+        from ..detect.book import AlertBook
+        from ..detect.runner import Detectors
+        sess = self.facts.session(day)
+        self.detect = Detectors(self.u, int(sess[0].timestamp()), AlertBook(self.out / "alerts"),
+                                prev_close={s: c.prev_close for s, (c, _m) in self.ctx.items()}) if sess else None
         self.loop = LiveLoop(self.engine, self.u, {s: c for s, (c, _m) in self.ctx.items()}, day, out_dir=self.out,
-                             feed=self.feed, clock=clock, grace_s=grace_s, facts=self.facts)
+                             feed=self.feed, clock=clock, grace_s=grace_s, facts=self.facts, detect=self.detect)
         self.feed.on_ticks = self.loop.on_ticks
         self._stop = threading.Event()
         self._timer: threading.Thread | None = None

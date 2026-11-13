@@ -1,0 +1,42 @@
+{
+  "about": "News feeds and headline / filing rules (bullet, dated). 'india' feeds fill the News tab, 'global' the World tab. Tone and impact are keyword rules (copied from the legacy app on 13 Nov 2026), shown as a hint only; an AI reading of headlines comes with Tanu's AI (later). A feed URL must pass the market-data URL guard (no 'fund', 'order', 'margin'... in the path).",
+  "valid_from": "2026-11-13",
+  "india": {
+    "ET Markets": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+    "Business Standard": "https://www.business-standard.com/rss/markets-106.rss",
+    "Mint": "https://www.livemint.com/rss/markets",
+    "Moneycontrol": "https://www.moneycontrol.com/rss/marketreports.xml",
+    "RBI": "https://www.rbi.org.in/pressreleases_rss.xml"
+  },
+  "global": {
+    "Investing.com markets": "https://www.investing.com/rss/news_25.rss",
+    "Investing.com economy": "https://www.investing.com/rss/news_14.rss",
+    "Investing.com commodities": "https://www.investing.com/rss/news_11.rss",
+    "MarketWatch": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+    "ET economy": "https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms",
+    "Mint economy": "https://www.livemint.com/rss/economy"
+  },
+  "keep": 300,
+  "positive": ["surge", "jump", "rally", "soar", "gain", "rise", "beat", "record high", "upgrade", "order win", "bags",
+               "approval", "buyback", "profit rises", "strong", "outperform", "bullish", "wins", "acquire", "truce",
+               "stimulus", "eases"],
+  "negative": ["fall", "drop", "slump", "plunge", "crash", "decline", "miss", "downgrade", "loss", "probe", "penalty",
+               "raid", "fraud", "resign", "weak", "bearish", "selloff", "sell-off", "tumble", "ban", "default",
+               "sebi order", "war", "sanction", "tariff", "recession"],
+  "high_impact": "\\b(fed|fomc|powell|rate (cut|hike)|interest rate|inflation|cpi|pce|payrolls?|jobs report|gdp|recession|rbi|repo rate|war|missile|sanction|tariff|opec|crude|oil prices?|default|crash|plunge|surge|record high|stimulus|yuan|devaluation|rupee|bond yields?|treasury|ecb|boj|bank of japan|china|budget|gst|sebi)\\b",
+  "india_words": "\\b(india|indian|nifty|sensex|rupee|rbi|sebi|nse|bse|dalal street|fpi|fii|dii)\\b",
+  "filing_rules": [
+    ["fraud|default|insolven|forensic|raid|search and seizure|sebi order|penalt|show cause", "Red flag", 2, -1],
+    ["financial result|results for the|outcome of board meeting.*result", "Results", 2, 0],
+    ["buy ?back", "Buyback", 2, 1],
+    ["bonus|stock split|sub-division", "Bonus / split", 2, 1],
+    ["acqui|amalgamation|merger|scheme of arrangement|demerger|takeover|open offer", "M&A", 2, 0],
+    ["award|bagging|receipt of order|order win|letter of intent|loa |contract", "Order win", 2, 1],
+    ["resignation|cessation", "Resignation", 2, -1],
+    ["pledge|encumbrance", "Pledge", 1, -1],
+    ["credit rating|rating", "Rating", 1, 0],
+    ["fund raising|qualified institutions placement|qip|preferential issue|rights issue", "Fund raising", 1, 0],
+    ["dividend", "Dividend", 1, 1]
+  ],
+  "filing_skip": "trading window|newspaper|investor presentation|analysts?/institutional|con\\. call|loss of share|certificate under|esop|esos|monitoring agency|shareholders meeting|general updates|clarification|copy of|record date|book closure|transcript|spurt in volume|price movement"
+}

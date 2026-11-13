@@ -211,6 +211,9 @@ class Supervisor:
         self.session = None
         self.state = {"mode": "view", "why": [], "since": time.time()}
         self.stop = threading.Event()
+        from ..detect.book import AlertBook
+        from ..intel.collect import Collector
+        self.collector = Collector(self.base, on_alert=AlertBook(self.base / "live" / "alerts").add)
 
     def web(self, port_check: bool = True):
         import uvicorn
@@ -245,6 +248,7 @@ class Supervisor:
         if not lock.take():
             print("Another Tanu is already live.")
             return 1
+        threading.Thread(target=self.collector.run_forever, args=(self.stop,), daemon=True, name="tanu-intel").start()
         try:
             self._days()
         except KeyboardInterrupt:

@@ -3,6 +3,27 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.14.0] - 2026-11-13
+### Added
+- Market page (ADR-0012, Mandeep: World, market insider, watchlist and market context on one page with tabs):
+  Context, World, Insiders, Watchlist, News, Alerts. Gun `tanu/intel/`: one public-site client (URL guard, timeouts,
+  polite gaps, NSE cookies, size cap), pure parsers tested on saved samples (Yahoo chart, ForexFactory, NSE FII / DII,
+  participant OI, position limits / ban, bulk and block deals, insider XBRL filings, event calendar, announcements,
+  NSE IX GIFT Nifty, RSS), a collector that reads each source in isolation into `data/tanu/intel/` and keeps the last
+  good data on a failure. Bullets: `intel/sources.json`, `intel/world.json`, `intel/feeds.json`. Watchlist editable on
+  the page (saved on this Mac).
+- Display-only detectors (Mandeep: "abhi rakho sirf dikhane ke liye"): `tanu/detect/` on the live loop's closed
+  minutes: sharp move, opening range, day high / low, VWAP cross, volume surge, unusual options, option OI build-up,
+  OI walls, PCR shift, IV spike, 5-minute candles, double top / bottom; thresholds in `detect/detectors.json`.
+  News, filings, insider trades, FII / DII and big world moves go to the same alert book (`live/alerts/<day>.jsonl`).
+  No Telegram, no setup, no account, no broker. A failing detector is switched off for the day; the live loop never
+  stops for one.
+- Supervisor thread `tanu-intel` after the switch-over; before it the sources are read only while the page is open.
+- `python -m tanu intel [source ...]`: read the sources once and print which answered.
+### Checked
+- Tests: 125 (14 new, no network). Headless check: every tab and screen at 390 / 1280 px, no sideways scroll, no
+  console errors.
+
 ## [0.13.0] - 2026-11-13
 ### Added
 - Multi-leg option structures (ADR-0011, Mandeep: "haan kardo add"). Gun: `tanu/structures/` (registry, runner,

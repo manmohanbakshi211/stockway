@@ -1,0 +1,28 @@
+{
+  "about": "What the Market page reads and how often (bullet, dated). every_s = the oldest a cached copy may be before the next read. Before the switch-over Tanu reads only while the Market page is open (the legacy app reads the same NSE pages; ADR-0007, ADR-0012); after it, the supervisor also reads them on this schedule. on: false switches a source off without touching code.",
+  "valid_from": "2026-11-13",
+  "sources": {
+    "world":          {"name": "World markets (Yahoo Finance)", "every_s": 120, "on": true},
+    "calendar":       {"name": "Economic calendar (ForexFactory)", "every_s": 3600, "on": true},
+    "gift_nifty":     {"name": "GIFT Nifty (NSE IX)", "every_s": 120, "on": true},
+    "fii_dii":        {"name": "FII / DII cash (NSE)", "every_s": 1800, "on": true},
+    "participant_oi": {"name": "Participant-wise open interest (NSE)", "every_s": 21600, "on": true},
+    "ban":            {"name": "F&O ban list and position limits (NSE)", "every_s": 21600, "on": true},
+    "deals":          {"name": "Bulk and block deals (NSE)", "every_s": 3600, "on": true},
+    "insiders":       {"name": "Insider trades (NSE disclosures)", "every_s": 3600, "on": true,
+                       "first_read_days": 30, "max_filings_per_read": 150, "show_min_rs": 5000000, "alert_min_rs": 10000000},
+    "events":         {"name": "Results and board meetings (NSE)", "every_s": 21600, "on": true},
+    "filings":        {"name": "Company filings (NSE)", "every_s": 600, "on": true},
+    "news_india":     {"name": "Indian market news (RSS)", "every_s": 300, "on": true},
+    "news_global":    {"name": "Global news (RSS)", "every_s": 600, "on": true},
+    "watchlist":      {"name": "Watchlist quotes (Yahoo Finance)", "every_s": 120, "on": true}
+  },
+  "tabs": {
+    "context": ["gift_nifty", "world", "fii_dii", "participant_oi", "ban", "events", "filings", "calendar"],
+    "world": ["world", "calendar", "news_global"],
+    "insiders": ["fii_dii", "participant_oi", "deals", "insiders"],
+    "watchlist": ["watchlist", "ban", "events", "insiders", "filings", "news_india"],
+    "news": ["news_india", "filings"],
+    "alerts": []
+  }
+}
