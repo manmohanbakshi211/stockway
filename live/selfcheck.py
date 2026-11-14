@@ -293,6 +293,15 @@ def static_checks(cfg: dict | None = None) -> list:
                   and "replay" in __import__("live.practice", fromlist=["PRACTICE"]).PRACTICE,
                   "source 'replay' (alerts, paper, bench, trials cleared at the next replay); its own recording folder; "
                   "no Telegram, no AI notes; the live scanner stops it at the next session"))
+    from live import strict as _strict, books as _bk
+    sc = _strict.cfg()
+    bsrc = inspect.getsource(_eng.LiveEngine._coin_tick)
+    out.append(_c("strict", "Strict track: the strict test on the live bench, coin-flip yardstick apart, Strict account (2.77)",
+                  _strict._CFG.get("error") is None and 'f"{self.source}#coin"' in inspect.getsource(_eng.LiveEngine._run)
+                  and "self.coin.add(" in bsrc and "self._bench_add(" not in bsrc and "_emit" not in bsrc
+                  and "strict" in (_bk.cfg().get("books") or {}),
+                  f"pass bar: {sc['min_trades']}+ learn trades, t at the multiple-testing bar, {sc['min_hold']}+ holdout trades, "
+                  f"beats coin flips (one every {sc['coin_every_min']} min, bench only); runs after {sc['run_after']}"))
     return out
 
 

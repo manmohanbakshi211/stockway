@@ -207,7 +207,7 @@ class Bench:
         self.stale_skips: dict = {}      # style -> signals skipped because a leg's quote was old or suspect (2.33)
         self.bdb = db_for(store)
         with self.bdb.lock:
-            if source in PRACTICE:              # practice sources start clean (2.76: the replay too)
+            if source.split("#")[0] in PRACTICE:  # practice sources start clean (2.76: the replay; 2.77: its coin flips)
                 self.bdb.db.execute("DELETE FROM bench_trades WHERE source=?", (source,))
                 self.bdb.db.execute("DELETE FROM bench_signals WHERE source=?", (source,))
             self.bdb.db.commit()
@@ -235,7 +235,7 @@ class Bench:
         i1 = state.get(opt["key"]) if state is not None else None
         if not i1 or not (i1.ask or i1.ltp):
             return 0
-        if self.source not in PRACTICE:       # 2.48: an open NSE session and today's prices only (exchange time)
+        if self.source.split("#")[0] not in PRACTICE:   # 2.48: an open NSE session and today's prices only (exchange time)
             from . import session as SESSION
             if not SESSION.paper_ok(now):
                 return 0

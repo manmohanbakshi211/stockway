@@ -5,6 +5,7 @@ import datetime as dt
 import gzip
 import json
 import os
+import sqlite3
 import time
 
 import numpy as np
@@ -249,6 +250,13 @@ def test_whole_engine_replays_the_day_apart_from_the_real_market(tmp_path, monke
     with e.store.lock:
         srcs = {r[0] for t in ("alerts", "paper", "outcomes") for r in e.store.db.execute(f"SELECT DISTINCT source FROM {t}")}
     assert srcs <= {"replay"} or all(s.startswith("replay") for s in srcs)
+    with e.store.lock:
+        assert e.store.db.execute("SELECT COUNT(*) FROM alerts WHERE kind='coin'").fetchone()[0] == 0
+        assert e.store.db.execute("SELECT COUNT(*) FROM paper WHERE kind='coin'").fetchone()[0] == 0
+    bdb = sqlite3.connect(tmp_path / "bench.db")
+    coins = dict(bdb.execute("SELECT source, COUNT(*) FROM bench_trades WHERE kind='coin' GROUP BY source").fetchall())
+    bdb.close()
+    assert set(coins) == {"replay#coin"} and coins["replay#coin"] > 0   # 2.77: the yardstick, test bench only
     assert not sent                                              # no Telegram from a replay
     assert {f.name: f.stat().st_mtime for f in (tmp_path / "recordings").iterdir()} == real   # real recordings untouched
     assert any(f.name.startswith("replay_2026-11-13") for f in (tmp_path / "replay" / "recordings").iterdir())

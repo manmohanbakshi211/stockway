@@ -168,6 +168,68 @@ def upstox_logout():
 
 
 # ----------------------------------------------------------------- control
+@router.get("/api/strict")
+def strict_view(top: int = 80):
+    """2.77 Strict track: the strict test's latest result (live/strict.py) and the head-to-head since it began: the main
+    account (Explore: every alert it takes), the Strict account (only alert types that passed) and the coin flips."""
+    import json as _json
+    from live import books as BK, strict as ST
+    from live.bench import db_for
+    e = engine()
+    c = ST.load(e.data_dir)
+    rep = c.get("rep") or {}
+    first = None
+    try:
+        with open(e.data_dir / "strict_runs.jsonl") as f:
+            first = (_json.loads(f.readline() or "{}").get("made") or "")[:10] or None
+    except OSError:
+        pass
+    since = first or dt.datetime.now(IST).date().isoformat()
+    lc = e.cfg()["live"]
+    main_cap = float((lc.get("paper") or {}).get("capital") or 500000)
+    bk = (getattr(e, "books", None).books.get("strict") if getattr(e, "books", None) else None)
+    s_cap = float((bk.cfg.get("capital") if bk else None) or main_cap)
+    pick = lambda src: [t for t in e.store.trades(source=src, limit=20000) if t["day"] >= since]
+    rows = [{"id": "explore", "name": "Explore (main account)", **BK.stats(pick("upstox"), main_cap)},
+            {"id": "strict", "name": "Strict account", **BK.stats(pick("upstox#strict"), s_cap)}]
+    coin = {"n": 0}
+    try:
+        con = db_for(e.store).reader()
+        try:
+            r = con.execute("SELECT COUNT(*), SUM(net > 0), SUM(net), AVG(r_mult) FROM bench_trades WHERE source='upstox#coin' "
+                            "AND style=? AND net IS NOT NULL AND day >= ?", (ST.cfg()["paper_style"], since)).fetchone()
+            coin = {"n": r[0] or 0, "won_pct": round(r[1] / r[0] * 100, 1) if r[0] else None, "net": round(r[2] or 0, 2),
+                    "avg": round((r[2] or 0) / r[0], 2) if r[0] else None, "avg_r": round(r[3], 3) if r[3] is not None else None}
+        finally:
+            con.close()
+    except Exception:
+        pass
+    today = dt.datetime.now(IST).date().isoformat()
+    strict_today = [a for a in list(getattr(e, "alerts_mem", []) or []) if (a.get("data") or {}).get("strict") and a.get("day") == today]
+    setups = rep.get("setups") or []
+    return clean({"made": rep.get("made"), "days": rep.get("days"), "first": rep.get("first"), "last": rep.get("last"),
+                  "holdout_from": rep.get("holdout_from"), "t_bar": rep.get("t_bar"), "k": rep.get("k"), "bar": rep.get("bar"),
+                  "yardstick": rep.get("yardstick"), "passing": rep.get("passing") or [], "n_setups": len(setups),
+                  "setups": setups[:max(1, min(int(top), 500))], "since": since, "accounts": rows, "coin": coin,
+                  "strict_today": len(strict_today), "rules": ST.cfg(), "running": bool(getattr(e, "_strict_running", False))})
+
+
+@router.post("/api/strict/run")
+def strict_run():
+    """2.77: run the strict test now (it also runs by itself every evening after the close)."""
+    e = engine()
+    if getattr(e, "_strict_running", False):
+        raise HTTPException(409, "The strict test is already running.")
+    e._strict_running = True
+    try:
+        out = e.strict_run()
+    finally:
+        e._strict_running = False
+    if out.get("error"):
+        raise HTTPException(500, out["error"])
+    return clean({"passing": out.get("passing"), "k": out.get("k"), "t_bar": out.get("t_bar"), "days": out.get("days")})
+
+
 @router.get("/api/live/replay/days")
 def replay_days():
     """2.76: the recorded days a replay can play, newest first."""

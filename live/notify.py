@@ -79,6 +79,9 @@ def telegram_text(a: dict) -> str:
     if mv and mv.get("avg") is not None:                 # 2.61: the multiverse's verdict on signals like this one
         t += (f"\nMultiverse: {html.escape(mv['like'])}: {mv['avg']:+.1f}% a trade × {mv['n']} "
               f"(lower bound {mv['lcb']:+.1f}%); best way: {html.escape(mv['how'])}")
+    st = (a.get("data") or {}).get("strict")
+    if st:                                               # 2.77: this alert type passed the strict test (live/strict.py)
+        t += f"\n✅ STRICT: passed the strict test ({html.escape(', '.join(st.get('styles') or []))})"
     t += f"\n<i>{dt.datetime.fromtimestamp(a['ts'], IST):%H:%M:%S}</i>"
     return t
 

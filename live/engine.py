@@ -22,6 +22,7 @@ from .learn import Ranker, features, regime, regime_adjust
 from .notify import AI, News, Telegram, alert_prompt, match_symbols, pulse_prompt, rule_pulse, symbol_words, telegram_text
 from .paper import PaperBook
 from .practice import is_practice
+from .strict import verdict as strict_verdict
 from .record import Recorder, Tracker, evidence, levels, outcomes, scorecard, signal_score, size_mb
 from .state import MarketState
 from .store import Store
@@ -180,6 +181,7 @@ class LiveEngine:
         self.mind = None                             # 2.70: MindGame buyer / seller scenes, recorded and graded (live/mindgame.py)
         self.trials = None                           # bullets on trial: recorded and graded only (live/trials.py)
         self.bench = None                            # an honest paper trade for every signal (live/bench.py)
+        self.coin = None                             # 2.77: coin-flip signals, the strict test's yardstick (bench only)
         self.focuslab = None                         # 2.37: shadow Focus challengers, recorded only (live/focuslab.py)
         self.in_play: set = set()                   # 2.31: stocks the mover sweep tested today (library rules run on them)
         self._facts_cache: dict = {}                 # (sym, direction, minute) -> facts for test-bench trades
@@ -410,6 +412,13 @@ class LiveEngine:
             self.bench = Bench(self.store, self.source, self.log)
         except Exception as e:
             self.log(f"Test bench off: {e}")
+        try:                                         # 2.77: the strict test's yardstick: coin-flip signals, bench only
+            from .bench import Bench
+            self.coin = Bench(self.store, f"{self.source}#coin", self.log)
+            self._coin_rng = None
+        except Exception as e:
+            self.coin = None
+            self.log(f"Coin-flip yardstick off: {e}")
         try:                                         # 2.37: shadow Focus (recorded next to every alert, changes nothing)
             from .focuslab import FocusLab
             self.focuslab = FocusLab(self.store, self.source, self.log)
@@ -964,6 +973,12 @@ class LiveEngine:
                 self._guard("Test bench", self.bench.update, self.state, self.clock.ts(), (self.paper.cfg if self.paper else {}).get("exit_time") or "15:15",
                             False, self.dguard.is_bad if self.dguard is not None else None)
                 self._guard("Mover sweep", self._mover_sweep, now)
+            if getattr(self, "coin", None) is not None:      # 2.77: the strict test's yardstick (bench only)
+                self._guard("Coin-flip yardstick", self.coin.update, self.state, self.clock.ts(),
+                            (self.paper.cfg if self.paper else {}).get("exit_time") or "15:15", False,
+                            self.dguard.is_bad if self.dguard is not None else None)
+                if open_:
+                    self._guard("Coin-flip yardstick", self._coin_tick, now)
             self._guard("Data vault", self._vault_context, now)
             self._guard("Flat-by reminder", self._flat_by_reminder, now, lc)
             if self._every("last_session", 60, clock_time=False):
@@ -1021,6 +1036,8 @@ class LiveEngine:
         try:
             if self.bench is not None:
                 self.bench.update(self.state, self.clock.ts(), force=True)
+            if getattr(self, "coin", None) is not None:
+                self.coin.update(self.state, self.clock.ts(), force=True)
         except Exception:
             pass
         try:
@@ -1663,6 +1680,35 @@ class LiveEngine:
             pass
         return bs.offer_pack(a, self.state, now, r)
 
+    def _coin_tick(self, now):
+        """2.77: the strict test's yardstick. Every few minutes of market time (rules/strict.json) a coin picks a
+        symbol whose at-the-money option is streaming and a direction; the test bench trades it in every style under
+        source "<feed>#coin". Never an alert, never a paper account, never in the bench's own results."""
+        from . import strict as ST
+        c = ST.cfg()
+        hm = now.strftime("%H:%M")
+        if not (str(c["coin_start"]) <= hm < str(c["coin_end"])) or not self.uni or self.state is None:
+            return
+        if not self._every("coin_flip", float(c["coin_every_min"]) * 60):
+            return
+        day = now.date().isoformat()
+        if self._coin_rng is None or self._coin_rng[0] != day:
+            import random
+            self._coin_rng = (day, random.Random(f"coin|{self.source}|{day}"))
+        rng = self._coin_rng[1]
+        syms = sorted(s for s in self.uni.underlyings if s in self.metrics)
+        for _ in range(5):                           # a symbol whose option has a live price
+            if not syms:
+                return
+            sym, d = rng.choice(syms), rng.choice(("up", "down"))
+            opt = self._suggest(sym, d)
+            if opt:
+                u = self.uni.underlyings[sym]
+                a = {"sym": sym, "kind": ST.COIN, "direction": d, "severity": 0, "title": "Coin flip (yardstick)",
+                     "option": opt, "und_key": u.key, "data": {}}
+                self.coin.add(a, self, now, self.paper.cfg if self.paper else {})
+                return
+
     def _bench_add(self, a, now, **kw):
         """2.58: every test-bench signal (alerts, ideas on trial, Lab rules) is also offered to the "Multiverse pick" paper
         account, which takes it when it matches one of the multiverse's live picks (lab/multiverse.py). The bench itself
@@ -1965,6 +2011,13 @@ class LiveEngine:
         except Exception as e:
             if self._every("mv_verdict_err", 600, clock_time=False):
                 self.log(f"Multiverse verdict skipped: {e}")
+        try:                                         # 2.77: the strict test's word on this alert type (live/strict.py)
+            sv = strict_verdict(a, self.data_dir)
+            if sv:
+                a["data"]["strict"] = sv
+        except Exception as e:
+            if self._every("strict_err", 600, clock_time=False):
+                self.log(f"Strict test verdict skipped: {e}")
         # stories: alerts on the same symbol within 30 minutes are one developing story
         s = self.stories.get(a["sym"])
         new_story = not s or ts - s["last"] > STORY_GAP_MIN * 60
@@ -2569,6 +2622,14 @@ class LiveEngine:
                 if now.time() >= dt.time(15, 50) and ("paths", today) not in self.brief_done and not self.running:
                     self.brief_done.add(("paths", today))          # 2.45: trade journeys from today's recording
                     threading.Thread(target=self._trade_paths, daemon=True, name="trade-paths").start()
+                try:                                       # 2.77: the strict test on the day's bench trades (live/strict.py)
+                    from . import strict as _st
+                    if now.weekday() < 5 and now.strftime("%H:%M") >= str(_st.cfg()["run_after"]) \
+                            and ("strict", today) not in self.brief_done and not self.running:
+                        self.brief_done.add(("strict", today))
+                        threading.Thread(target=self.strict_run, daemon=True, name="strict-test").start()
+                except Exception as e:
+                    self.log(f"Strict test not started: {e}")
                 lab_on = (self.cfg().get("lab") or {}).get("nightly", True)
                 if lab_on and now.time() >= dt.time(16, 15) and ("lab", today) not in self.brief_done and not self.running:
                     self.brief_done.add(("lab", today))
@@ -2594,6 +2655,15 @@ class LiveEngine:
                     self.telegram.send("🔑 Stockway: log in with Upstox to start today's live scanner (open the app → Live).")
             except Exception as e:
                 self.log(f"Watcher error: {e}")
+
+    def strict_run(self) -> dict:
+        """2.77: the strict test (live/strict.py) on every closed test-bench trade of the real market."""
+        from . import strict as _st
+        try:
+            return _st.run(self.data_dir, "upstox", log=self.log)
+        except Exception as e:
+            self.log(f"Strict test failed: {e}")
+            return {"error": str(e)}
 
     def _trade_paths(self):
         """2.45: every bench signal of the recorded days held to 15:15 (live/paths.py), in a low-priority child process."""

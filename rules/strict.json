@@ -1,0 +1,11 @@
+{
+  "about": "Strict track (2.77, live/strict.py): the pass test copied from Tanu (ADR-0005). An alert type + bench style passes only when its learn part (first 80% of the days) has at least min_trades trades, an average R above 0 and t at or above the multiple-testing bar (Bonferroni, 5% two-sided, over every setup with enough trades), its holdout (last 20% of the days) has at least min_hold trades with an average R above 0, and it beats the yardstick in both parts. The yardstick is coin-flip signals (a random symbol and direction every coin_every_min minutes of market time, traded on the test bench only, never an alert or a paper trade). A broken value falls back to the default.",
+  "min_trades": 30,
+  "min_hold": 10,
+  "hold_frac": 0.2,
+  "coin_every_min": 5,
+  "coin_start": "09:20",
+  "coin_end": "14:40",
+  "paper_style": "buy",
+  "run_after": "15:40"
+}

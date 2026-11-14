@@ -117,6 +117,36 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.77: Strict track: strict alerts, a Strict paper account, Explore vs Strict (15 Nov 2026)
+- **Mandeep (15 Nov):** "kuch strict karna hai toh hum alage alerts banayenge, alag se us hisaab se trade lenge kyuki
+  accountability or comparison se hi best ka pata chalega". Tanu's pass test (ADR-0005) is copied into Stockway
+  (`live/strict.py`), run on Stockway's own live test bench.
+- **The strict test.** Evidence: the test bench, where every signal is paper-traded in every style at the live ask / bid
+  (the spread really paid) with every charge, so the costs are the real ones (Tanu's measured-spread model is not needed:
+  the bench fills already are the measurement; time decay is inside the option prices). Measure: R = net after costs ÷
+  money at risk. Each alert type + style is split by day into learn (first 80%) and holdout (last 20%, never used to
+  choose). It passes only with 30+ learn trades averaging above 0R with t at the multiple-testing bar (Bonferroni over
+  every pair with enough trades), 10+ holdout trades still above 0R, and beating the yardstick in both parts.
+- **The yardstick: coin flips.** Every 5 minutes of market time a coin picks a symbol and a direction; the test bench
+  trades it in every style under its own source (`upstox#coin`). Never an alert, never a paper account, never in the
+  bench's own results, the multiverse or the journeys (they read `upstox` only). Until there are enough coin flips the
+  yardstick is every signal of that style.
+- **Strict alerts.** An alert whose type passed gets a ✅ Strict pill (and a "STRICT" line on Telegram). Nothing else
+  about the alert, its score or whether it is sent changes.
+- **Strict paper account** (`rules/paper_books.json` "strict"): takes an alert only when its type passed in Buy ATM (the
+  style a paper account trades) and the risk check says PASS. Until something passes it stays in cash.
+- **Strict track page** (menu, under Paper trades): Explore (the main account) vs the Strict account vs the coin flips
+  since the first run, and the full test table with the reason each pair failed (failed ones kept). The test runs by
+  itself every weekday evening after 15:40 (`rules/strict.json`), and from the page's "Run the strict test now".
+- **Today's honest result** (the Mac's bench, 4 to 13 Nov: 248,157 closed trades, 798 pairs tested, t bar 4.0):
+  **nothing passes yet.** Every style loses on average after costs (Buy ATM −0.08R on the learn days, −0.13R on the
+  holdout). The closest: candle rectangle breakout 15m sold for the day (learn t 2.9), opening-range breakout sold for
+  the day (t 2.1). So the Strict account starts in cash, and the comparison will show whether Explore's many trades or
+  Strict's patience does better.
+- Nothing else changes: the main account, alerts, the risk check, the other accounts and the Lab are untouched (no Lab
+  code changed, so Lab results are identical). A replay keeps its coin flips apart too ("replay#coin", cleared at the
+  next replay). System & logins has a "strict" check. New tests: `tests/test_strict.py` (7).
+
 ## 2.76: Replay a past day (15 Nov 2026)
 - **Mandeep (15 Nov):** "the tanu's features of reply ... also add ... just take from tanu". Tanu's rehearsal idea (a
   past market day played through the whole live path) is now in Stockway, built on Stockway's own recordings.

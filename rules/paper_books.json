@@ -124,6 +124,18 @@
     "max_open": 3,
     "max_trades_day": 6
    }
+  },
+  "strict": {
+   "name": "Strict",
+   "short": "Only alert types that passed the strict test",
+   "explain": "Takes an alert only when its alert type passed the strict test (System: Strict track): on the test bench, after the real spread and every charge, it made money on the learn days with a t-value above the multiple-testing bar, made money again on the holdout days it was never tuned on, and beat the coin-flip yardstick on both. The risk check must say PASS too. Until an alert type passes, this account stays in cash: that is the point of strict. Compare it with the main account (Explore) on the Strict track page.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "strict": true,
+    "risk_pass": true
+   },
+   "paper": {}
   }
  }
 }

@@ -370,6 +370,7 @@ function alertItem(a, full = false, extra = "") {
   const ag = (v, label) => v == null || v === 0 ? "" : `<span class="ev ${v > 0 ? "yes" : "no"}">${v > 0 ? "✓" : "✗"} ${label}</span>`;
   const ctxChips = [ag(cx.nifty_al, "Nifty"), ag(cx.sector_al, "sector"), ag(cx.global_al, "global"), ag(cx.breadth_al, "breadth"),
     cx.news_n ? `<span class="ev ${cx.news_al > 0 ? "yes" : cx.news_al < 0 ? "no" : ""}">📰 ${cx.news_n} news</span>` : ""].join("");
+  const strictP = d.strict ? `<a class="pill p-up" href="#/strict" title="This alert type passed the strict test: profit after every real cost on days it was never tuned on, beyond luck and beyond coin flips">✅ Strict</a>` : "";
   const conv = d.conviction != null ? `<span class="pill ${d.conviction >= 85 ? "p-up" : ""}" title="Conviction: where this alert ranks among all graded alerts by the learned model (90 = top 10%)">Conviction ${d.conviction}</span>` : "";
   const fits = "";                                  // 2.48: no ₹40K pill; the risk check sizes every idea for your capital
   return `<li class="alert sev${a.severity}" data-aid="${a.id}">
@@ -377,7 +378,7 @@ function alertItem(a, full = false, extra = "") {
     <div class="al-body"><div class="al-title">${arrow(a.direction)} <a href="${a.sym === "GLOBAL" ? "#/world" : `#/chart?s=${encodeURIComponent(a.sym)}`}">${esc(a.title)}</a></div>
       <p>${esc(a.detail)}${link} <span class="muted small">${esc(KIND[a.kind] || a.kind)}</span> ${track}</p>${live ? `<p class="small" style="margin:2px 0 6px">${live}</p>` : ""}
       ${d.muted ? `<p class="muted small">⤓ ${esc(d.muted)}</p>` : ""}${bigLine(d.bigger)}${eventLine(d.event_risk)}
-      ${ev || ctxChips || conv || fits ? `<div class="evs">${conv}${fits}${ev}${ctxChips}</div>` : ""}${plan}${pro}${mvLine(d.mv)}${trade}${riskLine(d.risk)}
+      ${ev || ctxChips || conv || fits || strictP ? `<div class="evs">${strictP}${conv}${fits}${ev}${ctxChips}</div>` : ""}${plan}${pro}${mvLine(d.mv)}${trade}${riskLine(d.risk)}
       ${a.ai ? `<div class="ai-text">${fmtAI(a.ai)}</div>` : ""}${extra}</div></li>`;
 }
 
@@ -3536,6 +3537,47 @@ function labML(f) {
 
 /* ---------------- page: Ghanshyam (2.69, Mandeep: "ghanshyam ke naam se ek different section... nifty or banknifty
    mein bas... strategy accountability ka monitor... alerts ki list expand karne wale button ke saath") */
+/* 2.77 Strict track: Tanu's pass test on the live test bench, and Explore vs Strict vs coin flips */
+async function pageStrict() {
+  main.innerHTML = `<h1 class="page-title">Strict track</h1><p class="muted">Loading…</p>`;
+  let d;
+  try { d = await api("/api/strict"); } catch (e) { main.innerHTML = `<h1 class="page-title">Strict track</h1><p class="down">${esc(e.message)}</p>`; return; }
+  const r3 = (x) => x == null ? "–" : `<span class="${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : ""}${Number(x).toFixed(2)}R</span>`;
+  const part = (x) => x && x.n ? `${x.n} · ${r3(x.avg_r)}${x.t != null ? ` · t ${x.t}` : ""}` : "–";
+  const yard = Object.entries(d.yardstick || {}).map(([st, y]) => `<li><b>${esc(st)}</b>: ${esc(y.what)}, learn ${r3((y.learn || {}).avg_r)}, holdout ${r3((y.hold || {}).avg_r)}${y.coin_n != null ? ` <small class="muted">(${y.coin_n} coin flips so far)</small>` : ""}</li>`).join("");
+  const acc = (d.accounts || []).map((a) => `<tr><td><b>${esc(a.name)}</b>${a.open ? ` <small class="muted">${a.open} open</small>` : ""}</td><td class="r">${a.trades}</td><td class="r">${a.won_pct != null ? a.won_pct + "%" : "–"}</td>
+      <td class="r ${(a.net || 0) >= 0 ? "up" : "down"}"><b>${rupees(a.net)}</b></td><td class="r">${a.avg != null ? rupees(a.avg) : "–"}</td><td class="r down">${a.max_drop ? rupees(a.max_drop) : "–"}</td>
+      <td class="r">${a.days ? `${a.green_days} of ${a.days}` : "–"}</td></tr>`).join("");
+  const c = d.coin || {};
+  const coinRow = `<tr><td><b>Coin flips</b> <small class="muted">test bench only, Buy ATM</small></td><td class="r">${c.n || 0}</td><td class="r">${c.won_pct != null ? c.won_pct + "%" : "–"}</td>
+      <td class="r ${(c.net || 0) >= 0 ? "up" : "down"}"><b>${rupees(c.net || 0)}</b></td><td class="r">${c.avg != null ? rupees(c.avg) : "–"}</td><td class="r">–</td><td class="r">–</td></tr>`;
+  const rows = (d.setups || []).map((x) => `<tr class="${x.passes ? "hl" : ""}"><td><b>${esc(KIND[x.kind] || x.kind)}</b>${x.variant ? ` <small class="muted">${esc(x.variant)}</small>` : ""}</td><td>${esc(x.style)}</td>
+      <td class="r nw">${part(x.learn)}</td><td class="r nw">${part(x.hold)}</td><td class="r">${x.rs_per_trade != null ? rupees(x.rs_per_trade) : "–"}</td>
+      <td>${x.passes ? `<span class="pill p-up">PASS</span>` : `<small class="muted">${esc((x.why_not || []).join("; "))}</small>`}</td></tr>`).join("");
+  const b = d.bar || d.rules || {};
+  main.innerHTML = `<h1 class="page-title">Strict track</h1>
+    <p class="lede">Explore takes every alert the risk check passes. Strict takes an alert only when its type has proved itself: profit after every real cost on days it was never tuned on, beyond luck. Same market, same days, two accounts: the comparison shows which is better.</p>
+    <div class="kpis kpi3"><div class="kpi"><b>${(d.passing || []).length}</b><span>pass, of ${d.k || 0} alert type + style pairs with enough trades to test</span></div>
+      <div class="kpi"><b>${d.strict_today || 0}</b><span>Strict alerts today</span></div>
+      <div class="kpi"><b>${d.days || 0}</b><span>days of test-bench trades${d.first ? ` (${esc(d.first)} to ${esc(d.last)})` : ""}</span></div></div>
+    <h2>Explore vs Strict, since ${esc(d.since)}</h2>
+    <div class="table-wrap"><table><thead><tr><th>Account</th><th class="r">Trades</th><th class="r">Won</th><th class="r">Net</th><th class="r">Avg / trade</th><th class="r">Worst drop</th><th class="r">Green days</th></tr></thead>
+      <tbody>${acc}${coinRow}</tbody></table></div>
+    <p class="note">Paper only. The Strict account stays in cash until an alert type passes: no trade is better than a trade that has not proved itself. Coin flips are the yardstick: a random symbol and direction every ${esc(String((d.rules || {}).coin_every_min || 5))} minutes, traded on the test bench only (never an alert, never an account).</p>
+    <h2>The strict test</h2>
+    <p class="small">Evidence: the live test bench, where every signal is paper-traded in every style at the real ask / bid with every charge, so the costs are the real ones. Each alert type + style is split by day: <b>learn</b> (first ${Math.round((1 - (b.hold_frac || 0.2)) * 100)}%) and <b>holdout</b> (last ${Math.round((b.hold_frac || 0.2) * 100)}%${d.holdout_from ? `, from ${esc(d.holdout_from)}` : ""}, never used to choose anything). It passes only with ${b.min_trades || 30}+ learn trades averaging above 0R with t ≥ <b>${d.t_bar != null ? d.t_bar : "–"}</b> (the bar for ${d.k || 0} ideas tested at once, so luck is ruled out), ${b.min_hold || 10}+ holdout trades still above 0R, and beating the yardstick in both parts.
+      R = net after costs ÷ money at risk.</p>
+    <ul class="small">${yard || "<li class='muted'>No test-bench trades yet.</li>"}</ul>
+    <div class="btn-row" style="margin:8px 0 14px"><button class="btn" id="st-run">Run the strict test now</button><span class="muted small">${d.made ? `Last run ${esc(d.made.replace("T", " "))}. It runs by itself every evening after the close.` : "Not run yet: it runs by itself every evening after the close."}</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Alert type</th><th>Style</th><th class="r">Learn: trades · avg · t</th><th class="r">Holdout: trades · avg</th><th class="r">₹ / trade</th><th>Verdict</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" class="muted">No result yet.</td></tr>`}</tbody></table></div>
+    <p class="note">Showing the ${(d.setups || []).length} closest of ${d.n_setups || 0} alert type + style pairs. Failed ones are kept, not deleted. Some types are test-bench signals only (candle patterns on a timeframe, Lab library rules): if one passes, it shows here first.</p>`;
+  const rb = $("#st-run");
+  if (rb) rb.onclick = async () => { rb.disabled = true; rb.textContent = "Running…";
+    try { const r = await post("/api/strict/run", {}); toast(`Strict test: ${(r.passing || []).length} passing of ${r.k}`); pageStrict(); }
+    catch (e) { toast(e.message); rb.disabled = false; rb.textContent = "Run the strict test now"; } };
+}
+
 async function pageGhanshyam() {
   stopPageTimer();
   main.innerHTML = `<div id="gh-main"><p class="muted">Loading…</p></div>`;
@@ -3621,7 +3663,7 @@ function drawGhanshyam(d, first) {
 /* ---------------- register */
 Object.assign(PAGES, { live: pageLive, scanner: pageScanner, sym: pageSym, alerts: pageAlerts, paper: pagePaper, connect: pageConnect,
   context: pageContext, scorecard: pageScorecard, briefs: pageBriefs, desk: pageDesk, chart: pageChart, world: pageWorld, insiders: pageInsiders,
-  timemachine: pageTimeMachine, ask: pageAsk, watchlist: pageWatchlist, lab: pageLab, ghanshyam: pageGhanshyam });
+  timemachine: pageTimeMachine, ask: pageAsk, watchlist: pageWatchlist, lab: pageLab, ghanshyam: pageGhanshyam, strict: pageStrict });
 window.addEventListener("hashchange", () => { stopPageTimer(); if (!location.hash.startsWith("#/chart") && CH.chart) { CH.chart.remove(); CH.chart = null; } main.classList.toggle("wide", location.hash.startsWith("#/chart")); });
 pollSnapshot(); evStream();
 aiStatus(true); setInterval(() => aiStatus(true), 5 * 60000);

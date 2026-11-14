@@ -134,6 +134,12 @@ class Books:
                 return "the situation picker has not learned this rule yet"
             if not v.get("take"):
                 return "the situation picker skips it today"
+        if p.get("strict"):                             # 2.77: only alert types that passed the strict test (live/strict.py)
+            st = d.get("strict") or {}
+            if not st:
+                return "its alert type has not passed the strict test"
+            if not st.get("buy"):
+                return "passed the strict test only in a style this account cannot trade (" + ", ".join(st.get("styles") or []) + ")"
         if p.get("focus") and not d.get("focus"):
             return "not a Focus alert"
         if a.get("severity", 0) < int(p.get("min_severity") or 1):
