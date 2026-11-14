@@ -505,7 +505,7 @@ function chStream() {
       const c = { time: d.candle.time, open: d.candle.open, high: d.candle.high, low: d.candle.low, close: d.candle.close };
       if (c.time < lastBar.time) return;
       CH.series.candle.update(c);
-      const v = { time: c.time, value: d.candle.volume || 0, color: c.close >= c.open ? "rgba(30,138,90,.35)" : "rgba(194,59,50,.35)" };
+      const v = { time: c.time, value: d.candle.volume || 0, color: c.close >= c.open ? alpha(C.up, .35) : alpha(C.down, .35) };
       if (c.time > lastBar.time) { CH.bars.push(c); CH.vol.push(v); } else { CH.bars[CH.bars.length - 1] = c; CH.vol[CH.vol.length - 1] = v; }
       if (CH.series.vol && CH.hasVol) CH.series.vol.update(v);
     } else if (d.p) {                                   // daily / weekly / monthly: move the last candle's close
@@ -600,7 +600,7 @@ function indTile(v) {
 function worldBoard(w) {
   if (!w || !(w.groups || []).length) return `<div id="lv-world"></div>`;
   const sp = (a, up) => { if (!a || a.length < 2) return ""; const lo = Math.min(...a), hi = Math.max(...a), r = hi - lo || 1;
-    return `<svg viewBox="0 0 60 16" class="spark" aria-hidden="true"><polyline fill="none" stroke="${up ? "#1E8A5A" : "#C23B32"}" stroke-width="1.3" points="${a.map((v, i) => `${(i / (a.length - 1)) * 60},${15 - ((v - lo) / r) * 13}`).join(" ")}"/></svg>`; };
+    return `<svg viewBox="0 0 60 16" class="spark" aria-hidden="true"><polyline fill="none" stroke="${up ? C.up : C.down}" stroke-width="1.3" points="${a.map((v, i) => `${(i / (a.length - 1)) * 60},${15 - ((v - lo) / r) * 13}`).join(" ")}"/></svg>`; };
   const pr = w.pressure || {};
   const word = pr.label ? pr.label.charAt(0).toUpperCase() + pr.label.slice(1) : "";
   const drv = (pr.drivers || []).slice(0, 3).map((d) => `${esc(d.name)} ${d.move >= 0 ? "+" : ""}${Number(d.move).toFixed(1)}%`).join(", ");
@@ -621,7 +621,7 @@ async function loadWorldBoard() {
 function watchStrip(w) {
   if (!w || !w.length) return "";
   const sp = (a) => { if (!a || a.length < 2) return ""; const lo = Math.min(...a), hi = Math.max(...a), r = hi - lo || 1;
-    return `<svg viewBox="0 0 60 18" class="spark" aria-hidden="true"><polyline fill="none" stroke="${a[a.length - 1] >= a[0] ? "#1E8A5A" : "#C23B32"}" stroke-width="1.4" points="${a.map((v, i) => `${(i / (a.length - 1)) * 60},${16 - ((v - lo) / r) * 14}`).join(" ")}"/></svg>`; };
+    return `<svg viewBox="0 0 60 18" class="spark" aria-hidden="true"><polyline fill="none" stroke="${a[a.length - 1] >= a[0] ? C.up : C.down}" stroke-width="1.4" points="${a.map((v, i) => `${(i / (a.length - 1)) * 60},${16 - ((v - lo) / r) * 14}`).join(" ")}"/></svg>`; };
   return `<div class="watch-strip" aria-label="US markets">${w.map((x) => `<a class="watch" href="#/world"><span>${esc(x.name)}</span><b>${fx(x.last)}</b> ${fpc(x.chg_pct)}${sp(x.spark)}<small>${x.ts ? hm(x.ts) : ""}</small></a>`).join("")}
     <span class="muted small watch-note">Yahoo, about 1 min behind</span></div>`;
 }
@@ -987,7 +987,7 @@ function drawGex(d) {
   const prof = d.gex.profile.filter((p) => Math.abs(p.strike / spot - 1) < 0.04);
   Plotly.react(el, [{ type: "bar", x: prof.map((p) => p.strike), y: prof.map((p) => p.gex_cr), marker: { color: prof.map((p) => (p.gex_cr >= 0 ? C.signal : C.down)) }, hovertemplate: "%{x}: ₹%{y:,.0f} cr<extra></extra>" }],
     plotLayout({ margin: { l: 60, r: 12, t: 24, b: 30 }, title: { text: "Gamma by strike (purple = calls dampen, red = puts accelerate)", font: { size: 12 }, x: 0 },
-      yaxis: { gridcolor: "#EEF1F4", ticksuffix: " cr" }, xaxis: { gridcolor: "#EEF1F4" },
+      yaxis: { gridcolor: C.grid, ticksuffix: " cr" }, xaxis: { gridcolor: C.grid },
       shapes: [{ type: "line", x0: spot, x1: spot, yref: "paper", y0: 0, y1: 1, line: { color: C.ink, width: 1.5 } },
         ...(d.gex.flip ? [{ type: "line", x0: d.gex.flip, x1: d.gex.flip, yref: "paper", y0: 0, y1: 1, line: { color: C.amber, width: 1.5, dash: "dash" } }] : [])],
       annotations: [{ x: spot, yref: "paper", y: 1, text: "Now", showarrow: false, yanchor: "bottom", font: { size: 11 } },
@@ -1010,8 +1010,8 @@ function drawSymChart(d) {
   const inRange = (v) => v && v > lo - pad * 3 && v < hi + pad * 3;
   Plotly.react(el, [{ type: "candlestick", x, open: b.map((r) => r[1]), high: b.map((r) => r[2]), low: b.map((r) => r[3]), close: b.map((r) => r[4]),
     increasing: { line: { color: C.up } }, decreasing: { line: { color: C.down } }, hoverinfo: "x+y" }],
-    plotLayout({ margin: { l: 56, r: 12, t: 8, b: 30 }, xaxis: { rangeslider: { visible: false }, gridcolor: "#EEF1F4", type: "date", tickformat: "%H:%M" },
-      yaxis: { gridcolor: "#EEF1F4", range: [Math.min(lo, ...[o.support, m.vwap].filter(inRange)) - pad, Math.max(hi, ...[o.resistance, m.vwap].filter(inRange)) + pad] },
+    plotLayout({ margin: { l: 56, r: 12, t: 8, b: 30 }, xaxis: { rangeslider: { visible: false }, gridcolor: C.grid, type: "date", tickformat: "%H:%M" },
+      yaxis: { gridcolor: C.grid, range: [Math.min(lo, ...[o.support, m.vwap].filter(inRange)) - pad, Math.max(hi, ...[o.resistance, m.vwap].filter(inRange)) + pad] },
       shapes: lines.filter((l) => inRange(l.y0)), annotations: ann.filter((a) => inRange(a.y)), hovermode: "x" }), plotCfg);
   plotFit(el);
 }
@@ -1238,8 +1238,8 @@ function drawPaper(p, first) {
   if (p.equity.length && window.Plotly) {
     const first = p.closed.length ? Math.min(...p.closed.map((t) => t.entry_ts)) : p.equity[0].ts - 60;
     const eq = [{ ts: first, equity: 0 }, ...p.equity];
-    Plotly.react(el, [{ x: eq.map((e) => new Date(e.ts * 1000)), y: eq.map((e) => e.equity), type: "scatter", mode: "lines", line: { color: C.signal, width: 2, shape: "hv" }, fill: "tozeroy", fillcolor: "rgba(61,47,168,.08)" }],
-      plotLayout({ margin: { l: 60, r: 12, t: 8, b: 30 }, xaxis: { gridcolor: "#EEF1F4", type: "date", tickformat: "%d %b %H:%M" }, yaxis: { gridcolor: "#EEF1F4", tickprefix: "₹", zeroline: true, zerolinecolor: C.rule } }), plotCfg);
+    Plotly.react(el, [{ x: eq.map((e) => new Date(e.ts * 1000)), y: eq.map((e) => e.equity), type: "scatter", mode: "lines", line: { color: C.signal, width: 2, shape: "hv" }, fill: "tozeroy", fillcolor: alpha(C.signal, .08) }],
+      plotLayout({ margin: { l: 60, r: 12, t: 8, b: 30 }, xaxis: { gridcolor: C.grid, type: "date", tickformat: "%d %b %H:%M" }, yaxis: { gridcolor: C.grid, tickprefix: "₹", zeroline: true, zerolinecolor: C.rule } }), plotCfg);
   } else el.innerHTML = `<p class="muted" style="padding:16px">Your running P&amp;L appears here.</p>`;
 }
 
@@ -1683,8 +1683,8 @@ async function pageDesk() {
           <label class="field">API key <span class="muted">(optional, for Log in with Dhan)</span><input type="text" id="l-akey" value="${q(settings["lab.dhan_api_key"])}" autocomplete="off"><small>web.dhan.co → DhanHQ Trading APIs → switch to <b>API Key</b> → name <code>Stockway</code>, Redirect URL <code>http://127.0.0.1:8765/dhan/callback</code> → Generate. Valid 12 months.</small></label>
           <label class="field">API secret<input type="password" id="l-asec" value="${q(settings["lab.dhan_api_secret"])}" autocomplete="off"><small>Shown once by Dhan with the API key. Stays on your Mac.</small></label>
         </div>
-        ${st.dhan_token && st.dhan_token.expires ? `<p class="small" style="margin:10px 0 0;${st.dhan_token.error ? "color:#C23B32" : ""}">Token valid till <b>${st.dhan_token.expires}</b> (${st.dhan_token.hours_left} h left). It renews by itself about 3 hours before it expires, while the app is open${st.dhan_token.renewed ? ` · last renewed ${st.dhan_token.renewed}` : ""}.${st.dhan_token.error ? ` ${q(st.dhan_token.error)}` : ""}</p>` : ""}
-        <div style="margin-top:12px;padding:10px 12px;border:1px solid #D5DCE3;border-radius:8px">
+        ${st.dhan_token && st.dhan_token.expires ? `<p class="small" style="margin:10px 0 0;${st.dhan_token.error ? "color:var(--down)" : ""}">Token valid till <b>${st.dhan_token.expires}</b> (${st.dhan_token.hours_left} h left). It renews by itself about 3 hours before it expires, while the app is open${st.dhan_token.renewed ? ` · last renewed ${st.dhan_token.renewed}` : ""}.${st.dhan_token.error ? ` ${q(st.dhan_token.error)}` : ""}</p>` : ""}
+        <div style="margin-top:12px;padding:10px 12px;border:1px solid var(--rule);border-radius:8px">
           <b>Automatic login (TOTP)</b> ${st.dhan_token && st.dhan_token.auto && st.dhan_token.auto.on
             ? `<span class="pill p-up">on</span> <span class="small muted">PIN and TOTP key kept in ${esc(st.dhan_token.auto.where || "the macOS Keychain")}${st.dhan_token.auto.last_login ? " · last automatic login " + esc(st.dhan_token.auto.last_login) : ""}</span>${st.dhan_token.auto.blocked ? `<div class="small down">Stopped ${esc(st.dhan_token.auto.blocked)}: ${esc(st.dhan_token.auto.last_error || "Dhan refused the PIN / key")}. Enter them again below.</div>` : ""}`
             : `<span class="small muted">off</span>`}
@@ -1794,7 +1794,7 @@ function drawDeskLive(d) {
     ${d.days.length ? `<h2>Paper P&amp;L by day</h2><div class="chart" id="desk-days" style="height:200px"></div>` : ""}`;
   if (d.days.length && window.Plotly) {
     Plotly.react($("#desk-days"), [{ type: "bar", x: d.days.map((x) => x.day), y: d.days.map((x) => x.pnl), marker: { color: d.days.map((x) => (x.pnl >= 0 ? C.up : C.down)) } }],
-      plotLayout({ margin: { l: 60, r: 10, t: 8, b: 30 }, yaxis: { gridcolor: "#EEF1F4", tickprefix: "₹" } }), plotCfg);
+      plotLayout({ margin: { l: 60, r: 10, t: 8, b: 30 }, yaxis: { gridcolor: C.grid, tickprefix: "₹" } }), plotCfg);
   }
 }
 
@@ -1943,10 +1943,10 @@ function deskResults(r) {
 function drawDeskCharts(r) {
   if (!window.Plotly) return;
   const eq = r.equity;
-  if ($("#bt-eq") && eq.length) Plotly.react($("#bt-eq"), [{ x: eq.map((e) => e.date), y: eq.map((e) => e.eq), type: "scatter", mode: "lines", line: { color: C.signal, width: 2 }, fill: "tozeroy", fillcolor: "rgba(61,47,168,.08)" }],
-    plotLayout({ margin: { l: 64, r: 10, t: 26, b: 30 }, title: { text: "Out-of-sample equity (₹)", font: { size: 12 }, x: 0 }, yaxis: { gridcolor: "#EEF1F4", tickprefix: "₹" } }), plotCfg);
+  if ($("#bt-eq") && eq.length) Plotly.react($("#bt-eq"), [{ x: eq.map((e) => e.date), y: eq.map((e) => e.eq), type: "scatter", mode: "lines", line: { color: C.signal, width: 2 }, fill: "tozeroy", fillcolor: alpha(C.signal, .08) }],
+    plotLayout({ margin: { l: 64, r: 10, t: 26, b: 30 }, title: { text: "Out-of-sample equity (₹)", font: { size: 12 }, x: 0 }, yaxis: { gridcolor: C.grid, tickprefix: "₹" } }), plotCfg);
   if ($("#bt-hist") && r.hist.length) Plotly.react($("#bt-hist"), [{ type: "bar", x: r.hist.map((h) => (h.from + h.to) / 2), y: r.hist.map((h) => h.n), marker: { color: r.hist.map((h) => ((h.from + h.to) / 2 >= 0 ? C.up : C.down)) } }],
-    plotLayout({ margin: { l: 40, r: 10, t: 26, b: 30 }, title: { text: "Daily P&L on days with trades (number of days)", font: { size: 12 }, x: 0 }, xaxis: { tickprefix: "₹", gridcolor: "#EEF1F4" }, bargap: 0.05 }), plotCfg);
+    plotLayout({ margin: { l: 40, r: 10, t: 26, b: 30 }, title: { text: "Daily P&L on days with trades (number of days)", font: { size: 12 }, x: 0 }, xaxis: { tickprefix: "₹", gridcolor: C.grid }, bargap: 0.05 }), plotCfg);
 }
 
 
@@ -2233,10 +2233,8 @@ function fortuneDraw(d) {
   const rb = $("#fo-real"); if (rb) { rb.checked = showReal; rb.onchange = () => { LS.set("fo_real", rb.checked); if (FO.last) fortuneDraw(FO.last); }; }
   if (!FO.chart) {
     el.innerHTML = "";
-    FO.chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 11 },
-      grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" },
-      timeScale: { borderColor: "#D5DCE3", timeVisible: FO.tf !== "1D", secondsVisible: false, rightOffset: 3 }, crosshair: { mode: 0 } });
-    FO.s.r = FO.chart.addSeries(LW.LineSeries, { color: "rgba(94,107,120,.8)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    FO.chart = LW.createChart(el, lwOpts({ timeScale: { timeVisible: FO.tf !== "1D", secondsVisible: false, rightOffset: 3 } }));
+    FO.s.r = FO.chart.addSeries(LW.LineSeries, { color: alpha(C.muted, .8), lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     FO.s.p = FO.chart.addSeries(LW.CandlestickSeries, { upColor: FO_UP, downColor: FO_DN, borderVisible: false, wickUpColor: FO_UP, wickDownColor: FO_DN,
       priceLineVisible: false, lastValueVisible: true });
     FO.mk = LW.createSeriesMarkers ? LW.createSeriesMarkers(FO.s.p, []) : null;
@@ -2250,15 +2248,15 @@ function fortuneDraw(d) {
   FO.s.r.setData(showReal ? preds.filter((x) => x.actual_close != null).map((x) => ({ time: x.time, value: x.actual_close })) : []);
   FO.lines.forEach((pl) => { try { FO.s.p.removePriceLine(pl); } catch (_) {} });
   FO.lines = [];
-  if (nx.now) ["close_hi", "close_lo"].forEach((k) => FO.lines.push(FO.s.p.createPriceLine({ price: nx.now[k], color: "#5E6B78", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "likely close" })));
+  if (nx.now) ["close_hi", "close_lo"].forEach((k) => FO.lines.push(FO.s.p.createPriceLine({ price: nx.now[k], color: C.muted, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "likely close" })));
   const cn = nx.cast && nx.cast.now, onBar = cn && nx.now && cn.time === nx.now.time;       // 2.41: the forecast on the forming candle
-  if (onBar && cn.zone) cn.zone.forEach((v) => FO.lines.push(FO.s.p.createPriceLine({ price: v, color: "#9AA6B2", lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: "90%" })));
+  if (onBar && cn.zone) cn.zone.forEach((v) => FO.lines.push(FO.s.p.createPriceLine({ price: v, color: C.dim, lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: "90%" })));
   // 2.69 (Mandeep: "candle par time bhi batao"): the forming candle shows when it started and the time it closes
   const foMin = { "5m": 5, "15m": 15, "1H": 60 }[FO.tf], foHm = (t) => { const z = new Date(t * 1000); return `${z.getUTCHours()}:${String(z.getUTCMinutes()).padStart(2, "0")}`; };
   const spanTxt = nx.now && foMin ? `${foHm(nx.now.time)}→${foHm(nx.now.time + foMin * 60)}` : "";
   const mks = onBar ? [{ time: cn.time, position: cn.dir === "up" ? "aboveBar" : "belowBar", color: cn.dir === "up" ? FO_UP : FO_DN,
     shape: cn.dir === "up" ? "arrowUp" : "arrowDown", text: `${cn.pakka ? "PAKKA " : ""}${Math.round(cn.strength)}%${spanTxt ? ` · ${spanTxt}` : ""}` }] : [];
-  if (!onBar && spanTxt) mks.push({ time: nx.now.time, position: "aboveBar", color: "#5E6B78", shape: "circle", size: 0.6, text: spanTxt });
+  if (!onBar && spanTxt) mks.push({ time: nx.now.time, position: "aboveBar", color: C.muted, shape: "circle", size: 0.6, text: spanTxt });
   FO.span = spanTxt;
   if (FO.mk) FO.mk.setMarkers(mks);
   if (!FO.fitted && preds.length) { FO.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, preds.length - 40), to: preds.length + 2 }); FO.fitted = true; }
@@ -2289,9 +2287,9 @@ const MTF_TFS = ["5m", "15m", "1H", "4H", "1D", "1W"];  // small to large (2.70:
 const MTF_LAYERS = [["own", "Levels of each timeframe"], ["htf", "Higher-timeframe levels on lower charts"], ["conf", "Confluence zones"],
   ["ind", "Moving averages, VWAP, Supertrend"], ["marks", "Swings and patterns"]];
 const mtfOn = (k) => LS.get("mtf_" + k, k !== "htf" ? true : true);
-const MTF_COL = { "1W": "#1B3A6B", "1D": "#3D2FA8", "4H": "#9A6A12", "1H": "#B04ACF", "15m": "#0F7C8C", "5m": "#5E6B78" };
-const MTF_SER = { ema20: "#3D2FA8", ema50: "#9A6A12", ema200: "#5E6B78", vwap: "#0F7C8C", u1: "rgba(15,124,140,.35)", d1: "rgba(15,124,140,.35)",
-  ema9: "#1E8A5A", ema21: "#C23B32", st_up: "#1E8A5A", st_dn: "#C23B32" };
+const MTF_COL = { "1W": C.dark ? "#7FA3E0" : "#1B3A6B", "1D": C.signal, "4H": C.amber, "1H": "#B04ACF", "15m": "#0F7C8C", "5m": C.muted };
+const MTF_SER = { ema20: C.signal, ema50: C.amber, ema200: C.muted, vwap: "#0F7C8C", u1: "rgba(15,124,140,.35)", d1: "rgba(15,124,140,.35)",
+  ema9: C.up, ema21: C.down, st_up: C.up, st_dn: C.down };
 const MT = { charts: {}, data: null, ov: null, timer: null };
 
 async function mtfInit() {
@@ -2391,10 +2389,8 @@ function mtfChart(tf) {
   if (MT.charts[tf]) return MT.charts[tf];
   const el = $("#mtf-" + tf); if (!el || !window.LightweightCharts) return null;
   const LW = window.LightweightCharts;
-  const chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 11 },
-    grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" },
-    timeScale: { borderColor: "#D5DCE3", timeVisible: tf !== "1D" && tf !== "1W", secondsVisible: false, rightOffset: 4 }, crosshair: { mode: 0 } });
-  const candle = chart.addSeries(LW.CandlestickSeries, { upColor: "#1E8A5A", downColor: "#C23B32", borderVisible: false, wickUpColor: "#1E8A5A", wickDownColor: "#C23B32" });
+  const chart = LW.createChart(el, lwOpts({ timeScale: { timeVisible: tf !== "1D" && tf !== "1W", secondsVisible: false, rightOffset: 4 } }));
+  const candle = chart.addSeries(LW.CandlestickSeries, { upColor: C.up, downColor: C.down, borderVisible: false, wickUpColor: C.up, wickDownColor: C.down });
   MT.charts[tf] = { chart, candle, lines: {}, plines: [], markers: LW.createSeriesMarkers(candle, []), first: true };
   return MT.charts[tf];
 }
@@ -2416,7 +2412,7 @@ function drawMTF(d) {
     const want = mtfOn("ind") ? p.series || {} : {};
     Object.keys(C.lines).forEach((k) => { if (!want[k]) { C.chart.removeSeries(C.lines[k]); delete C.lines[k]; } });
     Object.entries(want).forEach(([k, pts]) => {
-      if (!C.lines[k]) C.lines[k] = C.chart.addSeries(LW.LineSeries, { color: MTF_SER[k] || "#5E6B78", lineWidth: k.startsWith("u") || k.startsWith("d") ? 1 : 2, lineStyle: k === "u1" || k === "d1" ? 2 : 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+      if (!C.lines[k]) C.lines[k] = C.chart.addSeries(LW.LineSeries, { color: MTF_SER[k] || C.muted, lineWidth: k.startsWith("u") || k.startsWith("d") ? 1 : 2, lineStyle: k === "u1" || k === "d1" ? 2 : 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
       C.lines[k].setData(pts);
     });
     C.plines.forEach((pl) => C.candle.removePriceLine(pl)); C.plines = [];
@@ -2427,11 +2423,11 @@ function drawMTF(d) {
     const inZone = (x) => zones.some((z) => x >= z.lo - spot * 0.0005 && x <= z.hi + spot * 0.0005);
     const pick = (arr, n) => arr.filter((l) => Math.abs(l.price - spot) <= near && !inZone(l.price)).sort((a, b) => Math.abs(a.price - spot) - Math.abs(b.price - spot)).slice(0, n);
     if (mtfOn("own")) pick(p.levels || [], 6).forEach((l) => add(l.price, MTF_COL[tf], l.group === "swing" ? 1 : 0, 1, l.name));
-    if (mtfOn("htf")) pick(p.htf_levels || [], 5).forEach((l) => add(l.price, MTF_COL[l.tf] || "#5E6B78", 2, 1, l.name));
+    if (mtfOn("htf")) pick(p.htf_levels || [], 5).forEach((l) => add(l.price, MTF_COL[l.tf] || C.muted, 2, 1, l.name));
     zones.forEach((z) => add(z.mid, "rgba(224,123,0,.6)", 0, 3, `Zone ×${z.strength}`));
     let mk = mtfOn("marks") ? (p.markers || []).slice() : [];
     if (MT.ov && tf === "5m") mk = mk.concat(MT.ov.marks);
-    if (MT.ov && tf === "5m" && MT.ov.last) { add(MT.ov.last.stop, "#C23B32", 2, 1, "Test stop"); add(MT.ov.last.target, "#1E8A5A", 2, 1, "Test target"); }
+    if (MT.ov && tf === "5m" && MT.ov.last) { add(MT.ov.last.stop, C.down, 2, 1, "Test stop"); add(MT.ov.last.target, C.up, 2, 1, "Test target"); }
     mk.sort((a, b) => a.time - b.time);
     C.markers.setMarkers(mk);
     if (C.first) {                          // each timeframe opens at its own zoom: small ones close in, big ones wide
@@ -2449,10 +2445,10 @@ async function applyOverlay() {
   try {
     const r = await api(`/api/live/mtf/${encodeURIComponent(CH.sym)}/overlay?id=${encodeURIComponent(id)}&days=${$("#mtf-days").value}`);
     const sigs = r.signals || [];
-    const res = (s) => s.result === "target" ? "#1E8A5A" : s.result === "stop" ? "#C23B32" : "#9A6A12";
+    const res = (s) => s.result === "target" ? C.up : s.result === "stop" ? C.down : C.amber;
     const marks = [];
     sigs.forEach((s) => {
-      marks.push({ time: s.time, position: s.dir === "up" ? "belowBar" : "aboveBar", color: s.dir === "up" ? "#1E8A5A" : "#C23B32", shape: s.dir === "up" ? "arrowUp" : "arrowDown", text: "TEST" });
+      marks.push({ time: s.time, position: s.dir === "up" ? "belowBar" : "aboveBar", color: s.dir === "up" ? C.up : C.down, shape: s.dir === "up" ? "arrowUp" : "arrowDown", text: "TEST" });
       marks.push({ time: s.exit_time, position: "inBar", color: res(s), shape: "circle", text: `${s.r > 0 ? "+" : ""}${s.r}R` });
     });
     MT.ov = { id, marks, last: sigs[sigs.length - 1] || null };
@@ -2476,24 +2472,23 @@ function buildChart() {
   el.innerHTML = "";
   const LW = window.LightweightCharts;
   const intra = chIntraday();
-  const chart = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 12, panes: { separatorColor: "#D5DCE3" } },
-    grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" },
-    timeScale: { borderColor: "#D5DCE3", timeVisible: intra, secondsVisible: chSec(), rightOffset: 6 }, crosshair: { mode: 0 } });
+  const chart = LW.createChart(el, lwOpts({ layout: { fontSize: 12, panes: { separatorColor: C.rule } },
+    timeScale: { timeVisible: intra, secondsVisible: chSec(), rightOffset: 6 } }));
   const S = {};
-  S.candle = chart.addSeries(LW.CandlestickSeries, { upColor: "#1E8A5A", downColor: "#C23B32", borderVisible: false, wickUpColor: "#1E8A5A", wickDownColor: "#C23B32" });
+  S.candle = chart.addSeries(LW.CandlestickSeries, { upColor: C.up, downColor: C.down, borderVisible: false, wickUpColor: C.up, wickDownColor: C.down });
   const ln = (color, width = 1, style = 0, pane = 0, extra = {}) => chart.addSeries(LW.LineSeries, { color, lineWidth: width, lineStyle: style, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...extra }, pane);
-  if (chOn("vwap") && intra) { S.vwap = ln("#3D2FA8", 2); S.u1 = ln("rgba(61,47,168,.45)", 1, 2); S.d1 = ln("rgba(61,47,168,.45)", 1, 2); S.u2 = ln("rgba(61,47,168,.3)", 1, 1); S.d2 = ln("rgba(61,47,168,.3)", 1, 1); }
-  if (chOn("ema")) { S.ema9 = ln("#E07B00", 1); S.ema21 = ln("#0A84C1", 1); S.ema50 = ln("#5E6B78", 1, 2); }
-  if (chOn("st")) { S.st_up = ln("#1E8A5A", 2, 0, 0, { lineType: 1 }); S.st_dn = ln("#C23B32", 2, 0, 0, { lineType: 1 }); }
+  if (chOn("vwap") && intra) { S.vwap = ln(C.signal, 2); S.u1 = ln(alpha(C.signal, .45), 1, 2); S.d1 = ln(alpha(C.signal, .45), 1, 2); S.u2 = ln(alpha(C.signal, .3), 1, 1); S.d2 = ln(alpha(C.signal, .3), 1, 1); }
+  if (chOn("ema")) { S.ema9 = ln("#E07B00", 1); S.ema21 = ln("#0A84C1", 1); S.ema50 = ln(C.muted, 1, 2); }
+  if (chOn("st")) { S.st_up = ln(C.up, 2, 0, 0, { lineType: 1 }); S.st_dn = ln(C.down, 2, 0, 0, { lineType: 1 }); }
   if (chOn("scen") && intra) {
     const sl = (color, style, w = 2) => chart.addSeries(LW.LineSeries, { color, lineWidth: w, lineStyle: style, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false }, 0);
-    S.sc_up = sl("rgba(30,138,90,.9)", 2); S.sc_side = sl("rgba(94,107,120,.9)", 2); S.sc_down = sl("rgba(194,59,50,.9)", 2);
-    S.sc_lo = sl("rgba(94,107,120,.45)", 1, 1); S.sc_hi = sl("rgba(94,107,120,.45)", 1, 1);
+    S.sc_up = sl(alpha(C.up, .9), 2); S.sc_side = sl(alpha(C.muted, .9), 2); S.sc_down = sl(alpha(C.down, .9), 2);
+    S.sc_lo = sl(alpha(C.muted, .45), 1, 1); S.sc_hi = sl(alpha(C.muted, .45), 1, 1);
     S.sc_lo.applyOptions({ lastValueVisible: false }); S.sc_hi.applyOptions({ lastValueVisible: false });
   }
   let pane = 1;
   if (chOn("vol")) { S.vol = chart.addSeries(LW.HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false }, pane); S.volPane = pane++; }
-  if (chOn("rsi")) { S.rsi = ln("#3D2FA8", 1, 0, pane, { lastValueVisible: true }); S.rsi.createPriceLine({ price: 70, color: "#C23B32", lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsi.createPriceLine({ price: 30, color: "#1E8A5A", lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsiPane = pane++; }
+  if (chOn("rsi")) { S.rsi = ln(C.signal, 1, 0, pane, { lastValueVisible: true }); S.rsi.createPriceLine({ price: 70, color: C.down, lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsi.createPriceLine({ price: 30, color: C.up, lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsiPane = pane++; }
   if (chOn("macd")) { S.macd_hist = chart.addSeries(LW.HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, pane); S.macd = ln("#0A84C1", 1, 0, pane); S.macd_sig = ln("#E07B00", 1, 0, pane); S.macdPane = pane++; }
   chart.panes().forEach((p, i) => p.setStretchFactor(i === 0 ? 4 : 1));
   S.markers = LW.createSeriesMarkers(S.candle, []);
@@ -2524,7 +2519,7 @@ function drawBars(first) {
   if (S.st_up) { const st = IND.st(h, l, c); put(S.st_up, st.line.map((x, i) => (st.dir[i] > 0 ? x : null)), 10); put(S.st_dn, st.line.map((x, i) => (st.dir[i] < 0 ? x : null)), 10); }
   if (S.vwap) { const w = IND.vwap(B, CH.vol); put(S.vwap, w.v); put(S.u1, w.u1); put(S.d1, w.d1); put(S.u2, w.u2); put(S.d2, w.d2); }
   if (S.rsi) put(S.rsi, IND.rsi(c), 14);
-  if (S.macd) { const m = IND.macd(c); put(S.macd, m.m, 26); put(S.macd_sig, m.s, 34); S.macd_hist.setData(B.map((b, i) => (i < 34 ? null : { time: b.time, value: m.h[i], color: m.h[i] >= 0 ? "rgba(30,138,90,.5)" : "rgba(194,59,50,.5)" })).filter(Boolean)); }
+  if (S.macd) { const m = IND.macd(c); put(S.macd, m.m, 26); put(S.macd_sig, m.s, 34); S.macd_hist.setData(B.map((b, i) => (i < 34 ? null : { time: b.time, value: m.h[i], color: m.h[i] >= 0 ? alpha(C.up, .5) : alpha(C.down, .5) })).filter(Boolean)); }
   if (S.vol) S.vol.setData(CH.vol || []);
   if (first && B.length) {                       // zoom that suits the timeframe: about one screen of recent bars
     const n = B.length, want = CH_VIEW[CH.tf] || 130;
@@ -2599,8 +2594,8 @@ function drawChart(d, first) {
   const at = (m) => { const t = chBarTime(m.time); if (t != null) mk.push({ ...m, time: t }); };
   if (chOn("marks") && intra) d.markers.forEach(({ time, position, color, shape, text }) => at({ time, position, color, shape, text }));
   if (chOn("pat") && intra) (d.patterns || []).forEach((p) => at({ time: p.time, position: p.direction === "up" ? "belowBar" : "aboveBar",
-    color: p.grade === "edge" ? "#1E8A5A" : p.grade === "losing" ? "#9AA5B1" : "#3D2FA8", shape: p.direction === "up" ? "arrowUp" : "arrowDown", text: PAT_SHORT[p.pattern] || "" }));
-  if (chOn("swing") && intra) (d.swings || []).forEach((w) => at({ time: w.time, position: w.type === "H" ? "aboveBar" : "belowBar", color: "#8A94A0", shape: "circle", size: 0.3, text: w.label }));
+    color: p.grade === "edge" ? C.up : p.grade === "losing" ? C.dim : C.signal, shape: p.direction === "up" ? "arrowUp" : "arrowDown", text: PAT_SHORT[p.pattern] || "" }));
+  if (chOn("swing") && intra) (d.swings || []).forEach((w) => at({ time: w.time, position: w.type === "H" ? "aboveBar" : "belowBar", color: C.dim, shape: "circle", size: 0.3, text: w.label }));
   if (CH.overlayMarks) CH.overlayMarks.forEach(at);
   const seen = new Set(); const mk2 = mk.filter((m) => { const k = m.time + "|" + m.text + "|" + m.position; if (seen.has(k)) return false; seen.add(k); return true; });
   mk2.sort((a, b) => a.time - b.time);
@@ -2614,7 +2609,7 @@ function drawChart(d, first) {
     if (chOn("pat") && intra) (d.patterns || []).forEach((p) => p.lines.forEach((ln) => {
       const pts = []; ln.forEach((q) => { if (!pts.length || q.time > pts[pts.length - 1].time) pts.push(q); });
       if (pts.length < 2) return;
-      const ser = CH.chart.addSeries(window.LightweightCharts.LineSeries, { color: p.direction === "up" ? "rgba(30,138,90,.85)" : "rgba(194,59,50,.85)", lineWidth: 2, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 0);
+      const ser = CH.chart.addSeries(window.LightweightCharts.LineSeries, { color: p.direction === "up" ? alpha(C.up, .85) : alpha(C.down, .85), lineWidth: 2, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 0);
       ser.setData(pts); CH.patSeries.push(ser);
     }));
     CH.psig = psig;
@@ -2745,7 +2740,7 @@ function drawWorld(w, first) {
     const lo = Math.min(...all), hi = Math.max(...all), W = 84, H = 22, y = (v) => (H - 1 - ((v - lo) / ((hi - lo) || 1)) * (H - 2)).toFixed(1);
     const pts = xs.map((x, i) => `${((i / (xs.length - 1)) * W).toFixed(1)},${y(x)}`).join(" ");
     const up = pc ? xs[xs.length - 1] >= pc : xs[xs.length - 1] >= xs[0];
-    return `<svg width="${W}" height="${H}" class="spark" aria-hidden="true">${pc ? `<line x1="0" x2="${W}" y1="${y(pc)}" y2="${y(pc)}" stroke="#9AA5B1" stroke-dasharray="2 2" stroke-width="1"/>` : ""}<polyline points="${pts}" fill="none" stroke="${up ? "#1E8A5A" : "#C23B32"}" stroke-width="1.5"/></svg>`;
+    return `<svg width="${W}" height="${H}" class="spark" aria-hidden="true">${pc ? `<line x1="0" x2="${W}" y1="${y(pc)}" y2="${y(pc)}" stroke=C.dim stroke-dasharray="2 2" stroke-width="1"/>` : ""}<polyline points="${pts}" fill="none" stroke="${up ? C.up : C.down}" stroke-width="1.5"/></svg>`;
   };
   const prevLast = L.worldLast || {};
   const nowS = w.server_ts || Date.now() / 1000;
@@ -3055,11 +3050,11 @@ function tmFan(r) {
   const line = (y, color, name, dash) => ({ x: [x[0], x[n - 1]], y: [y, y], mode: "lines", line: { color, width: 1.2, dash }, name, hoverinfo: "name+y" });
   Plotly.newPlot(el, [
     { x, y: f.p95, mode: "lines", line: { width: 0 }, hoverinfo: "skip", name: "95%" },
-    { x, y: f.p5, mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: "rgba(61,47,168,.12)", name: "90% of replays", hovertemplate: "%{y:.2f}" },
-    { x, y: f.p50, mode: "lines", line: { color: C.signal || "#3D2FA8", width: 2 }, name: "Median" },
-    line(pl.target, "#1E8A5A", "Target", "dash"), line(pl.stop, "#C23B32", "Stop", "dash"), line(pl.entry, "#5E6B78", "Entry", "dot"),
-  ], plotLayout({ height: 260, margin: { l: 70, r: 16, t: 8, b: 36 }, hovermode: "x unified", xaxis: { gridcolor: "#EEF1F4", nticks: 8 },
-    yaxis: { gridcolor: "#EEF1F4", tickformat: pl.entry >= 1000 ? ",.0f" : ",.2f" } }), plotCfg);
+    { x, y: f.p5, mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: alpha(C.signal, .12), name: "90% of replays", hovertemplate: "%{y:.2f}" },
+    { x, y: f.p50, mode: "lines", line: { color: C.signal, width: 2 }, name: "Median" },
+    line(pl.target, C.up, "Target", "dash"), line(pl.stop, C.down, "Stop", "dash"), line(pl.entry, C.muted, "Entry", "dot"),
+  ], plotLayout({ height: 260, margin: { l: 70, r: 16, t: 8, b: 36 }, hovermode: "x unified", xaxis: { gridcolor: C.grid, nticks: 8 },
+    yaxis: { gridcolor: C.grid, tickformat: pl.entry >= 1000 ? ",.0f" : ",.2f" } }), plotCfg);
   plotFit(el);
 }
 
@@ -3825,9 +3820,7 @@ async function pageLens() {
   const mk = (id, opts = {}) => {
     if (LZ.charts[id]) return LZ.charts[id];
     const el = $("#" + id); if (!el || !LW) return null;
-    const c = LW.createChart(el, { autoSize: true, layout: { background: { color: "#ffffff" }, textColor: "#16212C", fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 11 },
-      grid: { vertLines: { color: "#F4F6F8" }, horzLines: { color: "#F4F6F8" } }, rightPriceScale: { borderColor: "#D5DCE3" }, leftPriceScale: { visible: !!opts.left, borderColor: "#D5DCE3" },
-      timeScale: { borderColor: "#D5DCE3", timeVisible: true, secondsVisible: false }, crosshair: { mode: 0 } });
+    const c = LW.createChart(el, lwOpts({ leftPriceScale: { visible: !!opts.left }, timeScale: { timeVisible: true, secondsVisible: false } }));
     c._s = {}; LZ.charts[id] = c; return c;
   };
   const put = (c, name, type, data, o = {}) => { if (!c) return; if (!c._s[name]) c._s[name] = c.addSeries(LW[type], { priceLineVisible: false, lastValueVisible: true, ...o }); c._s[name].setData(data || []); };
@@ -3844,18 +3837,18 @@ async function pageLens() {
       ["PCR", n2(nw.pcr), "puts ÷ calls (OI)"], ["Max pain", n2(nw.max_pain), x.expiry ? "expiry " + esc(x.expiry) : ""],
       ["Call wall", n2(nw.resistance), "biggest call OI"], ["Put wall", n2(nw.support), "biggest put OI"],
     ].map(([a, b, c]) => `<div class="kpi"><b>${b}</b><span>${a}${c ? ` · <small>${c}</small>` : ""}</span></div>`).join("") + (x.session && x.session !== "today" ? `<p class="small muted" style="grid-column:1/-1;margin:6px 12px">Showing the last recorded session (${esc(x.session)}).</p>` : "");
-    const a = mk("lz-strad"); put(a, "s", "LineSeries", S.straddle, { color: "#3D2FA8", lineWidth: 2, title: "Straddle" }); put(a, "v", "LineSeries", S.straddle_vwap, { color: "#9A6A12", lineWidth: 1, lineStyle: 2, title: "Average" });
-    const b = mk("lz-cepe"); put(b, "c", "LineSeries", S.ce, { color: "#C23B32", lineWidth: 2, title: "Call" }); put(b, "p", "LineSeries", S.pe, { color: "#1E8A5A", lineWidth: 2, title: "Put" });
-    const c = mk("lz-oi"); put(c, "d", "HistogramSeries", (S.pe_minus_ce_oi_lakh || []).map((p) => ({ time: p.time, value: p.value, color: p.value >= 0 ? "rgba(30,138,90,.6)" : "rgba(194,59,50,.6)" })), { title: "PE − CE" });
+    const a = mk("lz-strad"); put(a, "s", "LineSeries", S.straddle, { color: C.signal, lineWidth: 2, title: "Straddle" }); put(a, "v", "LineSeries", S.straddle_vwap, { color: C.amber, lineWidth: 1, lineStyle: 2, title: "Average" });
+    const b = mk("lz-cepe"); put(b, "c", "LineSeries", S.ce, { color: C.down, lineWidth: 2, title: "Call" }); put(b, "p", "LineSeries", S.pe, { color: C.up, lineWidth: 2, title: "Put" });
+    const c = mk("lz-oi"); put(c, "d", "HistogramSeries", (S.pe_minus_ce_oi_lakh || []).map((p) => ({ time: p.time, value: p.value, color: p.value >= 0 ? alpha(C.up, .6) : alpha(C.down, .6) })), { title: "PE − CE" });
     const d = mk("lz-iv", { left: true }); put(d, "iv", "LineSeries", S.atm_iv, { color: "#B04ACF", lineWidth: 2, priceScaleId: "left", title: "IV" }); put(d, "pcr", "LineSeries", S.pcr, { color: "#0F7C8C", lineWidth: 2, title: "PCR" });
     const st = x.strikes || [], mx = Math.max(1, ...st.map((r) => Math.max(r.ce_oi || 0, r.pe_oi || 0)));
     const bar = (v, col) => `<span style="display:inline-block;height:9px;width:${Math.round((v || 0) / mx * 100)}%;max-width:100%;background:${col};border-radius:2px"></span>`;
     $("#lz-strikes").innerHTML = st.length ? `<div class="table-wrap"><table class="mini"><thead><tr><th class="r">Call OI chg</th><th>Call OI</th><th class="r">Strike</th><th>Put OI</th><th>Put OI chg</th></tr></thead><tbody>
-      ${st.map((r) => `<tr${nw.spot && Math.abs(r.strike - nw.spot) === Math.min(...st.map((q) => Math.abs(q.strike - nw.spot))) ? ` style="background:#FFF8E6"` : ""}><td class="r ${(r.ce_chg || 0) > 0 ? "down" : "up"}">${n2(r.ce_chg)}</td><td style="width:30%;text-align:right">${bar(r.ce_oi, "rgba(194,59,50,.55)")} <small>${n2(r.ce_oi)}</small></td><td class="r"><b>${fk(r.strike)}</b></td><td style="width:30%"><small>${n2(r.pe_oi)}</small> ${bar(r.pe_oi, "rgba(30,138,90,.55)")}</td><td class="${(r.pe_chg || 0) > 0 ? "up" : "down"}">${n2(r.pe_chg)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="small muted" style="margin:0">Strike OI shows while the scanner runs (options streaming).</p>`;
+      ${st.map((r) => `<tr${nw.spot && Math.abs(r.strike - nw.spot) === Math.min(...st.map((q) => Math.abs(q.strike - nw.spot))) ? ` style="background:var(--itm)"` : ""}><td class="r ${(r.ce_chg || 0) > 0 ? "down" : "up"}">${n2(r.ce_chg)}</td><td style="width:30%;text-align:right">${bar(r.ce_oi, alpha(C.down, .55))} <small>${n2(r.ce_oi)}</small></td><td class="r"><b>${fk(r.strike)}</b></td><td style="width:30%"><small>${n2(r.pe_oi)}</small> ${bar(r.pe_oi, alpha(C.up, .55))}</td><td class="${(r.pe_chg || 0) > 0 ? "up" : "down"}">${n2(r.pe_chg)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="small muted" style="margin:0">Strike OI shows while the scanner runs (options streaming).</p>`;
     const br = mk("lz-breadth", { left: true });
-    put(br, "a", "LineSeries", (m.breadth || []).map((p) => ({ time: p.time, value: p.adv })), { color: "#1E8A5A", lineWidth: 2, title: "Up" });
-    put(br, "d", "LineSeries", (m.breadth || []).map((p) => ({ time: p.time, value: p.dec })), { color: "#C23B32", lineWidth: 2, title: "Down" });
-    put(br, "v", "LineSeries", (m.breadth || []).filter((p) => p.above_vwap_pct != null).map((p) => ({ time: p.time, value: p.above_vwap_pct })), { color: "#5E6B78", lineWidth: 1, lineStyle: 2, priceScaleId: "left", title: "% > VWAP" });
+    put(br, "a", "LineSeries", (m.breadth || []).map((p) => ({ time: p.time, value: p.adv })), { color: C.up, lineWidth: 2, title: "Up" });
+    put(br, "d", "LineSeries", (m.breadth || []).map((p) => ({ time: p.time, value: p.dec })), { color: C.down, lineWidth: 2, title: "Down" });
+    put(br, "v", "LineSeries", (m.breadth || []).filter((p) => p.above_vwap_pct != null).map((p) => ({ time: p.time, value: p.above_vwap_pct })), { color: C.muted, lineWidth: 1, lineStyle: 2, priceScaleId: "left", title: "% > VWAP" });
     const BL = { long_buildup: ["Long buildup", "price ↑ OI ↑", "up"], short_covering: ["Short covering", "price ↑ OI ↓", "up"], short_buildup: ["Short buildup", "price ↓ OI ↑", "down"], long_unwinding: ["Long unwinding", "price ↓ OI ↓", "down"] };
     const bkey = (k) => Object.keys(BL).find((b) => (k || "").toLowerCase().replace(/ /g, "_").includes(b)) || k;
     const bu = {}; Object.entries(m.buildup || {}).forEach(([k, v]) => { const kk = bkey(k); (bu[kk] = bu[kk] || []).push(...v); });

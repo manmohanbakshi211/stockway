@@ -3,10 +3,46 @@
 
 const $ = (s, el = document) => el.querySelector(s);
 const main = $("#main");
-const C = {
-  ink: "#16212C", muted: "#5E6B78", rule: "#D5DCE3", signal: "#3D2FA8",
-  up: "#1E8A5A", down: "#C23B32", amber: "#9A6A12", fog: "#E9EDF1",
-};
+/* 2.75: chart and page colours come from the theme's tokens (app.css), so charts follow the light / dark switch */
+const C = (() => {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n, d) => (cs.getPropertyValue("--" + n) || "").trim() || d;
+  return {
+    ink: v("ink", "#16212C"), muted: v("muted", "#5E6B78"), rule: v("rule", "#D5DCE3"), signal: v("signal", "#3D2FA8"),
+    up: v("up", "#1E8A5A"), down: v("down", "#C23B32"), amber: v("amber", "#9A6A12"), fog: v("fog", "#E9EDF1"),
+    bg: v("paper", "#FFFFFF"), grid: v("grid", "#F1F3F6"), dim: v("dim", "#A9B4BF"),
+    dark: document.documentElement.dataset.theme === "dark",
+  };
+})();
+/* rgba() of a theme colour (#RRGGBB) */
+const alpha = (hex, a) => { const h = String(hex).replace("#", ""); return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`; };
+/* Lightweight Charts options in the current theme, merged with a chart's own options */
+function lwOpts(extra = {}) {
+  const base = { autoSize: true, layout: { background: { color: C.bg }, textColor: C.ink, fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif", fontSize: 11 },
+    grid: { vertLines: { color: C.grid }, horzLines: { color: C.grid } }, rightPriceScale: { borderColor: C.rule },
+    timeScale: { borderColor: C.rule }, crosshair: { mode: 0 } };
+  const out = { ...base, ...extra };
+  for (const k of ["layout", "grid", "rightPriceScale", "leftPriceScale", "timeScale"]) out[k] = { ...(base[k] || {}), ...(extra[k] || {}) };
+  if (extra.layout && extra.layout.panes) out.layout.panes = { separatorColor: C.rule, ...extra.layout.panes };
+  if (out.leftPriceScale && !out.leftPriceScale.borderColor) out.leftPriceScale.borderColor = C.rule;
+  return out;
+}
+function themeButton() {
+  const b = document.getElementById("theme-btn");
+  if (!b) return;
+  const sun = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  const moon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  b.innerHTML = C.dark ? sun : moon;
+  b.title = C.dark ? "Switch to the light theme" : "Switch to the dark theme";
+  b.setAttribute("aria-label", b.title);
+  b.setAttribute("aria-pressed", String(C.dark));
+  b.onclick = () => {                                    // like trading platforms: the whole app, charts included, switches
+    try { localStorage.setItem("stockway-theme", C.dark ? "light" : "dark"); } catch (e) { /* private window: not remembered */ }
+    if (C.dark) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = "dark";
+    location.reload();
+  };
+}
+themeButton();
 const state = { status: null, page: null, jobSince: 0, jobId: null, pollTimer: null, ridx: "BANKNIFTY", rlist: null };
 try { state.ridx = localStorage.getItem("radarIdx") || "BANKNIFTY"; } catch (_) {}
 
@@ -67,10 +103,11 @@ function badge(outcome) {
 
 const plotLayout = (extra = {}) => Object.assign({
   font: { family: "Archivo, Helvetica Neue, Arial, sans-serif", size: 12, color: C.ink },
-  paper_bgcolor: "#fff", plot_bgcolor: "#fff",
+  paper_bgcolor: C.bg, plot_bgcolor: C.bg,
   margin: { l: 56, r: 16, t: 10, b: 36 },
-  xaxis: { gridcolor: "#EEF1F4", linecolor: C.rule, zeroline: false },
-  yaxis: { gridcolor: "#EEF1F4", linecolor: C.rule, zeroline: false },
+  xaxis: { gridcolor: C.grid, linecolor: C.rule, zeroline: false },
+  yaxis: { gridcolor: C.grid, linecolor: C.rule, zeroline: false },
+  hoverlabel: { bgcolor: C.bg, bordercolor: C.rule, font: { color: C.ink } },
   showlegend: false, hovermode: "x unified",
 }, extra);
 const plotCfg = { displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d", "toggleSpikelines"] };
@@ -400,20 +437,20 @@ async function pageHistory() {
   });
   const traces = [
     { x: D, y: h.close, type: "scattergl", mode: "lines", line: { color: C.ink, width: 1.1 }, name: "Close", hovertemplate: "%{x}<br>%{y:,.0f}<extra></extra>" },
-    mk(untested, "Big day (training years)", "#A9B4BF", "circle", 5),
+    mk(untested, "Big day (training years)", C.dim, "circle", 5),
     mk(falseA, "Flagged, no big move", "#B9A6F0", "circle-open", 6),
     mk(missed, "Big day, missed", C.down, "x-thin-open", 8),
     mk(caught, "Big day, flagged", C.signal, "circle", 7),
   ];
   const last = D[D.length - 1];
   const from = (days) => { const t = new Date(last); t.setDate(t.getDate() - days); return t.toISOString().slice(0, 10); };
-  const priceLayout = plotLayout({ hovermode: "closest", xaxis: { gridcolor: "#EEF1F4", range: [from(1095), last] }, yaxis: { gridcolor: "#EEF1F4", tickformat: ",.0f" } });
+  const priceLayout = plotLayout({ hovermode: "closest", xaxis: { gridcolor: C.grid, range: [from(1095), last] }, yaxis: { gridcolor: C.grid, tickformat: ",.0f" } });
   Plotly.newPlot("hist-price", traces, priceLayout, plotCfg);
   const thr = h.threshold;
   Plotly.newPlot("hist-prob", [
     { x: D, y: h.prob, type: "scattergl", mode: "lines", line: { color: C.signal, width: 1 }, name: "Chance", hovertemplate: "%{x}<br>%{y:.0%}<extra></extra>" },
     { x: D, y: thr, type: "scattergl", mode: "lines", line: { color: C.muted, width: 1, dash: "dot" }, name: "Flag level", hovertemplate: "Flag at %{y:.0%}<extra></extra>" },
-  ], plotLayout({ xaxis: { gridcolor: "#EEF1F4", range: [from(1095), last] }, yaxis: { gridcolor: "#EEF1F4", tickformat: ".0%", range: [0, 1] } }), plotCfg);
+  ], plotLayout({ xaxis: { gridcolor: C.grid, range: [from(1095), last] }, yaxis: { gridcolor: C.grid, tickformat: ".0%", range: [0, 1] } }), plotCfg);
 
   const setRange = (r) => {
     main.querySelectorAll("[data-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.range === r)));
@@ -522,14 +559,14 @@ async function pageCheck() {
   bindRidx();
   Plotly.newPlot("chk-years", [{
     x: years, y: years.map((y) => m.by_year_auc[y]), type: "bar",
-    marker: { color: years.map((y) => (m.by_year_auc[y] >= 0.6 ? C.signal : "#A9B4BF")) },
+    marker: { color: years.map((y) => (m.by_year_auc[y] >= 0.6 ? C.signal : C.dim)) },
     hovertemplate: "%{x}: %{y:.2f}<extra></extra>",
-  }], plotLayout({ yaxis: { range: [0.4, 1], gridcolor: "#EEF1F4" }, shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: 0.5, y1: 0.5, line: { color: C.muted, dash: "dot", width: 1 } }] }), plotCfg);
+  }], plotLayout({ yaxis: { range: [0.4, 1], gridcolor: C.grid }, shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: 0.5, y1: 0.5, line: { color: C.muted, dash: "dot", width: 1 } }] }), plotCfg);
   const e = p.equity;
   Plotly.newPlot("chk-eq", [
-    { x: e.all_dates, y: e.all, type: "scattergl", mode: "lines", line: { color: "#A9B4BF", width: 1.4 }, name: "Every day" },
+    { x: e.all_dates, y: e.all, type: "scattergl", mode: "lines", line: { color: C.dim, width: 1.4 }, name: "Every day" },
     { x: e.flag_dates, y: e.flag, type: "scattergl", mode: "lines", line: { color: C.signal, width: 2 }, name: "Flagged days only" },
-  ], plotLayout({ showlegend: true, legend: { orientation: "h", y: 1.1 }, yaxis: { gridcolor: "#EEF1F4", ticksuffix: "%", title: { text: "Cumulative, % of spot" } } }), plotCfg);
+  ], plotLayout({ showlegend: true, legend: { orientation: "h", y: 1.1 }, yaxis: { gridcolor: C.grid, ticksuffix: "%", title: { text: "Cumulative, % of spot" } } }), plotCfg);
 }
 
 /* ---------------- page: all indices (2.67, radar/indices.py) */

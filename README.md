@@ -117,6 +117,16 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.75: light and dark theme, like trading platforms (15 Nov 2026)
+- **Mandeep (15 Nov):** "make light and dark theme like trading platforms have ... take from tanu".
+- The sun / moon button next to the Stockway name (sidebar on a computer, top bar on a phone) switches the whole app:
+  pages, tables, the option chain, and every chart (candles, grid, axes, VWAP / EMA / levels, Plotly charts). Light
+  stays the default; the choice is remembered on that browser (copied from Tanu's switch).
+- Every colour is now a token in `webapp/static/app.css` (light and dark sets); charts read the same tokens
+  (`lwOpts()` and `plotLayout()` in `app.js`). The task panel and toasts stay dark in both themes.
+- Checked: all 28 pages in light and dark at 1440 and 390 px: no sideways scroll, no page errors; the switch is
+  remembered after a reload. Nothing else changes (no alert, score, paper rule or Lab result).
+
 ## 2.74: the day's gaps filled after a restart or a late start (15 Nov 2026)
 - **Mandeep (15 Nov):** keep only the original Stockway and copy Tanu's useful pieces into it, starting with "the
   fill gaps from real data feature".

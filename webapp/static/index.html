@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stockway</title>
+<script>try { if (localStorage.getItem("stockway-theme") === "dark") document.documentElement.dataset.theme = "dark"; } catch (e) {}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
@@ -13,10 +14,13 @@
 <body>
 <div class="shell">
   <nav class="rail" aria-label="Main">
-    <a class="brand" href="#/live">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" /><circle cx="16" cy="16" r="7" /><circle cx="16" cy="16" r="2.5" class="dot"/><path d="M16 16 L27 9" /></svg>
-      <span><b>Stockway</b><small>F&amp;O live radar</small></span>
-    </a>
+    <div class="rail-top">
+      <a class="brand" href="#/live">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" /><circle cx="16" cy="16" r="7" /><circle cx="16" cy="16" r="2.5" class="dot"/><path d="M16 16 L27 9" /></svg>
+        <span><b>Stockway</b><small>F&amp;O live radar</small></span>
+      </a>
+      <button type="button" class="theme-btn" id="theme-btn" aria-pressed="false"></button>
+    </div>
     <div class="rail-scroll">
     <p class="rail-group">Trade today <span id="rail-live" class="rail-live"></span></p>
     <ul>
