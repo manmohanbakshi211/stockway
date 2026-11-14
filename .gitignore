@@ -38,5 +38,3 @@ data/packs/
 data/*
 !data/events_template.csv
 
-# Tanu (tanu/): its data, logs and this machine's settings stay on the Mac
-data/tanu/

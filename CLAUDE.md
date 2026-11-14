@@ -4,10 +4,11 @@
 Mandeep: "now we don't need any second body like tanu ... now onwards we will only keep original stockway and modify
 that only ... you don't need to code again for same features just take from tanu and add in manu".
 - The 13 Nov freeze is lifted: live/, lab/, webapp/, radar/ get changes again, under the rules below.
-- Tanu (tanu/) is being removed. Its useful pieces are COPIED into Stockway (not imported, not redesigned), one release
-  at a time: gap fill (2.74), light / dark theme (2.75), replay of a recorded day (2.76, live/replay.py), the Strict track (2.77,
-  live/strict.py: strict pass test on the live bench, coin-flip yardstick, Strict alerts and paper account, comparison). Then tanu/ and Start Tanu.command are deleted; data/tanu on the
-  Mac is deleted only with Mandeep's explicit OK.
+- Tanu (the trial rebuild) is gone (2.78: tanu/ and Start Tanu.command removed). Its useful pieces were COPIED into
+  Stockway first: gap fill (2.74), light / dark theme (2.75), replay of a recorded day (2.76, live/replay.py), the
+  Strict track (2.77, live/strict.py: strict pass test on the live bench, coin-flip yardstick, Strict alerts and paper
+  account, comparison). Its research ledger and measured costs are kept in data/archive/tanu_2026-11 on the Mac.
+  Never start a second app again: new ideas go into Stockway as bullets, in shadow first.
 
 ## Rules
 

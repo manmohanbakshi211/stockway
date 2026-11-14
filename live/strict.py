@@ -68,7 +68,7 @@ def variant_of(a: dict) -> str | None:
     return (d.get("factory") or {}).get("id") or d.get("trial_key")
 
 
-# ---------------------------------------------------------------- Tanu's statistics (tanu/evaluate/report.py)
+# ---------------------------------------------------------------- Tanu's statistics (its tanu/evaluate/report.py, before 2.78)
 def stats(x) -> dict:
     x = [float(v) for v in x if v is not None and v == v]
     n = len(x)

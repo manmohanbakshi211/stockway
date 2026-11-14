@@ -1,7 +1,8 @@
 # Stockway
 
-> **15 Nov 2026:** this app is Stockway again, the only one. The trial rebuild ("Tanu") is being removed; its useful
-> pieces are copied in here one release at a time (2.74 onwards). Start it as always with **Start Radar.command**.
+> **15 Nov 2026:** Stockway is the only app. The trial rebuild ("Tanu") was removed in 2.78 after its useful pieces
+> were copied in (gap fill 2.74, light / dark theme 2.75, replay 2.76, Strict track 2.77). Start it as always with
+> **Start Radar.command**.
 
 A Mac app (runs in your browser, on your own computer) with two parts:
 
@@ -116,6 +117,15 @@ which AI is connected ("Powered by Claude Opus · your Pro plan"). Other choices
 Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
+
+## 2.78: Tanu removed; Stockway is the only app (15 Nov 2026)
+- **Mandeep (15 Nov):** "after updating manu just delete the tanu ... now onwards we will only keep original stockway".
+- Tanu's useful pieces are in Stockway (2.74 gap fill, 2.75 light / dark theme, 2.76 replay, 2.77 Strict track), so
+  its code (`tanu/`) and `Start Tanu.command` are removed. Stockway's own code never imported Tanu, so nothing in the
+  app, the alerts, the paper accounts or the Lab changes.
+- On the Mac, Tanu's research ledger and measured costs are kept in `data/archive/tanu_2026-11` (experiments are kept).
+  Its other files (copies of Stockway's recordings and history, caches, its own Python in `.venv-tanu`) are deleted
+  only with Mandeep's OK.
 
 ## 2.77: Strict track: strict alerts, a Strict paper account, Explore vs Strict (15 Nov 2026)
 - **Mandeep (15 Nov):** "kuch strict karna hai toh hum alage alerts banayenge, alag se us hisaab se trade lenge kyuki
