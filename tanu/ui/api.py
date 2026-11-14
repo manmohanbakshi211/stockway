@@ -392,9 +392,17 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
 
     @app.get("/")
     def index():
-        return FileResponse(STATIC / "index.html")
+        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+    @app.middleware("http")
+    async def _fresh_static(request: Request, call_next):
+        """After an update the browser checks the page's files again (no stale screens after Start Tanu pulls)."""
+        resp = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp
 
     @app.exception_handler(Exception)
     async def _err(request, exc):                       # a clear message instead of a stack trace

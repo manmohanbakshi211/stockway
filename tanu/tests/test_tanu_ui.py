@@ -65,3 +65,13 @@ def test_static_app_is_served_and_has_no_outside_links(tmp_path):
     for f in ("app.js", "app.css"):
         body = c.get("/static/" + f).text
         assert "http://" not in body and "https://" not in body          # works offline, nothing leaves the machine
+
+
+def test_page_files_are_checked_again_after_an_update(tmp_path):
+    from fastapi.testclient import TestClient
+    from tanu.ui.api import create_app
+    api = TestClient(create_app(tmp_path))
+    for path in ("/", "/static/app.js", "/static/app.css"):
+        r = api.get(path)
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
+    assert 'id="theme-btn"' in api.get("/").text and "Archivo" in api.get("/").text

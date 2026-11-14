@@ -3,6 +3,11 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.16.2] - 2026-11-15
+### Fixed
+- After an update the browser could keep showing the old screens from its cache: the page and its files are now
+  sent with "check again" (no-cache), so a normal reload shows the new version.
+
 ## [0.16.1] - 2026-11-15
 ### Changed
 - The app now looks like the legacy app's desktop UI (Mandeep: "tanu should be like the manu's UI desktop one and in
