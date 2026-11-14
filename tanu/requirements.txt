@@ -6,6 +6,7 @@ pydantic>=2.5
 fastapi>=0.110
 uvicorn>=0.29
 websocket-client>=1.8
+keyring>=24             # Dhan PIN + TOTP key in the macOS Keychain (ADR-0014)
 protobuf>=4.25
 websockets>=12          # the rehearsal's local fake broker
 pytest>=8               # Tanu's tests (python -m pytest tanu/tests)

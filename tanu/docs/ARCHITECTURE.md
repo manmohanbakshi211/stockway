@@ -52,6 +52,7 @@ They reuse layers 0-4 and 6-9; only setups and holding horizons differ.
 | `tanu-minute-clock` (thread) | closes each minute 2 s after it ends (wall clock live, exchange time in a rehearsal) | the engine steps on time even in a quiet minute |
 | `tanu-web` (thread) | UI + API on 127.0.0.1 | pages cannot slow trading logic |
 | `tanu-telegram` (thread) | queued alerts, one a second | a slow phone API never blocks the engine |
+| `tanu-dhan5y` (thread) | after the switch-over, outside market hours: the Dhan 5-year download (ADR-0014) | it can never compete with the live day |
 | `tanu-ai-notes` (thread) | after the switch-over: the morning and evening AI notes on trading days | a slow AI never blocks the live day |
 | `tanu-intel` (thread) | after the switch-over: reads the Market page's public sources on their schedule (before it, only while the page is open) | a slow website never blocks the live day |
 

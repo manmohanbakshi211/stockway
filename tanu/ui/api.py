@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import shutil
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def _latest(folder: Path, pattern: str) -> Path | None:
 
 
 def create_app(base: Path | str, legacy_history: Path | str | None = None, *, settings=None, keeper=None,
-               telegram=None, supervisor=None, collector=None, ai=None) -> FastAPI:
+               telegram=None, supervisor=None, collector=None, ai=None, dhan_keeper=None, dhan5y=None) -> FastAPI:
     from ..brokers.upstox.auth import TokenKeeper, redirect_uri
     from ..core import config
     from ..notify.telegram import Telegram
@@ -74,6 +75,11 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
     from ..ai.client import AI, AIError
     from ..ai.context import ask_prompt, snapshot
     brain = ai or getattr(supervisor, "ai", None) or AI(base, sec)
+    from ..brokers.dhan.auth import DhanKeeper
+    from ..data.dhan5y import Dhan5y
+    dk = dhan_keeper or getattr(supervisor, "dhan_keeper", None) or DhanKeeper(base, sec)
+    d5 = dhan5y or getattr(supervisor, "dhan5y", None) or Dhan5y(base, Path(legacy_history).parent if legacy_history else None)
+    d5cache: dict = {}
 
     def account_info() -> list[dict]:
         from ..paper.accounts import SPEC
@@ -276,6 +282,50 @@ def create_app(base: Path | str, legacy_history: Path | str | None = None, *, se
             raise HTTPException(400, str(e))
         return {"saved": True, "message": "Saved. " + ("AI is ready." if brain.available() else "AI is not ready yet."),
                 **{k: v for k, v in brain.status().items() if k != "usage"}}
+
+    @app.get("/api/dhan")
+    def dhan_status(request: Request):
+        """The Dhan login (no secrets) and where the 5-year download stands (from its files; no Dhan call)."""
+        guard(request, write=False)
+        if not d5cache or time.time() - d5cache.get("t", 0) > 60:
+            try:
+                d5cache.update(t=time.time(), v=d5.overview())
+            except Exception as e:
+                d5cache.update(t=time.time(), v={"error": f"{type(e).__name__}: {str(e)[:150]}"})
+        return {"login": dk.status(), "download": {**d5cache["v"], "paused": d5.paused()}, "live": s.live}
+
+    @app.post("/api/setup/dhan")
+    async def setup_dhan(request: Request):
+        guard(request)
+        b = await request.json()
+        try:
+            if b.get("forget"):
+                dk.clear()
+                return {"saved": True, "message": "Dhan login removed from this Mac."}
+            if b.get("token"):
+                dk.save_token(b.get("client_id"), b.get("token"))
+                where = "Tanu's secrets folder"
+            else:
+                where = dk.save_login(b.get("client_id"), b.get("pin"), b.get("totp_key"))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        if not s.live:
+            return {"saved": True, "message": f"Saved ({where}). Tanu logs in to Dhan only after the switch-over, "
+                                              "when the old app and its Dhan login are closed."}
+        import anyio
+        res = "ok" if b.get("token") else await anyio.to_thread.run_sync(lambda: dk.login(force=True))
+        msg = {"ok": "Saved and logged in to Dhan.", "blocked": "Saved, but Dhan refused the PIN / TOTP key / client ID.",
+               "failed": "Saved; Dhan's login service did not answer, Tanu tries again by itself.",
+               "off": "Saved."}.get(res, "Saved.")
+        return {"saved": True, "message": msg, "login": dk.status()}
+
+    @app.post("/api/dhan/pause")
+    async def dhan_pause(request: Request):
+        guard(request)
+        on = bool((await request.json()).get("paused"))
+        d5.set_paused(on)
+        d5cache.clear()
+        return {"paused": on}
 
     @app.get("/api/live")
     def live():

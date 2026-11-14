@@ -18,6 +18,13 @@ How to run, check and fix Tanu. Until cutover the legacy app is what runs on mar
   `claude`, log in) or paste a Claude API key. Then Today has "Ask Tanu" and the notes.
 - After the switch-over the morning note comes at 08:45 and the evening note at 16:05 (also on Telegram).
 
+## Dhan 5-year download (ADR-0014)
+- System page, "Dhan 5-year data": Dhan client ID, PIN and TOTP key (Dhan web: Profile -> set up TOTP shows the key).
+  Saved in the macOS Keychain. Tanu logs in only after the switch-over.
+- Runs by itself after 16:15 and before 08:30 on market days, all day on weekends and holidays; "Pause the download"
+  stops it. Progress, calls today and the latest steps are on the same page.
+- "Refused": Dhan rejected the PIN / TOTP key; save them again (Tanu never retries a refused login by itself).
+
 ## Daily (after cutover)
 | When | Do | Check |
 |---|---|---|

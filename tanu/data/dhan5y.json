@@ -1,0 +1,20 @@
+{
+  "about": "The Dhan 5-year download (bullet, dated; ADR-0014). Order: Nifty, Bank Nifty, then 'first' (the 30 most liquid stocks, as the legacy Lab), then every other F&O stock by turnover. Strikes: indices ATM±index_offsets, the first wide_count stocks ATM±wide_offsets, the rest ATM±narrow_offsets. It runs only after the switch-over and only in 'run_when' (never in market hours). daily_cap stays under Dhan's 100,000 calls a day; rate under Dhan's 5 a second. Copied from the legacy download (lab/dhan_hist.py, 2.21) on 14 Nov 2026.",
+  "valid_from": "2026-11-14",
+  "start": "2021-01-01",
+  "index_flag": {"NIFTY": "WEEK", "BANKNIFTY": "MONTH"},
+  "index_offsets": 10,
+  "wide_offsets": 3,
+  "narrow_offsets": 1,
+  "wide_count": 80,
+  "first": ["RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS", "AXISBANK", "KOTAKBANK", "BHARTIARTL", "ITC",
+            "LT", "BAJFINANCE", "M&M", "MARUTI", "SUNPHARMA", "TATASTEEL", "ADANIENT", "HCLTECH", "HINDALCO", "JSWSTEEL",
+            "BEL", "HAL", "TRENT", "DLF", "INDUSINDBK", "ONGC", "NTPC", "COALINDIA", "VEDL", "BAJAJ-AUTO"],
+  "daily_cap": 92000,
+  "rate_per_s": 4.6,
+  "min_free_gb": 10,
+  "empty_final_days": 3,
+  "pauses_s": [60, 120, 300, 300, 600],
+  "run_when": {"market_days_after": "16:15", "market_days_before": "08:30", "holidays_and_weekends": true},
+  "scrip_master": "https://images.dhan.co/api-data/api-scrip-master.csv"
+}

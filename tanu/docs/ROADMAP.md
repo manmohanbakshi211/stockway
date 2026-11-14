@@ -18,6 +18,7 @@ acceptance checks pass. Order follows the research in claude/tanu_blueprint.md a
 | **0.13.0** | Multi-leg structures (ADR-0011): iron condor + straddle bullets, fifth paper account, journal table, app sections | real-option run on the Mac | built, shadow, replay only |
 | **0.14.0** | Market page (Context, World, Insiders, Watchlist, News, Alerts) from public sources + display-only detectors (ADR-0012) | sources answer on the Mac (`python -m tanu intel`); detectors in a rehearsal | built, display only |
 | **0.15.0** | Tanu's AI (ADR-0013): Ask Tanu, morning and evening notes (read-only, never trades); headline reading next | Claude Code on the Mac answers; notes on trading days | built |
+| **0.16.0** | Dhan 5-year download in Tanu (ADR-0014): TOTP login, continues the legacy progress, after the switch-over outside market hours | progress on the System page; then the 5-year archive in Tanu's research | built |
 | **T6** | Video Lab: link / file → transcript → idea cards (gun vs bullet) → tests (history, recordings, shadow) | every card recorded with its result, failed ones kept | |
 | **T7** | Stock options on the low-cost list, "in play" days only | passes ADR-0005 | |
 | **T8+** | Swing / positional, investing (cash stocks), ETF, mutual funds as horizon plugins | same protocol | |

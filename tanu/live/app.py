@@ -217,6 +217,14 @@ class Supervisor:
         self.collector = Collector(self.base, on_alert=self.book.add)
         from ..ai.client import AI
         self.ai = AI(self.base, self.secrets)
+        from ..brokers.dhan.auth import DhanKeeper
+        from ..brokers.dhan.client import Budget, DhanData
+        from ..data.dhan5y import Dhan5y
+        self.dhan_keeper = DhanKeeper(self.base, self.secrets)
+        d5spec = json.loads((Path(__file__).parents[1] / "data" / "dhan5y.json").read_text())
+        self.dhan_budget = Budget(self.base / "dhan" / "calls.json", rate=d5spec["rate_per_s"])
+        self.dhan5y = Dhan5y(self.base, paths.LEGACY_DATA, DhanData(self.dhan_keeper, self.dhan_budget), self.dhan_budget,
+                             spec=d5spec)
 
     def web(self, port_check: bool = True):
         import uvicorn
@@ -253,6 +261,9 @@ class Supervisor:
             return 1
         threading.Thread(target=self.collector.run_forever, args=(self.stop,), daemon=True, name="tanu-intel").start()
         threading.Thread(target=self._notes, daemon=True, name="tanu-ai-notes").start()
+        from ..data.dhan5y import run_forever as dhan5y_forever
+        threading.Thread(target=dhan5y_forever, args=(self.dhan5y, self.stop), kwargs={"facts": self.facts},
+                         daemon=True, name="tanu-dhan5y").start()    # outside market hours only (ADR-0014)
         try:
             self._days()
         except KeyboardInterrupt:

@@ -155,3 +155,6 @@ button.ghost { background: none; color: var(--pen); border: 1px solid var(--pen)
 button:disabled { opacity: .55; cursor: default; }
 .note ul.plain li { margin: 2px 0; }
 .ask input { min-width: 0; }
+.bar { height: 8px; background: var(--rule); border-radius: 99px; overflow: hidden; margin: 8px 0 4px; }
+.bar span { display: block; height: 100%; background: var(--pen); }
+details summary { cursor: pointer; color: var(--muted); }

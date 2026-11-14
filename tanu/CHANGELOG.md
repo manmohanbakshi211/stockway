@@ -3,6 +3,22 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.16.0] - 2026-11-15
+### Added
+- The Dhan 5-year download in Tanu (ADR-0014, Mandeep: "add that in tanu"), so it keeps going after the old app
+  closes. `tanu/brokers/dhan/`: token keeper with Dhan's automatic TOTP login (PIN + TOTP key in the macOS Keychain,
+  never shown; a refused login is never retried by itself; or a pasted token), a data-only client through the URL
+  guard with one speed limit and a daily count. `tanu/data/dhan5y.py`: the legacy downloader ported; it continues
+  the legacy progress read-only (a day the legacy archive holds is never fetched again) and writes only to
+  `data/tanu/dhan5y/`. Bullet `tanu/data/dhan5y.json` (order, strikes, cap 92,000 a day, run times, disk guard).
+- Runs only after the switch-over (one Dhan login at a time) and never in market hours: after 16:15 / before 08:30
+  on market days, all day on weekends and holidays. System page: Dhan login form, progress, Pause / Resume.
+- `keyring` added to Tanu's packages (the legacy app already uses it) for the Keychain.
+### Checked
+- Tests: 153 (20 new, fakes only: TOTP test vector, secrets never shown, refusal stops login, 5-minute gap, URL guard,
+  retries, refused token replaced once, budget pace and IST day, legacy folder unchanged, legacy days skipped, empty
+  days, network pause retries the same day, daily cap, never in market hours, API). Headless System page 390 / 1280.
+
 ## [0.15.0] - 2026-11-13
 ### Added
 - Tanu's AI (ADR-0013, Mandeep: "ai wala system toh chahiye hi hai"), read-only: "Ask Tanu" on the Today page

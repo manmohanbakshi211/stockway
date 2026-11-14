@@ -13,6 +13,7 @@
 | A forged Upstox callback | the login `state` is random per login and checked; the code is exchanged only for the app saved on this Mac |
 | Two live feeds / two token keepers | gates: legacy port 8765 must be silent, one live lock, switch on (ADR-0009) |
 | The AI reads files, runs commands or sees a secret | Claude Code runs with every tool off in an empty folder, no session, no MCP; the prompt is built from Tanu's data only and secret-like keys are dropped (tested); the API key is a secret, never shown (ADR-0013) |
+| The Dhan PIN / TOTP key leaks or locks the account | kept in the macOS Keychain, sent only to auth.dhan.co, never logged or shown; a refused login is never retried by itself; at most one login in 5 minutes; Dhan used only after the switch-over and only for market data (ADR-0014) |
 | A public website sends something harmful | Market page sources are parsed as data only (no code runs), size-capped, every URL through the guard; news links are shown only if http(s) and open in a new tab without the opener; all text is escaped (ADR-0012) |
 
 ## Secrets
@@ -22,7 +23,7 @@
   `user_settings.json`.
 - Kite / Dhan keys are entered by Mandeep on the Mac only.
 - Tanu's own secrets (ADR-0009): typed by Mandeep into the System page on the Mac; saved in `data/tanu/secrets/`
-  (folder 0700, files 0600: `upstox_app`, `upstox_token`, `telegram`, `ai`); the app only says "saved", never shows them;
+  (folder 0700, files 0600: `upstox_app`, `upstox_token`, `telegram`, `ai`, `dhan`, `dhan_token`; the Dhan PIN and TOTP key in the macOS Keychain); the app only says "saved", never shows them;
   Tanu never reads the legacy app's token or settings files.
 
 ## Reporting

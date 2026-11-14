@@ -18,3 +18,4 @@ supersedes it. Template: copy [0000-template.md](0000-template.md).
 | [0011](0011-multi-leg-structures.md) | Multi-leg structures (iron condor, straddle) as their own bullets on real option prices; fifth paper account | Accepted (replay only) |
 | [0012](0012-market-page-and-display-only-detectors.md) | One Market page from public sources (tabs); detectors shown only, never traded | Accepted |
 | [0013](0013-ai-read-only.md) | Tanu's AI is read-only: Ask Tanu and daily notes from Tanu's own data; no tools, no secrets | Accepted |
+| [0014](0014-dhan-5-year-download.md) | Dhan 5-year download in Tanu: TOTP login in the Keychain, continues the legacy progress read-only, after the switch-over and outside market hours | Accepted |

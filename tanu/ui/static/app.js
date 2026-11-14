@@ -580,8 +580,51 @@ function aiSetup(ai) {
         <button type="submit">Save</button><span class="msg small" role="status"></span></form></div></div>`;
 }
 
+function dhanBlock(x) {
+  if (!x) return "";
+  const L = x.login || {}, D = x.download || {};
+  const ready = L.client_id_saved && (L.auto_login || L.token_saved) && !L.blocked;
+  const state = { running: "Downloading now", waiting: "Waiting", done: "Complete up to yesterday", budget: "Today's Dhan allowance used",
+    disk: "Paused: disk almost full", no_login: "Needs the Dhan login", error: "Stopped on an error", starting: "Starting", stopped: "Stopped" };
+  const why = { "market hours": "market hours: it runs after 16:15 and before 08:30, and all day on weekends and holidays",
+    "not after the switch-over": "it starts after the switch-over", paused: "paused by you" };
+  const pct = Math.max(0, Math.min(100, Number(D.pct) || 0));
+  return `<h2>Dhan 5-year data</h2>
+    <div class="rows"><div class="row"><div class="row-head"><b>Dhan login</b>
+      <span class="status ${ready ? "live" : ""}">${L.blocked ? "Refused" : ready ? "Saved" : "To do"}</span></div>
+      <p class="muted small">${L.auto_login ? `Automatic login (TOTP), kept in ${esc(L.where)}.` : L.token_saved ? "A pasted token (lasts about a day)." : "Not set up."}
+        ${L.last_login ? ` Last login ${esc(L.last_login)}.` : ""}${L.last_error ? ` <span class="warn">${esc(L.last_error)}</span>` : ""}
+        ${x.live ? "" : " Tanu logs in to Dhan only after the switch-over."}</p>
+      <form class="form" data-form="dhan">
+        <label>Dhan client ID<input name="client_id" inputmode="numeric" autocomplete="off"></label>
+        <label>Dhan PIN<input name="pin" type="password" inputmode="numeric" autocomplete="off"></label>
+        <label>TOTP key (the long code Dhan shows when you set up TOTP)<input name="totp_key" type="password" autocomplete="off"></label>
+        <p class="muted small">Used only to make Dhan's market-data token. Tanu has no order, funds or position calls. Saved on this Mac, never shown again.</p>
+        <button type="submit">Save</button><span class="msg small" role="status"></span></form></div>
+    <div class="row"><div class="row-head"><b>Download</b><span class="status ${D.state === "running" ? "live" : ""}">${esc(state[D.state] || "Not started")}</span></div>
+      ${D.error ? `<p class="warn small">${esc(D.error)}</p>` : `
+      <div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></div>
+      <p class="small">${pct}% of symbol-months complete. Symbols: ${D.symbols_complete ?? "–"} complete, ${D.symbols_partial ?? "–"} partly, ${D.symbols_not_started ?? "–"} not started (of ${D.symbols ?? "–"}).</p>
+      <p class="muted small">${Number(D.days_missing || 0).toLocaleString("en-IN")} symbol-days left, ${D.days_to_finish == null ? "" : D.days_to_finish < 1 ? "less than a day" : `about ${Math.ceil(D.days_to_finish)} days`} at ${Number(D.cap || 0).toLocaleString("en-IN")} calls a day.
+        Today ${Number(D.calls_today || 0).toLocaleString("en-IN")} calls. ${D.now ? `Now: ${esc(D.now)}.` : ""} ${D.state === "waiting" && why[D.why] ? `Waiting: ${esc(why[D.why])}.` : ""}
+        ${D.from_legacy ? "Continues from the old app's download (what it has is never fetched again)." : ""} Free disk ${D.free_gb ?? "–"} GB.</p>
+      ${(D.log || []).length ? `<details><summary class="small">Latest steps</summary><ul class="plain small">${D.log.slice().reverse().map((l) => `<li>${esc(l)}</li>`).join("")}</ul></details>` : ""}
+      <div class="controls"><button type="button" class="ghost" id="d5-pause" data-paused="${D.paused ? 1 : 0}">${D.paused ? "Resume the download" : "Pause the download"}</button>
+        <span class="msg small" role="status" id="d5-msg"></span></div>`}</div></div>`;
+}
+
+function wireDhan() {
+  const b = document.getElementById("d5-pause");
+  if (b) b.onclick = async () => {
+    b.disabled = true;
+    try { await post("/api/dhan/pause", { paused: b.dataset.paused !== "1" }); route(); }
+    catch (e) { document.getElementById("d5-msg").textContent = e.message; b.disabled = false; }
+  };
+}
+
 async function system() {
-  const [d, u, ai] = await Promise.all([get("/api/system"), get("/api/setup").catch(() => null), get("/api/ai").catch(() => null)]);
+  const [d, u, ai, dh] = await Promise.all([get("/api/system"), get("/api/setup").catch(() => null), get("/api/ai").catch(() => null),
+    get("/api/dhan").catch(() => null)]);
   const mark = { ok: "OK", warn: "Check", fail: "Fix" };
   const mb = (b) => (b / 1e6).toFixed(b < 1e7 ? 1 : 0) + " MB";
   view.innerHTML = `<h1>System</h1>
@@ -589,6 +632,7 @@ async function system() {
     ${location.hash.includes("login=ok") ? `<p class="up">Logged in with Upstox.</p>` : location.hash.includes("login=failed") ? `<p class="down">Upstox login did not finish. Try again.</p>` : ""}
     ${setupBlock(u)}
     ${aiSetup(ai)}
+    ${dhanBlock(dh)}
     <h2>Checks</h2>
     <div class="scroll"><table class="ledger"><tbody>${d.checks.map((c) => `<tr><td>${esc(c.check)}</td>
       <td class="${c.status === "ok" ? "" : c.status === "warn" ? "warn" : "down"}">${mark[c.status]}</td><td class="small">${esc(c.why)}</td></tr>`).join("")}
@@ -602,6 +646,7 @@ async function system() {
       <td class="small ${l.level === "ERROR" ? "down" : l.level === "WARNING" ? "warn" : ""}">${esc(l.comp)}: ${esc(l.event)}</td></tr>`).join("")}</tbody></table></div>`
       : `<p class="muted">No log lines yet.</p>`}`;
   wireForms();
+  wireDhan();
 }
 
 // ---------------------------------------------------------------- router
