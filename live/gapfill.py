@@ -21,6 +21,7 @@ import urllib.parse
 from pathlib import Path
 
 from .clock import IST
+from .practice import PRACTICE
 
 HIST_MIN = 45
 PACE_S = 0.5                     # Upstox calls of the fill: at most 2 a second (the limiter allows 15)
@@ -131,7 +132,7 @@ def fill(engine, now: dt.datetime | None = None, pace_s: float = PACE_S, should_
 
 def start(engine) -> threading.Thread | None:
     """Starts the fill in its own thread (never holds up the start, the analysis loop or the REST worker)."""
-    if getattr(engine, "source", None) == "sim":
+    if getattr(engine, "source", None) in PRACTICE:     # 2.76: practice sources have nothing to fill
         return None
 
     def run():

@@ -9,6 +9,7 @@ import inspect
 import time
 import shutil
 from pathlib import Path
+from .practice import PRACTICE
 
 
 def _c(id_, name, ok, detail=""):
@@ -284,6 +285,14 @@ def static_checks(cfg: dict | None = None) -> list:
                   and _gf.PACE_S >= 0.5 and "gapfill.start(self)" in inspect.getsource(_eng.LiveEngine._run),
                   f"its own thread; Upstox intraday candles at most {1 / _gf.PACE_S:.0f} a second through the shared Upstox limiter; "
                   "live candles always win"))
+    from live import replay as _rp
+    rsrc = inspect.getsource(_eng.LiveEngine._run)
+    out.append(_c("replay", "Replay a past day: a recorded day through the same scanner, kept apart, no broker calls (2.76)",
+                  "RP.RecordingFeed(" in rsrc and 'Path(self.data_dir) / "replay"' in rsrc
+                  and not any(x in inspect.getsource(_rp) for x in ("UpstoxREST(", "import requests", "urlopen"))
+                  and "replay" in __import__("live.practice", fromlist=["PRACTICE"]).PRACTICE,
+                  "source 'replay' (alerts, paper, bench, trials cleared at the next replay); its own recording folder; "
+                  "no Telegram, no AI notes; the live scanner stops it at the next session"))
     return out
 
 
@@ -313,10 +322,10 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
         dp = getattr(engine, "depth", None)
         n = len(getattr(dp, "ids", {}) or {}) if dp else 0
         out.append(_c("dhan_depth", "Dhan order-book sockets ≤ 5", n <= 5 if dp else None, f"{n} socket(s)" if dp else "off"))
-        out.append(_c("one_price_feed", "One live price feed (Upstox, or the simulator)",
-                      (engine.source in ("upstox", "sim")) if engine.running else None,
+        out.append(_c("one_price_feed", "One live price feed (Upstox, the simulator or a replay)",
+                      (engine.source in ("upstox", "sim", "replay")) if engine.running else None,
                       f"{engine.source}" if engine.running else "scanner not running"))
-    if engine is not None and getattr(engine, "context", None) is not None and getattr(engine, "source", None) != "sim":
+    if engine is not None and getattr(engine, "context", None) is not None and getattr(engine, "source", None) not in PRACTICE:
         cal = getattr(engine.context, "events_cal", None) or []
         out.append(_c("results_calendar", "Results calendar loaded (NSE board meetings)", bool(cal) or None,
                       f"{len(cal):,} upcoming board meetings" if cal else

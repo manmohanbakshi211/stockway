@@ -117,6 +117,32 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.76: Replay a past day (15 Nov 2026)
+- **Mandeep (15 Nov):** "the tanu's features of reply ... also add ... just take from tanu". Tanu's rehearsal idea (a
+  past market day played through the whole live path) is now in Stockway, built on Stockway's own recordings.
+- **Live → Replay a past day** (next to Run simulator, when the scanner is off): pick a recorded day and a speed (5×,
+  10×, 20×, 30×; 10× plays a full day in about 38 minutes). The same scanner, alerts, risk check, paper trades,
+  extra paper accounts, test bench and trials run on that day's real prices, on a replay clock.
+- **What it plays** (`live/replay.py`): index and stock prices from the day's 1-minute candles (open, the two
+  extremes, close inside each minute, so the candles it builds are the recorded ones); futures, options, VIX and Sensex
+  from the minute snapshots; full option chains from the recorded chains, never one stamped later than the replay
+  clock; that day's headlines as they were seen; that morning's daily history and IV history (cut before the day);
+  that day's lot sizes; the previous session's closes. Contracts that expired since come back from the recorded chains.
+  Nothing is fetched from a broker for the replayed day.
+- **Kept apart like the simulator:** source "replay" for alerts, paper trades, grades, bench and trials (cleared when
+  the next replay starts), its own recording folder (`data/replay`, never `data/recordings`), no Telegram, no world
+  move alerts of today, no automatic AI notes (no AI calls spent), no model learns from it, never an order. Stopping a
+  replay never pauses the live scanner, and the live scanner stops a replay by itself when the next session starts.
+- **Honest limits:** one price path per minute, not every tick (an alert that needs seconds-level ticks can differ); world
+  markets and FII figures shown are today's; the models in use were trained after that day. So a replay is a rehearsal
+  of the system on a real day, not a fair test: the Strategy Lab's holdout stays the fair test.
+- A slow computer slows the replay instead of skipping minutes: every replay minute waits (up to 8 s) for one full
+  analysis pass. Days with gaps in the recording (13 Nov 09:15-09:19, the restart before 2.74) replay with those gaps.
+- Checked on the real 13 Nov recording (224 symbols, 3,404 instruments): 09:15 to 10:24 in 150 s at 30×, 385 alerts and
+  paper trades, all under "replay"; nothing written to the real recordings or the real paper book. New tests:
+  `tests/test_replay.py`; System & logins has a "replay" check. Nothing else changes (no alert, score, paper rule or
+  Lab result of the real market).
+
 ## 2.75: light and dark theme, like trading platforms (15 Nov 2026)
 - **Mandeep (15 Nov):** "make light and dark theme like trading platforms have ... take from tanu".
 - The sun / moon button next to the Stockway name (sidebar on a computer, top bar on a phone) switches the whole app:

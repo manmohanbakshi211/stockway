@@ -33,6 +33,7 @@ DEFAULTS = {
 }
 
 from .registry import paper_kinds as _pk  # noqa: E402
+from .practice import PRACTICE  # noqa: E402
 
 DEFAULTS["kinds"] = _pk()
 
@@ -71,7 +72,7 @@ class PaperBook:
         """2.48: None when a paper trade may open now, else the reason. An open NSE session (rules/market_calendar.json
         + holidays), the option's last trade inside today's session and the underlying traded in the last 2 minutes
         (exchange time, not the time the app received it: a reconnect's old snapshot never opens a trade)."""
-        if self.source == "sim":
+        if self.source in PRACTICE:        # 2.76: practice sources (live/practice.py)
             return None
         if not SESSION.paper_ok(now):
             return "market closed (NSE calendar)"
@@ -159,7 +160,7 @@ class PaperBook:
                     und_key: str | None = None, kind="manual") -> dict:
         """Buy (direction 1) or sell (direction -1) an option by hand from the option chain or the chart. Selling an
         option you hold closes it; otherwise it opens a short. Market hours only, live price only. Paper only."""
-        if self.source != "sim" and not SESSION.paper_ok(now):   # 2.48: the NSE calendar (holidays, special sessions)
+        if self.source not in PRACTICE and not SESSION.paper_ok(now):   # 2.48: the NSE calendar (holidays, special sessions)
             v = SESSION.view(now)
             nxt = (v.get("next") or {}).get("open")
             raise ValueError("Market closed: paper fills only on live prices in an open NSE session"

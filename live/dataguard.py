@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 from .clock import is_market_hours
+from .practice import PRACTICE
 
 FILE = Path(__file__).resolve().parents[1] / "rules" / "dataguard.json"
 DEFAULTS = {"every_s": 5, "jump_pct": {"index": 1.5, "stock": 6.0, "future": 6.0, "option": 45.0}, "option_min_price": 3.0,
@@ -80,7 +81,7 @@ class DataGuard:
             return
         self._map()
         clock_now = now or (self.e.clock.now() if getattr(self.e, "clock", None) else None)
-        live = bool(clock_now and is_market_hours(clock_now)) or getattr(self.e, "source", None) == "sim"
+        live = bool(clock_now and is_market_hours(clock_now)) or getattr(self.e, "source", None) in PRACTICE
         with st.lock:
             snap = [(i.key, i.ltp, i.bid, i.ask, i.t) for i in st.insts.values() if i.ltp]
         jp, rows = c["jump_pct"], []

@@ -162,7 +162,15 @@ function railLive() {
   if (!el || !L.snap) return;
   const st = L.snap.status;
   const label = { running: "Live", starting: "Starting", stopped: "Off", closed: "Closed", error: "Error", login_needed: "Login needed" }[st.state] || st.state;
-  el.innerHTML = `<span class="dot-st st-${esc(st.state)}"></span>${esc(label)}${st.source === "sim" && st.running ? " · Sim" : ""}`;
+  el.innerHTML = `<span class="dot-st st-${esc(st.state)}"></span>${esc(label)}${st.source === "sim" && st.running ? " · Sim" : st.source === "replay" && st.running ? " · Replay" : ""}`;
+}
+
+/* 2.76: practice sources (the simulator, the replay of a recorded day) */
+function srcName(src) { return src === "sim" ? "simulator" : src === "replay" ? "replay" : "live paper"; }
+function replayText(st) {
+  const r = st.replay || {};
+  const d = r.day ? new Date(r.day + "T12:00:00+05:30").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }) : "";
+  return `Replay ${esc(d)} · ${r.speed || "?"}× · ${r.progress != null ? r.progress + "% of the day" : ""}`;
 }
 
 /* ---------------- shared pieces */
@@ -191,17 +199,19 @@ function statusBar() {
   const ses = s.session || {}, nx = ses.next || {};
   const sesMsg = ses.today && ses.open_now ? (ses.paused_today ? "Paused by you for today." : "Starting by itself…")
     : nx.open ? `${ses.holiday ? "NSE holiday today. " : ""}Next session ${esc(nx.open)}${nx.kind === "special" ? ` (${esc(nx.name)})` : ""}.` : "";
-  const msg = st.state === "running" ? `${st.source === "sim" ? "Simulator" : "Upstox"} · ${subs} · ${lag}${speed}`
+  const msg = st.state === "running" ? `${st.source === "sim" ? "Simulator" : st.source === "replay" ? replayText(st) : "Upstox"} · ${subs} · ${lag}${speed}`
     : esc(st.message || "") + (st.logged_in && sesMsg ? ` <span class="muted">${sesMsg}</span>` : "");
   let btns = "";
-  if (st.running) btns = `<button class="btn" data-live-stop title="Stops the scanner for the rest of today. It starts by itself again at the next session.">${st.source === "sim" ? "Stop simulator" : "Pause for today"}</button>`;
+  if (st.running) btns = st.source === "replay" ? `<button class="btn" data-live-stop title="Stops the replay. The live scanner still starts by itself at the next session.">Stop replay</button>`
+    : `<button class="btn" data-live-stop title="Stops the scanner for the rest of today. It starts by itself again at the next session.">${st.source === "sim" ? "Stop simulator" : "Pause for today"}</button>`;
   else {
     if (!st.logged_in) btns += `<a class="btn primary" href="/upstox/login">Log in with Upstox</a>`;
     else if (ses.open_now && (ses.paused_today || ses.auto_start === false || st.state === "error")) btns += `<button class="btn primary" data-live-start="upstox">${ses.paused_today ? "Resume" : "Start live"}</button>`;
     btns += `<button class="btn" data-live-start="sim" title="A made-up market for trying the app; never mixed with real data">Run simulator</button>`;
+    btns += `<button class="btn" data-replay-open title="Play a recorded market day through the same scanner, alerts and paper trades">Replay a past day</button>`;
   }
   return `<div class="livebar"><div class="lb-left"><span class="dot-st st-${esc(st.state)}"></span>
-    <b>${st.running ? (st.source === "sim" ? "Simulator" : "Live") : ({ stopped: "Scanner off", closed: "Market closed", error: "Error", login_needed: "Login needed", starting: "Starting" }[st.state] || st.state)}</b>
+    <b>${st.running ? (st.source === "sim" ? "Simulator" : st.source === "replay" ? "Replay" : "Live") : ({ stopped: "Scanner off", closed: "Market closed", error: "Error", login_needed: "Login needed", starting: "Starting" }[st.state] || st.state)}</b>
     ${st.running ? `<span class="clock">${clock}</span>` : ""}${vix}<span class="muted small">${msg}</span></div>
     <div class="btn-row">${btns}</div></div>`;
 }
@@ -213,10 +223,45 @@ function bindLiveButtons(root = main) {
     catch (e) { toast(e.message); }
     b.disabled = false; pollSnapshot();
   }));
+  root.querySelectorAll("[data-replay-open]").forEach((b) => b.addEventListener("click", () => openReplayPick(root)));
   root.querySelectorAll("[data-live-stop]").forEach((b) => b.addEventListener("click", async () => {
     try { await post("/api/live/stop", {}); toast("Stopped"); } catch (e) { toast(e.message); }
     pollSnapshot();
   }));
+}
+
+/* 2.76: Replay a past day. The picker sits under the status bar (which redraws every second), so it keeps its choices. */
+async function openReplayPick(bar) {
+  let box = document.getElementById("lv-replay");
+  if (box) { box.remove(); return; }
+  box = document.createElement("div");
+  box.id = "lv-replay"; box.className = "panel replay-pick";
+  box.innerHTML = `<p class="muted small">Loading the recorded days…</p>`;
+  (bar.closest("#lv-bar") || bar).insertAdjacentElement("afterend", box);
+  let d;
+  try { d = await api("/api/live/replay/days"); } catch (e) { box.innerHTML = `<p class="down">${esc(e.message)}</p>`; return; }
+  const days = d.days || [];
+  const sp = d.speeds || [10];
+  box.innerHTML = `<h3>Replay a past day</h3>
+    <p class="small">Plays a day the scanner recorded through the same scanner, alerts, risk check and paper trades, faster than real time.
+      Its alerts and paper trades are kept apart from the real ones (shown as "replay") and cleared at the next replay. No orders, no Telegram, no AI notes.</p>
+    ${days.length ? `<div class="replay-row">
+      <label class="field">Day<select id="rp-day">${days.map((x) => `<option value="${esc(x.day)}">${esc(x.label)}${x.news ? "" : " (no headlines)"}</option>`).join("")}</select></label>
+      <label class="field">Speed<select id="rp-speed">${sp.map((v) => `<option value="${v}" ${v === d.default_speed ? "selected" : ""}>${v}× (about ${Math.round(375 / v)} min)</option>`).join("")}</select></label>
+      <div class="btn-row"><button class="btn primary" id="rp-go">Start replay</button><button class="btn" id="rp-close">Close</button></div></div>`
+      : `<p class="muted">No finished recording yet. A day is ready to replay after the live scanner has recorded it and the market has closed.</p>
+      <div class="btn-row"><button class="btn" id="rp-close">Close</button></div>`}
+    <p class="small muted">A rehearsal of the system, not a fair test: one price path per minute, the models in use were trained after that day, and world markets and FII figures are today's. The Strategy Lab's holdout is the fair test.</p>`;
+  box.querySelector("#rp-close").onclick = () => box.remove();
+  const go = box.querySelector("#rp-go");
+  if (go) go.onclick = async () => {
+    go.disabled = true;
+    try {
+      await post("/api/live/start", { source: "replay", day: $("#rp-day").value, speed: Number($("#rp-speed").value) });
+      toast("Replay starting"); L.alerts = []; L.lastId = 0; L.primed = false; box.remove();
+    } catch (e) { toast(e.message); go.disabled = false; }
+    pollSnapshot();
+  };
 }
 
 function biasMeter(score) {
@@ -1206,7 +1251,7 @@ function drawPaper(p, first) {
     <div class="table-wrap"><table class="pp-closed"><thead><tr><th>Option</th><th>Stock</th><th>When</th><th class="r">Price</th><th>Exit</th><th class="r">Charges</th><th class="r">Net</th></tr></thead><tbody>${closed || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>
     ${p.closed.length > nShow ? `<p style="margin:8px 0 0"><button class="btn" id="pp-all">${allClosed ? `Show the latest ${nShow} only` : `Show all ${p.closed.length.toLocaleString("en-IN")} closed trades`}</button></p>` : ""}
     ${isMain ? bookCompare() : ""}
-    <p class="note">Paper only: no order ever reaches a broker. Charges are real (brokerage, STT, exchange, GST, stamp). Target +${s.target_pct}% / stop −${s.stop_pct}% on the option; alert trades exit after ${s.max_hold_min} min, all by ${esc(s.exit_time)}. ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : ""}</p>`;
+    <p class="note">Paper only: no order ever reaches a broker. Charges are real (brokerage, STT, exchange, GST, stamp). Target +${s.target_pct}% / stop −${s.stop_pct}% on the option; alert trades exit after ${s.max_hold_min} min, all by ${esc(s.exit_time)}. ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : p.source === "replay" ? "<b>Showing replay trades (a recorded day played again).</b>" : ""}</p>`;
   main.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => { try { await post(`/api/live/paper/${b.dataset.close}/close`, {}); toast("Closed"); pagePaper(); } catch (e) { toast(e.message); } });
   main.querySelectorAll("[data-close-book]").forEach((b) => b.onclick = async () => { b.disabled = true;
     try { const r = await post(`/api/live/paper/books/${encodeURIComponent(p.book)}/${b.dataset.closeBook}/close`, {}); toast(`Closed · ${rupees(r.net)}`); L.ppTotAt = 0; pagePaper(); } catch (e) { toast(e.message); b.disabled = false; } });
@@ -1511,7 +1556,7 @@ async function pageScorecard() {
     <td>${o.result ? `<span class="pill ${o.result === "hit" ? "p-up" : o.result === "miss" ? "p-down" : ""}">${o.result === "hit" ? "Worked" : o.result === "miss" ? "Failed" : "Flat"}</span>` : `<span class="muted small">tracking…</span>`}</td>
     <td class="r">${fpc(o.r5, 2)}</td><td class="r">${fpc(o.r15, 2)}</td><td class="r">${fpc(o.r60, 2)}</td><td class="r">${o.o0 ? fpc(o.omax, 0) + " / " + fpc(o.omin, 0) : "–"}</td></tr>`).join("");
   main.innerHTML = `<h1 class="page-title">Signal scorecard</h1>
-    <p class="lede">Every alert is followed for 60 minutes and graded. This is how you know which signals deserve real money. ${sc.source === "sim" ? "<b>Showing simulator results (random market, not evidence).</b>" : ""}
+    <p class="lede">Every alert is followed for 60 minutes and graded. This is how you know which signals deserve real money. ${sc.source === "sim" ? "<b>Showing simulator results (random market, not evidence).</b>" : sc.source === "replay" ? "<b>Showing replay results (a recorded day played again, not new evidence).</b>" : ""}
       <a href="#/scorecard?src=${sc.source === "sim" ? "upstox" : "sim"}">Show ${sc.source === "sim" ? "real market" : "simulator"} results</a></p>
     ${scoreBuckets(sc)}
     <div class="panel tight" id="cred-box" style="margin-top:14px"><p class="small muted">Credibility check: loading…</p></div>
@@ -1593,7 +1638,7 @@ async function pageBriefs() {
   const card = (x, title, kind) => `<div class="panel brief"><div class="toolbar" style="margin:0 0 8px"><h2 style="margin:0">${title}</h2>
       <button class="btn" data-mk="${kind}">${x ? "Make again" : "Make now"}</button></div>
     ${x ? `${x.ai ? `<div class="ai-text big">${fmtAI(x.ai)}</div><details><summary class="small muted">Facts used</summary><ul>${x.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></details>` : `<ul class="brief-lines">${x.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`}
-      <p class="muted small">Made ${new Date(x.ts).toLocaleString("en-IN", { hour12: false })}${x.source === "sim" ? " · simulator day" : ""}</p>` :
+      <p class="muted small">Made ${new Date(x.ts).toLocaleString("en-IN", { hour12: false })}${x.source === "sim" ? " · simulator day" : x.source === "replay" ? " · replay" : ""}</p>` :
       `<p class="muted">${kind === "pre" ? "Made automatically at 8:45 AM on market days (and sent to Telegram)." : "Made automatically when the market closes."}</p>`}</div>`;
   main.innerHTML = `<div class="toolbar"><div><h1 class="page-title">Briefs</h1><p class="lede" style="margin-bottom:0">Your morning plan and evening review, written from the data. Connect Claude (your Pro plan) or another AI in Live setup for a written analysis.</p></div>
       ${b.days.length ? `<label class="field inline">Day <select id="br-day">${b.days.map((d) => `<option ${d === b.day ? "selected" : ""}>${d}</option>`).join("")}</select></label>` : ""}</div>
@@ -1624,7 +1669,7 @@ function dayReportCard(r) {
   const tr = (t) => `<tr><td>${esc(t.time)}</td><td>${esc(t.label)}<div class="muted small">${esc(KIND[t.kind] || t.kind)} · ${esc(t.exit)}${t.gate !== "pass" ? ` · <span class="down">${t.gate === "override" ? "override" : "against risk check"}</span>` : ""}</div></td><td class="r">${rs(t.net)}</td></tr>`;
   const kinds = (list) => list.map((k) => `<li>${esc(KIND[k.kind] || k.kind)} <b>${k.win_pct}%</b> <span class="muted small">of ${k.hits + k.misses} decided · option ${fpc(k.avg_o60, 1)} after 1h</span></li>`).join("") || `<li class="muted">Not enough decided alerts yet.</li>`;
   const fg = a.focus_graded || {}, gg = a.graded || {};
-  return `<div class="panel" style="margin-top:18px"><div class="toolbar" style="margin:0 0 8px"><h2 style="margin:0">📋 Day report <span class="muted small">${esc(r.day)}${r.source === "sim" ? " · simulator" : ""}</span></h2>
+  return `<div class="panel" style="margin-top:18px"><div class="toolbar" style="margin:0 0 8px"><h2 style="margin:0">📋 Day report <span class="muted small">${esc(r.day)}${r.source === "sim" ? " · simulator" : r.source === "replay" ? " · replay" : ""}</span></h2>
       <button class="btn" id="rep-rebuild">Rebuild</button></div>
     <div class="kpis kpi6">
       <div class="kpi">${kb(p.net)}<span>Paper net after ₹${Math.round(p.costs || 0).toLocaleString("en-IN")} charges</span></div>
@@ -1782,7 +1827,7 @@ function drawDeskLive(d) {
   const open = d.today.map((t) => `<tr><td><b>${esc(SNAME[t.family] || t.family)}</b> ${esc(t.sym)}<br><small class="muted">${t.entry_ts ? `in ${hm(t.entry_ts)}${t.exit_ts ? ` · out ${hm(t.exit_ts)}` : ""} · ` : ""}${t.lots} lot${t.lots > 1 ? "s" : ""}${t.lot ? ` × ${t.lot} = ${(t.lots * t.lot).toLocaleString("en-IN")} qty` : ""} · max loss ₹${fk(Math.round(t.max_loss))} · margin ~₹${fk(Math.round(t.margin))}</small></td>
     <td class="small">${esc(legsText(t.legs))}</td><td>${t.status === "open" ? `<span class="pill p-sig">Open</span>` : esc(t.reason || "")}</td>
     <td class="r"><b class="${((t.status === "open" ? t.mtm : t.net) || 0) >= 0 ? "up" : "down"}">${rupees(t.status === "open" ? t.mtm : t.net)}</b></td></tr>`).join("");
-  el.innerHTML = `<div class="kpis"><div class="kpi"><b class="${d.today_pnl >= 0 ? "up" : "down"}">${rupees(d.today_pnl)}</b><span>Today (${esc(d.source === "sim" ? "simulator" : "live paper")})</span></div>
+  el.innerHTML = `<div class="kpis"><div class="kpi"><b class="${d.today_pnl >= 0 ? "up" : "down"}">${rupees(d.today_pnl)}</b><span>Today (${esc(srcName(d.source))})</span></div>
       <div class="kpi"><b>${s.avg_day != null ? rupees(s.avg_day) : "–"}</b><span>Average day, ${s.days || 0} paper days</span></div>
       <div class="kpi"><b>${s.green_pct != null ? Math.round(s.green_pct) + "%" : "–"}</b><span>Green days</span></div>
       <div class="kpi"><b>${rupees(s.total || 0)}</b><span>Total paper P&amp;L</span></div></div>

@@ -316,6 +316,12 @@ input[type=text], input[type=time], input[type=password], select {
 .lb-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .livebar .clock { font-weight: 700; font-stretch: 105%; }
 .livebar .btn { padding: 7px 13px; }
+/* 2.76: Replay a past day */
+.replay-pick { margin: -8px 0 18px; }
+.replay-pick h3 { margin: 0 0 6px; }
+.replay-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 10px 0; }
+.replay-row .field { min-width: 180px; flex: 1 1 180px; max-width: 280px; }
+.replay-row .btn-row { flex: 0 0 auto; }
 
 .icards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
 .icard { display: block; background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius); padding: 14px 16px 12px; color: var(--ink); text-decoration: none; transition: border-color .15s; }

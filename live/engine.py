@@ -21,6 +21,7 @@ from .context import Context
 from .learn import Ranker, features, regime, regime_adjust
 from .notify import AI, News, Telegram, alert_prompt, match_symbols, pulse_prompt, rule_pulse, symbol_words, telegram_text
 from .paper import PaperBook
+from .practice import is_practice
 from .record import Recorder, Tracker, evidence, levels, outcomes, scorecard, signal_score, size_mb
 from .state import MarketState
 from .store import Store
@@ -162,6 +163,7 @@ class LiveEngine:
         self.log(message)
 
     def _reset(self):
+        self.replay = None                               # 2.76: {day, speed, ...} while a recorded day is replayed
         self.trading_open = False                        # 2.48: set by the loop from the NSE calendar
         self.clock = Clock()
         self.state = None
@@ -257,12 +259,14 @@ class LiveEngine:
             self._reset()
             self.source = source
             self.status.update(source=source)
+            if source != "replay":
+                self.replay = None
             self.thread = threading.Thread(target=self._run_safe, daemon=True, name="live-engine")
             self.thread.start()
             return self.status
 
     def stop(self, manual=True):
-        if manual:
+        if manual and self.source != "replay":           # 2.76: stopping a replay never pauses the live scanner
             self.manual_stop_day = dt.datetime.now(IST).date()
         self.stop_evt.set()
         if self.feed:
@@ -290,6 +294,8 @@ class LiveEngine:
         finally:
             if self.feed:
                 self.feed.stop()
+            if self.source == "replay" and getattr(self, "_news_saved", None) is not None:
+                self.news.items, self._news_saved = self._news_saved, None    # 2.76: today's headlines back
             if self.tracker:
                 try:
                     self.tracker.update(self.state, self.clock.ts(), force=True)
@@ -304,7 +310,8 @@ class LiveEngine:
     def _run(self):
         c = self.cfg()
         lc = c["live"]
-        self.set_status("starting", "Starting live scanner" + (" (simulator)" if self.source == "sim" else ""))
+        self.set_status("starting", "Starting live scanner" + (" (simulator)" if self.source == "sim" else
+                                                               " (replay of a recorded day)" if self.source == "replay" else ""))
         if self.source == "sim":
             from .sim import SimFeed, SimMarket, SimREST
             self.store.clear_source("sim")
@@ -318,6 +325,28 @@ class LiveEngine:
             self.rest = SimREST(market)
             self.status["user"] = "Simulator"
             make_feed = lambda: SimFeed(market, self._on_ticks, self.log)
+        elif self.source == "replay":                    # 2.76: a recorded day through the same scanner (live/replay.py)
+            from . import replay as RP
+            req = dict(getattr(self, "replay_req", None) or {})
+            rday, speed = str(req.get("day") or ""), RP.speed_of(req.get("speed"))
+            if rday not in {d["day"] for d in RP.days(self.data_dir)}:
+                self.set_status("error", f"No finished recording of {rday or 'that day'} to replay")
+                return
+            self.set_status("starting", f"Loading the recorded day {rday}")
+            prep = RP.prepare_store(self.store, rday, self.data_dir, self.log)
+            rec = RP.Recording(self.data_dir, rday, daily=self.store.get(f"daily:upstox:{rday}"), log=self.log)
+            self.clock = RP.ReplayClock(rec.d, speed)
+            self.uni = RP.universe_for(self.data_dir, rec, log=self.log)
+            self.rest = RP.RecordingREST(rec, self.clock, self.uni)
+            self.status["user"] = f"Replay {rday}"
+            self.replay = {"day": rday, "speed": speed, "news": len(rec.news), "daily": prep.get("daily"),
+                           "prev_day": rec.prev_day.isoformat() if rec.prev_day else None, "prev_closes": len(rec.prev)}
+            self._news_saved = list(self.news.items)
+            self.news.items = []                         # the replayed day's headlines only (restored at the end)
+            self.log(f"Replay of {rday} at {speed:g}x: {len(rec.bars)} symbols' candles, {len(rec.m_by_key):,} instruments, "
+                     f"{len(rec.news)} headlines" + ("" if prep.get("daily") else "; that morning's daily history was not saved"))
+            make_feed = lambda: RP.RecordingFeed(rec, self.clock, self.uni, self._on_ticks, self.log,
+                                                 on_news=self._replay_news, gate=lambda: getattr(self, "loop_n", 0))
         else:
             from . import universe
             from .upstox import UpstoxFeed, UpstoxREST
@@ -354,7 +383,8 @@ class LiveEngine:
         self.state.clock = self.clock
         self.state.und_keys = {u.key: s for s, u in self.uni.underlyings.items()}
         self.state.flow_keys = {u.key for u in self.uni.stocks} | {u.fut_key for u in self.uni.underlyings.values() if u.fut_key}
-        self.recorder = Recorder(self.data_dir, self.source, day)
+        self.recorder = Recorder(Path(self.data_dir) / "replay" if self.source == "replay" else self.data_dir,
+                                 self.source, day)        # 2.76: a replay never writes into the real recordings
         self.tracker = Tracker(self.store, self.source)
         from .shadow import ShadowExits
         self.shadow = ShadowExits(self.store, self.source, self.log)
@@ -567,7 +597,7 @@ class LiveEngine:
         self._attach_iv_history()
         self.store.put(f"daily:{self.source}:{self.clock.now().date()}", out)
         self.log(f"One-year history ready for {len(out)} symbols")
-        if self.source != "sim" and not self._daily_fresh(out, self.clock.now().date()) and not getattr(self, "_daily_retry", None):
+        if not is_practice(self.source) and not self._daily_fresh(out, self.clock.now().date()) and not getattr(self, "_daily_retry", None):
             p = ((out.get("NIFTY") or {}).get("prev") or {}).get("date")
             self.log(f"Daily history ends on {p}: the broker has not published the last trading day yet; trying again in 30 minutes")
             token = self._run_token
@@ -836,7 +866,7 @@ class LiveEngine:
                 raise e_
             now = self.clock.now()
             mins = minutes_since_open(now)
-            if self.source == "sim":
+            if is_practice(self.source):
                 ended = mins >= 375
             else:                                        # 2.48: by the NSE calendar (holidays, special sessions)
                 ses = SESSION.session(now.date())
@@ -951,11 +981,11 @@ class LiveEngine:
             if pro and self.ai.enabled():
                 every, pulse_every = max(every, 3600), max(pulse_every, 3600)
             if mins >= 3 and self._every("brain", every, clock_time=False):
-                threading.Thread(target=self._brain_safe, daemon=True).start()
+                threading.Thread(target=self._brain_safe, kwargs={"rules_only": self.source == "replay"}, daemon=True).start()
             elif mins >= 3 and every > 300 and self._every("brain_rules", 300, clock_time=False):
                 threading.Thread(target=self._brain_safe, kwargs={"rules_only": True}, daemon=True).start()   # fresh note every 5 min, no AI call
             if self._every("ai_pulse", pulse_every, clock_time=False) \
-                    and self.ai.enabled() and mins >= 5:
+                    and self.ai.enabled() and mins >= 5 and self.source != "replay":
                 threading.Thread(target=self._ai_pulse, daemon=True).start()
             self._loop_done(time.time() - t0)
             self.stop_evt.wait(max(0.2, 1.0 - (time.time() - t0)))
@@ -1005,17 +1035,20 @@ class LiveEngine:
             pass
         self.recorder.finalize(int(self.cfg()["live"].get("keep_recordings_days") or 365), self.log)
         try:
-            self.ranker.train(outcomes(self.store, self.source, limit=200000))
+            if self.source != "replay":                  # 2.76: no model learns from a replayed day
+                self.ranker.train(outcomes(self.store, self.source, limit=200000))
         except Exception as e:
             self.log(f"Model training failed: {e}")
         if self.cfg()["live"].get("briefs"):
             try:
-                self.make_brief("post", send=self.source != "sim")
+                self.make_brief("post", send=not is_practice(self.source))
             except Exception as e:
                 self.log(f"Post-market review failed: {e}")
-        if self.source != "sim":
+        if not is_practice(self.source):
             self.closed_day = now.date()
-        self.set_status("closed", "Simulation day finished" if self.source == "sim" else "Market closed for today")
+        self.set_status("closed", "Simulation day finished" if self.source == "sim" else
+                        f"Replay of {(getattr(self, 'replay', None) or {}).get('day')} finished" if self.source == "replay"
+                        else "Market closed for today")
         if self.feed:
             self.feed.stop()
         if self.depth:
@@ -1023,7 +1056,7 @@ class LiveEngine:
             self.depth = None
 
     def _watchdog(self, now):
-        if not self.feed or self.source == "sim" or not is_market_hours(now):
+        if not self.feed or is_practice(self.source) or not is_market_hours(now):
             return
         try:                                             # 2.72: prices behind Upstox, or the analysis passes slow
             self._delay_watch()
@@ -1123,7 +1156,7 @@ class LiveEngine:
     def _trading_open(self, now) -> bool:
         """2.48: alerts and trades only while an NSE session is open (calendar: holidays, special sessions) and the
         exchange has not told the feed that F&O is closed. The simulator always trades."""
-        if self.source == "sim":
+        if is_practice(self.source):
             return True
         if not SESSION.is_open(now):
             return False
@@ -1146,6 +1179,7 @@ class LiveEngine:
         """2.72: how long one analysis pass took, its slow-pass rate and, when slow, which parts took the time (shown on
         the System page; logged at most every 5 minutes). Nothing about the analysis changes."""
         self.status["loop_ms"] = round(dur * 1000)
+        self.loop_n = getattr(self, "loop_n", 0) + 1          # 2.76: the replay waits for one pass per minute
         self._loop_hist.append(dur)
         h = sorted(self._loop_hist)
         self.status["loop_p95_ms"] = round(h[int(0.95 * (len(h) - 1))] * 1000) if h else None
@@ -1544,7 +1578,7 @@ class LiveEngine:
             t0 = time.time()
             now = self.clock.now()
             hm = now.strftime("%H:%M")
-            if self.source != "sim" and str(c["start"]) <= hm <= str(c["end"]) and self.uni:
+            if not is_practice(self.source) and str(c["start"]) <= hm <= str(c["end"]) and self.uni:
                 stocks = [u.symbol for u in self._rank_stocks()]
                 gap = every * 0.6 / max(1, len(stocks))
                 done = waited = 0
@@ -1729,7 +1763,7 @@ class LiveEngine:
     def _start_depth(self):
         """Dhan 200-level order book for Nifty and Bank Nifty futures (needs Dhan keys with the Pro data plan).
         Optional: any problem here only logs; the scanner never depends on it."""
-        if self.source == "sim" or self.depth:
+        if is_practice(self.source) or self.depth:
             return
         lab = self.cfg().get("lab") or {}
         if not (lab.get("dhan_client_id") and lab.get("dhan_token")) or lab.get("dhan_depth") is False:
@@ -1943,11 +1977,13 @@ class LiveEngine:
         self.store.set_alert_story(a["id"], s["id"])
         a["ai"] = None
         self.alerts_mem.appendleft(a)
-        if not muted and ((a["severity"] >= int(lc["telegram_min_severity"]) and (focus or not lc.get("telegram_focus_only", True)))
-                          or (a.get("data") or {}).get("notify")):     # 2.59: a "Signals agree" alert always tells you
+        if not muted and self.source != "replay" and (                 # 2.76: a replayed day never reaches your phone
+                (a["severity"] >= int(lc["telegram_min_severity"]) and (focus or not lc.get("telegram_focus_only", True)))
+                or (a.get("data") or {}).get("notify")):     # 2.59: a "Signals agree" alert always tells you
             self.telegram.send(telegram_text(a))
         aic = self.cfg().get("ai") or {}
-        if self.ai.enabled() and a["severity"] >= int(aic.get("explain_min_severity") or 3) and self._auto_explain_ok(a, aic):
+        if self.ai.enabled() and a["severity"] >= int(aic.get("explain_min_severity") or 3) and self._auto_explain_ok(a, aic) \
+                and self.source != "replay":                 # 2.76: a replay spends no AI calls
             threading.Thread(target=self._explain_one, args=(a["id"],), daemon=True).start()
         try:
             self.tracker.add(a, m, self.state, self.clock.ts(), feats)
@@ -2111,7 +2147,7 @@ class LiveEngine:
         pcfg = {**book.cfg, "capital": float(capital)} if capital else book.cfg
         out = riskgate.check(a, opt, now=now, paper_cfg=pcfg, guard=book.guard(now),
                              open_syms={t["sym"] for t in book.open_trades()}, ban=ban, cfg=(lc.get("risk") or {}),
-                             sim=self.source == "sim", bigger=(a.get("data") or {}).get("bigger"))
+                             sim=is_practice(self.source), bigger=(a.get("data") or {}).get("bigger"))
         er = (a.get("data") or {}).get("event_risk") or {}
         if er.get("warnings"):                       # 2.35: event risk, warnings only
             out["warnings"] = (out.get("warnings") or []) + list(er["warnings"])
@@ -2189,11 +2225,11 @@ class LiveEngine:
 
     def _macro_alert(self, a):
         now = dt.datetime.now(IST)
-        if self.source != "sim" and (now.weekday() >= 5 or not (dt.time(8, 0) <= now.time() <= dt.time(15, 30))):
+        if not is_practice(self.source) and (now.weekday() >= 5 or not (dt.time(8, 0) <= now.time() <= dt.time(15, 30))):
             return                                   # 2.42: a world move at night is not an alert of the next day (India indication covers it)
-        if self.running and self.source != "sim":
+        if self.running and not is_practice(self.source):
             self._emit_safe(a, self.clock.now(), self.cfg()["live"])
-        elif self.running:
+        elif self.running and self.source == "sim":      # 2.76: a replayed day gets no world move of today
             a["title"] = "[real market] " + a["title"]
             self._emit_safe(a, self.clock.now(), self.cfg()["live"])
 
@@ -2313,7 +2349,7 @@ class LiveEngine:
             self._macro_alert(a)
 
     def _filing_alert(self, f):
-        if not self.running or self.source == "sim" or not self.uni or f["sym"] not in self.uni.underlyings:
+        if not self.running or is_practice(self.source) or not self.uni or f["sym"] not in self.uni.underlyings:
             return
         m = self.metrics.get(f["sym"]) or {}
         d = "up" if f["tone"] > 0 else "down" if f["tone"] < 0 else "neutral"
@@ -2409,7 +2445,7 @@ class LiveEngine:
 
     # ------------------------------------------------------------ briefs
     def _last_levels(self) -> dict:
-        if self.metrics and self.source != "sim":
+        if self.metrics and not is_practice(self.source):
             src = {s: self.index_view(self.metrics[s]) for s in ("NIFTY", "BANKNIFTY") if s in self.metrics}
         else:
             src = self.store.get("last_levels:upstox", {}) or {}      # the morning brief only uses real-market levels
@@ -2422,7 +2458,7 @@ class LiveEngine:
         that is the previous weekday's session; the simulator's clock is its own session."""
         now = now or (self.clock.now() if self.running or self.metrics else dt.datetime.now(IST))
         d = now.date()
-        if self.source == "sim":
+        if is_practice(self.source):
             return d
         if now.weekday() >= 5 or now.time() < dt.time(15, 30):
             if now.weekday() < 5 and now.time() >= dt.time(9, 15) and self.running:
@@ -2458,7 +2494,7 @@ class LiveEngine:
             b["lines"] = [l for l in b["lines"] if not l.startswith(("Alerts:", "Paper trading:"))] + dayreport.text(rep)
         b["day"] = day
         b["source"] = self.source if kind == "post" else "market"
-        key = kind if not (kind == "post" and self.source == "sim") else "post_sim"   # a simulator day never replaces the real review
+        key = kind if not (kind == "post" and is_practice(self.source)) else f"post_{self.source}"   # a simulator day never replaces the real review
         self.store.put(f"brief:{day}:{key}", b)
         days = self.store.get("brief_days", []) or []
         if day not in days:
@@ -2473,7 +2509,7 @@ class LiveEngine:
         day = day or self.session_day().isoformat()
         idx = self._indices() if self.metrics and (self.session_day().isoformat() == day) else []
         rep = dayreport.build(self.store, src, day, idx)
-        if save and src != "sim":
+        if save and not is_practice(src):
             self.store.put(f"report:{day}", rep)
         return rep
 
@@ -2540,9 +2576,14 @@ class LiveEngine:
                 if c["source"] != "upstox" or not c.get("auto_start"):
                     continue
                 ses = SESSION.session(now.date())        # 2.48: the NSE calendar (special sessions too)
-                if not ses or not (ses["start_scanner"] <= now < ses["close"] - dt.timedelta(minutes=5)) or self.running:
+                if not ses or not (ses["start_scanner"] <= now < ses["close"] - dt.timedelta(minutes=5)):
                     continue
                 if self.manual_stop_day == now.date() or self.closed_day == now.date():
+                    continue
+                if self.running and self.source == "replay" and self.tokens.load():
+                    self.log("The live market is starting: the replay stops")     # 2.76: the real market comes first
+                    self.stop(manual=False)
+                if self.running:
                     continue
                 if self.tokens.load():
                     self.log(f"Auto-starting live scanner: {ses['name']} {ses['open']:%H:%M}-{ses['close']:%H:%M}")
@@ -2649,6 +2690,9 @@ class LiveEngine:
         time.sleep(5)
         while True:
             try:
+                if self.running and self.source == "replay":     # 2.76: the replayed day's headlines come from its recording
+                    time.sleep(30)
+                    continue
                 if self.cfg()["live"].get("news"):
                     new = self.news.fetch(self.words or {})
                     new += self._dhan_news()
@@ -2673,6 +2717,20 @@ class LiveEngine:
             now = dt.datetime.now(IST)
             busy = now.weekday() < 5 and dt.time(8, 30) <= now.time() <= dt.time(15, 30)
             time.sleep(60 if busy else 300)            # every minute in market hours: news reaches alerts fast
+
+    def _replay_news(self, items: list):
+        """2.76: the replayed day's headlines as they were seen; a fresh one with a stock in it is a news alert, as live."""
+        now = self.clock.ts()
+        for n in items:
+            if n["title"] in self.news.seen and any(x["title"] == n["title"] for x in self.news.items):
+                continue
+            self.news.items = ([n] + self.news.items)[:300]
+            if n.get("syms") and n.get("ts", 0) > now - 1800 and self.running:
+                try:
+                    self._news_alert(n)
+                except Exception as e:
+                    if self._every("replay_news_err", 600, clock_time=False):
+                        self.log(f"Replay headline skipped: {e}")
 
     def _dhan_news(self) -> list:
         """Dhan's headlines into the same news list (symbols from Dhan's tags + the app's name matching)."""
@@ -2760,8 +2818,12 @@ class LiveEngine:
                 ps = self.paper.summary(self.state)
                 self._snap_ps = (_PV[0], time.time(), ps)
         cv = self.context.view()
+        rp = None
+        if self.source == "replay" and self.replay:      # 2.76: which day, how fast, how far
+            rp = {**self.replay, "progress": self.feed.progress() if self.feed and hasattr(self.feed, "progress") else None,
+                  "waits": getattr(self.feed, "waits", 0) if self.feed else 0}
         return {"status": {**self.status, "running": self.running, "logged_in": bool(self.tokens.load()),
-                           "feed": feed, "ticks": self.state.tick_count if self.state else 0},
+                           "feed": feed, "ticks": self.state.tick_count if self.state else 0, "replay": rp},
                 "clock": now.isoformat(), "mins": minutes_since_open(now), "fetched": time.time(),
                 "session": {**SESSION.view(), "paused_today": self.manual_stop_day == dt.datetime.now(IST).date(),
                             "auto_start": bool(self.cfg()["live"].get("auto_start", True))},
@@ -2940,7 +3002,7 @@ class LiveEngine:
     def save_last_session(self):
         """The Live page's index cards, breadth, sectors and movers, kept for when the scanner is off."""
         import json
-        if not self._indices() or self.source == "sim":
+        if not self._indices() or is_practice(self.source):
             return
         if minutes_since_open(self.clock.now()) < 0:     # 2.38: before 9:15 the prices are yesterday's: keep the real session
             return
@@ -2956,8 +3018,8 @@ class LiveEngine:
 
     def _nse_state(self) -> dict | None:
         """2.38: NSE open / closed / holiday now (rules/market_hours.json); the simulator is always 'open'."""
-        if self.source == "sim" and self.running:
-            return {"session": "NSE", "open": True, "label": "Simulator"}
+        if is_practice(self.source) and self.running:
+            return {"session": "NSE", "open": True, "label": "Simulator" if self.source == "sim" else "Replay"}
         try:
             from .marketclock import state as _mstate
             last = getattr(self.state, "last_tick", None) if (self.running and self.state) else None

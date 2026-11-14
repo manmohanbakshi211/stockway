@@ -5,7 +5,7 @@ Mandeep: "now we don't need any second body like tanu ... now onwards we will on
 that only ... you don't need to code again for same features just take from tanu and add in manu".
 - The 13 Nov freeze is lifted: live/, lab/, webapp/, radar/ get changes again, under the rules below.
 - Tanu (tanu/) is being removed. Its useful pieces are COPIED into Stockway (not imported, not redesigned), one release
-  at a time: gap fill (2.74), light / dark theme, replay of a recorded day, the Strict track (real costs, strict pass
+  at a time: gap fill (2.74), light / dark theme (2.75), replay of a recorded day (2.76, live/replay.py), the Strict track (real costs, strict pass
   test, Strict alerts and paper account, comparison). Then tanu/ and Start Tanu.command are deleted; data/tanu on the
   Mac is deleted only with Mandeep's explicit OK.
 
@@ -14,6 +14,9 @@ that only ... you don't need to code again for same features just take from tanu
 - **Never place real orders.** No order, modify or cancel calls to Upstox, Dhan or any broker; no algo trading;
   no access to funds, positions or holdings of a real trading account. Broker APIs are used for market data only.
 - The app's job: clear entry/exit alerts (what, when, why, stop, target) and automatic **paper** trades at the same time.
+- Practice sources (live/practice.py): "sim" and "replay" never touch the real paper book, real-day reviews or the real
+  market's models; a replay also sends nothing to Telegram and spends no AI calls. A new practice source is added to
+  PRACTICE, not handled one place at a time.
 
 ## Don't break what works (Mandeep, 30 Oct 2026)
 

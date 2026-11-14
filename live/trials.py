@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import time
+from .practice import PRACTICE
 
 SQL = """
 CREATE TABLE IF NOT EXISTS trial_alerts (
@@ -35,8 +36,8 @@ class Trials:
                 store.db.execute("ALTER TABLE trial_alerts ADD COLUMN variant TEXT")
             except Exception:
                 pass
-            if source == "sim":
-                store.db.execute("DELETE FROM trial_alerts WHERE source='sim'")
+            if source in PRACTICE:              # practice sources start clean (2.76: the replay too)
+                store.db.execute("DELETE FROM trial_alerts WHERE source=?", (source,))
             store.db.commit()
         self._reload()
 

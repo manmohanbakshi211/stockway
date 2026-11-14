@@ -71,7 +71,7 @@ class ChartData:
 
     def history(self, sym):
         """Previous sessions' 1-minute bars (live mode only; the simulator has just today)."""
-        if self.e.source != "upstox" or not self.e.rest or not self.e.uni:
+        if self.e.source not in ("upstox", "replay") or not self.e.rest or not self.e.uni:   # 2.76: replay: earlier recorded days
             return []
         day = self.e.clock.now().date()
         k = (sym, day)

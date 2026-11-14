@@ -168,13 +168,34 @@ def upstox_logout():
 
 
 # ----------------------------------------------------------------- control
+@router.get("/api/live/replay/days")
+def replay_days():
+    """2.76: the recorded days a replay can play, newest first."""
+    from live import replay as RP
+    e = engine()
+    return clean({"days": RP.days(e.data_dir), "speeds": list(RP.SPEEDS), "default_speed": RP.DEFAULT_SPEED,
+                  "running": e.source == "replay" and e.running, "replay": getattr(e, "replay", None)})
+
+
 @router.post("/api/live/start")
 async def live_start(req: Request):
     body = await req.json() if (await req.body()) else {}
     e = engine()
     source = body.get("source") or e.cfg()["live"]["source"]
-    if source not in ("upstox", "sim"):
+    if source not in ("upstox", "sim", "replay"):
         raise HTTPException(400, "Unknown data source")
+    if source == "replay":                           # 2.76: a recorded day through the same scanner (live/replay.py)
+        from live import replay as RP
+        day = str(body.get("day") or "")
+        if day not in {d["day"] for d in RP.days(e.data_dir)}:
+            raise HTTPException(400, "No finished recording of that day on this computer.")
+        if e.running and e.source == "upstox":
+            raise HTTPException(400, "The live scanner is on the real market now. Replay a day when it is off "
+                                     "(after the close, or after Pause for today).")
+        if e.running:
+            e.stop(manual=False)
+        e.replay_req = {"day": day, "speed": RP.speed_of(body.get("speed"))}
+        return clean(e.start("replay"))
     if e.running:
         if e.source == source:
             return clean(e.status)

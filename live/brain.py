@@ -10,6 +10,7 @@ import time
 
 from .clock import IST
 from .notify import SYSTEM_STYLE, _compact_json
+from .practice import PRACTICE
 
 
 def _scen(e, sym):
@@ -161,7 +162,8 @@ class Brain:
         self.running = False
 
     def _key(self, day) -> str:
-        return f"brain:sim:{day}" if getattr(self.e, "source", None) == "sim" else f"brain:{day}"
+        src = getattr(self.e, "source", None)
+        return f"brain:{src}:{day}" if src in PRACTICE else f"brain:{day}"
 
     def history(self, day=None) -> list:
         day = day or dt.datetime.now(IST).date().isoformat()
@@ -186,10 +188,10 @@ class Brain:
             note["ts"] = time.time()
             note["time"] = s["time"]
             now = dt.datetime.now(IST)
-            if getattr(self.e, "source", None) != "sim" and not (now.weekday() < 5 and dt.time(9, 15) <= now.time() <= dt.time(15, 30)):
+            if getattr(self.e, "source", None) not in PRACTICE and not (now.weekday() < 5 and dt.time(9, 15) <= now.time() <= dt.time(15, 30)):
                 note["closed"] = True                     # numbers are from the last session, not live
                 note["headline"] = "Market closed (last session): " + (note.get("headline") or "")
-            if getattr(self.e, "source", None) == "sim":
+            if getattr(self.e, "source", None) in PRACTICE:
                 note["sim"] = True
             self.last_snap = s
             day = now.date().isoformat()
