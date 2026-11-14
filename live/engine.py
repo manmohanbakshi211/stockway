@@ -416,6 +416,11 @@ class LiveEngine:
         self.feed.start()
         self.feed.subscribe(base_keys, "full")
         self._start_depth()
+        try:                                     # 2.74: a late start or a restart fills the day's earlier candles
+            from . import gapfill
+            gapfill.start(self)
+        except Exception as e:
+            self.log(f"Filling today's earlier candles not started: {e}")
         if self.source != "sim":                  # Sensex, live from Upstox (BSE index); optional, never blocks the start
             try:
                 self._seed(self.rest.quotes([SENSEX_KEY]))

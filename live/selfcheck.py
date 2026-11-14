@@ -277,6 +277,13 @@ def static_checks(cfg: dict | None = None) -> list:
                   "lim.used(1800)" in vsrc and "keep=False" in vsrc and 0 < float(vc["max_upstox_share"]) < 1,
                   f"waits while more than {int(float(vc['max_upstox_share']) * 100)}% of the 30-minute Upstox budget is busy; "
                   f"every {vc['stock_chains_every_min']} min"))
+    from live import gapfill as _gf, upstox as _up
+    gsrc = inspect.getsource(_gf.fill)
+    out.append(_c("gap_fill", "Late start / restart: the day's earlier candles filled from today's recording, then Upstox (2.74)",
+                  "recording_bars(" in gsrc and "intraday_1m" in gsrc and "self.limiter.wait()" in inspect.getsource(_up.UpstoxREST.get)
+                  and _gf.PACE_S >= 0.5 and "gapfill.start(self)" in inspect.getsource(_eng.LiveEngine._run),
+                  f"its own thread; Upstox intraday candles at most {1 / _gf.PACE_S:.0f} a second through the shared Upstox limiter; "
+                  "live candles always win"))
     return out
 
 

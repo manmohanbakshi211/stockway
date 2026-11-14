@@ -69,6 +69,18 @@ class Bars:
         xs = [b[4] for b in tuple(self.bars)]
         return xs[-n:] if n else xs
 
+    def fill(self, rows, before: int | None = None) -> int:
+        """2.74: add earlier 1-minute candles [[minute, o, h, l, c, v], ...] (a restart or a late start). A minute
+        already built from live ticks is never replaced; only minutes before `before` are added. Returns how many."""
+        have = {int(b[0]) for b in self.bars}
+        new = [[int(r[0]), *map(float, r[1:6])] for r in rows
+               if int(r[0]) not in have and (before is None or int(r[0]) < before)]
+        if not new:
+            return 0
+        merged = sorted([list(b) for b in self.bars] + new, key=lambda b: b[0])
+        self.bars = collections.deque(merged[-self.bars.maxlen:], maxlen=self.bars.maxlen)
+        return len(new)
+
 
 class MarketState:
     def __init__(self):
@@ -154,6 +166,26 @@ class MarketState:
         if ltq and px * ltq >= self.print_min_value:
             self.prints.append((now_ts, t["key"], ltq, px, side))
         i._pbid, i._pask, i._pltp = t.get("bid") or i._pbid, t.get("ask") or i._pask, px
+
+    def fill_bars(self, sym: str, rows, before: int | None = None) -> int:
+        """2.74: earlier candles for an underlying (see Bars.fill)."""
+        with self.lock:
+            b = self.bars.get(sym)
+            if b is None:
+                b = self.bars[sym] = Bars()
+            return b.fill(rows, before)
+
+    def fill_hist(self, key: str, rows) -> int:
+        """2.74: earlier minute snapshots (minute, ltp, vol, oi, iv) for an instrument; live minutes win."""
+        with self.lock:
+            i = self.inst(key)
+            have = {h[0] for h in i.hist}
+            new = [tuple(r) for r in rows if r[0] not in have]
+            if not new:
+                return 0
+            merged = sorted(list(i.hist) + new, key=lambda h: h[0])
+            i.hist = collections.deque(merged[-i.hist.maxlen:], maxlen=i.hist.maxlen)
+            return len(new)
 
     def snapshot_minute(self, minute_ts: int):
         with self.lock:

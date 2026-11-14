@@ -145,6 +145,11 @@ class UpstoxREST:
         return self.get("/v2/option/chain", {"instrument_key": underlying_key,
                                               "expiry_date": expiry.isoformat()}) or []
 
+    def intraday_1m(self, key: str) -> list:
+        """2.74: today's 1-minute candles so far ([iso time, o, h, l, c, volume, oi], newest first)."""
+        from .gapfill import intraday_path
+        return (self.get(intraday_path(key)) or {}).get("candles", [])
+
     def daily_candles(self, key: str, days: int = 40) -> list:
         to = dt.datetime.now(IST).date()
         frm = to - dt.timedelta(days=days)

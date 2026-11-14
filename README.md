@@ -1,8 +1,7 @@
 # Stockway
 
-> **13 Nov 2026:** this app ("Manu", the legacy code) is frozen. Its replacement, **Tanu**, is being built in
-> [`tanu/`](tanu/README.md) and takes over at cutover. Everything below describes the legacy app.
-> To open Tanu: double-click **Start Tanu.command** (its own environment; view-only until the switch-over).
+> **15 Nov 2026:** this app is Stockway again, the only one. The trial rebuild ("Tanu") is being removed; its useful
+> pieces are copied in here one release at a time (2.74 onwards). Start it as always with **Start Radar.command**.
 
 A Mac app (runs in your browser, on your own computer) with two parts:
 
@@ -117,6 +116,20 @@ which AI is connected ("Powered by Claude Opus · your Pro plan"). Other choices
 Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
+
+## 2.74: the day's gaps filled after a restart or a late start (15 Nov 2026)
+- **Mandeep (15 Nov):** keep only the original Stockway and copy Tanu's useful pieces into it, starting with "the
+  fill gaps from real data feature".
+- **Problem:** a restart in the middle of the day started the 1-minute candles again from that minute (13 Nov began
+  at 09:19), so VWAP, the opening range, EMAs and every candle-based alert saw only part of the day, and the next save
+  of the day's candles replaced the morning in the recording.
+- **Now** (`live/gapfill.py`, copied from Tanu's late-start backfill): when the scanner starts after the open it first
+  restores today's own recording (the candles of every index and stock saved before the restart, and the last 45
+  minutes of every instrument's minute history for OI / price-change alerts), then fetches Upstox's 1-minute intraday
+  candles for any minutes still missing, indices first, at most 2 calls a second through the shared Upstox limiter,
+  in its own thread (the start, the analysis loop and option chains never wait). A live candle is never replaced. The
+  System page's no-clash checks list it; the log says how many minutes were filled.
+- Nothing else changes: no alert, score, paper rule or Lab result (Lab code untouched). Tests: 5 new.
 
 ## 2.73: market situation picker: the right Lab rule for today's market (13 Nov 2026)
 
