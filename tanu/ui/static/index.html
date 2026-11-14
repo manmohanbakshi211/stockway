@@ -4,22 +4,49 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tanu</title>
+<script>try { if (localStorage.getItem("tanu-theme") === "dark") document.documentElement.dataset.theme = "dark"; } catch (e) {}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%233D2FA8' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%233D2FA8'/%3E%3C/svg%3E">
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="#today">Tanu</a>
-  <span class="ver" id="ver"></span>
-  <span class="mode" title="No real orders are ever placed">Paper only</span>
-</header>
-<nav class="tabs" aria-label="Screens">
-  <a href="#today" data-tab="today">Today</a>
-  <a href="#market" data-tab="market">Market</a>
-  <a href="#setups" data-tab="setups">Setups</a>
-  <a href="#journal" data-tab="journal">Journal</a>
-  <a href="#system" data-tab="system">System</a>
-</nav>
-<main id="view" tabindex="-1"><p class="muted">Loading…</p></main>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <a class="brand" href="#today">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" /><circle cx="16" cy="16" r="7" /><circle cx="16" cy="16" r="2.5" class="dot"/><path d="M16 16 L27 9" /></svg>
+      <span><b>Tanu</b><small>F&amp;O paper radar</small></span>
+    </a>
+    <div class="rail-scroll">
+      <p class="rail-group">Trade today <span id="rail-live" class="rail-live"></span></p>
+      <ul>
+        <li><a href="#today" data-page="today">Today</a></li>
+        <li><a href="#ask" data-page="ask">Ask Tanu <span class="rail-tag">AI</span></a></li>
+        <li><a href="#journal" data-page="journal">Paper trades</a></li>
+        <li><a href="#setups" data-page="setups">Setups</a></li>
+      </ul>
+      <p class="rail-group">Market intel</p>
+      <ul>
+        <li><a href="#market?tab=context" data-page="market" data-sub="context">Market context</a></li>
+        <li><a href="#market?tab=world" data-page="market" data-sub="world">World</a></li>
+        <li><a href="#market?tab=insiders" data-page="market" data-sub="insiders">Insider trades</a></li>
+        <li><a href="#market?tab=watchlist" data-page="market" data-sub="watchlist">Watchlist</a></li>
+        <li><a href="#market?tab=news" data-page="market" data-sub="news">News</a></li>
+        <li><a href="#market?tab=alerts" data-page="market" data-sub="alerts">Alerts</a></li>
+      </ul>
+      <p class="rail-group">Setup</p>
+      <ul>
+        <li><a href="#system" data-page="system">System &amp; logins</a></li>
+      </ul>
+    </div>
+    <div class="rail-foot">
+      <p class="rail-version"><b id="ver">Tanu</b><span> Paper only: never a real order.</span></p>
+      <button type="button" class="theme-btn" id="theme-btn" aria-pressed="false">Dark theme</button>
+    </div>
+  </nav>
+  <main id="view" tabindex="-1"><p class="muted">Loading…</p></main>
+</div>
 <script src="/static/app.js"></script>
 </body>
 </html>

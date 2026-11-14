@@ -3,6 +3,18 @@
 All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [Semantic Versioning](https://semver.org/) (0.x while the core is being built).
 
+## [0.16.1] - 2026-11-15
+### Changed
+- The app now looks like the legacy app's desktop UI (Mandeep: "tanu should be like the manu's UI desktop one and in
+  light ... give option to switch dark and light theme"): Manu's font (Archivo), colours (fog page, white panels,
+  purple signal) and left sidebar (Trade today: Today, Ask Tanu, Paper trades, Setups; Market intel: Market context,
+  World, Insider trades, Watchlist, News, Alerts; Setup: System & logins), copied from webapp/static. Phones get
+  Manu's top bar instead of the bottom bar. Light by default; a Dark theme button in the sidebar (remembered on this
+  browser). The sidebar shows whether Tanu is live (On / Off).
+### Checked
+- Every screen in light and dark at 1440 and 390 px: no sideways scroll, no console errors, the right sidebar item
+  marked, the theme remembered after a reload. Tests: 154.
+
 ## [0.16.0] - 2026-11-15
 ### Added
 - The Dhan 5-year download in Tanu (ADR-0014, Mandeep: "add that in tanu"), so it keeps going after the old app

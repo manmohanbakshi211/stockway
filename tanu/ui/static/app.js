@@ -1,4 +1,5 @@
-// Tanu UI: five screens. Read-only except the live setup on System (saved on this Mac only). No libraries.
+// Tanu UI: the legacy app's layout (sidebar on desktops, top bar on phones), light with a Dark theme switch.
+// Read-only except the setup on System (saved on this Mac only). No libraries.
 "use strict";
 
 const view = document.getElementById("view");
@@ -126,7 +127,7 @@ function wireAsk() {
 
 async function today() {
   const [d, L, ai] = await Promise.all([get("/api/today"), get("/api/live").catch(() => null), get("/api/ai").catch(() => null)]);
-  document.getElementById("ver").textContent = "v" + d.version;
+  document.getElementById("ver").textContent = "Tanu v" + d.version;
   const accl = d.account_list || [];
   const st = d.setups || {};
   const acctTable = (kind, title) => {
@@ -649,17 +650,52 @@ async function system() {
   wireDhan();
 }
 
-// ---------------------------------------------------------------- router
-const screens = { today, market, setups, journal, system };
+// ---------------------------------------------------------------- router, sidebar, theme
+async function ask() {                      // "Ask Tanu" in the sidebar: the Today screen, with the question box ready
+  await today();
+  const box = document.querySelector("#ask-form input");
+  if (box) { box.scrollIntoView({ block: "center" }); box.focus({ preventScroll: true }); }
+}
+const screens = { today, ask, market, setups, journal, system };
 function route() {
   const name = (location.hash.slice(1) || "today").split("?")[0];
-  const fn = screens[name] || today;
-  document.querySelectorAll(".tabs a").forEach((a) => a.toggleAttribute("aria-current", a.dataset.tab === (screens[name] ? name : "today")));
-  document.querySelectorAll(".tabs a[aria-current]").forEach((a) => a.setAttribute("aria-current", "page"));
-  view.innerHTML = `<p class="muted">Loading…</p>`;
+  const page = screens[name] ? name : "today";
   const qs = location.hash.slice(1).split("?")[1] || "";
-  fn(Object.fromEntries(new URLSearchParams(qs))).catch(fail);
+  const params = Object.fromEntries(new URLSearchParams(qs));
+  const sub = page === "market" ? (params.tab || "context") : null;
+  document.querySelectorAll(".rail a[data-page]").forEach((a) => {
+    const on = a.dataset.page === page && (!a.dataset.sub || a.dataset.sub === sub);
+    if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
+  const cur = document.querySelector('.rail a[aria-current="page"]');
+  if (cur && window.matchMedia("(max-width: 900px)").matches) cur.scrollIntoView({ block: "nearest", inline: "center" });
+  view.innerHTML = `<p class="muted">Loading…</p>`;
+  screens[page](params).catch(fail);
 }
+
+function setTheme(t) {
+  const dark = t === "dark";
+  if (dark) document.documentElement.dataset.theme = "dark"; else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("tanu-theme", dark ? "dark" : "light"); } catch (e) { /* private window: not remembered */ }
+  const b = document.getElementById("theme-btn");
+  if (b) { b.textContent = dark ? "Light theme" : "Dark theme"; b.setAttribute("aria-pressed", String(dark)); }
+}
+document.getElementById("theme-btn").onclick = () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+
+async function railLive() {
+  const el = document.getElementById("rail-live");
+  try {
+    const L = await get("/api/live");
+    const on = L.switch && L.fresh;
+    el.textContent = on ? "On" : "Off";
+    el.className = "rail-live" + (on ? " on" : "");
+    el.title = on ? "Tanu is running the market day" : L.switch ? "Switched over; waiting for the market" : "Not live yet: the old app runs the market";
+  } catch (e) { el.textContent = ""; }
+}
+
 window.addEventListener("hashchange", route);
-get("/api/today").then((d) => (document.getElementById("ver").textContent = "v" + d.version)).catch(() => {});
+get("/api/today").then((d) => (document.getElementById("ver").textContent = "Tanu v" + d.version)).catch(() => {});
+railLive();
+setInterval(railLive, 60000);
 route();
