@@ -15,7 +15,7 @@ All notable changes to Tanu. Format: [Keep a Changelog](https://keepachangelog.c
   on market days, all day on weekends and holidays. System page: Dhan login form, progress, Pause / Resume.
 - `keyring` added to Tanu's packages (the legacy app already uses it) for the Keychain.
 ### Checked
-- Tests: 153 (20 new, fakes only: TOTP test vector, secrets never shown, refusal stops login, 5-minute gap, URL guard,
+- Tests: 154 (21 new, fakes only: before the switch-over no Dhan, intel or note thread starts; TOTP test vector, secrets never shown, refusal stops login, 5-minute gap, URL guard,
   retries, refused token replaced once, budget pace and IST day, legacy folder unchanged, legacy days skipped, empty
   days, network pause retries the same day, daily cap, never in market hours, API). Headless System page 390 / 1280.
 

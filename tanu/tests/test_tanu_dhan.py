@@ -318,3 +318,26 @@ def test_dhan_routes_show_no_secrets_and_need_the_header(tmp_path):
     assert api.get("/api/dhan", headers=HOST).json()["download"]["paused"] is True
     assert api.post("/api/setup/dhan", json={"forget": True}, headers=w).json()["saved"]
     assert not k.status()["auto_login"] and not k.status()["client_id_saved"]
+
+
+# ------------------------------------------------------------------ no clash with the legacy app
+def test_before_the_switch_over_tanu_starts_no_dhan_intel_or_note_threads(tmp_path, monkeypatch):
+    """View mode (the legacy app still running): only the web app; no Dhan login or download, no background reads."""
+    from tanu.core import config
+    from tanu.live import app as live_app
+
+    sv = live_app.Supervisor(config.Settings(data_dir=str(tmp_path / "tanu"), live=False))
+    calls = []
+    sv.dhan_keeper.transport = lambda url: calls.append(url) or (500, b"")
+    sv.dhan5y.dhan.transport = lambda *a: calls.append(a) or (500, b"")
+
+    class Server:
+        should_exit = False
+
+    monkeypatch.setattr(sv, "web", lambda port_check=True: Server())
+    before = {t.name for t in threading.enumerate()}
+    threading.Timer(0.3, sv.stop.set).start()
+    assert sv.run() == 0 and sv.state["mode"] == "view"
+    started = {t.name for t in threading.enumerate()} - before
+    assert not started & {"tanu-dhan5y", "tanu-intel", "tanu-ai-notes"} and calls == []
+    assert any("Cutover switch is off" in w for w in sv.state["why"])
