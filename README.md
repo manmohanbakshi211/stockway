@@ -118,6 +118,16 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.78.1: the Paper page never stays blank (17 Nov 2026)
+- **Mandeep (17 Nov, 11:55):** the Paper trades page was not loading (empty screen).
+- **Why:** the scanner started late that day (11:51; the Mac was asleep / offline from 10:38), so for its first ~6
+  minutes it loaded chart history for 220 symbols, filled the morning's candles and ran a first analysis pass of 365 s.
+  Every page request took 10-20 s in that time, and the Paper page waited for three of them one after another
+  (the accounts, all accounts added up, then the trades) before drawing anything.
+- **Now:** the page shows "Loading paper trades…" at once, says after 5 s that the app is busy and the page fills in by
+  itself, draws the trades as soon as they arrive, and adds the accounts and the totals when they come (no longer
+  waiting for them). A failed request says so and keeps trying. Nothing else changes.
+
 ## 2.78: Tanu removed; Stockway is the only app (15 Nov 2026)
 - **Mandeep (15 Nov):** "after updating manu just delete the tanu ... now onwards we will only keep original stockway".
 - Tanu's useful pieces are in Stockway (2.74 gap fill, 2.75 light / dark theme, 2.76 replay, 2.77 Strict track), so

@@ -1111,25 +1111,35 @@ async function pagePaper() {
   stopPageTimer();
   { const b = new URLSearchParams(location.hash.split("?")[1] || "").get("b"); if (b) L.paperBook = b; }
   L.paperBook = L.paperBook || "main";
-  main.innerHTML = `<div id="pp-main"></div><div id="pp-top"></div>`;     // the top (capital, challenge) is not redrawn every 3 s
-  let lastBooks = 0;
+  main.innerHTML = `<div id="pp-main"><h1 class="page-title">Paper trading</h1><p class="muted" id="pp-wait">Loading paper trades…</p></div><div id="pp-top"></div>`;     // the top (capital, challenge) is not redrawn every 3 s
+  let lastBooks = 0, drawn = false;
+  const slow = setTimeout(() => {                                         // 2.78.1: never a blank page while the app is busy
+    const w = $("#pp-wait");
+    if (w && !drawn) w.innerHTML = "The app is busy right now (just after a start it loads chart history and today's candles for a few minutes). This page fills in by itself as soon as the trades arrive.";
+  }, 5000);
+  const side = (url, set) => api(url).then((v) => { set(v); if (drawn && L.pageKick) L.pageKick(); }).catch(() => null);
   const tick = async (first) => {
     if (state.page !== "paper") return;
     let busy = false;
     try {
       if (first || Date.now() - lastBooks > 15000) {                     // 2.49: the accounts + their comparison
-        lastBooks = Date.now(); L.books = await api("/api/live/paper/books").catch(() => L.books || null);
+        lastBooks = Date.now();                                           // 2.78.1: never held up waiting for them
+        side("/api/live/paper/books", (v) => { L.books = v || L.books || null; });
       }
       if (first || !L.ppTotAt || Date.now() - L.ppTotAt > 6000) {        // 2.69: every account added up
-        L.ppTotAt = Date.now(); L.ppTotal = await api("/api/live/paper/total").catch(() => L.ppTotal || null);
+        L.ppTotAt = Date.now();
+        side("/api/live/paper/total", (v) => { L.ppTotal = v || L.ppTotal || null; });
       }
       const bk = L.paperBook;
-      if (bk !== "main" && !((L.books || {}).books || []).some((b) => b.id === bk)) L.paperBook = "main";
+      if (bk !== "main" && L.books && !((L.books || {}).books || []).some((b) => b.id === bk)) L.paperBook = "main";
       const p = await api(L.paperBook === "main" ? "/api/live/paper" : `/api/live/paper?book=${encodeURIComponent(L.paperBook)}`);
       if (state.page !== "paper") return;                                 // 2.56.2: you moved on while it loaded: don't draw over the new page
-      busy = (p.open || []).length > 0; drawPaper(p, first);
+      busy = (p.open || []).length > 0; drawPaper(p, first || !drawn); drawn = true; clearTimeout(slow);
       qApply(); qStream("paper");                                         // 2.71: live prices / P&L stream in place
-    } catch (e) { if (first && state.page === "paper") main.innerHTML = `<div class="empty"><h2>Paper trading</h2><p>${esc(e.message)}</p></div>`; }
+    } catch (e) {
+      const w = $("#pp-wait");                                            // 2.78.1: say it, and keep trying
+      if (!drawn && w && state.page === "paper") w.innerHTML = `${esc(e.message)}. Trying again…`;
+    }
     if (state.page !== "paper") return;
     const live = L.qWs && L.qWs.readyState === 1;                         // streaming: the full refresh can be slower
     L.pageTimer = setTimeout(() => tick(false), busy ? (live ? 3000 : 1500) : 3000);
