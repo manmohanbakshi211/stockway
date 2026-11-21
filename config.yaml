@@ -164,3 +164,6 @@ lab:
   alloc_pct: 25                # max margin one strategy may use, % of capital
   daily_stop_pct: 2.0          # close everything for the day after losing this % of capital
   auto_trade: true             # paper-trade today's plan automatically
+  pause_in_market: true        # 2.80: the nightly Lab, journeys and multiverse freeze while an NSE session is on
+  pause_before_min: 15         #   from this many minutes before the open
+  resume_after_min: 5          #   to this many minutes after the close (nothing is lost: they continue)

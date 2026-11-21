@@ -1769,6 +1769,16 @@ def system_view():
         {"name": "Other job", "state": cur.get("status") if cur and not cur.get("kind", "").startswith("factory") else "idle",
          "detail": cur.get("label") if cur and not cur.get("kind", "").startswith("factory") else ""},
     ]
+    from lab import proc as _lp                          # 2.80: the automatic (nightly) Lab work and its market pause
+    st_ = dict(_lp.STATE)
+    if st_:
+        five = "5-year " if "lab5y" in str(st_.get("folder", "")) else ""
+        job_rows.append({"name": "Nightly Lab (automatic)", "state": "paused" if st_.get("paused") else "running",
+                         "detail": (f"{five}{st_.get('job')}: " + (
+                             "waiting for the market to close" if st_.get("waiting") else
+                             f"paused for market hours since {time.strftime('%H:%M', time.localtime(st_.get('paused_at') or time.time()))}; "
+                             "continues after the close, nothing lost" if st_.get("paused") else
+                             f"running since {time.strftime('%H:%M', time.localtime(st_.get('since') or time.time()))}"))})
     # recent problems from the app log (last hour)
     import re as _re
     now = dt.datetime.now()

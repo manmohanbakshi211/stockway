@@ -2715,12 +2715,12 @@ class LiveEngine:
         """2.45: every bench signal of the recorded days held to 15:15 (live/paths.py), in a low-priority child process."""
         try:
             from lab import proc
-            proc.run("paths", self.data_dir, log=lambda m: self.log(f"Journeys: {m}"))
+            proc.run("paths", self.data_dir, log=lambda m: self.log(f"Journeys: {m}"), pause=self.lab_paused)
         except Exception as e:
             self.log(f"Trade journeys failed: {e}")
         try:                                             # 2.58: then the multiverse on every recorded day (incl. today)
             from lab import proc
-            proc.run("multiverse", self.data_dir, log=lambda m: self.log(m))
+            proc.run("multiverse", self.data_dir, log=lambda m: self.log(m), pause=self.lab_paused)
         except Exception as e:
             self.log(f"Multiverse failed: {e}")
         try:                                             # 2.65: then the evening AI analyst reads the whole day
@@ -2729,6 +2729,21 @@ class LiveEngine:
                 _analyst(self, self.data_dir, log=self.log)
         except Exception as e:
             self.log(f"Evening analyst failed: {e}")
+
+    def lab_paused(self) -> bool:
+        """2.80: automatic Lab work (the nightly chain, journeys, multiverse) waits or is frozen from 15 minutes before an
+        NSE session opens to 5 minutes after it closes (config.yaml lab: pause_in_market, pause_before_min,
+        resume_after_min), so the live scanner has the Mac to itself. Runs started by hand are never paused."""
+        lab = self.cfg().get("lab") or {}
+        if not lab.get("pause_in_market", True):
+            return False
+        now = dt.datetime.now(IST)
+        ses = SESSION.session(now.date())
+        if not ses:
+            return False
+        a = ses["open"] - dt.timedelta(minutes=int(lab.get("pause_before_min", 15)))
+        b = ses["close"] + dt.timedelta(minutes=int(lab.get("resume_after_min", 5)))
+        return a <= now < b
 
     def _nightly_lab(self):
         """Every evening: fetch new expiries (if logged in), switch off rules losing money live, ask Claude for a few
@@ -2765,20 +2780,20 @@ class LiveEngine:
                 log(f"library not queued ({e})")
             from lab import proc                          # 2.38: in its own low-priority process (the app stays quick)
             try:                                          # 2.60: mass search first; its best go to tonight's exams
-                proc.run("mass", self.data_dir, log=log)
+                proc.run("mass", self.data_dir, log=log, pause=self.lab_paused)
             except Exception as e:
                 log(f"Mass search failed: {e}")
             try:                                          # 2.66: the day-type forecaster learns from the same bar table
-                proc.run("daytype", self.data_dir, log=log)
+                proc.run("daytype", self.data_dir, log=log, pause=self.lab_paused)
             except Exception as e:
                 log(f"Day-type forecaster failed: {e}")
-            proc.run("factory", self.data_dir, log=log, n_random=6000, n_mutate=3000)
+            proc.run("factory", self.data_dir, log=log, n_random=6000, n_mutate=3000, pause=self.lab_paused)
             try:                                          # 2.73: which live rule fits which market situation
-                proc.run("situation", self.data_dir, log=log)
+                proc.run("situation", self.data_dir, log=log, pause=self.lab_paused)
             except Exception as e:
                 log(f"Situation picker failed: {e}")
             try:
-                proc.run("mlstrat", self.data_dir, log=log)
+                proc.run("mlstrat", self.data_dir, log=log, pause=self.lab_paused)
             except Exception as e:
                 log(f"ML strategies failed: {e}")
             try:                                          # the 5-year Lab (challenger) keeps searching too, once it has data
@@ -2788,14 +2803,14 @@ class LiveEngine:
                     from lab import library
                     factory.queue_untested(r5, library.rules(), source="library")
                     try:                                  # 2.60: the 5-year mass search (the most days: the real proof)
-                        proc.run("mass", r5, log=lambda m: log("[5y] " + m))
+                        proc.run("mass", r5, log=lambda m: log("[5y] " + m), pause=self.lab_paused)
                     except Exception as e:
                         log(f"[5y] Mass search failed: {e}")
                     try:                                  # 2.66: and on the 5-year table (more days)
-                        proc.run("daytype", r5, log=lambda m: log("[5y] " + m))
+                        proc.run("daytype", r5, log=lambda m: log("[5y] " + m), pause=self.lab_paused)
                     except Exception as e:
                         log(f"[5y] Day-type forecaster failed: {e}")
-                    proc.run("factory", r5, log=lambda m: log("[5y] " + m), n_random=3000, n_mutate=1500)
+                    proc.run("factory", r5, log=lambda m: log("[5y] " + m), n_random=3000, n_mutate=1500, pause=self.lab_paused)
             except Exception as e:
                 log(f"5-year Lab failed: {e}")
             self._fact_rules = (0.0, [])

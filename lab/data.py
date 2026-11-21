@@ -235,18 +235,23 @@ def iter_days(data_dir, sym: str, start=None, end=None):
 
 
 # ---------------------------------------------------------------- day features (known before entry)
-def day_table(data_dir, sym: str, days: list[Day] | None = None) -> pd.DataFrame:
-    """One row per day: open/close, ATM straddle at open/close, expiry flag (from the straddle rolling over)."""
-    rows = []
-    for d in days if days is not None else iter_days(data_dir, sym):
-        def straddle(m):
-            k = d.atm(m)
-            c, p = d.price(k, "CE", m), d.price(k, "PE", m)
-            return c + p if not (math.isnan(c) or math.isnan(p)) else math.nan
-        ivs = [d.price(d.atm(5), s, 5, "iv") for s in ("CE", "PE")]
-        rows.append({"date": d.date, "open": d.spot[0], "close": d.spot[-1], "high": np.nanmax(d.spot),
-                     "low": np.nanmin(d.spot), "spot_920": d.spot[5], "str_open": straddle(5), "str_close": straddle(N_MIN - 6),
-                     "iv_open": np.nanmean(ivs) if not all(math.isnan(x) for x in ivs) else math.nan})
+def day_summary(d: Day) -> dict:
+    """2.80: one day's own numbers for the day table (only that day's data: the cached bar-table build keeps them)."""
+    def straddle(m):
+        k = d.atm(m)
+        c, p = d.price(k, "CE", m), d.price(k, "PE", m)
+        return c + p if not (math.isnan(c) or math.isnan(p)) else math.nan
+    ivs = [d.price(d.atm(5), s, 5, "iv") for s in ("CE", "PE")]
+    return {"date": d.date, "open": d.spot[0], "close": d.spot[-1], "high": np.nanmax(d.spot),
+            "low": np.nanmin(d.spot), "spot_920": d.spot[5], "str_open": straddle(5), "str_close": straddle(N_MIN - 6),
+            "iv_open": np.nanmean(ivs) if not all(math.isnan(x) for x in ivs) else math.nan}
+
+
+def day_table(data_dir, sym: str, days: list[Day] | None = None, rows: list | None = None) -> pd.DataFrame:
+    """One row per day: open/close, ATM straddle at open/close, expiry flag (from the straddle rolling over).
+    rows (2.80): the days' summaries (day_summary) when they are already known."""
+    if rows is None:
+        rows = [day_summary(d) for d in (days if days is not None else iter_days(data_dir, sym))]
     if not rows:                                           # 2.43: a symbol with no history (was a crash in the 5-year build)
         return pd.DataFrame()
     t = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)

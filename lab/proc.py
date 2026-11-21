@@ -10,6 +10,9 @@ and the Mac stay quick.
 - Log lines stream back to the caller's log; Stop asks the child to finish cleanly (SIGTERM -> its should_stop), and
   ends it if it does not within a minute.
 - If a child process cannot start, the work runs in the app's process exactly as before.
+- 2.80: automatic (nightly) work can be paused for market hours: given a pause() check, a new job waits for it to
+  clear, and a running child is frozen (SIGSTOP) while it is true and continued (SIGCONT) after: nothing is lost or
+  redone, the live scanner has the Mac to itself. Runs started by hand are never paused.
 Read-only towards brokers: nothing here talks to a broker.
 """
 from __future__ import annotations
@@ -28,6 +31,21 @@ JOBS = ("factory", "mlstrat", "candlecast", "paths", "multiverse", "mass", "dayt
 NICE = 10
 RESULT = "@@RESULT "
 LAST: dict = {}                   # the latest run: how it ran (child / in-process), when, how long (System page)
+STATE: dict = {}                  # 2.80: the running automatic job: {job, folder, since, paused, paused_at, paused_s}
+_FROZEN: set = set()              # 2.80: pids frozen right now (woken and ended if the app quits)
+
+
+def _wake_all():
+    for pid in list(_FROZEN):
+        for sig in ("SIGCONT", "SIGTERM"):
+            try:
+                os.kill(pid, getattr(signal, sig))
+            except Exception:
+                pass
+
+
+import atexit                     # noqa: E402
+atexit.register(_wake_all)
 
 
 class _NoChild(Exception):
@@ -82,10 +100,20 @@ def _lock_for(data_dir):
         return factory._RUN_LOCKS.setdefault(key, threading.Lock())
 
 
-def run(job: str, data_dir, log=print, should_stop=lambda: False, child: bool = True, nice: int = NICE, **kw):
-    """Run a Lab job (factory = one research round, mlstrat = model-based strategies) in a child process."""
+def run(job: str, data_dir, log=print, should_stop=lambda: False, child: bool = True, nice: int = NICE, pause=None, **kw):
+    """Run a Lab job (factory = one research round, mlstrat = model-based strategies) in a child process.
+    pause (2.80, automatic work only): a check that is true while the market needs the Mac; the job waits / freezes."""
     if job not in JOBS:
         raise ValueError(f"unknown Lab job {job!r}")
+    if pause is not None and _safe(pause):           # 2.80: never start automatic work in market hours
+        log(f"{job}: waiting for the market to close (automatic Lab work pauses in market hours)")
+        STATE.update(job=job, folder=str(data_dir), since=time.time(), paused=True, paused_at=time.time(), waiting=True)
+        while _safe(pause):
+            if should_stop():
+                STATE.clear()
+                raise RuntimeError("Stopped while waiting for the market to close.")
+            time.sleep(30)
+        STATE.clear()
     lk = _lock_for(data_dir) if job in ("factory", "mass") else None     # 2.60: mass search queues ideas: one at a time
     if lk is not None and not lk.acquire(blocking=False):
         log("Another Strategy Lab run is in progress on this data: waiting for it to finish…")
@@ -97,7 +125,7 @@ def run(job: str, data_dir, log=print, should_stop=lambda: False, child: bool = 
     try:
         if child:
             try:
-                return _child(job, data_dir, log, should_stop, nice, kw)
+                return _child(job, data_dir, log, should_stop, nice, kw, pause)
             except _NoChild as e:
                 how = "app process"
                 log(f"(Lab running inside the app: a separate process could not start: {e})")
@@ -123,7 +151,14 @@ def lower_priority(nice: int = NICE):
             pass
 
 
-def _child(job, data_dir, log, should_stop, nice, kw):
+def _safe(fn) -> bool:
+    try:
+        return bool(fn())
+    except Exception:
+        return False
+
+
+def _child(job, data_dir, log, should_stop, nice, kw, pause=None):
     spec = json.dumps({"job": job, "data_dir": str(data_dir), "kw": kw}, default=str)
     env = {**os.environ, "PYTHONWARNINGS": "ignore", "PYTHONUNBUFFERED": "1"}
     pre = (lambda: lower_priority(nice)) if nice else None
@@ -133,14 +168,44 @@ def _child(job, data_dir, log, should_stop, nice, kw):
     except Exception as e:
         raise _NoChild(str(e) or type(e).__name__)
     done = threading.Event()
+    if pause is not None:
+        STATE.update(job=job, folder=str(data_dir), since=time.time(), paused=False, paused_s=0.0, waiting=False)
+    frozen = [None]                                      # 2.80: when the child was frozen for market hours
+
+    def freeze(on: bool):
+        sig = getattr(signal, "SIGSTOP" if on else "SIGCONT", None)
+        if sig is None:                                  # (not a Mac / Linux: nothing to freeze with)
+            return
+        try:
+            os.kill(p.pid, sig)
+        except Exception:
+            return
+        if on:
+            _FROZEN.add(p.pid)
+            frozen[0] = time.time()
+            STATE.update(paused=True, paused_at=frozen[0])
+            log(f"{job}: paused for market hours (nothing lost: it continues after the close)")
+        else:
+            _FROZEN.discard(p.pid)
+            STATE.update(paused=False, paused_s=round(STATE.get("paused_s", 0.0) + time.time() - (frozen[0] or time.time()), 1))
+            log(f"{job}: continuing after the close (paused {(time.time() - (frozen[0] or time.time())) / 60:.0f} min)")
+            frozen[0] = None
 
     def watch():                                         # Stop: ask nicely, then end it
         asked = None
         while not done.wait(1.0):
             if p.poll() is not None:
                 return
+            if pause is not None and asked is None:      # 2.80: frozen while the market needs the Mac
+                want = _safe(pause)
+                if want and frozen[0] is None:
+                    freeze(True)
+                elif not want and frozen[0] is not None:
+                    freeze(False)
             if asked is None and should_stop():
                 asked = time.time()
+                if frozen[0] is not None:                # a frozen child can't hear SIGTERM: wake it first
+                    freeze(False)
                 try:
                     p.send_signal(signal.SIGTERM)
                 except Exception:
@@ -168,6 +233,9 @@ def _child(job, data_dir, log, should_stop, nice, kw):
         rc = p.wait()
     finally:
         done.set()
+        _FROZEN.discard(p.pid)
+        if pause is not None:
+            STATE.clear()
     if result is None:
         if should_stop():
             raise RuntimeError("Stopped.")

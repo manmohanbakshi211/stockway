@@ -669,9 +669,11 @@ def _sim_fly(legs, wings, m0, sym, lot, loss_pct):
     return (credit - exit_cost) * lot - charges(fills, lot)
 
 
-def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataFrame:
+def build(data_dir, syms=None, log=print, should_stop=lambda: False, cache: bool = True) -> pd.DataFrame:
     """One row per (symbol, day, bar, direction): the bar's facts and the option-buy P&L per lot under each exit.
-    Stocks get option-buying rows only (selling a stock straddle needs lakhs of margin)."""
+    Stocks get option-buying rows only (selling a stock straddle needs lakhs of margin).
+    cache (2.80): keep each symbol's rows (lab/bars_cache) and price only the days that are new or whose data or context
+    changed; the table is the same as a full build (tests/test_bars_cache.py). cache=False: the full build as before."""
     syms = syms or lab_syms(data_dir)
     register_stocks(data_dir)
     compact = Path(data_dir).name == "lab5y"              # 5-year Lab: stock entries every 15 min, 32-bit numbers (memory)
@@ -694,6 +696,18 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
             except Exception as e:
                 log(f"  heavyweights for {sym} not loaded ({e})")
         tfd = _tf_days(data_dir, sym, keep=bool(hw_maps) or sym in _HW_SYMS(), log=log)    # 2.47
+        if cache:                                         # 2.80: only the new / changed days are priced
+            try:
+                got = _build_sym_cached(data_dir, sym, lot, stock, compact, vmap, tfd, hw_maps, pack_styles, stk, stk_on,
+                                        log, should_stop)
+            except _Stopped as e:
+                return pd.concat(chunks + e.parts, ignore_index=True) if chunks or e.parts else pd.DataFrame()
+            except Exception as e:
+                log(f"  {sym}: cached build failed ({e}); building it in full")
+                got = None
+            if got is not None:
+                chunks += got
+                continue
         if compact:                                       # two streaming passes instead of holding 5 years of minutes
             dtab = day_table(data_dir, sym)
             if dtab.empty:
@@ -712,109 +726,7 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
             if should_stop():
                 return pd.concat(chunks + [pd.DataFrame(rows)], ignore_index=True)
             r = dtab.loc[day.date] if day.date in dtab.index else None
-            sp = day.spot
-            nb = int(np.sum(~np.isnan(sp)) // 5)
-            if nb < 10:
-                continue
-            seg = sp[:5 * nb].reshape(nb, 5)
-            o, h, l, c = seg[:, 0], seg.max(1), seg.min(1), seg[:, -1]
-            ivs, prem = [], []
-            for i in range(nb):
-                m = 5 * i + 4
-                k = day.atm(m)
-                v = [day.price(k, s, m, "iv") for s in ("CE", "PE")]
-                v = [x for x in v if not math.isnan(x)]
-                ivs.append(float(np.mean(v)) if v else math.nan)
-                ce, pe = day.price(k, "CE", m), day.price(k, "PE", m)
-                prem.append((ce + pe) / sp[m] * 100 if not (math.isnan(ce) or math.isnan(pe)) else math.nan)
-            ctx = {"prev_close": None if r is None else r["prev_close"], "prev_high": None if r is None else r["prev_high"],
-                   "prev_low": None if r is None else r["prev_low"], "gap": None if r is None else r["gap_pct"],
-                   "vix": vmap.get(day.date), "dte": None if r is None or pd.isna(r["dte"]) else r["dte"], "dow": day.date.weekday(),
-                   **{k: (None if r is None or k not in r or pd.isna(r[k]) else float(r[k]))
-                      for k in ("d_trend", "d_vs_ema20", "d_pos20", "d_struct2", "d_struct3")}}
-            for key in ("prev_close", "prev_high", "prev_low", "gap"):
-                if ctx[key] is not None and (isinstance(ctx[key], float) and math.isnan(ctx[key])):
-                    ctx[key] = None
-            if hw_maps:
-                ctx["hw"] = _hw_ctx(sym, day.date, hw_maps, nb)
-            f = bar_features(o, h, l, c, ctx, ivs, prem)
-            tf_day = tfd.get(day.date) or {}                    # 2.47: bigger timeframes, many days (lab/tfacts.py)
-            for k_ in TF_FACTS:
-                v_ = tf_day.get(k_)
-                f[k_] = v_[:nb] if v_ is not None and len(v_) >= nb else np.full(nb, np.nan)
-            f.update(opt_facts(day, nb, prem))
-            atr = atr14(h, l, c)
-            sw_lo, sw_hi = last_swings(h, l)                  # 2.44: the swing stop of file exits
-            try:                                              # 2.68: 2:20 candle, 0.38 retracement, hammer / star stops
-                pa_lv = PA.levels(o, h, l, c) if pack_styles else {}
-            except Exception:
-                pa_lv = {}
-            for i in range(nb):
-                tod = (i + 1) * 5
-                if tod < SELL_FIRST_TOD or tod > LAST_ENTRY_TOD:
-                    continue
-                m0 = 5 * i + 5
-                if m0 >= M_EXIT:
-                    continue
-                k = day.atm(m0)
-                base = {"sym": sym, "date": day.date, "bar": i, **{name: float(f[name][i]) for name in FEATURES}}
-                legs = [day.px.get((float(k), sd)) for sd in ("CE", "PE")]
-                if not stock and all(lg is not None for lg in legs):        # selling the ATM straddle / iron fly (non-directional)
-                    step = day.step
-                    wings = [day.px.get((float(k + FLY_WINGS * step), "CE")), day.px.get((float(k - FLY_WINGS * step), "PE"))]
-                    row = {**base, "dir": 0, "premium": round(sp[m0] * lot * 0.12, 0)}
-                    for rule, sl in SELL_EXITS.items():
-                        if rule.startswith("fly"):
-                            row["pnl_" + rule] = _sim_fly(legs, wings, m0, sym, lot, sl) if all(w is not None for w in wings) else math.nan
-                        else:
-                            row["pnl_" + rule] = _sim_short(legs, m0, sym, lot, sl)
-                    rows.append(row)
-                if tod < EARLY_ENTRY_TOD:                 # 2.43: from the 09:25 bar (only file rules may ask before 09:30)
-                    continue
-                if compact and stock and i % 3 != 2:
-                    continue
-                for d, side in ((1, "CE"), (-1, "PE")):
-                    px = day.px.get((float(k), side))
-                    if px is None:
-                        continue
-                    e = px["c"][m0]
-                    if math.isnan(e) or e <= 0.5:
-                        continue
-                    entry = e + slip(sym, e)
-                    row = {**base, "dir": d, "premium": round(entry * lot, 0)}
-                    for rule in EXITS:
-                        row["pnl_" + rule] = _sim(px["c"], sp, m0, entry, sym, lot, rule)
-                    for style in STYLES:
-                        row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i])
-                    if stk_on and sym in stk["syms"]:     # 2.57: the same trade on other strikes (rules/strikes.json)
-                        for cname, ch in stk["choices"].items():
-                            kk = pick_strike(day, k, side, m0, sp[m0], ch)
-                            px2 = day.px.get((float(kk), side)) if kk is not None else None
-                            e2 = px2["c"][m0] if px2 is not None else math.nan
-                            ok2 = not (math.isnan(e2) or e2 <= 0.5)
-                            en2 = e2 + slip(sym, e2) if ok2 else math.nan
-                            for ex in stk["exits"]:
-                                col = f"pnl_{ex}@{cname}"
-                                if not ok2:
-                                    row[col] = math.nan
-                                elif ex in EXITS:
-                                    row[col] = _sim(px2["c"], sp, m0, en2, sym, lot, ex)
-                                else:
-                                    row[col] = _sim_lv(px2["c"], sp, m0, en2, sym, lot, d, ex, atr[i], l[i], h[i])
-                    if pack_styles:                       # 2.44: levels for file exits, the opposite option for sells
-                        lv = {"fc": (l[0], h[0]), "or15": (l[:3].min(), h[:3].max()) if i >= 2 else (None, None),
-                              "or30": (l[:6].min(), h[:6].max()) if i >= 5 else (None, None),
-                              "swing": (sw_lo[i], sw_hi[i]), "dayx": (float(l[:i + 1].min()), float(h[:i + 1].max())),
-                              **{k_: (float(a_[i]), float(b_[i])) for k_, (a_, b_) in pa_lv.items()}}
-                        oppx = day.px.get((float(k), "PE" if side == "CE" else "CE"))
-                    for style in pack_styles:             # a bad file exit is NaN for its own column, nothing else
-                        try:
-                            row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i],
-                                                          fc=(l[0], h[0]), bars=(o, h, l, c), i=i, lv=lv,
-                                                          opp=oppx["c"] if oppx is not None else None, fx=f)
-                        except Exception:
-                            row["pnl_" + style] = math.nan
-                    rows.append(row)
+            rows += _day_rows(day, r, sym, lot, stock, compact, vmap, tfd, hw_maps, pack_styles, stk, stk_on)
             if (di + 1) % 100 == 0:
                 log(f"  {sym}: {di + 1} of {n_days} days ({time.time() - t0:.0f}s)")
             if len(rows) >= BUILD_CHUNK:                  # 2.47: rows as Python dicts are big; make a table every ~40K
@@ -834,6 +746,287 @@ def build(data_dir, syms=None, log=print, should_stop=lambda: False) -> pd.DataF
         for c_ in [c for c in df.columns if c.startswith("pnl_") and "@" in c]:     # 2.57: strike columns, small
             df[c_] = df[c_].astype("float32")
     return df
+
+
+def _day_ctx(date, nb: int, r, vmap: dict, hw_maps: dict, sym: str) -> dict:
+    """The day's context for its bar facts (2.80: one place, so the cached build fingerprints exactly what is used)."""
+    ctx = {"prev_close": None if r is None else r["prev_close"], "prev_high": None if r is None else r["prev_high"],
+           "prev_low": None if r is None else r["prev_low"], "gap": None if r is None else r["gap_pct"],
+           "vix": vmap.get(date), "dte": None if r is None or pd.isna(r["dte"]) else r["dte"], "dow": date.weekday(),
+           **{k: (None if r is None or k not in r or pd.isna(r[k]) else float(r[k]))
+              for k in ("d_trend", "d_vs_ema20", "d_pos20", "d_struct2", "d_struct3")}}
+    for key in ("prev_close", "prev_high", "prev_low", "gap"):
+        if ctx[key] is not None and (isinstance(ctx[key], float) and math.isnan(ctx[key])):
+            ctx[key] = None
+    if hw_maps:
+        ctx["hw"] = _hw_ctx(sym, date, hw_maps, nb)
+    return ctx
+
+
+def _day_rows(day, r, sym: str, lot, stock: bool, compact: bool, vmap: dict, tfd: dict, hw_maps: dict,
+              pack_styles: list, stk: dict, stk_on: bool) -> list:
+    """2.80: the rows of one day (one per bar and direction), exactly as the build always made them; shared by the
+    full build and the cached build."""
+    out = []
+    sp = day.spot
+    nb = int(np.sum(~np.isnan(sp)) // 5)
+    if nb < 10:
+        return out
+    seg = sp[:5 * nb].reshape(nb, 5)
+    o, h, l, c = seg[:, 0], seg.max(1), seg.min(1), seg[:, -1]
+    ivs, prem = [], []
+    for i in range(nb):
+        m = 5 * i + 4
+        k = day.atm(m)
+        v = [day.price(k, s, m, "iv") for s in ("CE", "PE")]
+        v = [x for x in v if not math.isnan(x)]
+        ivs.append(float(np.mean(v)) if v else math.nan)
+        ce, pe = day.price(k, "CE", m), day.price(k, "PE", m)
+        prem.append((ce + pe) / sp[m] * 100 if not (math.isnan(ce) or math.isnan(pe)) else math.nan)
+    ctx = _day_ctx(day.date, nb, r, vmap, hw_maps, sym)
+    f = bar_features(o, h, l, c, ctx, ivs, prem)
+    tf_day = tfd.get(day.date) or {}                    # 2.47: bigger timeframes, many days (lab/tfacts.py)
+    for k_ in TF_FACTS:
+        v_ = tf_day.get(k_)
+        f[k_] = v_[:nb] if v_ is not None and len(v_) >= nb else np.full(nb, np.nan)
+    f.update(opt_facts(day, nb, prem))
+    atr = atr14(h, l, c)
+    sw_lo, sw_hi = last_swings(h, l)                  # 2.44: the swing stop of file exits
+    try:                                              # 2.68: 2:20 candle, 0.38 retracement, hammer / star stops
+        pa_lv = PA.levels(o, h, l, c) if pack_styles else {}
+    except Exception:
+        pa_lv = {}
+    for i in range(nb):
+        tod = (i + 1) * 5
+        if tod < SELL_FIRST_TOD or tod > LAST_ENTRY_TOD:
+            continue
+        m0 = 5 * i + 5
+        if m0 >= M_EXIT:
+            continue
+        k = day.atm(m0)
+        base = {"sym": sym, "date": day.date, "bar": i, **{name: float(f[name][i]) for name in FEATURES}}
+        legs = [day.px.get((float(k), sd)) for sd in ("CE", "PE")]
+        if not stock and all(lg is not None for lg in legs):        # selling the ATM straddle / iron fly (non-directional)
+            step = day.step
+            wings = [day.px.get((float(k + FLY_WINGS * step), "CE")), day.px.get((float(k - FLY_WINGS * step), "PE"))]
+            row = {**base, "dir": 0, "premium": round(sp[m0] * lot * 0.12, 0)}
+            for rule, sl in SELL_EXITS.items():
+                if rule.startswith("fly"):
+                    row["pnl_" + rule] = _sim_fly(legs, wings, m0, sym, lot, sl) if all(w is not None for w in wings) else math.nan
+                else:
+                    row["pnl_" + rule] = _sim_short(legs, m0, sym, lot, sl)
+            out.append(row)
+        if tod < EARLY_ENTRY_TOD:                 # 2.43: from the 09:25 bar (only file rules may ask before 09:30)
+            continue
+        if compact and stock and i % 3 != 2:
+            continue
+        for d, side in ((1, "CE"), (-1, "PE")):
+            px = day.px.get((float(k), side))
+            if px is None:
+                continue
+            e = px["c"][m0]
+            if math.isnan(e) or e <= 0.5:
+                continue
+            entry = e + slip(sym, e)
+            row = {**base, "dir": d, "premium": round(entry * lot, 0)}
+            for rule in EXITS:
+                row["pnl_" + rule] = _sim(px["c"], sp, m0, entry, sym, lot, rule)
+            for style in STYLES:
+                row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i])
+            if stk_on and sym in stk["syms"]:     # 2.57: the same trade on other strikes (rules/strikes.json)
+                for cname, ch in stk["choices"].items():
+                    kk = pick_strike(day, k, side, m0, sp[m0], ch)
+                    px2 = day.px.get((float(kk), side)) if kk is not None else None
+                    e2 = px2["c"][m0] if px2 is not None else math.nan
+                    ok2 = not (math.isnan(e2) or e2 <= 0.5)
+                    en2 = e2 + slip(sym, e2) if ok2 else math.nan
+                    for ex in stk["exits"]:
+                        col = f"pnl_{ex}@{cname}"
+                        if not ok2:
+                            row[col] = math.nan
+                        elif ex in EXITS:
+                            row[col] = _sim(px2["c"], sp, m0, en2, sym, lot, ex)
+                        else:
+                            row[col] = _sim_lv(px2["c"], sp, m0, en2, sym, lot, d, ex, atr[i], l[i], h[i])
+            if pack_styles:                       # 2.44: levels for file exits, the opposite option for sells
+                lv = {"fc": (l[0], h[0]), "or15": (l[:3].min(), h[:3].max()) if i >= 2 else (None, None),
+                      "or30": (l[:6].min(), h[:6].max()) if i >= 5 else (None, None),
+                      "swing": (sw_lo[i], sw_hi[i]), "dayx": (float(l[:i + 1].min()), float(h[:i + 1].max())),
+                      **{k_: (float(a_[i]), float(b_[i])) for k_, (a_, b_) in pa_lv.items()}}
+                oppx = day.px.get((float(k), "PE" if side == "CE" else "CE"))
+            for style in pack_styles:             # a bad file exit is NaN for its own column, nothing else
+                try:
+                    row["pnl_" + style] = _sim_lv(px["c"], sp, m0, entry, sym, lot, d, style, atr[i], l[i], h[i],
+                                                  fc=(l[0], h[0]), bars=(o, h, l, c), i=i, lv=lv,
+                                                  opp=oppx["c"] if oppx is not None else None, fx=f)
+                except Exception:
+                    row["pnl_" + style] = math.nan
+            out.append(row)
+    return out
+
+class _Stopped(Exception):
+    def __init__(self, parts):
+        super().__init__("stopped")
+        self.parts = parts
+
+
+CACHE_DIR = "bars_cache"          # 2.80: lab/bars_cache/<sym>.parquet (its rows) + <sym>.json (what they were built from)
+_SIG_MODULES = ("lab/factory.py", "lab/data.py", "lab/engine.py", "lab/exits.py", "lab/tfacts.py", "lab/pafacts.py",
+                "lab/packs.py", "lab/rules.py", "live/smc.py", "live/candles.py", "live/htf.py")
+
+
+def _sig(sym: str, compact: bool, pack_styles: list, stk: dict) -> str:
+    """Everything besides a day's own data and context that shapes its rows: the code of every module the build uses,
+    the strike / exit settings, today's cost rates, the symbol's lot and strike step, compact mode. If it changes, the
+    symbol is priced again in full (as before 2.80)."""
+    from .rules import costs
+    root = Path(__file__).resolve().parents[1]
+    h = hashlib.sha256()
+    for m in _SIG_MODULES:
+        try:
+            h.update((root / m).read_bytes())
+        except OSError:
+            h.update(m.encode())
+    h.update(json.dumps([sorted(pack_styles), stk, costs(None), UNDERLYINGS.get(sym), bool(compact)],
+                        sort_keys=True, default=str).encode())
+    return h.hexdigest()[:24]
+
+
+def _day_hash(d) -> str:
+    """A day's own data (spot and every option's minute arrays), as the rows see it."""
+    h = hashlib.sha1(repr((d.date.isoformat(), d.sym, float(d.step))).encode())
+    h.update(np.ascontiguousarray(d.spot, dtype=np.float64).tobytes())
+    for key in sorted(d.px):
+        h.update(repr(key).encode())
+        a = d.px[key]
+        for f in sorted(a):
+            h.update(f.encode())
+            h.update(np.ascontiguousarray(a[f], dtype=np.float64).tobytes())
+    return h.hexdigest()
+
+
+def _ctx_fp(day_hash: str, nb: int, ctx: dict, tf_day: dict) -> str:
+    """The day's data + everything else _day_rows reads for it (context, bigger-timeframe facts)."""
+    h = hashlib.sha1(f"{day_hash}|{nb}|".encode())
+    h.update(json.dumps(ctx, sort_keys=True, default=lambda o: float(o) if isinstance(o, (np.floating, np.integer)) else str(o)).encode())
+    for k in TF_FACTS:
+        v = tf_day.get(k)
+        h.update(k.encode())
+        h.update(b"-" if v is None else np.ascontiguousarray(v, dtype=np.float64).tobytes())
+    return h.hexdigest()
+
+
+def _summary_json(s: dict) -> dict:
+    return {k: (v.isoformat() if k == "date" else (None if v is None else float(v))) for k, v in s.items()}
+
+
+def _summary_back(s: dict) -> dict:
+    return {k: (dt.date.fromisoformat(v) if k == "date" else (math.nan if v is None else v)) for k, v in s.items()}
+
+
+def _build_sym_cached(data_dir, sym, lot, stock, compact, vmap, tfd, hw_maps, pack_styles, stk, stk_on, log, should_stop):
+    """2.80: one symbol's rows, reusing the saved rows of every day whose data and context are unchanged. Reads only the
+    history files that changed (a day of an unchanged file whose context changed, e.g. the day before a new expiry, is
+    read again). Returns the symbol's tables, or None when it has no history (as the full build skips it)."""
+    from .data import build_days, day_summary, hist_dir
+    cdir = Path(data_dir) / "lab" / CACHE_DIR
+    cdir.mkdir(parents=True, exist_ok=True)
+    fmeta, frows = cdir / f"{sym}.json", cdir / f"{sym}.parquet"
+    sig = _sig(sym, compact, pack_styles, stk)
+    meta = None
+    try:
+        meta = json.loads(fmeta.read_text()) if fmeta.exists() and frows.exists() else None
+    except Exception:
+        meta = None
+    if meta and meta.get("sig") != sig:
+        log(f"  {sym}: the build's code or settings changed: pricing every day again")
+        meta = None
+    old_files = (meta or {}).get("files") or {}
+    old_fps = (meta or {}).get("fps") or {}
+    old_cols, old_colsets = (meta or {}).get("cols") or {}, (meta or {}).get("colsets") or []
+    t0 = time.time()
+    files = sorted((hist_dir(data_dir) / sym).glob("raw_*.parquet"))
+    loaded, new_files, recs, seen = {}, {}, [], set()
+
+    def read_file(f):
+        for d in build_days(pd.read_parquet(f), sym):
+            loaded.setdefault((f.name, d.date), d)
+    for f in files:                                       # the days, in iter_days order (the first file of a date wins)
+        st = f.stat()
+        fp = [st.st_size, st.st_mtime_ns]
+        old = old_files.get(f.name)
+        if old and old.get("fp") == fp:
+            fdays = [tuple(x) for x in old["days"]]
+        else:
+            n0 = len(loaded)
+            read_file(f)
+            fdays = [(d.date.isoformat(), _day_hash(d), int(np.sum(~np.isnan(d.spot)) // 5), _summary_json(day_summary(d)))
+                     for (fn, _), d in list(loaded.items())[n0:] if fn == f.name]
+        new_files[f.name] = {"fp": fp, "days": [list(x) for x in fdays]}
+        for iso, h, nb, summ in fdays:
+            if iso in seen:
+                continue
+            seen.add(iso)
+            recs.append((iso, f, h, nb, summ))
+    if not recs:
+        return None
+    dtab = day_table(data_dir, sym, rows=[_summary_back(x[4]) for x in recs]).set_index("date")
+    if dtab.empty:
+        return None
+    reuse, rows, parts, fps, n_new = set(), [], [], {}, 0
+    cols, colsets, cs_idx = {}, [], {}                    # each day's row keys in order (the table's column order)
+
+    def keep_cols(iso, keys):
+        t = tuple(keys)
+        if t not in cs_idx:
+            cs_idx[t] = len(colsets)
+            colsets.append(list(t))
+        cols[iso] = cs_idx[t]
+    for di, (iso, f, h, nb, _summ) in enumerate(recs):
+        if should_stop():
+            raise _Stopped(parts + ([_part(rows, compact)] if rows else []))
+        date = dt.date.fromisoformat(iso)
+        r = dtab.loc[date] if date in dtab.index else None
+        if nb < 10:                                       # no rows (as _day_rows)
+            continue
+        fp = _ctx_fp(h, nb, _day_ctx(date, nb, r, vmap, hw_maps, sym), tfd.get(date) or {})
+        fps[iso] = fp
+        if old_fps.get(iso) == fp and iso in old_cols:
+            reuse.add(date)
+            keep_cols(iso, old_colsets[old_cols[iso]])
+            continue
+        if (f.name, date) not in loaded:                  # an unchanged file, a changed context: read it again
+            read_file(f)
+        dr = _day_rows(loaded[(f.name, date)], r, sym, lot, stock, compact, vmap, tfd, hw_maps, pack_styles, stk, stk_on)
+        keep_cols(iso, dict.fromkeys(k for row in dr for k in row))
+        rows += dr
+        n_new += 1
+        if (n_new % 100) == 0:
+            log(f"  {sym}: {n_new} days priced ({time.time() - t0:.0f}s)")
+        if len(rows) >= BUILD_CHUNK:
+            parts.append(_part(rows, compact))
+            rows = []
+    if rows:
+        parts.append(_part(rows, compact))
+    if reuse:
+        old = pd.read_parquet(frows)
+        old = old[old["date"].isin(reuse)]
+        parts = [old] + parts
+    out = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+    order = list(dict.fromkeys(k for x in recs if x[0] in cols for k in colsets[cols[x[0]]]))
+    if len(out) and set(order) != set(out.columns):
+        raise RuntimeError("the saved rows do not match their columns")   # (the caller then builds the symbol in full)
+    if len(out):
+        out = out[order]                                  # the same column order as a full build
+    tmp = frows.with_name(frows.name + ".tmp")
+    out.to_parquet(tmp, index=False)
+    os.replace(tmp, frows)
+    tmpm = fmeta.with_name(fmeta.name + ".tmp")
+    tmpm.write_text(json.dumps({"sig": sig, "sym": sym, "made": time.time(), "files": new_files, "fps": fps,
+                                "cols": cols, "colsets": colsets}))
+    os.replace(tmpm, fmeta)
+    log(f"{sym}: {len(recs)} days ready ({n_new} priced, {len(reuse)} kept, {time.time() - t0:.0f}s)")
+    return [out] if len(out) else []
 
 
 BUILD_CHUNK = 40_000

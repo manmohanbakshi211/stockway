@@ -118,6 +118,36 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.80: the nightly Lab stays out of market hours and only prices new days (22 Nov 2026)
+- **Mandeep (22 Nov):** "okay we will go with 2.80 build it", after the 22 Nov check showed the nightly Lab still
+  running into market hours on 16, 18, 19 and 20 Nov, and the 5-year Lab rebuilding every stock from scratch each night
+  (ICICIBANK 8 times since 7 Nov, one new day each time); its table has not finished since 10 Nov.
+- **Market-hours pause** (`lab/proc.py`, `LiveEngine.lab_paused`): the nightly chain (mass search, day-type, Lab round,
+  situation picker, ML strategies, the 5-year Lab), the trade journeys and the multiverse wait before starting, or are
+  frozen if running, from 15 minutes before an NSE session opens to 5 minutes after it closes (special sessions too),
+  then continue where they were: nothing is lost or redone. Runs started by hand never pause. A frozen job is woken and
+  ended if the app quits. Settings: `config.yaml` lab `pause_in_market`, `pause_before_min`, `resume_after_min`. The
+  System page shows "Nightly Lab (automatic): paused for market hours".
+- **Only new days are priced** (`lab/factory.py` `_build_sym_cached`): each symbol's rows are kept in
+  `lab/bars_cache/` with what they were built from (each day's data, its context, the build's code and settings).
+  Each night only new days, days whose data changed and days whose context moved (e.g. the day before a new expiry)
+  are priced; unchanged history files are not even read. A change to the build's code, strike / exit settings or
+  cost rates prices that symbol again in full. Progress is kept per symbol, so an interrupted build continues the
+  next night instead of starting over.
+- **Results do not move:** on the same data the new full build equals the old code's build, and the cached build
+  equals a full build after a new day and after an old day's data changes (synthetic history and a real ICICIBANK
+  5-year sample from the Mac: 121 days, 5,281 rows × 190 columns, identical including column order). Real sample,
+  one new day: **2.0 s instead of 16.7 s** (1 day priced, 120 kept).
+- **Lab regression:** compared function by function with 2.79, only `build` and `day_table` changed (`day_table` gives
+  the same table when called as before); `Book`, `score`, `validate` and everything they use are identical, so every
+  saved rule (data/lab/factory.json) scores exactly as before on the same table. The 487 MB table is too big for this
+  release's remote check, so the rescoring itself runs on the Mac (`python3 tools/lab_regression.py`).
+- Tests: 532 passed (full suite incl. test_no_clash); System page checked headless at desktop and phone width, light
+  and dark: no console errors, no sideways scroll.
+- The first night after the update prices everything once (it builds the cache, like one full build); from then on it
+  is the new days only. The cache takes about as much disk as the table itself (the 5-year one ~0.5 GB).
+- New tests: `tests/test_lab_pause.py` (4), `tests/test_bars_cache.py` (3). System & logins has two new checks.
+
 ## 2.79: the week's bugs fixed (22 Nov 2026)
 From the 22 Nov check of the Mac's log (16 to 20 Nov) and the System page. Mandeep: "go with it".
 - **The Telegram bot token is never written anywhere any more.** A failed Telegram send used to put the bot's address,

@@ -265,6 +265,21 @@ def static_checks(cfg: dict | None = None) -> list:
                   and "mask(" in inspect.getsource(_eng.LiveEngine.log)
                   and _al.mask("/bot1234567:ABCDEFGHIJKLMNOPQRSTUVWXYZ012/send") == "/bot<hidden>/send",
                   "5 MB × 10 files; 2.79: the Telegram bot token too, on screen, on the System page and in the AI's notes"))
+    from lab import proc as _lproc                         # 2.80: automatic Lab work pauses in market hours
+    nsrc80 = inspect.getsource(_eng.LiveEngine._nightly_lab) + inspect.getsource(_eng.LiveEngine._trade_paths)
+    lab80 = (cfg or {}).get("lab") or {}
+    out.append(_c("lab_market_pause", "Nightly Lab, journeys and multiverse pause in market hours (2.80)",
+                  nsrc80.count("pause=self.lab_paused") >= 10 and "SIGSTOP" in inspect.getsource(_lproc._child)
+                  and hasattr(_lproc, "_wake_all"),
+                  "off (config.yaml lab: pause_in_market)" if lab80.get("pause_in_market") is False else
+                  f"frozen from {int(lab80.get('pause_before_min', 15))} min before the open to "
+                  f"{int(lab80.get('resume_after_min', 5))} min after the close; runs started by hand never pause"))
+    from lab import factory as _fac                        # 2.80: the bar table prices only new / changed days
+    out.append(_c("bars_cache", "Strategy Lab bar tables: only new or changed days are priced (2.80)",
+                  inspect.signature(_fac.build).parameters["cache"].default is True and hasattr(_fac, "_build_sym_cached")
+                  and "lab/factory.py" in _fac._SIG_MODULES,
+                  "each symbol's rows kept in lab/bars_cache; a change to the build's code, strike / exit settings or cost "
+                  "rates prices that symbol again in full; the table equals a full build (tests/test_bars_cache.py)"))
     from live import candlecast as _cc
     from lab import proc as _proc
     ccc = _cc.cfg()
