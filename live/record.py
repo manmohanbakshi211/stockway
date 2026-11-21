@@ -351,8 +351,8 @@ class Tracker:
         return done
 
 
-def outcomes(store, source=None, day=None, limit=5000) -> list:
-    q, args = "SELECT * FROM outcomes WHERE 1=1", []
+def outcomes(store, source=None, day=None, limit=5000, cols: str = "*") -> list:
+    q, args = f"SELECT {cols} FROM outcomes WHERE 1=1", []
     if source:
         q += " AND source=?"
         args.append(source)
@@ -368,9 +368,14 @@ def outcomes(store, source=None, day=None, limit=5000) -> list:
             return []
 
 
+SCORECARD_COLS = "kind, is_index, severity, result, o15, o60, r15"     # 2.81: only what the scorecard reads
+
+
 def scorecard(store, source) -> dict:
-    """Hit rates by alert type. Keys: (kind, is_index) and (kind, is_index, severity)."""
-    rows = [r for r in outcomes(store, source) if r["result"]]
+    """Hit rates by alert type. Keys: (kind, is_index) and (kind, is_index, severity).
+    2.81: reads only the columns it uses (the same rows in the same order; the stored facts of each alert, ~1 KB a row,
+    are no longer loaded and sorted every 5 minutes)."""
+    rows = [r for r in outcomes(store, source, cols=SCORECARD_COLS) if r["result"]]
     groups = {}
     for r in rows:
         for k in ((r["kind"], r["is_index"]), (r["kind"], r["is_index"], r["severity"]), (r["kind"],)):

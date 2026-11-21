@@ -280,6 +280,15 @@ def static_checks(cfg: dict | None = None) -> list:
                   and "lab/factory.py" in _fac._SIG_MODULES,
                   "each symbol's rows kept in lab/bars_cache; a change to the build's code, strike / exit settings or cost "
                   "rates prices that symbol again in full; the table equals a full build (tests/test_bars_cache.py)"))
+    from live import record as _rec                        # 2.81: two slow parts of the analysis loop moved off it
+    lsrc81 = inspect.getsource(_eng.LiveEngine._loop)
+    live81 = (cfg or {}).get("live") or {}
+    out.append(_c("loop_offload", "Scorecard and 5-minute setup / Lab rules scan off the analysis loop (2.81)",
+                  "self._refresh_stats_bg()" in lsrc81 and "self._scan_bg(now, lc)" in lsrc81 and "self._scan_drain()" in lsrc81
+                  and "result" in _rec.SCORECARD_COLS and hasattr(_eng.LiveEngine, "_scan_wait"),
+                  ("scan inside the loop (config.yaml live: scan_in_background false); " if live81.get("scan_in_background") is False
+                   else "scan in its own thread, its alerts raised by the loop in order; ")
+                  + "scorecard refresh in its own thread, reading only the columns it uses; a replay keeps both step by step"))
     from live import candlecast as _cc
     from lab import proc as _proc
     ccc = _cc.cfg()
@@ -504,6 +513,10 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
             sp = stt.get("slow_parts") or {}
             if sp.get("parts") and time.time() - sp.get("at", 0) < 900:
                 det += "; last slow pass: " + ", ".join(f"{n} {v} ms" for n, v in sp["parts"])
+        if running and stt.get("scan_ms") is not None:         # 2.81: off the loop, shown so a slow one is still seen
+            det += f"; 5-minute scan {stt['scan_ms']} ms (own thread)"
+        if running and stt.get("stats_ms") is not None:
+            det += f"; scorecard {stt['stats_ms']} ms (own thread)"
         if stt.get("snapshot_ms") is not None:
             det += f"; page refresh {stt['snapshot_ms']} ms"
         nw = stt.get("net_worker") or {}

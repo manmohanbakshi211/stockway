@@ -964,7 +964,10 @@ class LiveEngine:
             t1 = time.perf_counter()
             self._compute_all(now, mins, emit=open_, lc=lc)
             self._prof["Analysis of every symbol"] = time.perf_counter() - t1
-            if open_:
+            if open_ and self._scan_in_background():
+                self._scan_bg(now, lc)                       # 2.81: its own thread (it held the loop 5-8 s every 5 minutes)
+                self._scan_drain()                           # its alerts are raised here, in the loop, as before
+            elif open_:
                 t1 = time.perf_counter()
                 try:
                     self.charts.scan(now, lambda a, now=now, lc=lc: self._emit_safe(a, now, lc))
@@ -1029,7 +1032,10 @@ class LiveEngine:
                 self._guard("Rule pulse", self._rule_pulse)
                 self._guard("Watchdog", self._watchdog, now)
             if self._every("stats", 300, clock_time=False):
-                self._guard("Stats", self._refresh_stats)
+                if is_practice(self.source):                 # a replay stays step by step (same results every run)
+                    self._guard("Stats", self._refresh_stats)
+                else:
+                    self._refresh_stats_bg()                 # 2.81: off the live loop (it took 2-6 s every 5 minutes)
             aic = self.cfg().get("ai") or {}
             pro = aic.get("provider") == "claude_pro"          # Pro plan: spread the few automatic notes over the day
             every = int(aic.get("brain_every_min") or 10) * 60 if self.ai.enabled() else 300
@@ -1047,6 +1053,7 @@ class LiveEngine:
             self.stop_evt.wait(max(0.2, 1.0 - (time.time() - t0)))
 
     def _end_of_day(self, now, mins):
+        self._scan_wait()                            # 2.81: a 15:25 scan still running finishes first
         self._run_token = None                       # stops the data-vault chain sweep before the recording is closed
         self.paper.update(self.state, now, force_close=True)
         if getattr(self, "books", None) is not None:
@@ -2308,6 +2315,75 @@ class LiveEngine:
             self.stats = scorecard(self.store, self.source)
         except Exception as e:
             self.log(f"Scorecard failed: {e}")
+
+    def _scan_in_background(self) -> bool:
+        """2.81: the 5-minute setup / Lab rules scan runs in its own thread on the live market (config.yaml
+        live.scan_in_background, default on). A practice run (sim, replay) keeps it inside the loop, step by step."""
+        return not is_practice(self.source) and bool((self.cfg().get("live") or {}).get("scan_in_background", True))
+
+    def _scan_bg(self, now, lc) -> bool:
+        """2.81: the scan of the 5-minute bar that just closed runs in a short thread: the same scan, the same bar and the
+        same time (now), while the loop goes on with prices, the alert tracker and the test bench. The alerts it finds
+        are queued and raised by the loop itself (_scan_drain, within a second), in the order found, exactly as before:
+        nothing new ever raises an alert from another thread. Never two scans at once."""
+        if getattr(self, "_scan_busy", False) or not self.charts.due(now):
+            return False
+        self._scan_busy = True
+        out = self.__dict__.setdefault("_scan_out", collections.deque())
+
+        def job():
+            t0 = time.perf_counter()
+            try:
+                self.charts.scan(now, lambda a, now=now, lc=lc: out.append((a, now, lc)))
+            except Exception as e:
+                if self._every("setup_err", 300, clock_time=False):
+                    self.log(f"Setup scan error: {e}")
+            finally:
+                dur = time.perf_counter() - t0
+                self.status["scan_ms"] = round(dur * 1000)
+                self._scan_busy = False
+                if dur >= 5 and self._every("slow_scan_log", 300, clock_time=False):
+                    self.log(f"Setup / Lab rules scan took {dur:.1f} s (in its own thread: the analysis loop did not wait)")
+        self._scan_thread = threading.Thread(target=job, daemon=True, name="scan-worker")
+        self._scan_thread.start()
+        return True
+
+    def _scan_drain(self) -> int:
+        """2.81: raises the alerts the background scan found (in the loop thread, in order, with the scan's own time)."""
+        out = getattr(self, "_scan_out", None)
+        n = 0
+        t1 = time.perf_counter()
+        while out:
+            a, now, lc = out.popleft()
+            self._emit_safe(a, now, lc)
+            n += 1
+        if n:
+            self._prof["Setup / Lab rules alerts"] = time.perf_counter() - t1
+        return n
+
+    def _scan_wait(self, timeout: float = 30.0):
+        """2.81: lets a running scan finish and raises what it found (end of day: before the day is closed)."""
+        t = getattr(self, "_scan_thread", None)
+        if t is not None and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout)
+        self._scan_drain()
+
+    def _refresh_stats_bg(self) -> bool:
+        """2.81: the 5-minute scorecard refresh in its own short thread, so alerts and paper exits never wait for it.
+        The finished scorecard replaces the old one in one step; a refresh still running is not started twice."""
+        if getattr(self, "_stats_busy", False):
+            return False
+        self._stats_busy = True
+
+        def job():
+            t0 = time.perf_counter()
+            try:
+                self._refresh_stats()
+            finally:
+                self.status["stats_ms"] = round((time.perf_counter() - t0) * 1000)
+                self._stats_busy = False
+        threading.Thread(target=job, daemon=True, name="stats-worker").start()
+        return True
 
     def _brain_safe(self, rules_only=False):
         try:

@@ -616,16 +616,17 @@ class ChartData:
         k = min(ch, key=lambda x: abs(x - m["spot"]))
         und_key = u.key if self.e.state.get(u.key) and self.e.state.get(u.key).ltp else u.fut_key
         done = []
-        for side in ("CE", "PE"):
-            o = ch[k].get(side)
-            inst = self.e.state.get(o.key) if o else None
-            if not inst or not inst.ltp or any(t["opt_key"] == o.key for t in pb.open_trades()):
-                continue
-            opt = {"key": o.key, "label": f"{sym} {k:g} {side} {exp:%d %b}", "side": side, "lot": o.lot}
-            pb._open(self.e.state, now, sym=sym, kind="factory", opt=opt, entry=inst.bid or inst.ltp, ltp=inst.ltp, lots=1,
-                     direction=-1, manual=0, und_key=und_key, why=f"Strategy Lab {r['id']}",
-                     exit=[None, factory.SELL_EXITS[r["exit"]], 400])
-            done.append(opt["label"])
+        with pb._ulock:                      # 2.81: the scan may run in its own thread; paper exits use the same lock
+            for side in ("CE", "PE"):
+                o = ch[k].get(side)
+                inst = self.e.state.get(o.key) if o else None
+                if not inst or not inst.ltp or any(t["opt_key"] == o.key for t in pb.open_trades()):
+                    continue
+                opt = {"key": o.key, "label": f"{sym} {k:g} {side} {exp:%d %b}", "side": side, "lot": o.lot}
+                pb._open(self.e.state, now, sym=sym, kind="factory", opt=opt, entry=inst.bid or inst.ltp, ltp=inst.ltp, lots=1,
+                         direction=-1, manual=0, und_key=und_key, why=f"Strategy Lab {r['id']}",
+                         exit=[None, factory.SELL_EXITS[r["exit"]], 400])
+                done.append(opt["label"])
         return " + ".join(done) or None
 
     def five_min(self, sym, day):
@@ -650,6 +651,13 @@ class ChartData:
             t[key] = time.time()
             return True
         return False
+
+    def due(self, now) -> bool:
+        """2.81: True when a 5-minute bar has closed that the setup / Lab rules scan has not looked at yet (the same test
+        scan() makes first; used to start the scan in its own thread only when there is something to scan)."""
+        t0 = self._session_start(now.date())
+        slot = int((now.timestamp() - t0) // 300)
+        return not (slot < 3 or slot == self.last_slot or now.timestamp() < t0)
 
     def scan(self, now, emit):
         t0 = self._session_start(now.date())

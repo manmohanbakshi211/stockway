@@ -118,6 +118,30 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.81: the scorecard and the 5-minute scan no longer hold up the live loop (22 Nov 2026)
+- **Mandeep (22 Nov):** "go with it" (2.81 from the 22 Nov check: the analysis loop, which raises alerts and runs the
+  alert tracker, test bench and strategy desk every second, stopped for 2-6 s every 5 minutes on the scorecard and for
+  5-8 s at most 5-minute bar closes on the setup / Lab rules scan; 19 Nov log: "Slow analysis pass 10.0 s (Setup / Lab
+  rules scan 8.0 s)"). Paper stop / target exits were not affected: they have run in their own watcher since 2.71.
+- **Scorecard** (`live/record.py` `scorecard`): reads only the 7 columns it uses instead of every column. It used to
+  load and sort each alert's stored facts too (38,000 rows, 39 MB on the Mac). Same rows, same order, same result:
+  checked on a copy of the Mac's live.db (5,000 of 5,000 rows identical, in order) and in `tests/test_2_81.py`; the
+  query took 0.08 s instead of 0.44 s on that copy. The 5-minute refresh also runs in its own short thread
+  (`stats-worker`): the new scorecard replaces the old one in one step, and a refresh is never started twice.
+- **5-minute setup / Lab rules scan** (`LiveEngine._scan_bg`, `ChartData.due`): on the live market it runs in its own
+  short thread (`scan-worker`): the same scan of the same closed bar with the same time. The alerts it finds are queued
+  and raised by the loop itself within a second, in the order found, so no alert is raised from a new thread.
+  Never two scans at once; at the close the day waits for a running scan. A replay or the simulator keeps the scan
+  inside the loop, step by step. Setting: `config.yaml` live `scan_in_background` (default true; false = as before).
+  The off-by-default range-day paper straddle now takes the paper lock (the scan may run beside the paper watcher).
+- **Replay check (19 Nov, the Mac's current Lab rules: 109 promoted + 52 five-year):** two runs with the scan inside the
+  loop agree on 1,438 of about 1,470 scan alerts (a replay is not exact from run to run); the scan in its own thread
+  agrees with them on 1,434 and 1,435, the same as one ordinary run with another. The few that differ are the same
+  stock and setup a few minutes apart, around an alert cooldown. The scan itself took 0.6-2.9 s here.
+- System page: a new check (scorecard and scan off the loop); the speed line shows the last scan and scorecard times.
+- Tests: `tests/test_2_81.py` (6); full suite 538 passed (incl. test_no_clash). No Lab code changed, so the Lab
+  regression is untouched. System page checked headless at desktop and phone width, light and dark.
+
 ## 2.80: the nightly Lab stays out of market hours and only prices new days (22 Nov 2026)
 - **Mandeep (22 Nov):** "okay we will go with 2.80 build it", after the 22 Nov check showed the nightly Lab still
   running into market hours on 16, 18, 19 and 20 Nov, and the 5-year Lab rebuilding every stock from scratch each night
