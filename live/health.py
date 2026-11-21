@@ -254,7 +254,8 @@ class Health:
         e = self.e
         day = now.date().isoformat()
         rec = getattr(e, "recorder", None)
-        cnt = dict(getattr(rec, "counts", {}) or {})
+        ran = rec is not None and getattr(rec, "day", None) == day and (e.source or "upstox") == "upstox"
+        cnt = dict(getattr(rec, "counts", {}) or {}) if ran else {}     # 2.79: never an earlier day's counts
         try:
             from . import vault
             today = next((d for d in vault.days(e.data_dir, e.source or "upstox", 5) if d["day"] == day), None)
@@ -262,7 +263,7 @@ class Health:
             today = None
         bench = 0
         try:
-            bench = sum(v.get("opened", 0) for v in (e.bench.status().get("styles") or {}).values()) if e.bench else 0
+            bench = sum(v.get("opened", 0) for v in (e.bench.status().get("styles") or {}).values()) if e.bench and ran else 0
         except Exception:
             pass
         gaps = [g for g in (e.store.get(f"health:gaps:{day}", []) or []) if g.get("market_mins", 0) >= 1]
@@ -271,6 +272,8 @@ class Health:
                  f"{cnt.get('chains', 0):,} option chains", f"{cnt.get('news', 0):,} headlines",
                  f"{cnt.get('candles', 0):,} candle patterns", f"{bench:,} test-bench trades"]
         txt = ", ".join(parts) + "."
+        if not ran:
+            txt = "📊 Stockway today: the live scanner did not run today, so nothing was recorded."
         txt += f" Gaps: {len(gaps)} ({lost:.0f} market minutes lost)." if gaps else " No gaps: the whole session was recorded."
         self.notify(f"summary:{day}", txt, force=True)
 

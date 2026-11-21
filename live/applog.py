@@ -12,11 +12,13 @@ from pathlib import Path
 _LOCK = threading.Lock()
 _LOGGERS: dict = {}
 _MASK = [re.compile(r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{5,}"),          # JWT access tokens
-         re.compile(r"(?i)(access[_-]?token|api[_-]?key|secret|password|pin|totp|bearer)(\W{1,3})[A-Za-z0-9_\-\.]{6,}")]
+         re.compile(r"(?i)(access[_-]?token|api[_-]?key|secret|password|pin|totp|bearer)(\W{1,3})[A-Za-z0-9_\-\.]{6,}"),
+         re.compile(r"bot\d{5,}:[A-Za-z0-9_\-]{20,}")]           # 2.79: a Telegram bot token inside an error's URL
 
 
 def mask(line: str) -> str:
     line = _MASK[0].sub("<token>", line)
+    line = _MASK[2].sub("bot<hidden>", line)
     return _MASK[1].sub(lambda m: f"{m.group(1)}{m.group(2)}<hidden>", line)
 
 

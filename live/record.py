@@ -67,6 +67,7 @@ class Recorder:
         d = Path(data_dir) / "recordings"
         d.mkdir(parents=True, exist_ok=True)
         self.path = d / f"{source}_{day}.sqlite"
+        self.day = day                            # 2.79: which day this recording is (the daily summary checks it)
         self.window = None if source == "sim" else session_window(day)      # 2.42: no stale night / after-close prices
         self.db = sqlite3.connect(str(self.path), check_same_thread=False)
         self.closed = False                       # 2.48: set by close()

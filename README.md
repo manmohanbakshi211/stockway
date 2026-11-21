@@ -118,6 +118,27 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.79: the week's bugs fixed (22 Nov 2026)
+From the 22 Nov check of the Mac's log (16 to 20 Nov) and the System page. Mandeep: "go with it".
+- **The Telegram bot token is never written anywhere any more.** A failed Telegram send used to put the bot's address,
+  token included, into the log; from there it showed on the System page and went into the evening analyst's notes
+  for the AI (16 and 17 Nov). Every log line is now masked (screen, `data/logs/app.log`, System page, AI notes), and a
+  send without internet logs just "Telegram not sent: no internet". **Make a new bot token in BotFather** and enter
+  it in the app: the old one has been in those places.
+- **Telegram never loses a message to a stray "<".** The evening analyst's 22 Nov report was refused ("Unsupported start
+  tag 0.9x"). The analyst's and the market brain's AI words are escaped now, and any message Telegram cannot read as
+  HTML is sent again as plain text.
+- **The daily summary never repeats an earlier day.** On 20 Nov (scanner never started) it said "0 MB recorded, 3,217
+  option chains, 192 headlines, 52,687 test-bench trades": 19 Nov's counts. Now: "the live scanner did not run today".
+- **"Live speed" is no longer red after the close** (it read the last session's stopped feed), so the System page is
+  not "bad" every evening for nothing.
+- **No internet at the start: one line and a back-off.** On 16 Nov the start failed 195 times, a full traceback every
+  20 s, and sent 7 "many problems" alerts. Now it logs "No internet: the live scanner could not start" once (again at
+  most every 10 minutes), retries after 1, 2, 3 ... up to 5 minutes, and says when the internet is back.
+- **GIFT Nifty backs off without internet** (1, 2, 4 ... up to 10 minutes; one log line in 30 minutes at most): it
+  wrote 281 lines this week.
+- Nothing about alerts, scores, paper trades or the Lab changes. New tests: `tests/test_fixes_279.py` (7).
+
 ## 2.78.1: the Paper page never stays blank (17 Nov 2026)
 - **Mandeep (17 Nov, 11:55):** the Paper trades page was not loading (empty screen).
 - **Why:** the scanner started late that day (11:51; the Mac was asleep / offline from 10:38), so for its first ~6

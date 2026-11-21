@@ -57,15 +57,35 @@ class Telegram:
                 time.sleep(2)
                 now = time.time()
             tg = self.get_cfg().get("telegram", {})
+            url = f"https://api.telegram.org/bot{tg.get('bot_token')}/sendMessage"
             try:
-                r = requests.post(f"https://api.telegram.org/bot{tg['bot_token']}/sendMessage",
-                                  data={"chat_id": tg["chat_id"], "text": text, "parse_mode": "HTML",
-                                        "disable_web_page_preview": "true"}, timeout=20)
+                r = requests.post(url, data={"chat_id": tg["chat_id"], "text": text, "parse_mode": "HTML",
+                                             "disable_web_page_preview": "true"}, timeout=20)
+                if r.status_code == 400 and "parse entities" in r.text:     # 2.79: a stray "<" in the text: send it plain
+                    r = requests.post(url, data={"chat_id": tg["chat_id"], "text": plain(text),
+                                                 "disable_web_page_preview": "true"}, timeout=20)
                 if r.status_code != 200:
-                    self.log(f"Telegram failed: {r.text[:120]}")
+                    self.log(f"Telegram failed: {_mask(r.text[:160])}")
+            except requests.exceptions.ConnectionError as e:                 # 2.79: one short line, never the URL
+                self.log("Telegram not sent: no internet" if "Resolution" in str(e) or "resolve" in str(e)
+                         else f"Telegram not sent: connection problem ({type(e).__name__})")
             except Exception as e:
-                self.log(f"Telegram failed: {e}")
+                self.log(f"Telegram failed: {_mask(str(e))}")
             self.sent.append(time.time())
+
+
+def _mask(s: str) -> str:
+    try:
+        from .applog import mask
+        return mask(s)
+    except Exception:
+        return s
+
+
+def plain(text: str) -> str:
+    """2.79: the message without HTML tags, for when Telegram cannot read its HTML."""
+    import re
+    return html.unescape(re.sub(r"</?(b|i|u|s|code|pre|a)(\s[^>]*)?>", "", text))
 
 
 def telegram_text(a: dict) -> str:

@@ -64,10 +64,14 @@ class GiftNifty:
         self.err = None
         self._at = 0.0
         self._lock = threading.Lock()
+        self.fails = 0                 # 2.79: failures in a row (no internet): wait longer between tries
+        self._logged = 0.0
 
     def get(self, max_age=30) -> dict | None:
-        """Cached row; refreshed in the background when older than max_age seconds."""
-        if time.time() - self._at > max_age and self._lock.acquire(blocking=False):
+        """Cached row; refreshed in the background when older than max_age seconds (after failures: 1, 2, 4 ... up to
+        10 minutes, so a Mac without internet does not try every 30 s)."""
+        wait = max_age if not self.fails else min(600, max_age * 2 ** min(self.fails, 5))
+        if time.time() - self._at > wait and self._lock.acquire(blocking=False):
             self._at = time.time()
             threading.Thread(target=self._fetch, daemon=True).start()
         return self.row
@@ -80,9 +84,13 @@ class GiftNifty:
             row = parse(r.json())
             if row:
                 self.row, self.err = row, None
+            self.fails = 0
         except Exception as e:
-            if self.err is None:
-                self.log(f"GIFT Nifty not available right now: {e}")
+            self.fails += 1
+            if time.time() - self._logged > 1800:        # 2.79: one line in 30 minutes at most
+                self._logged = time.time()
+                off = "Resolution" in str(e) or "resolve" in str(e)
+                self.log("GIFT Nifty not available right now: " + ("no internet" if off else str(e)[:160]))
             self.err = str(e)
         finally:
             self._lock.release()

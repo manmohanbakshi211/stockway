@@ -3,6 +3,7 @@ several behaviours at once, one short message (AI when ready, else the system's)
 the timeframe charts are 5m / 15m / 1H / 4H (replaces 75m) / 1D / 1W, each with its own scene beside it. On trial:
 no alert, no paper trade, market data only."""
 import datetime as dt
+import time
 import json
 import types
 from pathlib import Path
@@ -233,7 +234,9 @@ def test_timeframe_view_gives_each_chart_its_own_scene(monkeypatch):
     def lr(sym, base, days):
         n = 600
         step = 86400 if base == "D" else 60 * int(base)
-        t0 = dt.datetime.combine(DAY, dt.time(9, 15), IST).timestamp() - n * step
+        end = min(dt.datetime.combine(DAY, dt.time(9, 15), IST).timestamp(), time.time())   # 2.79: history ending recently
+        end = max(end, time.time() - 3 * 86400)          # (the 5m chart shows recent days only; a fixed date ages out)
+        t0 = end - n * step
         px = 25000 + np.cumsum(rng.normal(0, 5, n))
         return [[t0 + k * step, p, p + 4, p - 4, p + 1, 0] for k, p in enumerate(px)], "test"
     m.long_rows = lr

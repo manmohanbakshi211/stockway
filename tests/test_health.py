@@ -20,7 +20,7 @@ def _engine(tmp_path, running=True, status=None):
     e = types.SimpleNamespace(store=_Store(), telegram=types.SimpleNamespace(send=sent.append), log=lambda m: None,
                               data_dir=tmp_path, running=running, status=status or {"state": "running"},
                               cfg=lambda: {"live": {"source": "upstox", "auto_start": True}}, manual_stop_day=None,
-                              recorder=types.SimpleNamespace(rows=0, counts={}), logs=collections.deque(maxlen=400),
+                              recorder=types.SimpleNamespace(rows=0, counts={}, day="2026-11-04"), logs=collections.deque(maxlen=400),
                               source="upstox", bench=None)
     return e, sent
 

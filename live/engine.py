@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import collections
 import datetime as dt
+import html
 import json
 import sys
 import threading
@@ -82,6 +83,24 @@ def confluence_cfg() -> dict:
         return {"on": False}
 
 
+def _offline(e) -> bool:
+    """2.79: the error is 'no internet' (a name that does not resolve, a refused or timed-out connection)."""
+    try:
+        import requests
+        if isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+            return True
+    except Exception:
+        pass
+    t = str(e)
+    return any(x in t for x in ("NameResolution", "Failed to resolve", "nodename nor servname", "Temporary failure in name"))
+
+
+def _short_net(e) -> str:
+    import re
+    m = re.search(r"host='([^']+)'", str(e))
+    return f"{m.group(1)} unreachable" if m else type(e).__name__
+
+
 class LiveEngine:
     def __init__(self, get_cfg, data_dir: str | Path):
         self.get_cfg = get_cfg
@@ -150,6 +169,11 @@ class LiveEngine:
         return {**c, "live": live}
 
     def log(self, msg):
+        try:                                         # 2.79: no token or key on the screen, the System page or the AI notes
+            from .applog import mask
+            msg = mask(str(msg))
+        except Exception:
+            pass
         line = f"{dt.datetime.now(IST):%H:%M:%S}  {msg}"
         self.logs.append(line)
         print(line, flush=True)
@@ -291,8 +315,17 @@ class LiveEngine:
             self.tokens.clear()
             self.set_status("login_needed", str(e))
         except Exception as e:
-            self.log(traceback.format_exc())
-            self.set_status("error", f"Live scanner error: {e}")
+            if _offline(e):                          # 2.79: no internet: one short line (not a traceback every 20 s)
+                n, last = (getattr(self, "_start_fail", None) or (0, 0.0, 0.0))[1:]
+                msg = "No internet: the live scanner could not start. It tries again by itself every few minutes."
+                self.status.update(state="error", message=msg, since=time.time())
+                if n == 0 or time.time() - last > 600:
+                    self.log(f"{msg} ({_short_net(e)})")
+                    last = time.time()
+                self._start_fail = (time.time(), n + 1, last)
+            else:
+                self.log(traceback.format_exc())
+                self.set_status("error", f"Live scanner error: {e}")
         finally:
             if self.feed:
                 self.feed.stop()
@@ -312,8 +345,13 @@ class LiveEngine:
     def _run(self):
         c = self.cfg()
         lc = c["live"]
-        self.set_status("starting", "Starting live scanner" + (" (simulator)" if self.source == "sim" else
-                                                               " (replay of a recorded day)" if self.source == "replay" else ""))
+        msg = "Starting live scanner" + (" (simulator)" if self.source == "sim" else
+                                         " (replay of a recorded day)" if self.source == "replay" else "")
+        quiet = bool(getattr(self, "_start_fail", None))     # 2.79: retrying without internet: no line per try
+        if quiet:
+            self.status.update(state="starting", message=msg, since=time.time())
+        else:
+            self.set_status("starting", msg)
         if self.source == "sim":
             from .sim import SimFeed, SimMarket, SimREST
             self.store.clear_source("sim")
@@ -367,7 +405,10 @@ class LiveEngine:
                                                  f"starts by itself at {nxt['start_scanner']:%H:%M}." if nxt else "."))
                 return
             self.clock = Clock()
-            self.uni = universe.load(str(self.data_dir), log=self.log)
+            self.uni = universe.load(str(self.data_dir), log=(lambda m: None) if quiet else self.log)
+            if getattr(self, "_start_fail", None):       # 2.79: the internet is back
+                self.log(f"Internet is back: starting (after {self._start_fail[1]} tries without it)")
+                self._start_fail = None
             self.rest = UpstoxREST(tok["access_token"])
             prof = self.rest.profile() or {}
             self.status["user"] = prof.get("user_name") or tok.get("user")
@@ -2272,7 +2313,8 @@ class LiveEngine:
         try:
             note = self.brain.run(force_rules=rules_only)
             if note and note.get("by") == "AI" and int((self.cfg().get("ai") or {}).get("brain_telegram") or 0):
-                self.telegram.send(f"🧠 <b>{note.get('headline')}</b>\n" + "\n".join("• " + x for x in note.get("summary", [])[:4]))
+                e_ = lambda x: html.escape(str(x), quote=False)      # 2.79: the AI's words are text, not HTML
+                self.telegram.send(f"🧠 <b>{e_(note.get('headline'))}</b>\n" + "\n".join("• " + e_(x) for x in note.get("summary", [])[:4]))
         except Exception as e:
             self.log(f"Market brain failed: {e}")
 
@@ -2646,8 +2688,12 @@ class LiveEngine:
                     self.stop(manual=False)
                 if self.running:
                     continue
+                sf = getattr(self, "_start_fail", None)     # 2.79: no internet last time: wait 1, 2, ... up to 5 minutes
+                if sf and time.time() - sf[0] < min(300, 60 * sf[1]):
+                    continue
                 if self.tokens.load():
-                    self.log(f"Auto-starting live scanner: {ses['name']} {ses['open']:%H:%M}-{ses['close']:%H:%M}")
+                    if not sf:
+                        self.log(f"Auto-starting live scanner: {ses['name']} {ses['open']:%H:%M}-{ses['close']:%H:%M}")
                     self.start("upstox")
                 elif self.reminded_day != now.date():
                     self.reminded_day = now.date()

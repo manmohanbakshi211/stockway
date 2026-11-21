@@ -261,8 +261,10 @@ def static_checks(cfg: dict | None = None) -> list:
                   _bk._C.get("error") or f"after {bc['after']}, {bc['keep']} days kept in {bc['dir'] or 'data/backups'}"
                                          f"{'' if bc.get('on', True) else ' (switched off)'}"))
     out.append(_c("app_log", "Engine log kept on disk (data/logs/app.log, rotated), tokens and keys masked",
-                  "applog import write" in inspect.getsource(_eng.LiveEngine.log) and _al.mask("access_token=abcdef123456") == "access_token=<hidden>",
-                  "5 MB × 10 files"))
+                  "applog import write" in inspect.getsource(_eng.LiveEngine.log) and _al.mask("access_token=abcdef123456") == "access_token=<hidden>"
+                  and "mask(" in inspect.getsource(_eng.LiveEngine.log)
+                  and _al.mask("/bot1234567:ABCDEFGHIJKLMNOPQRSTUVWXYZ012/send") == "/bot<hidden>/send",
+                  "5 MB × 10 files; 2.79: the Telegram bot token too, on screen, on the System page and in the AI's notes"))
     from live import candlecast as _cc
     from lab import proc as _proc
     ccc = _cc.cfg()
@@ -459,7 +461,8 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
         out.append(_c("feeds", "Live feeds", False, str(e)[:160]))
     try:                                                   # 2.71: speed: the feed process, the paper watcher, the quotes stream
         lc = ((engine.cfg() if engine is not None and hasattr(engine, "cfg") else {}) or {}).get("live") or {}
-        prim = getattr(getattr(engine, "feed", None), "primary", None) if engine is not None else None
+        running = bool(engine is not None and getattr(engine, "running", False))   # 2.79: after the close it is not slow
+        prim = getattr(getattr(engine, "feed", None), "primary", None) if running else None
         rv = prim.view() if prim is not None and hasattr(prim, "view") else None
         want = lc.get("feed_reader", "process")
         if rv is None:
@@ -469,7 +472,7 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
             det = (f"Upstox feed reader: {rv.get('mode')}" + (f" (pid {rv['pid']})" if rv.get("pid") else "")
                    + (f", pipe delay {rv['pipe_ms']} ms" if rv.get("pipe_ms") is not None else "")
                    + (f", restarted {rv['restarts_10min']}x in 10 min" if rv.get("restarts_10min") else ""))
-        lag = getattr(getattr(engine, "feed", None), "lag_ms", None) if engine is not None else None
+        lag = getattr(getattr(engine, "feed", None), "lag_ms", None) if running else None
         if lag is not None:
             det += f"; data delay {lag / 1000:.1f} s"
             if lag > 3000:
@@ -479,7 +482,7 @@ def runtime_checks(engine=None, data_dir: str | Path = "data", jobs: dict | None
         det += (f"; paper exits checked every {int(lc.get('paper_watch_ms', 250))} ms"
                 + (f" (last check {pw} ms)" if pw is not None else "") + "; live quotes (/ws/quotes) and new alerts / paper "
                 "changes (/ws/events) pushed to the pages")
-        if stt.get("loop_p95_ms") is not None:          # 2.72: the analysis pass, the pages' refresh, the network worker
+        if running and stt.get("loop_p95_ms") is not None:   # 2.72: the analysis pass, the pages' refresh, the network worker
             det += f"; analysis pass {stt.get('loop_ms')} ms (95% within {stt['loop_p95_ms']} ms)"
             if stt["loop_p95_ms"] > 5000:
                 ok = False

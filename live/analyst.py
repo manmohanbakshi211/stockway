@@ -15,6 +15,7 @@ Only the app's own numbers and log lines are sent. Paper and information only.
 from __future__ import annotations
 
 import datetime as dt
+import html
 import json
 import re
 import time
@@ -40,6 +41,11 @@ def _log_problems(data_dir, day: str, limit: int = 30) -> list:
             if key in seen:
                 continue
             seen.add(key)
+            try:                                         # 2.79: never a token or key in the notes the AI reads
+                from .applog import mask
+                ln = mask(ln)
+            except Exception:
+                pass
             out.append(ln[11:240])
     return out[-limit:]
 
@@ -184,8 +190,10 @@ def run(engine, data_dir, day: str | None = None, log=print) -> dict:
         f"{len(f.get('log_problems') or [])} problem line(s) in the log")
     if rep:
         try:
-            lines = ["🧠 <b>Stockway evening analyst</b>"] + [f"✅ {x}" for x in rep["worked"][:2]] + [f"❌ {x}" for x in rep["failed"][:2]] + \
-                    [f"🐞 {x}" for x in rep["bugs"][:3]] + ([f"➡️ {rep['tomorrow']}"] if rep["tomorrow"] else [])
+            e_ = lambda x: html.escape(str(x), quote=False)      # 2.79: the AI's words are text, not HTML ("<0.9x")
+            lines = ["🧠 <b>Stockway evening analyst</b>"] + [f"✅ {e_(x)}" for x in rep["worked"][:2]] + \
+                    [f"❌ {e_(x)}" for x in rep["failed"][:2]] + [f"🐞 {e_(x)}" for x in rep["bugs"][:3]] + \
+                    ([f"➡️ {e_(rep['tomorrow'])}"] if rep["tomorrow"] else [])
             engine.telegram.send("\n".join(lines))
         except Exception:
             pass
