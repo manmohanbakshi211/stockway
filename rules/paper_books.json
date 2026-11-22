@@ -136,6 +136,23 @@
     "risk_pass": true
    },
    "paper": {}
+  },
+  "rider": {
+   "name": "Trend Rider",
+   "short": "Only Trend Rider option buys, 1 lot, its own exit",
+   "explain": "2.85 (Mandeep, 22 Nov 2026: option buying, every index and F&O stock, 1 lot, loss kam, premium time tak na ghise, trail profit bachaye par achha move na chhoote, strong initial stop). Takes only Trend Rider signals (on trial): buys the suggested option, 1 lot, with the money you set for the app. Exit: stop beyond the broken level on a 5-minute close (not a wick); at +1R the stop moves to entry (with 1 lot that is the booking); then a trail 2.5 ATR behind the best price that tightens to 1.5 ATR only when the candles show reversal signs; out if nothing moves in 3 bars; emergency stop -35% on the premium; out by 15:10. Own money and trades; never touches the main account. Paper only, on trial: compare it with the main account and the test bench.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "rider": true
+   },
+   "exit_style": "rider",
+   "paper": {
+    "max_open": 5,
+    "max_trades_day": 15,
+    "max_lots": 1
+   },
+   "section": "rider"
   }
  }
 }

@@ -292,6 +292,21 @@ def static_checks(cfg: dict | None = None) -> list:
     except Exception as e:
         rid_ok, rid_det = False, str(e)[:160]
     out.append(_c("trend_rider", "Trend Rider option-buying setup, on trial (2.84)", rid_ok, rid_det))
+    try:                                                  # 2.85: Trend Rider exit + its own paper account
+        from lab import rider_exit as _rx
+        from live import books as _bks, engine as _eng, paper as _pap
+        sp_ = (_bks.cfg().get("books") or {}).get("rider") or {}
+        ex_ = _rx.exit_cfg()
+        rx_ok = (sp_.get("exit_style") == _rx.STYLE and bool((sp_.get("pick") or {}).get("rider"))
+                 and "_rider_offer" in inspect.getsource(_eng.LiveEngine._trial)
+                 and "RiderPlan" in inspect.getsource(_pap.PaperBook._update))
+        rx_det = (f"account '{sp_.get('name')}' {'on' if sp_.get('on', True) else 'off'}: 1 lot, the app's capital; lock at "
+                  f"+{ex_['lock_r']}R, trail {ex_['trail_loose_atr']} ATR (tight {ex_['trail_tight_atr']} on "
+                  f"{ex_['reversal_signs_for_tight']} reversal signs), no move after {ex_['nomove_bars']} bars, emergency "
+                  f"-{ex_['emergency_premium_pct']:g}% premium, out {ex_['exit_hhmm']} (rules/buy_setup.json exit)")
+    except Exception as e:
+        rx_ok, rx_det = False, str(e)[:160]
+    out.append(_c("rider_exit", "Trend Rider exit and paper account (2.85)", rx_ok, rx_det))
     try:                                                  # 2.83: the multiverse's strict pick rule, in shadow
         from lab import multiverse as _mvx
         src_ = _mvx.strict_rule(_mvx.cfg())

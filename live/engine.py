@@ -1948,6 +1948,28 @@ class LiveEngine:
             except Exception as e:
                 if self._every("bench_err", 600, clock_time=False):
                     self.log(f"Test bench skipped a trial: {e}")
+        if a.get("kind") == "trend_rider":           # 2.85: its own paper account (rules/paper_books.json "rider")
+            try:
+                self._rider_offer(a, now)
+            except Exception as e:
+                if self._every("rider_paper_err", 600, clock_time=False):
+                    self.log(f"Trend Rider paper account skipped a signal: {e}")
+
+    def _rider_offer(self, a, now):
+        """2.85: a Trend Rider signal for the paper accounts with pick.rider. The stop is on the index / stock price the
+        setup's 5-minute bars are built from (the spot key), so the trade follows that same price. Paper only."""
+        bs = getattr(self, "books", None)
+        if bs is None or not self.paper or not getattr(bs, "has_rider", lambda: False)():
+            return {}
+        if a.get("direction") not in ("up", "down"):
+            return {}
+        if self.dguard is not None and self.dguard.symbol_problem(a["sym"]):
+            return {}
+        u = self.uni.underlyings.get(a["sym"]) if self.uni else None
+        i = self.state.get(u.key) if u and self.state is not None else None
+        a2 = {**a, "option": self._suggest(a["sym"], a["direction"]), "is_index": bool(u and u.is_index),
+              "und_key": u.key if i is not None and i.ltp else None}
+        return bs.offer_rider(a2, self.state, now)
 
     def _emit(self, a, now, lc):
         if registry.is_shadow(a.get("kind")):

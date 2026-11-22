@@ -73,15 +73,19 @@ class Books:
                       "min_severity": int((sp.get("pick") or {}).get("min_severity") or 1)}
                 if (sp.get("pick") or {}).get("same_as_main"):    # 2.56: the main account's alerts, only the exit differs
                     pc.update(kinds=main_cfg.get("kinds") or "all", min_severity=int(main_cfg.get("min_severity") or 2))
-                if (sp.get("pick") or {}).get("multiverse") or (sp.get("pick") or {}).get("pack_prefix"):
-                    pc.update(kinds="all", min_severity=1)        # 2.58 / 2.69: the picks / the strategy file decide
+                if (sp.get("pick") or {}).get("multiverse") or (sp.get("pick") or {}).get("pack_prefix") \
+                        or (sp.get("pick") or {}).get("rider"):
+                    pc.update(kinds="all", min_severity=1)        # 2.58 / 2.69 / 2.85: the picks / file / setup decide
                 if (sp.get("pick") or {}).get("mirror_main"):     # 2.56.2: the main account's own trades decide; its
                     pc.update(kinds="all", min_severity=1, max_open=99, max_trades_day=99,    # limits already applied
                               max_daily_loss_pct=100, cooloff_min=0)
                 if sp.get("exit_style"):
                     from lab.exits import STYLES
-                    if sp["exit_style"] not in STYLES:
+                    from lab.rider_exit import STYLE as RIDER
+                    if sp["exit_style"] not in STYLES and sp["exit_style"] != RIDER:
                         raise ValueError(f"unknown exit_style {sp['exit_style']!r}")
+                    if sp["exit_style"] == RIDER and not (sp.get("pick") or {}).get("rider"):
+                        raise ValueError("exit_style 'rider' needs pick.rider (Trend Rider signals carry its stop)")
                 old = self.books.get(bid)
                 if old is not None:                       # keep today's skip counts across a settings reload
                     old.cfg = pc
@@ -170,8 +174,9 @@ class Books:
         for bid, bk in list(self.books.items()):
             try:
                 sp = self.specs[bid]
-                if (sp.get("pick") or {}).get("multiverse") or (sp.get("pick") or {}).get("pack_prefix"):
-                    continue                                  # 2.58 / 2.69: take test-bench / strategy-file signals, not alerts
+                if (sp.get("pick") or {}).get("multiverse") or (sp.get("pick") or {}).get("pack_prefix") \
+                        or (sp.get("pick") or {}).get("rider"):
+                    continue                                  # 2.58 / 2.69 / 2.85: their own signals, not alerts
                 mirror = bool((sp.get("pick") or {}).get("mirror_main"))
                 ds = self.day_state(bid, state, now) if (sp.get("day_target_pct") or sp.get("day_stop_pct")
                                                           or sp.get("compound")) else None
@@ -301,6 +306,47 @@ class Books:
             except Exception as e:
                 self.errors[bid] = str(e)
                 self.log(f"Paper account {bid} skipped a strategy-file signal: {e}")
+        return out
+
+    # ------------------------------------------------------------------ 2.85: the "Trend Rider" account
+    def has_rider(self) -> bool:
+        return any((sp.get("pick") or {}).get("rider") for sp in self.specs.values())
+
+    def offer_rider(self, a: dict, state, now: dt.datetime) -> dict:
+        """A Trend Rider signal (live/rider.py, on trial): each account with pick.rider buys its option, 1 lot, with the
+        setup's own stop and the rider exit (lab/rider_exit.py). a["data"]["rider"] carries stop and ATR on the
+        underlying. Paper only; the main account never sees it."""
+        out = {}
+        r = (a.get("data") or {}).get("rider") or {}
+        for bid, bk in list(self.books.items()):
+            p = self.specs[bid].get("pick") or {}
+            if not p.get("rider"):
+                continue
+            if p.get("syms") and a["sym"] not in p["syms"]:
+                continue
+            try:
+                if not a.get("option"):
+                    why = "no option price for this signal"
+                elif r.get("stop") is None or not r.get("atr"):
+                    why = "no setup stop / ATR on the signal"
+                elif not a.get("und_key"):
+                    why = "no live price for the underlying"
+                else:
+                    d = dict(a.get("data") or {})
+                    d.update(risk={"verdict": "PASS", "lots": 1},
+                             factory={"plan": {"style": "rider", "R": abs(float(a.get("price") or 0) - float(r["stop"])),
+                                               "stop": float(r["stop"]), "atr": float(r["atr"])}})
+                    a2 = {**a, "data": d, "severity": max(1, int(a.get("severity") or 1)),
+                          "title": (a.get("title") or "Trend Rider")[:200]}
+                    before = dict(bk.skipped)
+                    tid = bk.try_open(a2, state, now)
+                    new = [k for k, v in bk.skipped.items() if v > before.get(k, 0)]
+                    why = None if tid else (new[0] if new else "account rules (open trades, trades a day, time)")
+                self._count(bid, now, why)
+                out[bid] = "taken" if why is None else why
+            except Exception as e:
+                self.errors[bid] = str(e)
+                self.log(f"Paper account {bid} skipped a Trend Rider signal: {e}")
         return out
 
     def _count(self, bid, now, why):

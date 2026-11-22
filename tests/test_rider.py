@@ -131,7 +131,7 @@ def test_the_live_scan_keeps_readings_and_series_and_respects_the_limits(monkeyp
     a = got[0]
     assert a["data"]["setup_levels"]["stop"] == 107.5 and a["data"]["setup_levels"]["target"] > a["price"]
     assert rd.read["SBIN"]["decision"]["go"] and len(rd.series["SBIN"]) == 1
-    assert rd.on_bar(now + dt.timedelta(minutes=5), len(b["c"]), got.append) == 0      # cooldown (30 min)
+    assert rd.on_bar(now + dt.timedelta(minutes=5), len(b["c"]), got.append) == 0      # cooldown (15 min)
     rd.on_bar(now + dt.timedelta(minutes=35), len(b["c"]), got.append)
     assert rd.on_bar(now + dt.timedelta(minutes=70), len(b["c"]), got.append) == 0     # two a day per symbol
     assert len(rd.series["SBIN"]) == 1                                                 # the same bar is one row

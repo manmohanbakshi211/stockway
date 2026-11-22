@@ -118,6 +118,40 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.85: Trend Rider exit and its own paper account, on trial (22 Nov 2026)
+- **Mandeep (22 Nov):** "loss less ho, time limit tak sirf premium na ghista rahe agar koi movement ka chance nahi hai
+  toh, reversal ho toh trail humara profit bachaye rakhe but ... ye nahi ki sl hit karwake aage ka achha move na le
+  paaye. trade ka initial stoploss bhi achhi strong or confident ho", 1 lot, the capital chosen in the app, then
+  "Karo ... ek ke baad ek khud karna".
+- **Exit (gun, `lab/rider_exit.py`; outside the Lab table build, so no Lab table rebuild):** judged on 5-minute
+  closes of the index / stock, never on a wick. (1) First stop beyond the broken level (or the breakout candle) +
+  0.35 ATR. (2) At +1R the stop moves to entry: with 1 lot there is nothing to book half of, so locking is the
+  booking. (3) Then a trail 2.5 ATR behind the best price, tightened to 1.5 ATR only when the closed candles show 2
+  reversal signs (a rejection candle, two closes against, a close beyond the previous bar's far end): an ordinary
+  pullback does not shake it out. (4) No move: 3 closes after entry, under 0.3 ATR of progress and the option not
+  above entry, out (the premium does not melt to a time limit). (5) Emergency stop -35% on the premium, any tick.
+  (6) Out by 15:10. The bar being built from ticks stays in memory, so the 0.25-second exit check writes the plan
+  only when a bar closes.
+- **Paper account "Trend Rider"** (`rules/paper_books.json` "rider", bullet): takes only Trend Rider signals, buys
+  the suggested option, 1 lot, money = the capital set in the app, at most 5 open and 15 a day, the main account's
+  daily loss limit. It follows the stop on the same price the setup's 5-minute bars use (the index / stock itself,
+  not the future); a signal whose price is already through its stop is skipped. Never touches the main account,
+  Telegram or Focus; the signal stays a trial (graded and on the test bench as in 2.84).
+- **Re-entry:** signals now 15 minutes apart (was 30), still at most 2 a symbol a day: the second one is the
+  re-entry after a stop (one open trade a symbol at a time).
+- **Bullets:** `rules/buy_setup.json` "exit" (every number above) and "cooldown_min" 15; registry cooldown 15.
+- **Replay check (19 Nov, the Mac's recording, one trend-up day; honest):** the account took 14 of 66 signals
+  (the 09:30 burst filled the 5 slots; the daily loss limit and one-trade-a-symbol did the rest). Result -₹3,087
+  (3 won). On the same 14 signals the test bench's buy with +30% / -20% / 60 min made +₹2,428 and holding to the
+  day's end lost -₹14,379. What the exit did: TVS Motor +₹5,513 by trailing (bench +₹3,871 at its fixed target);
+  no-move cut 5 losers smaller (Trent -₹114 vs -₹2,068); but no-move also cut TECHM at -14% before it ran to +27%
+  (-₹2,452 vs +₹4,434), and Nifty's put fell 37% in 12 minutes, so the emergency stop (-35%) lost more than the
+  bench's -20%. A second run with 10 slots took 11 trades, 10 of them at 09:30 (mostly puts on an up day), and lost
+  -₹15,223: correlated first-bar signals, so the 5-slot limit stays. One day decides nothing: the Lab test (next)
+  measures no-move after 3 / 4 / 6 bars, the emergency level and a later first window on a year of data before
+  anything changes.
+- System page: a new check (Trend Rider exit and paper account). Tests: `tests/test_rider_exit.py` (13).
+
 ## 2.84: Trend Rider v1, the option-buying setup, on trial (22 Nov 2026)
 - **Mandeep (22 Nov):** "ek achhi option buying ka set-up banana hai ... saare FNO stocks and index ... loss less ho
   ... initial stoploss bhi achhi strong or confident ho", then "Karo". Plan: the doc "Option Buying Setup v1" and the

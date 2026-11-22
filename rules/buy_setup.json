@@ -12,6 +12,9 @@
   "tradability": {"min": 40, "max_spread_pct": 4.0, "lot_share_of_capital": 0.25},
   "stop": {"buffer_atr": 0.35, "max_premium_risk_pct": 30.0},
   "flow_gates": false,
-  "cooldown_min": 30,
-  "max_signals_per_symbol_day": 2
+  "cooldown_min": 15,
+  "max_signals_per_symbol_day": 2,
+  "exit": {"lock_r": 1.0, "lock_buffer_atr": 0.05, "trail_loose_atr": 2.5, "trail_tight_atr": 1.5, "reversal_signs_for_tight": 2,
+           "nomove_bars": 3, "nomove_progress_atr": 0.3, "emergency_premium_pct": 35.0, "exit_hhmm": "15:10"},
+  "exit_about": "2.85 exit (lab/rider_exit.py), on 5-minute closes of the index / stock, never on a wick: first stop beyond the broken level + stop.buffer_atr; at lock_r x risk the stop moves to entry + lock_buffer_atr ATR (1 lot: locking is the booking); then a trail trail_loose_atr ATRs behind the best price, tightened to trail_tight_atr only when reversal_signs_for_tight reversal signs show (rejection candle, two closes against, a close beyond the previous bar's far end); out if after nomove_bars closes the move is under nomove_progress_atr ATR and the option is not above entry; emergency stop on the premium at -emergency_premium_pct % on any tick; out at exit_hhmm. cooldown_min 15 with max_signals_per_symbol_day 2: the second signal of a day is the re-entry after a stop."
 }

@@ -197,7 +197,7 @@ class Rider:
                          + " On trial: recorded and graded only."),
               "price": e_,
               "data": {"trial_key": self.KIND,
-                       "rider": {"trigger": dec.get("trigger"), "level": dec.get("level"), "stop": stop,
+                       "rider": {"trigger": dec.get("trigger"), "level": dec.get("level"), "stop": stop, "atr": r.get("atr"),
                                  "risk_pct": dec.get("risk_pct"), "tds": r["trend_day"].get("score"),
                                  "bq": bo["quality"] if bo else None, "chase": side["chase"],
                                  "agree": side["agree"]["agree"], "mvd": side["mvd"], "trad": side["trad"].get("score"),

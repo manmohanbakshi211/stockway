@@ -54,6 +54,19 @@ def costs(entry: float, exit: float, qty: int) -> float:
 VER = [0]                               # 2.72: bumps on every paper open / close (the pages refresh at once)
 
 
+def _settled(plan_json: str | None) -> str | None:
+    """2.85: a Trend Rider plan without the 5-minute bar still being built from ticks (what must be saved at once)."""
+    import json as _json
+    try:
+        x = _json.loads(plan_json) if plan_json else None
+    except Exception:
+        return plan_json
+    if not isinstance(x, dict):
+        return plan_json
+    x.pop("cur", None)
+    return _json.dumps(x, sort_keys=True)
+
+
 class PaperBook:
     def __init__(self, store, source: str, cfg: dict | None = None, log=print, on_open=None):
         self.store = store
@@ -63,6 +76,7 @@ class PaperBook:
         self.on_open = on_open          # 2.48: the engine streams a new trade's option at once (live price from the first second)
         self.skipped: dict = {}         # 2.48: why trades were not taken today (no money, closed market, old quote)
         self._ulock = threading.RLock()  # 2.71: the fast exit check (every 0.25 s) and the main loop never close a trade twice
+        self._mem: dict = {}            # 2.85: trade id -> (saved plan, live Trend Rider plan with its bar in progress)
 
     def _skip(self, why: str):
         self.skipped[why] = self.skipped.get(why, 0) + 1
@@ -220,7 +234,19 @@ class PaperBook:
         qty = int(opt["lot"]) * int(lots)
         need = self.need(entry, int(opt["lot"]), direction, t["und_entry"]) * int(lots)
         t.update(qty=qty, capital=round(need, 2), acct_capital=float(c.get("capital") or 0))
-        if plan and t["und_entry"] and plan.get("R"):     # chart-level exit: stop / target on the underlying (lab/exits.py)
+        if plan and t["und_entry"] and plan.get("style") == "rider" and plan.get("stop") is not None and plan.get("atr"):
+            import json as _json                          # 2.85: Trend Rider's own exit (lab/rider_exit.py)
+            from lab.rider_exit import RiderPlan, exit_cfg
+            ec = exit_cfg()
+            d_ = 1 if opt["side"] == "CE" else -1
+            if d_ * (t["und_entry"] - float(plan["stop"])) <= 0:
+                return self._skip("price already through the setup's stop")
+            rp = RiderPlan(t["und_entry"], d_, float(plan["stop"]), float(plan["atr"]), entry, now.timestamp(), ec)
+            t["plan"] = _json.dumps(rp.to_dict())
+            t["target"] = round(entry * 100, 2)            # no premium target: the trail decides
+            t["stop"] = round(entry * (1 - float(ec["emergency_premium_pct"]) / 100), 2)
+            t["hold_max"] = 400                           # the rider's own no-move / time rules decide
+        elif plan and t["und_entry"] and plan.get("R"):   # chart-level exit: stop / target on the underlying (lab/exits.py)
             import json as _json
             from lab.exits import PREM_STOP, STYLES, LivePlan
             lp = LivePlan(plan["style"], t["und_entry"], 1 if opt["side"] == "CE" else -1, float(plan["R"]), entry, now.timestamp())
@@ -323,13 +349,24 @@ class PaperBook:
             held = (now.timestamp() - t["entry_ts"]) / 60
             reason = None
             lp = None
+            rider = False
             if t.get("plan"):
                 import json as _json
-                from lab.exits import LivePlan
-                lp = LivePlan.from_dict(_json.loads(t["plan"]))
-                why = lp.check(und.ltp if und and und.ltp else None, inst.ltp, now.timestamp())
-                reason = {"stop": "chart stop", "premium stop": "stop loss", "target": "chart target",
-                          "time": "time limit"}.get(why) if why else None
+                pj = _json.loads(t["plan"])
+                if pj.get("style") == "rider":            # 2.85: Trend Rider's exit; the bar being built stays in memory
+                    from lab.rider_exit import RiderPlan
+                    rider = True
+                    mem = self._mem.get(t["id"])
+                    lp = mem[1] if mem and mem[0] == t["plan"] else RiderPlan.from_dict(pj)
+                    why = lp.check(und.ltp if und and und.ltp else None, inst.ltp, now.timestamp())
+                    reason = {"stop": "chart stop", "premium stop": "stop loss", "trail": "trailing stop",
+                              "no move": "no move", "time": "time limit"}.get(why) if why else None
+                else:
+                    from lab.exits import LivePlan
+                    lp = LivePlan.from_dict(pj)
+                    why = lp.check(und.ltp if und and und.ltp else None, inst.ltp, now.timestamp())
+                    reason = {"stop": "chart stop", "premium stop": "stop loss", "target": "chart target",
+                              "time": "time limit"}.get(why) if why else None
             if reason:
                 pass
             elif (d > 0 and px >= t["target"]) or (d < 0 and px <= t["target"]):
@@ -357,8 +394,12 @@ class PaperBook:
                     upd["und_last"] = und.ltp
                 if fast:                                  # only what the exit rules need later
                     upd = {k: v for k, v in upd.items() if k in ("peak", "plan") and v != t.get(k)}
+                    if rider and "plan" in upd and _settled(upd["plan"]) == _settled(t["plan"]):
+                        upd.pop("plan")                   # 2.85: only the bar being built changed: kept in memory
                 if upd:
                     self.store.update_trade(t["id"], **upd)
+                if rider:
+                    self._mem[t["id"]] = (upd.get("plan", t["plan"]), lp)
         return closed
 
     def close_manual(self, tid, state, now, reason: str = "closed by you"):
@@ -379,6 +420,7 @@ class PaperBook:
         return [x for x in (self.close_manual(t["id"], state, now) for t in self.open_trades()) if x]
 
     def _close(self, t, px, now, reason, und=None):
+        self._mem.pop(t.get("id"), None)
         d = t.get("dir") or 1
         qty = t["lot"] * t["lots"]
         gross = round(d * (px - t["entry"]) * qty, 2)
