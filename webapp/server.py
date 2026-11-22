@@ -813,6 +813,45 @@ def lab_situation_learn():
     return {"started": True}
 
 
+# ----------------------------------------------------------------- 2.87: Trend Rider in the Lab (lab/rider_lab.py)
+_RIDER_LAB: dict = {}
+
+
+@app.get("/api/lab/rider")
+def lab_rider():
+    """Trend Rider's Lab test: the year of stock and index days and, when there, the 5-year Nifty / Bank Nifty run."""
+    import json as _json
+    from lab import dhan_hist
+    out = {"busy": bool(_RIDER_LAB.get("busy")), "error": _RIDER_LAB.get("error")}
+    for name, d in (("1y", ROOT / "data"), ("5y", dhan_hist.root(ROOT / "data"))):
+        f = d / "lab" / "rider_lab.json"
+        try:
+            out[name] = _json.loads(f.read_text()) if f.exists() else None
+        except Exception as ex:
+            out[name] = {"error": str(ex)}
+    return clean(out)
+
+
+@app.post("/api/lab/rider/run")
+def lab_rider_run():
+    """Run the Trend Rider test now on the year of data (its own low-priority process; minutes)."""
+    import threading
+    from lab import proc
+    if _RIDER_LAB.get("busy"):
+        return {"busy": True}
+
+    def go():
+        _RIDER_LAB.update(busy=True, error=None)
+        try:
+            proc.run("rider", ROOT / "data", log=lambda m: None)
+        except Exception as ex:
+            _RIDER_LAB["error"] = str(ex)
+        finally:
+            _RIDER_LAB["busy"] = False
+    threading.Thread(target=go, daemon=True, name="rider-lab").start()
+    return {"started": True}
+
+
 # ----------------------------------------------------------------- Strategy Lab (lab/factory.py, lab/ebooks.py)
 @app.get("/api/factory")
 def factory_view():

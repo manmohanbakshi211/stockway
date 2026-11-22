@@ -307,6 +307,22 @@ def static_checks(cfg: dict | None = None) -> list:
     except Exception as e:
         rx_ok, rx_det = False, str(e)[:160]
     out.append(_c("rider_exit", "Trend Rider exit and paper account (2.85)", rx_ok, rx_det))
+    try:                                                  # 2.87: Trend Rider on every Lab day, nightly, reports only
+        import json as _json
+        from lab import proc as _proc
+        from live import engine as _eng2
+        rl_ok = "rider" in _proc.JOBS and 'proc.run("rider", self.data_dir' in inspect.getsource(_eng2.LiveEngine._nightly_lab)
+        f_ = Path(__file__).resolve().parents[1] / "data" / "lab" / "rider_lab.json"
+        if f_.exists():
+            r_ = _json.loads(f_.read_text())
+            v1_ = (r_.get("variants") or {}).get("w15_nm3_em35") or {}
+            rl_det = (f"last run {r_.get('ran_at', '?')[:16]}: {v1_.get('trades', 0)} trades on {v1_.get('days', 0)} days, "
+                      f"₹{v1_.get('per_day')} a day as live (lower bound {v1_.get('lcb')}); {r_.get('verdict', '')}")[:300]
+        else:
+            rl_det = "runs every night after the Lab (paused in market hours); no report yet"
+    except Exception as e:
+        rl_ok, rl_det = False, str(e)[:160]
+    out.append(_c("rider_lab", "Trend Rider tested on the Lab's history (2.87)", rl_ok, rl_det))
     try:                                                  # 2.83: the multiverse's strict pick rule, in shadow
         from lab import multiverse as _mvx
         src_ = _mvx.strict_rule(_mvx.cfg())

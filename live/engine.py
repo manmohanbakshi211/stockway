@@ -2896,6 +2896,10 @@ class LiveEngine:
                 proc.run("mlstrat", self.data_dir, log=log, pause=self.lab_paused)
             except Exception as e:
                 log(f"ML strategies failed: {e}")
+            try:                                          # 2.87: Trend Rider on every Lab day (reports only)
+                proc.run("rider", self.data_dir, log=log, pause=self.lab_paused)
+            except Exception as e:
+                log(f"Trend Rider test failed: {e}")
             try:                                          # the 5-year Lab (challenger) keeps searching too, once it has data
                 from lab import dhan_hist
                 r5 = dhan_hist.root(self.data_dir)
@@ -2911,6 +2915,10 @@ class LiveEngine:
                     except Exception as e:
                         log(f"[5y] Day-type forecaster failed: {e}")
                     proc.run("factory", r5, log=lambda m: log("[5y] " + m), n_random=3000, n_mutate=1500, pause=self.lab_paused)
+                    try:                                  # 2.87: Trend Rider on five years of Nifty / Bank Nifty
+                        proc.run("rider", r5, log=lambda m: log("[5y] " + m), pause=self.lab_paused)
+                    except Exception as e:
+                        log(f"[5y] Trend Rider test failed: {e}")
             except Exception as e:
                 log(f"5-year Lab failed: {e}")
             self._fact_rules = (0.0, [])

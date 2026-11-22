@@ -118,6 +118,37 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.87: Trend Rider tested on the Lab's history, by days (22 Nov 2026)
+- **Why:** the 19 Nov replay was one day. Before any Trend Rider number changes, the setup and its exit are measured on
+  every day of the Lab's option history (the year of stocks and indices; five years of Nifty / Bank Nifty once that
+  archive is there). Mandeep: "baaki jo pending the ... ek ke baad ek khud karna".
+- **Gun** (`lab/rider_lab.py`, Lab job "rider" in `lab/proc.py`, outside the Lab table build): the underlying's
+  1-minute closes become 5-minute bars and the live setup (`lab/rider.py`) is read at each closed bar as live (first
+  look 09:30, the windows, 2 signals a symbol a day 15 minutes apart). Entry: the at-the-money option at the bar's
+  last minute + the Lab's slippage. Exit: the Trend Rider exit (`lab/rider_exit.py`) fed every minute; out at the
+  minute's close - slippage; real charges, 1 lot (rules/lots.json). The same entries also exit the bench way
+  (+30% / -20% / 60 min) as the yardstick.
+- **Proxy, said on the page:** the Lab has no volume, bid / ask or order flow and no live greeks, so VWAP is
+  time-weighted, flow and option thrust are unknown (at most 4 of 6 families can agree), delta 0.5, the theta
+  stand-in.
+- **Variants:** first look 09:30 (live) / 09:45 / 10:00 × no move after 3 (live) / 4 / 6 bars / never × emergency
+  -35% (live) / -25% = 24, plus the bench exit.
+- **Grading by days** (a day's trades are not independent): ₹ a day for 1 lot of each signal, t, the one-sided 95%
+  lower bound, green days. The choice is made on the first 80% of days only; the last 20% (holdout) is never used to
+  choose. Walk-forward: each month is traded by the way that was best on the months before it (3+ months, 20+ days).
+- **Reports only:** nothing changes a rule, the live setup or a paper account; a change needs Mandeep's OK and a
+  holdout win (CLAUDE.md champion vs challenger).
+- **Nightly:** after the ML strategies (and on the 5-year archive after its Lab round), in its own low-priority
+  process, waiting / frozen in market hours (2.80). Signals are cached per symbol and day (`data/lab/rider_signals.json`,
+  rebuilt when the setup's code or entry numbers change), so a night reads only new days. Strategy Lab page: a
+  "Trend Rider on the Lab's history" panel (as live, bench exit, best on train; all days, holdout, walk-forward) and
+  Run now. System page: a new check.
+- **Smoke run on 19 Nov** (the recording rebuilt as Lab days for 224 symbols; no yesterday's levels in a recording):
+  52 signals (live had 66), 16 ms a symbol-day (a year of ~50 symbols: a few minutes). Trend Rider exit +₹17,274
+  (14 won), bench exit -₹28,310, without the no-move exit +₹6,460, first look 09:45 -₹18,671. One day again: the
+  year decides.
+- Lab regression: identical by construction (no file of the Lab table build changed). Tests: `tests/test_rider_lab.py` (7).
+
 ## 2.86: Trend Rider sub-charts under the candles and its reading card (22 Nov 2026)
 - **Mandeep (22 Nov):** "candle chart ke niche jo sub charts hain system unpar sab par sabkuch apply karre or analyse
   kare taaki main par dependent na ho or main chart clean rahe ... main chart ke side mein jo bhi analysis ya text hain

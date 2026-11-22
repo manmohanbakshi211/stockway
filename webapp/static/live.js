@@ -3327,6 +3327,35 @@ async function labSituation() {
     <p class="small muted" style="margin:6px 0 0">Learned ${v.made ? new Date(v.made * 1000).toLocaleString("en-IN") : "–"} · again every night after the Lab. <button class="btn" id="sit-learn" ${v.busy ? "disabled" : ""}>${v.busy ? "Learning…" : "Learn now"}</button></p>`;
   sitBtn();
 }
+/* 2.87: Trend Rider on every Lab day (lab/rider_lab.py), graded by days; reports only */
+async function labRider() {
+  const el = $("#lab-rider"); if (!el) return;
+  let v; try { v = await api("/api/lab/rider"); } catch (e) { el.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; return; }
+  const rs = (x) => x == null ? "–" : `<span class="nw ${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : "−"}₹${Math.abs(Math.round(x)).toLocaleString("en-IN")}</span>`;
+  const day = (x) => !x || !x.days ? `<span class="muted">–</span>` : `${rs(x.per_day)} a day · lower bound ${rs(x.lcb)} · ${x.days} days · ${Math.round((x.green || 0) * 100)}% green`;
+  const NAME = (k) => k === "fixed" ? "Bench exit (+30% / −20% / 60 min)" : k === "w15_nm3_em35" ? "As live (first look 09:30, no move 3 bars, −35%)"
+    : k.replace(/^w(\d+)_nm(\d+)_em(\d+)$/, (_, w, n, e) => `First look ${["09:30", "09:45", "10:00"][[15, 30, 45].indexOf(+w)] || w}, ${n === "99" ? "no no-move exit" : `no move ${n} bars`}, −${e}%`);
+  const block = (lab, r) => {
+    if (!r) return `<p class="small muted">${lab === "5y" ? "5-year Nifty / Bank Nifty: runs once that archive is downloaded." : "Not run yet: it runs every night after the Lab (market hours never), or Run now."}</p>`;
+    if (r.error) return `<p class="small down">${esc(r.error)}</p>`;
+    const vs = r.variants || {}, w = r.walk || {}, best = r.best_on_train;
+    const keys = ["w15_nm3_em35", "fixed", best].filter((k, i, a) => k && vs[k] && a.indexOf(k) === i);
+    return `<p class="small" style="margin:0 0 6px"><b>${esc(r.verdict || "")}</b></p>
+      <div class="table-wrap"><table class="small"><thead><tr><th>Way</th><th class="r">Trades</th><th class="r">Won</th><th>All days</th><th>Holdout (from ${esc(r.holdout_from || "–")})</th></tr></thead><tbody>
+      ${keys.map((k) => `<tr><td>${esc(NAME(k))}${k === best && k !== "w15_nm3_em35" ? ` <span class="pill p-amber">best on train</span>` : ""}</td><td class="r">${vs[k].trades}</td><td class="r">${vs[k].won == null ? "–" : Math.round(vs[k].won * 100) + "%"}</td><td>${day(vs[k])}</td><td><b>${day(vs[k].holdout)}</b></td></tr>`).join("")}</tbody></table></div>
+      <p class="small" style="margin:6px 0 0">Walk-forward (each month by the way that was best before it): ${day(w.walk)}; as live on the same months ${day(w.as_live)}; bench exit ${day(w.bench_exit)}.</p>
+      <p class="small muted" style="margin:4px 0 0">${r.sym_days} symbol-days · ${r.syms} symbols · ran ${esc((r.ran_at || "").replace("T", " "))} in ${r.secs}s. ${esc(r.note || "")}</p>`;
+  };
+  el.innerHTML = `<h3 style="margin-top:0">Trend Rider on the Lab's history <span class="pill p-amber">on trial</span></h3>
+    <p class="small" style="margin:0 0 8px">The option-buying setup and its exit replayed on every day of option history, 1 lot of each signal, real charges, judged by days (a day's trades are not independent). Reports only: no rule changes until you say so.</p>
+    <h4 style="margin:8px 0 4px">Stocks and indices, 1 year</h4>${block("1y", v["1y"])}
+    <h4 style="margin:12px 0 4px">Nifty and Bank Nifty, 5 years</h4>${block("5y", v["5y"])}
+    <p style="margin:8px 0 0"><button class="btn" id="rider-run" ${v.busy ? "disabled" : ""}>${v.busy ? "Running…" : "Run now"}</button>${v.error ? ` <span class="small down">${esc(v.error)}</span>` : ""}</p>`;
+  const b = $("#rider-run"); if (!b) return;
+  b.onclick = async () => { b.disabled = true; b.textContent = "Running…"; try { await api("/api/lab/rider/run", { method: "POST" }); } catch (e) { toast(e.message); }
+    const poll = async () => { if (state.page !== "lab") return; let x; try { x = await api("/api/lab/rider"); } catch (_) { return; } if (x.busy) setTimeout(poll, 5000); else labRider(); };
+    setTimeout(poll, 4000); };
+}
 function sitBtn() {
   const b = $("#sit-learn"); if (!b) return;
   b.onclick = async () => { b.disabled = true; b.textContent = "Learning…"; try { await api("/api/lab/situation/learn", { method: "POST" }); } catch (e) { toast(e.message); }
@@ -3366,6 +3395,7 @@ async function pageLab() {
           <li><b>Green "Passed all 3"</b> = good enough to paper-trade live. Most rules fail; that is normal and saves money.</li>
           <li><b>Click any strategy or rule</b> to see every stock and index it was tested on, with its result in each exam.</li>
           <li><b>The numbers:</b> trades · average ₹ per trade after charges · <b>t</b> = how sure (2+ strong, 1–2 some, below 1 could be luck) · green = % of days that ended in profit.</li></ol></div>
+      <div class="panel tight" id="lab-rider" style="margin-top:14px"></div>
       <div class="panel tight" id="lab-sit" style="margin-top:14px"></div>
       <div class="panel tight" id="lab-mass" style="margin-top:14px"></div>
       <div class="panel tight" id="lab-packs" style="margin-top:14px"></div>
@@ -3418,6 +3448,7 @@ async function pageLab() {
     drawMass();
     drawPacks();
     labSituation();
+    labRider();
     main.querySelectorAll("[data-rexp]").forEach((tr) => tr.onclick = (ev) => { if (ev.target.closest("input,label,a,button")) return;
       const row = main.querySelector(`[data-rrow="${CSS.escape(tr.dataset.rexp)}"]`); if (!row) return;
       row.hidden = !row.hidden; if (!row.hidden && !row.dataset.done) { row.dataset.done = "1"; labRuleDetail(row.firstElementChild, [tr.dataset.rexp], ["1y"]); } });
