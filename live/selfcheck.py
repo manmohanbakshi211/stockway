@@ -280,6 +280,14 @@ def static_checks(cfg: dict | None = None) -> list:
                   and "lab/factory.py" in _fac._SIG_MODULES,
                   "each symbol's rows kept in lab/bars_cache; a change to the build's code, strike / exit settings or cost "
                   "rates prices that symbol again in full; the table equals a full build (tests/test_bars_cache.py)"))
+    try:                                                  # 2.82: the ML trees model failed every night on an empty input
+        from lab import mlstrat as _mls
+        hgb_ok = type(_mls._model("hgb")[0]).__name__ == "KeepSeen"
+    except Exception:
+        hgb_ok = False
+    out.append(_c("ml_trees", "Strategy Lab ML: gradient-boosted trees accept an input empty in TRAIN (2.82)", hgb_ok,
+                  "inputs with no value in the training rows (VIX before 5 Aug 2026) are left out of the trees, which "
+                  "scikit-learn 1.9 otherwise refuses; the trees are the same as without that input (tests/test_2_82.py)"))
     from live import record as _rec                        # 2.81: two slow parts of the analysis loop moved off it
     lsrc81 = inspect.getsource(_eng.LiveEngine._loop)
     live81 = (cfg or {}).get("live") or {}

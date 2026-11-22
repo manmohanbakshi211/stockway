@@ -26,9 +26,10 @@ def _model(kind):
     from sklearn.linear_model import LogisticRegression
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
-    if kind == "hgb":
-        return HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05, max_leaf_nodes=31, min_samples_leaf=200,
-                                              l2_regularization=1.0, random_state=0)
+    if kind == "hgb":                     # 2.82: KeepSeen drops inputs empty in TRAIN (VIX before 5 Aug 2026), which
+        from .mlsafe import KeepSeen      # scikit-learn 1.9 refused ("window shape cannot be larger than input array shape")
+        return make_pipeline(KeepSeen(), HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05, max_leaf_nodes=31,
+                                                                        min_samples_leaf=200, l2_regularization=1.0, random_state=0))
     if kind == "logit":
         return make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(C=0.1, max_iter=3000))
     return make_pipeline(SimpleImputer(strategy="median"),

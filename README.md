@@ -118,6 +118,24 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.82: the ML strategies' gradient-boosted trees run again (22 Nov 2026)
+- **Mandeep (22 Nov):** "Karo" (fix the ML "hgb" error from the 22 Nov check).
+- **What failed:** every nightly ML round since 6 Nov logged "ML hgb / std (swing, atr2r, be3r): window shape
+  cannot be larger than input array shape" (13 nights x 4 exits on the Mac), so only logistic regression and random
+  forest were tested. Cause: VIX is in the 1-year Lab bar table only from 5 Aug 2026 (72 of 529 days), so the VIX input
+  is completely empty in the TRAIN part, and scikit-learn 1.9 (on the Mac: 1.9.1) refuses an all-missing column in
+  gradient-boosted trees. Logistic regression and random forest already skip such a column (their imputer drops it).
+- **Fix** (`lab/mlsafe.py` `KeepSeen`, used by `lab/mlstrat.py`): inputs with no value in the training rows are left out
+  of the trees, and the same inputs are left out when a saved model scores live. Older scikit-learn gave such a column no
+  splits, so the trees are identical to trees trained without it (checked in `tests/test_2_82.py`, bit-for-bit). Inputs
+  with some values are untouched. Saved models of the other two kinds are unchanged.
+- **What moves:** the next ML round tests 24 more versions (3 models instead of 2); a trees model still has to pass
+  validation and holdout like any other before it can fire live (paper only). No Lab rule scoring changed.
+- **Found on the way:** the VIX input carries nothing for the ML models yet (empty before Aug 2026 in TRAIN). Filling
+  VIX history into the bar table would give it a chance; not part of this release.
+- System page: a new check (ML trees accept an input empty in TRAIN). Tests: `tests/test_2_82.py` (4; the
+  empty-VIX test fails on 2.81 with the Mac's exact error).
+
 ## 2.81: the scorecard and the 5-minute scan no longer hold up the live loop (22 Nov 2026)
 - **Mandeep (22 Nov):** "go with it" (2.81 from the 22 Nov check: the analysis loop, which raises alerts and runs the
   alert tracker, test bench and strategy desk every second, stopped for 2-6 s every 5 minutes on the scorecard and for
