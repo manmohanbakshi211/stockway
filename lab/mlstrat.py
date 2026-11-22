@@ -77,12 +77,11 @@ def run(data_dir, book: F.Book | None = None, exits=None, log=print, should_stop
                     sd = {**s, "dir": d}
                     t = book.trades(sd)
                     res[d] = {name: F.stats(t[t["part"] == p], book.n_days[p]) for p, name in ((0, "train"), (1, "valid"), (2, "hold"))}
-                    res[d]["acct40"] = F.equity40(book.trades(sd, part=2, max_premium=F.SMALL_LOT_MAX))
                 for d in (1, -1):
                     r = res[d]
                     results.append({"id": f"{s['id']}-{'C' if d > 0 else 'P'}", "kind": kind, "model": KINDS[kind], "exit": ex,
                                     "syms": sorted({x if x in F.INDEX_SYMS else F.STOCKS for x in s["syms"]}),
-                                    "dir": d, "q": q, "thr": round(thr, 4), **{k: r[k] for k in ("train", "valid", "hold", "acct40")},
+                                    "dir": d, "q": q, "thr": round(thr, 4), **{k: r[k] for k in ("train", "valid", "hold")},
                                     "_model": m})
             log(f"  ML {KINDS[kind]} with exit {ex}: tested {len(QUANTS) * 2} versions ({time.time() - t0:.0f}s)")
     book.cols.pop("ml_score", None)

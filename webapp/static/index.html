@@ -28,48 +28,31 @@
       <li><a href="#/ask" data-page="ask">Ask Stockway <span class="rail-tag">AI</span></a></li>
       <li><a href="#/alerts" data-page="alerts">Alerts</a></li>
       <li><a href="#/chart" data-page="chart">Chart</a></li>
-      <li><a href="#/sym" data-page="sym">Option chain</a></li>
-      <li><a href="#/lens" data-page="lens">Options lens</a></li>
+      <li><a href="#/sym" data-group="chain">Option chain</a></li>
       <li><a href="#/scanner" data-page="scanner">Scanner</a></li>
       <li><a href="#/paper" data-page="paper">Paper trades <span class="nav-pnl" id="nav-pnl" title="Today's paper P&amp;L: booked + open"></span></a></li>
-      <li><a href="#/strict" data-page="strict">Strict track</a></li>
       <li><a href="#/ghanshyam" data-page="ghanshyam">Ghanshyam</a></li>
       <li><a href="#/watchlist" data-page="watchlist">Watchlist</a></li>
     </ul>
-    <p class="rail-group">Market intel</p>
+    <p class="rail-group">Market</p>
     <ul>
-      <li><a href="#/context" data-page="context">Market context</a></li>
-      <li><a href="#/world" data-page="world">World</a></li>
-      <li><a href="#/insiders" data-page="insiders">Insider trades</a></li>
-      <li><a href="#/briefs" data-page="briefs">Briefs</a></li>
-    </ul>
-    <p class="rail-group">Daily radar <small id="rail-ridx">Bank Nifty</small></p>
-    <ul>
-      <li><a href="#/grand" data-page="grand">All indices</a></li>
-      <li><a href="#/tomorrow" data-page="tomorrow">Tomorrow</a></li>
-      <li><a href="#/history" data-page="history">History</a></li>
-      <li><a href="#/biggest" data-page="biggest">Biggest days</a></li>
-      <li><a href="#/drivers" data-page="drivers">What drives moves</a></li>
-      <li><a href="#/check" data-page="check">Model check</a></li>
+      <li><a href="#/context" data-group="market">Market &amp; news</a></li>
+      <li><a href="#/grand" data-group="radar">Daily radar <small id="rail-ridx" class="rail-sub">Bank Nifty</small></a></li>
     </ul>
     <p class="rail-group">Test &amp; research</p>
     <ul>
       <li><a href="#/lab" data-page="lab">Strategy Lab <span class="rail-tag">AI</span></a></li>
       <li><a href="#/timemachine" data-page="timemachine">Time Machine <span class="rail-tag">10k</span></a></li>
-      <li><a href="#/desk" data-page="desk">Strategy desk</a></li>
-      <li><a href="#/scorecard" data-page="scorecard">Scorecard</a></li>
-      <li><a href="#/board" data-page="board">Strategy board <span class="rail-tag">live</span></a></li>
+      <li><a href="#/board" data-group="results">Results <span class="rail-tag">live</span></a></li>
     </ul>
     <p class="rail-group">Setup</p>
     <ul>
-      <li><a href="#/system" data-page="system">System &amp; logins</a></li>
-      <li><a href="#/connect" data-page="connect">Live setup</a></li>
-      <li><a href="#/data" data-page="data">Data &amp; settings</a></li>
+      <li><a href="#/system" data-group="system">System &amp; settings</a></li>
     </ul>
     <div class="rail-foot"><div id="rail-ai" class="rail-ai"></div><div id="rail-version" class="rail-version"></div><div id="rail-status"></div></div>
     </div>
   </nav>
-  <main id="main" tabindex="-1"></main>
+  <div class="content"><nav id="tabstrip" class="tabstrip" aria-label="Sections of this page" hidden></nav><main id="main" tabindex="-1"></main></div>
 </div>
 
 <aside class="drawer" id="drawer" aria-hidden="true">

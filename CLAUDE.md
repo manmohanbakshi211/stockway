@@ -34,7 +34,9 @@ that only ... you don't need to code again for same features just take from tanu
   (2.17: 594 of 594 identical.)
 - **Experiments are kept, not overwritten.** Lab runs, ebook rules, Claude ideas and live paper records accumulate;
   a failed trial is recorded as failed, not deleted.
-- Defaults that work (risk check, Focus, ₹40K preset, Strategy Lab promotion bar) change only on Mandeep's say-so.
+- Defaults that work (risk check, Focus, the capital set in the app, Strategy Lab promotion bar) change only on Mandeep's
+  say-so. No ₹40K anything (Mandeep, 23 Nov 2026: "pure system mein ab 40K jaisa kuch nahi hona chahiye"): size by the
+  capital chosen in the app.
 
 ## Gun and bullets (Mandeep, 31 Oct 2026)
 

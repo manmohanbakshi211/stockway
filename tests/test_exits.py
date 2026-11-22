@@ -77,7 +77,7 @@ def test_shadow_grades_every_style(tmp_path):
     sh.update(s, 120)
     sh.update(s, 4000, force=True)
     b = {r["style"]: r for r in board(st, "sim", days=100000)["styles"]}
-    assert b["current"]["avg_pct"] == 30.0 and b["atr2r"]["avg_pct"] == 30.0 and b["atr2r"]["n40"] == 1
+    assert b["current"]["avg_pct"] == 30.0 and b["atr2r"]["avg_pct"] == 30.0 and "n40" not in b["atr2r"]         # 2.92: no ₹40K subset
     assert set(b) == {"current", *X.STYLES}
 
 

@@ -504,7 +504,7 @@ def compare(data_dir) -> dict:
         return {"days": st.get("n_days"), "period": st.get("period"), "tried": st.get("tried_total", 0), "promoted": len(prom),
                 "strong": sum(v.get("evidence") in ("strong", "moderate") for v in prom),
                 "buy_strong": sum(v.get("evidence") in ("strong", "moderate") and v.get("dir") != 0 for v in prom),
-                "luck": round(st.get("tried_total", 0) * F.P_LUCK, 1), "plan40": (st.get("plan40") or {}).get("verdict"),
+                "luck": round(st.get("tried_total", 0) * F.P_LUCK, 1),
                 "updated": st.get("updated")}
     both = []
     ra, rb = a.get("rules", {}), b.get("rules", {})

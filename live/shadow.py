@@ -94,7 +94,8 @@ class ShadowExits:
 
 
 def board(store, source, days: int = 60) -> dict:
-    """Per exit style on live alerts: trades, average option return, wins, and the ₹40K subset."""
+    """Per exit style on live alerts: trades, average option return, wins. (2.92: no ₹40K subset; fits40 stays in the
+    table for the record only.)"""
     with store.lock:
         rows = store.db.execute("SELECT style, opt_pct, cost, fits40, day FROM plan_outcomes WHERE source=? "
                                 "AND day >= date('now', ?)", (source, f"-{days} day")).fetchall()
@@ -114,7 +115,7 @@ def board(store, source, days: int = 60) -> dict:
     for st, b in out.items():
         res.append({"style": st, "who": "current exit (premium %)" if st == CHAMPION else STYLES.get(st, {}).get("who", st),
                     "n": b["n"], "days": len(b["days"]), "avg_pct": round(b["sum"] / b["n"], 2), "win_pct": round(b["wins"] / b["n"] * 100, 1),
-                    "avg_rs": round(b["rs"] / b["n"]), "n40": b["n40"], "avg_rs40": round(b["rs40"] / b["n40"]) if b["n40"] else None})
+                    "avg_rs": round(b["rs"] / b["n"])})
     res.sort(key=lambda x: -x["avg_rs"])
     return {"styles": res, "champion": CHAMPION, "note": "Shadow only: every directional alert's option followed under each exit. "
             "Before charges. Needs a few weeks of alerts before a difference means anything."}

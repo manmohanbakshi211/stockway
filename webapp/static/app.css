@@ -96,6 +96,16 @@ main:focus { outline: none; }
 .rail-foot b { color: var(--ink); font-weight: 600; }
 
 main { padding: 36px 44px 120px; max-width: 1180px; width: 100%; outline: none; }
+.content { min-width: 0; }
+/* 2.92: tabs of a page group (Market & news, Daily radar, Results, System & settings, Option chain) */
+.tabstrip { display: flex; gap: 4px; flex-wrap: wrap; padding: 22px 44px 0; max-width: 1180px; }
+.tabstrip[hidden] { display: none; }
+.tabstrip .tab { padding: 6px 12px; border-radius: var(--radius); border: 1px solid var(--rule); background: var(--paper);
+  color: var(--ink); text-decoration: none; font-weight: 500; font-size: 14px; }
+.tabstrip .tab:hover { background: var(--fog); }
+.tabstrip .tab[aria-current="page"] { background: var(--signal-soft); color: var(--signal); border-color: var(--signal); font-weight: 650; }
+.tabstrip:not([hidden]) + main { padding-top: 18px; }
+.rail-sub { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: 4px; }
 
 /* ---------- type */
 h1, h2, h3 { margin: 0; line-height: 1.15; }
@@ -285,6 +295,9 @@ input[type=text], input[type=time], input[type=password], select {
   .rail li a { white-space: nowrap; padding: 7px 9px; }
   .rail-foot { display: none; }
   main { padding: 24px 16px 120px; }
+  .tabstrip { padding: 14px 16px 0; flex-wrap: nowrap; overflow-x: auto; }
+  .tabstrip .tab { white-space: nowrap; }
+  .tabstrip:not([hidden]) + main { padding-top: 14px; }
   .facts, .kpis { grid-template-columns: 1fr; }
   .fact + .fact, .kpi + .kpi { border-left: 0; border-top: 1px solid var(--rule-soft); }
   .drv, .drv-legend { grid-template-columns: 1fr 1fr 1fr; padding-left: 14px; padding-right: 14px; }

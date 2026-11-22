@@ -123,8 +123,13 @@ def test_daily_backup_copies_checks_and_keeps_a_week(tmp_path, monkeypatch):
     assert set(r) == {"live.db", "bench.db"}                               # a token file is never copied
     days = sorted(p.name for p in (tmp_path / "backups").iterdir())
     assert days == ["2026-11-03", "2026-11-04"]                            # older copies dropped
-    c = sqlite3.connect(tmp_path / "backups" / "2026-11-04" / "bench.db")
+    import gzip                                                            # 2.92: copies are gzip-compressed
+    gz = tmp_path / "backups" / "2026-11-04" / "bench.db.gz"
+    assert gz.exists() and not (tmp_path / "backups" / "2026-11-04" / "bench.db").exists() and r["bench.db"]["gz"]
+    (tmp_path / "restored.db").write_bytes(gzip.decompress(gz.read_bytes()))     # restore = gunzip
+    c = sqlite3.connect(tmp_path / "restored.db")
     assert c.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 500
+    assert BK.DEFAULTS["keep"] == 3 and BK.cfg is not None
     e = types.SimpleNamespace(data_dir=tmp_path, running=True, log=lambda *a: None)
     ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
     assert not BK.tick(e, dt.datetime(2026, 11, 5, 17, 0, tzinfo=ist))     # not while the scanner runs

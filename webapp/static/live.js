@@ -413,8 +413,8 @@ function exitBoardLive(x) {
   const rs = (v) => v == null ? "–" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}₹${Math.abs(v).toLocaleString("en-IN")}</span>`;
   return `<div class="panel tight" style="margin-top:14px"><h3>Stop-loss &amp; target styles on live alerts <span class="pill p-amber">shadow</span></h3>
     <p class="small muted">${esc(x.note)}</p>
-    <div class="table-wrap"><table class="mini"><thead><tr><th>Exit style</th><th class="r">Alerts</th><th class="r">Days</th><th class="r">Option avg</th><th class="r">Won</th><th class="r">₹ per lot</th><th class="r" title="Only alerts whose option lot costs ₹10,000 or less">Lots ≤ ₹10K: ₹/lot</th></tr></thead><tbody>
-    ${x.styles.map((r) => `<tr><td>${r.style === "current" ? "<b>Current exit</b> (champion)" : esc(r.style)} <small class="muted">${esc(r.who)}</small></td><td class="r">${r.n}</td><td class="r">${r.days}</td><td class="r">${r.avg_pct >= 0 ? "+" : ""}${r.avg_pct}%</td><td class="r">${r.win_pct}%</td><td class="r">${rs(r.avg_rs)}</td><td class="r">${r.n40 ? rs(r.avg_rs40) + ` <small class="muted">(${r.n40})</small>` : "–"}</td></tr>`).join("")}</tbody></table></div></div>`;
+    <div class="table-wrap"><table class="mini"><thead><tr><th>Exit style</th><th class="r">Alerts</th><th class="r">Days</th><th class="r">Option avg</th><th class="r">Won</th><th class="r">₹ per lot</th></tr></thead><tbody>
+    ${x.styles.map((r) => `<tr><td>${r.style === "current" ? "<b>Current exit</b> (champion)" : esc(r.style)} <small class="muted">${esc(r.who)}</small></td><td class="r">${r.n}</td><td class="r">${r.days}</td><td class="r">${r.avg_pct >= 0 ? "+" : ""}${r.avg_pct}%</td><td class="r">${r.win_pct}%</td><td class="r">${rs(r.avg_rs)}</td></tr>`).join("")}</tbody></table></div></div>`;
 }
 
 function riskLine(r) {

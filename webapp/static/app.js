@@ -746,13 +746,42 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawe
 
 /* ---------------- router */
 const PAGES = { tomorrow: pageTomorrow, history: pageHistory, biggest: pageBiggest, drivers: pageDrivers, check: pageCheck, data: pageData, grand: pageGrand };
+/* 2.92 (Mandeep, 23 Nov 2026: "kuch lite karne ke liye merge ho sakta hai toh" -> menu in tabs): related pages share one
+   menu entry and a row of tabs on top; every page, link and bookmark stays as it was. */
+const TABS = {
+  chain: { label: "Option chain", tabs: [["sym", "Option chain"], ["lens", "Options lens"]] },
+  market: { label: "Market & news", tabs: [["context", "Market context"], ["world", "World"], ["insiders", "Insider trades"], ["briefs", "Briefs"]] },
+  radar: { label: "Daily radar", tabs: [["grand", "All indices"], ["tomorrow", "Tomorrow"], ["history", "History"], ["biggest", "Biggest days"], ["drivers", "What drives moves"], ["check", "Model check"]] },
+  results: { label: "Results", tabs: [["board", "Strategy board"], ["strict", "Strict track"], ["scorecard", "Scorecard"], ["desk", "Strategy desk"]] },
+  system: { label: "System & settings", tabs: [["system", "System & logins"], ["connect", "Live setup"], ["data", "Data & settings"]] },
+};
+function groupOf(page) { return Object.keys(TABS).find((g) => TABS[g].tabs.some((t) => t[0] === page)) || null; }
+function renderTabs(page) {
+  const el = document.getElementById("tabstrip"), g = groupOf(page);
+  if (!el) return;
+  if (!g) { el.hidden = true; el.innerHTML = ""; return; }
+  try { localStorage.setItem("tab_" + g, page); } catch (_) {}
+  el.hidden = false;
+  el.innerHTML = TABS[g].tabs.map(([p, l]) => `<a href="#/${p}" class="tab"${p === page ? ' aria-current="page"' : ""}>${l}</a>`).join("");
+  const a = document.querySelector(`.rail a[data-group="${g}"]`);
+  if (a) a.setAttribute("href", "#/" + page);                    // the menu entry opens the tab you used last
+}
 async function route() {
   const page = (location.hash.replace("#/", "") || "live").split("?")[0];
   const fn = PAGES[page] || PAGES.live || pageTomorrow;
   document.querySelectorAll(".rail a[data-page]").forEach((a) => { if (a.dataset.page === page) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+  const grp = groupOf(page);
+  document.querySelectorAll(".rail a[data-group]").forEach((a) => { if (a.dataset.group === grp) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+  renderTabs(page);
   if (state.page !== page) { main.innerHTML = `<p class="muted">Loading…</p>`; window.scrollTo(0, 0); }
   state.page = page;
   try { await fn(); } catch (e) { main.innerHTML = `<div class="empty"><h2>This page couldn't load</h2><p>${esc(e.message)}</p><button class="btn" onclick="location.reload()">Reload</button></div>`; }
 }
 window.addEventListener("hashchange", () => { route(); main.focus({ preventScroll: true }); });
 document.addEventListener("DOMContentLoaded", async () => { await Promise.all([loadStatus(), loadIndices()]); loadVersion(); await route(); setInterval(loadStatus, 30000); setInterval(loadVersion, 15 * 60000); });
+
+document.addEventListener("DOMContentLoaded", () => {                // 2.92: each menu group opens the tab used last
+  document.querySelectorAll(".rail a[data-group]").forEach((a) => {
+    try { const last = localStorage.getItem("tab_" + a.dataset.group); if (last && groupOf(last) === a.dataset.group) a.setAttribute("href", "#/" + last); } catch (_) {}
+  });
+});

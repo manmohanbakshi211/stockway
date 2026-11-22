@@ -118,6 +118,27 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.92: A shorter menu with tabs, smaller backups, no ₹40K left on screen (23 Nov 2026)
+- **Mandeep (23 Nov), after the clean-up check:** alerts unchanged; candle patterns keep being observed on the test bench
+  ("patterens to observe karte raho ... system patterens achhe se pakdna seekhe"); "pure system mein ab 40K jaisa kuch
+  nahi hona chahiye"; backups 3 days + compressed; data/tanu + .venv-tanu deleted; menu in tabs.
+- **Menu: 29 entries -> 15**, nothing removed. Related pages share one entry and a row of tabs on top:
+  Option chain (chain, Options lens), Market & news (Market context, World, Insider trades, Briefs), Daily radar (All
+  indices, Tomorrow, History, Biggest days, What drives moves, Model check), Results (Strategy board, Strict track,
+  Scorecard, Strategy desk), System & settings (System & logins, Live setup, Data & settings). Each entry opens the tab
+  used last; every old link and bookmark (#/world, #/strict, ...) still opens its page, with its tabs.
+- **Backups** (`live/backup.py`, `rules/backup.json`): each daily copy is checked, then gzip-compressed (restore:
+  `gunzip -k live.db.gz` while the app is closed), and 3 days are kept (were 7 x ~700 MB = 3.9 GB on a 91% full disk).
+- **₹40K:** the exit board's "lots <= ₹10K" column, the ML strategies' ₹40K account and the 5-year Lab panel's ₹40K line
+  are gone; CLAUDE.md says the capital set in the app. Left, on purpose: the Lab's own nightly ₹40K report inside
+  `lab/factory.py` (not shown anywhere): that file is part of the Lab table's fingerprint, and any edit makes the Mac
+  rebuild every 1-year and 5-year table (days of work); it goes with the next change that has to touch that file.
+- The clean-up check itself (Mac data, 5-19 Nov): 41,388 alerts in 10 days; after costs only ORB, breakout-retest, day
+  high / low and the strategy files were positive on the test bench; candle patterns ~40k bench trades a day at -1.8%
+  to -3.4%. Mandeep kept the alerts and the candle bench as they are.
+- Headless check: menu and tabs at 1440 and 390, light and dark, no console errors, no sideways scroll.
+  Tests: `tests/test_menu_tabs.py` (1); backup and exit-board tests updated.
+
 ## 2.91: Live prices on every page, as fast as the chart (23 Nov 2026)
 - **Mandeep (23 Nov):** "har chart jitni speed se upstox mein chal rha hai utni hi speed se app par bhi ho. prices live aa
   rhe ho saari jagah par live page, paper trade ya jahan bhi sab same speed as upstox".

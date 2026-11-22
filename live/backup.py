@@ -3,13 +3,15 @@
 The app's own record (alerts and their grades, paper and test-bench trades, next-candle and candle-forecast grades,
 the stored readings) lives in two SQLite files, live.db and bench.db, and nowhere else. Once a day after the close
 (after 16:30, while the scanner is not running) each is copied with SQLite's own backup (safe while the app keeps
-writing), checked (quick_check), and kept for `keep` days in data/backups/<day>/. The folder can be moved with
+writing), checked (quick_check), compressed (2.92: gzip, restore with `gunzip -k live.db.gz`) and kept for `keep` days
+(2.92: 3, were 7; Mandeep 23 Nov: the Mac's disk was 91% full) in data/backups/<day>/. The folder can be moved with
 rules/backup.json "dir" (an iCloud Drive or external-disk folder keeps a copy off this disk). Token, key and settings
 files are never copied. Read-only towards brokers: nothing here talks to a broker.
 """
 from __future__ import annotations
 
 import datetime as dt
+import gzip
 import json
 import shutil
 import sqlite3
@@ -21,7 +23,8 @@ from .clock import IST
 
 ROOT = Path(__file__).resolve().parents[1]
 FILE = ROOT / "rules" / "backup.json"
-DEFAULTS = {"on": True, "after": "16:30", "keep": 7, "dir": None, "files": ["live.db", "bench.db"], "min_free_gb": 5}
+DEFAULTS = {"on": True, "after": "16:30", "keep": 3, "dir": None, "files": ["live.db", "bench.db"], "min_free_gb": 5,
+            "compress": True}
 NEVER = ("token", "dhan_", "user_settings", "keychain", ".env")
 LAST: dict = {"at": None, "ok": None, "dir": None, "files": {}, "error": None, "running": False}
 _LOCK = threading.Lock()
@@ -78,8 +81,19 @@ def run(data_dir, day: str | None = None, log=print) -> dict:
         if not ok:
             tmp.unlink(missing_ok=True)
             raise RuntimeError(f"{name}: the copy failed its check (kept the earlier copies)")
-        tmp.replace(dst)
-        res[name] = {"mb": round(dst.stat().st_size / 1e6, 1), "secs": round(time.time() - t0, 1)}
+        if c.get("compress", True):            # 2.92: gzip the checked copy (about 3-5x smaller); restore: gunzip -k <file>.gz
+            gz = out_dir / (name + ".gz")
+            gtmp = out_dir / (name + ".gz.tmp")
+            with open(tmp, "rb") as fi, gzip.open(gtmp, "wb", compresslevel=6) as fo:
+                shutil.copyfileobj(fi, fo, 1 << 20)
+            gtmp.replace(gz)
+            tmp.unlink(missing_ok=True)
+            dst.unlink(missing_ok=True)                 # an uncompressed copy of an earlier run of the same day
+            dst = gz
+        else:
+            tmp.replace(dst)
+        res[name] = {"mb": round(dst.stat().st_size / 1e6, 1), "secs": round(time.time() - t0, 1),
+                     **({"gz": True} if dst.suffix == ".gz" else {})}
     (out_dir / "done.json").write_text(json.dumps({"at": time.time(), "files": res}))
     kept = sorted(p for p in base.iterdir() if p.is_dir() and len(p.name) == 10 and (p / "done.json").exists())
     for old in kept[:-int(c["keep"])]:
