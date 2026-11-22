@@ -118,6 +118,32 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.83: Multiverse strict pick rule, in shadow (22 Nov 2026)
+- **Mandeep (22 Nov):** "Go", after checking the evening AI analyst's three flags (22 Nov note):
+  - "A test-bench rule leaked into regime picks": it shows (quiet day: "Library / book rule (test bench only)",
+    166 trades), but nothing leaks. Regime picks are display only, and the Multiverse pick paper account takes
+    test-bench signals by design. The weakness is that this pick stands on 2 days.
+  - "The lcb ignores that trades cluster by day": not so in the code. The bound already uses the larger of the
+    per-signal and the per-day (cluster) error, with Student's t on the number of days. But with 2-4 very uneven days
+    one big day can still carry a timeline. The 5 live picks stand on 4-9 days, one green on only 4 of 8; the usual
+    walk-forward's +16.88% comes from one day (19 Nov +49%); without it, -0.95%.
+  - "Brain AUC under 0.5: flipped label": no. On data with a planted edge the brain gives AUC 0.65-0.73 and its top
+    10% beats all signals every day. On the real 8 unseen days its AUC averages 0.48 (above 0.5 on 4): noise, no edge
+    yet. It is already "on trial", information only, never a filter.
+- **Strict rule** (`lab/multiverse.py` `day_lcb_table`, `strict_table`; bullet `rules/multiverse.json` "strict"):
+  a timeline needs 5+ days with trades, green on 60%+ of them, and is ranked by the lower of the usual bound and a
+  day-level bound where every day's average counts once (a day with 40 signals is one day, like a day with 1). Its
+  best list, would-be paper picks, best by day type and its own walk-forward (with the usual picks on the same days,
+  like for like) are shown on the Multiverse panel. **Shadow only:** the Multiverse pick paper account keeps the usual
+  picks until Mandeep says switch.
+- **Results do not move:** on an 8-day test universe the new code's usual outputs (best, luck, champion, by day type,
+  live picks, walk-forward, verdict table) are identical to 2.82's; the strict picks are extra keys. Test: a timeline
+  with 40 winners on one day and one loser on each of 6 other days gets a usual bound of +32% and a day-level bound of
+  -28%: the usual rule picks it, the strict rule picks the steady one (green 6 of 6).
+- Every pick also shows its day-level bound ("every day once"); the Multiverse pick list shows its green days.
+- Fixed: the walk-forward's "main account's way" printed float32 noise (-1.309999942779541); now -1.31.
+- System page: a new check (strict rule in shadow). Tests: `tests/test_2_83.py` (4).
+
 ## 2.82: the ML strategies' gradient-boosted trees run again (22 Nov 2026)
 - **Mandeep (22 Nov):** "Karo" (fix the ML "hgb" error from the 22 Nov check).
 - **What failed:** every nightly ML round since 6 Nov logged "ML hgb / std (swing, atr2r, be3r): window shape

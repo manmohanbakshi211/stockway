@@ -422,6 +422,8 @@ class Acc:
         self.c2 = np.zeros((K, E), np.float32)          # sum over days of (day total)^2: days, not signals, are the
         self.cn = np.zeros((K, E), np.float32)          # independent units (signals of one day move together)
         self.n2 = np.zeros(K, np.float64)
+        self.d1 = None if light else np.zeros((K, E), np.float32)   # 2.83: sum over days of the day's average a trade,
+        self.d2 = None if light else np.zeros((K, E), np.float32)   # and its square: every day counts once (strict picks)
 
     def add(self, s1, s2, w, n):
         self.s1 += s1
@@ -432,6 +434,10 @@ class Acc:
         if self.w is not None:
             self.w += w
             self.pos += ((s1 > 0) & (n[:, None] > 0)).astype(np.int16)
+        if self.d1 is not None:
+            avg = np.where(n[:, None] > 0, s1 / np.maximum(n, 1)[:, None], 0).astype(np.float32)
+            self.d1 += avg
+            self.d2 += avg * avg
         self.n += n
         self.days += (n > 0).astype(np.int32)
 
@@ -474,11 +480,52 @@ def lcb_table(acc: Acc, z: float, min_n: int, min_days: int):
     return np.where(ok, lcb, -np.inf), mean
 
 
-def top_of(accs: dict, z, min_n, min_days, k=1, keep=None):
-    """The k best (chunk, filter, exit) by lower confidence bound across all chunks. keep(chunk, fi) -> bool."""
+def day_lcb_table(acc: Acc, z: float):
+    """2.83: lower bound of the average of the DAYS: each day's average net % a trade counts once, however many signals
+    it had (a big day with 80 signals is one day, like a small day with 3). Student's t on the number of days."""
+    G = acc.days[:, None].astype(np.float64)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = acc.d1 / G
+        var = np.maximum(acc.d2 / G - mean * mean, 0) * (G / np.maximum(G - 1, 1))
+        lcb = mean - t_crit(G - 1, z) * np.sqrt(var / G)
+    return np.where(G >= 2, lcb, -np.inf), mean
+
+
+def strict_rule(c: dict) -> dict:
+    """2.83 bullet (rules/multiverse.json "strict"): the shadow pick rule."""
+    sc = dict(c.get("strict") or {})
+    return {"on": bool(sc.get("on", True)), "min_days": int(sc.get("min_days", 5)),
+            "min_green_share": float(sc.get("min_green_share", 0.6))}
+
+
+def strict_table(acc: Acc, z: float, min_n: int, sc: dict):
+    """2.83 strict (shadow) bound: needs min_days days with trades and green on min_green_share of them, then the lower
+    of the usual bound (signals and days) and the day-level bound (every day once)."""
+    lcb, mean = lcb_table(acc, z, min_n, max(2, int(sc["min_days"])))
+    dl, _dm = day_lcb_table(acc, z)
+    green = acc.pos / np.maximum(acc.days[:, None], 1)
+    ok = np.isfinite(lcb) & (green >= float(sc["min_green_share"]) - 1e-9)
+    return np.where(ok, np.minimum(lcb, dl), -np.inf), mean
+
+
+def cell_day_lcb(acc: Acc, fi: int, ei: int, z: float) -> float | None:
+    """The day-level bound of one (filter, exit), for showing next to a pick."""
+    if acc.d1 is None:
+        return None
+    G = float(acc.days[fi])
+    if G < 2:
+        return None
+    mean = float(acc.d1[fi, ei]) / G
+    var = max(float(acc.d2[fi, ei]) / G - mean * mean, 0.0) * G / (G - 1)
+    return round(mean - float(t_crit(np.array([G - 1]), z)[0]) * math.sqrt(var / G), 2)
+
+
+def top_of(accs: dict, z, min_n, min_days, k=1, keep=None, table=None):
+    """The k best (chunk, filter, exit) by lower confidence bound across all chunks. keep(chunk, fi) -> bool.
+    table(acc) -> (bound, mean) replaces the usual bound (2.83: the strict shadow rule)."""
     cands = []
     for ck, acc in accs.items():
-        lcb, mean = lcb_table(acc, z, min_n, min_days)
+        lcb, mean = table(acc) if table is not None else lcb_table(acc, z, min_n, min_days)
         if keep is not None:
             rows = np.array([keep(ck, fi) for fi in range(lcb.shape[0])])
             lcb = np.where(rows[:, None], lcb, -np.inf)
@@ -513,6 +560,8 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
     delays = [int(x) for x in c["delays"]]
     chunks = [(s, di, d) for s in strikes for di, d in enumerate(delays)]
     z, min_n, min_days = float(c.get("lcb_z", 2.0)), int(c.get("min_trades", 30)), int(c.get("min_days", 1))
+    sc = strict_rule(c)                                    # 2.83: the strict pick rule, in shadow next to the usual one
+    stab = (lambda acc: strict_table(acc, z, min_n, sc)) if sc["on"] else None
     # pass 0: which alert types have enough signals to get their own filters
     log(f"Multiverse: {len(days)} recorded days ({days[0]} to {days[-1]})")
     loaded = {}
@@ -572,6 +621,7 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
         perm = rng.permutation(D["n"])
         # walk-forward: pick from the days before (never this one), then see what this day did
         picks = top_of(accs, z, min_n, min_days, k=port) if any(a.n.max() > 0 for a in accs.values()) else []
+        s_picks = top_of(accs, z, min_n, min_days, k=port, table=stab) if (stab is not None and picks) else []
         today = {}
         for ck in chunks:
             strike, di, d = ck
@@ -601,7 +651,9 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
             if champ_ei is not None:
                 s1, n = today[champ_chunk]
                 rec["champ_n"] = int(n[champ_fi])
-                rec["champ_avg"] = round(float(s1[champ_fi, champ_ei]) / n[champ_fi], 2) if n[champ_fi] else None
+                rec["champ_avg"] = round(float(s1[champ_fi, champ_ei]) / float(n[champ_fi]), 2) if n[champ_fi] else None
+            if stab is not None:                           # 2.83: what the strict picks (from the days before) did today
+                rec["strict"] = _walk_picks(s_picks, today) if s_picks else None
             walk.append(rec)
         log(f"Multiverse: {day} done ({D['n']:,} signals)")
     # the final board: every day so far
@@ -628,7 +680,8 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
         return {"n": int(n), "avg": round(float(mean), 2) if n else None, "sd": round(math.sqrt(var), 2) if n else None,
                 "win": round(float(acc.w[fi, ei] / n * 100), 1) if n and acc.w is not None else None,
                 "lcb": round(lv, 2) if n and math.isfinite(lv) else None,
-                "green_days": int(acc.pos[fi, ei]) if acc.pos is not None else None, "days": int(acc.days[fi])}
+                "green_days": int(acc.pos[fi, ei]) if acc.pos is not None else None, "days": int(acc.days[fi]),
+                "day_lcb": cell_day_lcb(acc, fi, ei, z) if n else None}      # 2.83: every day counted once
     res["best"] = [{**describe(ck, fi, ei), **stats(accs[ck], fi, ei)} for _l, ck, fi, ei, _m in best]
     res["luck"] = {**describe(*luck_best[0][1:4]), **stats(luck[luck_best[0][1]], luck_best[0][2], luck_best[0][3])} if luck_best else None
     if champ_ei is not None:
@@ -669,6 +722,42 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
                           keep=lambda ck, fi: ck[2] == 0 and ck[0] in live_strikes and not defs[fi].get("champion")),
                    int(c.get("live_picks", 5)), by_filter=True)
     res["live_picks"] = [{**describe(ck, fi, ei), **stats(accs[ck], fi, ei)} for lcb, ck, fi, ei, _m in lp if lcb > 0]
+    if stab is not None:                                   # 2.83: the strict rule's picks, shadow only (nothing trades them)
+        top_n, lp_n = int(c.get("top", 30)), int(c.get("live_picks", 5))
+        s_best = _distinct(top_of(accs, z, min_n, min_days, k=top_n * 40, table=stab), top_n, by_idea=True)
+        s_lp = _distinct(top_of(accs, z, min_n, min_days, k=lp_n * 20, table=stab,
+                                keep=lambda ck, fi: ck[2] == 0 and ck[0] in live_strikes and not defs[fi].get("champion")),
+                         lp_n, by_filter=True)
+        s_reg = []
+        for si, sp in enumerate(singles):
+            if sp.get("cat") != "regime":
+                continue
+            t = top_of(accs, z, min_n, min_days, k=1, table=stab, keep=lambda ck, fi, si=si: defs[fi].get("single") == si)
+            s_reg.append({"regime": sp["is"], "name": sp["name"], **describe(*t[0][1:4]), **stats(accs[t[0][1]], t[0][2], t[0][3]),
+                          "strict_lcb": round(t[0][0], 2)} if t else {"regime": sp["is"], "name": sp["name"], "n": 0})
+        sw = [w["strict"] for w in walk if w.get("strict")]
+        for w in sw:
+            for p in w["picks"]:
+                ck = (p["chunk"][0], delays.index(p["chunk"][1]), p["chunk"][1])
+                p.update(describe(ck, p["filter"], p["exit"]))
+        res["strict"] = {
+            "rule": sc,
+            "best": [{**describe(ck, fi, ei), **stats(accs[ck], fi, ei), "strict_lcb": round(lv, 2)} for lv, ck, fi, ei, _m in s_best],
+            "live_picks": [{**describe(ck, fi, ei), **stats(accs[ck], fi, ei), "strict_lcb": round(lv, 2)}
+                           for lv, ck, fi, ei, _m in s_lp if lv > 0],
+            "by_regime": s_reg,
+            "walk_total": {"days": len(sw), "best_n": int(sum(w["best_n"] for w in sw)),
+                           "best_avg": _wavg([(w["best_avg"], w["best_n"]) for w in sw]),
+                           "port_n": int(sum(w["port_n"] for w in sw)),
+                           "port_avg": _wavg([(w["port_avg"], w["port_n"]) for w in sw]),
+                           # the usual picks on the same days, so the two are compared like for like
+                           "usual_best_n": int(sum(w["best_n"] for w in walk if w.get("strict"))),
+                           "usual_best_avg": _wavg([(w["best_avg"], w["best_n"]) for w in walk if w.get("strict")]),
+                           "usual_port_n": int(sum(w["port_n"] for w in walk if w.get("strict"))),
+                           "usual_port_avg": _wavg([(w["port_avg"], w["port_n"]) for w in walk if w.get("strict")])},
+            "note": (f"Shadow: a pick needs {sc['min_days']}+ days with trades, green on {round(sc['min_green_share'] * 100)}%+ of "
+                     "them, and is ranked by the lower of the usual bound and the day-level bound (every day counted once). "
+                     "Nothing trades these; the Multiverse pick account keeps the usual picks until Mandeep says switch.")}
     # 2.61 the verdict table: for every filter, its best way (strike, entry time, exit) and record, so a live alert can be
     # told "signals like this one did X" (live/engine.py _mv_verdict; information only)
     table = []
@@ -702,6 +791,29 @@ def run(data_dir, log=print, should_stop=lambda: False, days: list | None = None
         f"{res['best'][0]['lcb'] if res['best'] else '–'}% vs luck {res['luck']['lcb'] if res['luck'] else '–'}%; "
         f"{len(res['live_picks'])} live pick(s)")
     return res
+
+
+def _walk_picks(picks: list, today: dict) -> dict:
+    """2.83: one walk-forward day for a list of picks chosen from the days before: what each did today."""
+    rec = {"picks": []}
+    tot, nn = 0.0, 0.0
+    for lcb, ck, fi, ei, mean in picks:
+        s1, n = today[ck]
+        rec["picks"].append({"chunk": list(ck[::2]), "filter": fi, "exit": ei, "train_lcb": round(lcb, 2),
+                             "train_avg": round(mean, 2), "n": int(n[fi]), "sum": round(float(s1[fi, ei]), 2)})
+        tot += float(s1[fi, ei])
+        nn += float(n[fi])
+    rec["best_n"] = rec["picks"][0]["n"]
+    rec["best_avg"] = round(rec["picks"][0]["sum"] / rec["picks"][0]["n"], 2) if rec["picks"][0]["n"] else None
+    rec["port_n"] = int(nn)
+    rec["port_avg"] = round(tot / nn, 2) if nn else None
+    return rec
+
+
+def _wavg(pairs: list):
+    pairs = [(float(a), float(n)) for a, n in pairs if a is not None and n]
+    tn = sum(n for _a, n in pairs)
+    return round(sum(a * n for a, n in pairs) / tn, 2) if tn else None
 
 
 def _distinct(cands: list, k: int, by_filter: bool = False, by_idea: bool = False) -> list:

@@ -280,6 +280,16 @@ def static_checks(cfg: dict | None = None) -> list:
                   and "lab/factory.py" in _fac._SIG_MODULES,
                   "each symbol's rows kept in lab/bars_cache; a change to the build's code, strike / exit settings or cost "
                   "rates prices that symbol again in full; the table equals a full build (tests/test_bars_cache.py)"))
+    try:                                                  # 2.83: the multiverse's strict pick rule, in shadow
+        from lab import multiverse as _mvx
+        src_ = _mvx.strict_rule(_mvx.cfg())
+        mv_ok = hasattr(_mvx, "day_lcb_table") and "table=stab" in inspect.getsource(_mvx.run)
+        mv_det = (f"shadow: {src_['min_days']}+ days, green on {round(src_['min_green_share'] * 100)}%+ of them, ranked by the lower "
+                  "of the usual and the day-level bound; its walk-forward is shown next to the usual picks; the Multiverse "
+                  "pick paper account keeps the usual picks" if src_["on"] else "off (rules/multiverse.json strict.on false)")
+    except Exception as e:
+        mv_ok, mv_det = False, str(e)[:160]
+    out.append(_c("mv_strict", "Multiverse strict pick rule: every day counted once (2.83)", mv_ok, mv_det))
     try:                                                  # 2.82: the ML trees model failed every night on an empty input
         from lab import mlstrat as _mls
         hgb_ok = type(_mls._model("hgb")[0]).__name__ == "KeepSeen"

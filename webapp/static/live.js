@@ -4079,12 +4079,20 @@ async function drawMultiverse() {
     el.innerHTML = head + `<p class="small muted">${esc(m.note || "Not run yet.")}</p>`;
   } else {
     const wt = m.walk_total || {}, lk = m.luck || {}, ch = m.champion || {};
+    const dayb = (b) => b.day_lcb != null ? ` · every day once ${pc(b.day_lcb)}` : "";      // 2.83: the day-level bound
     const best = (m.best || []).slice(0, 10).map((b) => `<li><b>${pc(b.avg)}</b> a trade × ${nf(b.n)} · won ${b.win != null ? b.win + "%" : "–"} ·
-        lower bound <b>${pc(b.lcb)}</b> · green days ${b.green_days ?? "–"} of ${b.days}<br><span class="muted">${esc(b.words)}</span></li>`).join("");
+        lower bound <b>${pc(b.lcb)}</b>${dayb(b)} · green days ${b.green_days ?? "–"} of ${b.days}<br><span class="muted">${esc(b.words)}</span></li>`).join("");
     const walk = (m.walk || []).map((w) => `<li><b>${esc(w.day)}</b>: pick ${pc(w.best_avg)} × ${w.best_n} · top ${w.picks.length} ${pc(w.port_avg)} × ${w.port_n} ·
-        main account's way ${pc(w.champ_avg)} × ${w.champ_n ?? 0}<br><span class="muted">${esc((w.picks[0] || {}).words || "")}</span></li>`).join("");
+        main account's way ${pc(w.champ_avg)} × ${w.champ_n ?? 0}${w.strict ? ` · <span class="mv-strict">strict pick ${pc(w.strict.best_avg)} × ${w.strict.best_n}, its top ${w.strict.picks.length} ${pc(w.strict.port_avg)} × ${w.strict.port_n}</span>` : ""}<br><span class="muted">${esc((w.picks[0] || {}).words || "")}</span></li>`).join("");
+    const st = m.strict || null, swt = (st && st.walk_total) || {};
+    const strictHtml = !st ? "" : `<h4>Strict rule <span class="muted small">shadow: nothing trades it</span></h4>
+      <p class="small">${esc(st.note || "")}</p>
+      <p class="small">${swt.days ? `On ${swt.days} day${swt.days === 1 ? "" : "s"} it never saw: strict pick <b>${pc(swt.best_avg)}</b> × ${nf(swt.best_n)}, its top 5 <b>${pc(swt.port_avg)}</b> × ${nf(swt.port_n)} ·
+        usual pick on the same days ${pc(swt.usual_best_avg)} × ${nf(swt.usual_best_n)}, its top 5 ${pc(swt.usual_port_avg)} × ${nf(swt.usual_port_n)}.` : `Its walk-forward starts once a pick has ${st.rule ? st.rule.min_days : 5}+ days behind it.`}</p>
+      ${(st.best || []).length ? `<ol class="small mv-list">${st.best.slice(0, 5).map((b) => `<li><b>${pc(b.avg)}</b> a trade × ${nf(b.n)} · strict bound <b>${pc(b.strict_lcb)}</b> · green days ${b.green_days ?? "–"} of ${b.days}<br><span class="muted">${esc(b.words)}</span></li>`).join("")}</ol>` : `<p class="small muted">No timeline meets the strict rule yet.</p>`}
+      <p class="small">Would trade on paper: ${(st.live_picks || []).length ? (st.live_picks || []).map((p) => `${esc(p.words)} (${pc(p.avg)} × ${nf(p.n)}, strict bound ${pc(p.strict_lcb)})`).join(" · ") : `<span class="muted">nothing (no strict bound above zero)</span>`}</p>`;
     const reg = (m.by_regime || []).map((r) => `<li><b>${esc(r.name)}</b>: ${r.n ? `${esc(r.words)} · ${pc(r.avg)} a trade × ${nf(r.n)}, lower bound ${pc(r.lcb)}` : `<span class="muted">no signals on such a day yet</span>`}</li>`).join("");
-    const picks = (m.live_picks || []).map((p) => `<li>${esc(p.words)} · ${pc(p.avg)} × ${nf(p.n)}, lower bound ${pc(p.lcb)}</li>`).join("");
+    const picks = (m.live_picks || []).map((p) => `<li>${esc(p.words)} · ${pc(p.avg)} × ${nf(p.n)}, lower bound ${pc(p.lcb)}${dayb(p)} · green days ${p.green_days ?? "–"} of ${p.days}</li>`).join("");
     el.innerHTML = head + `
       <p class="small">${nf(m.signals)} signals × ${nf(m.filters)} filters × ${nf(m.exits)} exits × ${m.strikes.length} strikes × ${m.delays.length} entry times =
         <b>${nf(m.timelines)} timelines</b>, judged in ${m.seconds}s · ${m.days.length} recorded day${m.days.length > 1 ? "s" : ""} (${esc(m.days[0])} to ${esc(m.days[m.days.length - 1])}).
@@ -4102,6 +4110,7 @@ async function drawMultiverse() {
         <ul class="small mv-list">${m.brain.walk.map((w) => `<li><b>${esc(w.day)}</b> (never seen): its top 10% ${pc(w.top_avg)} × ${w.top_n} vs all signals ${pc(w.all_avg)} × ${nf(w.n)}${w.auc != null ? ` · ranking AUC ${w.auc}` : ""}</li>`).join("") || `<li class="muted">${esc(m.brain.note || "Needs 3 recorded days.")}</li>`}</ul>` : ""}
       <h4>Best by day type</h4><ul class="small">${reg}</ul>
       <h4>Trading now on paper ("Multiverse pick" account)</h4>${picks ? `<ol class="small">${picks}</ol>` : `<p class="small muted">Nothing proven yet: the account takes no trade until a timeline's lower bound is above zero.</p>`}
+      ${strictHtml}
       <p class="note">The main account's way here: its alert types and exit (${ch.avg != null ? `${pc(ch.avg)} a trade over ${nf(ch.n)}, won ${ch.win}%` : "–"}), without its risk check and limits.
         A few days can't prove much: the lower bound uses Student's t on the number of days, and a timeline beating the luck line on one day is still luck until more days agree.
         Nothing here changes alerts, the main account or the bench. Paper only.</p>`;

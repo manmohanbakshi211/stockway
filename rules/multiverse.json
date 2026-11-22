@@ -369,6 +369,12 @@
     "delay": 0
   },
   "luck_shuffles": 1,
+  "strict": {
+    "on": true,
+    "min_days": 5,
+    "min_green_share": 0.6,
+    "about": "2.83 shadow pick rule (Mandeep 22 Nov: go): a timeline needs 5+ days with trades, green on 60%+ of them, and is ranked by the lower of the usual bound and a day-level bound where every day counts once (a big day with 80 signals is one day). Shown next to the usual picks with its own walk-forward record; nothing trades it until Mandeep says switch."
+  },
   "brain": {
     "on": true,
     "exit": [
