@@ -118,6 +118,38 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.84: Trend Rider v1, the option-buying setup, on trial (22 Nov 2026)
+- **Mandeep (22 Nov):** "ek achhi option buying ka set-up banana hai ... saare FNO stocks and index ... loss less ho
+  ... initial stoploss bhi achhi strong or confident ho", then "Karo". Plan: the doc "Option Buying Setup v1" and the
+  project doc claude/buying_setup_plan.md (from the 5-19 Nov bench data: index option buys +0.04% a trade vs stock
+  options -2.58%; breakout triggers, the first hour, opening-drive days and VWAP side did best).
+- **Gun** (`lab/rider.py`, shared with the coming Lab test): Trend-Day Score (initial balance vs the day's ATR,
+  opening drive, extension beyond the opening range, closes on one side of VWAP, VWAP lean), VWAP Pull-Go (side,
+  distance and lean in ATRs; TWAP for an index), Breakout Quality (fresh break or break-and-retest of the day high /
+  low, opening range, inside bar or yesterday's high / low: how clear, body, room to the next level, earlier tests),
+  Chase Meter (how stretched: EMA 20 distance, closes in a row, last candle vs ATR, day range vs normal), Agreement
+  (trend, momentum, structure, VWAP, flow, the option: how many families agree), Relative Strength vs NIFTY, Move vs
+  Decay (the likely move over 45 min x delta against theta, half the spread and charges; above 1 = worth it),
+  Tradability (spread, one lot against the account's capital, event day, ban list), Flow (bid/ask quantity
+  imbalance and the order-flow change on the futures) and Option Thrust (the option's move against what delta says).
+  The decision needs a breakout of quality 55+, trend-day score 50+, the right side of VWAP, chase 65 or less, 3+
+  families, move vs decay 1+, tradability 40+, inside 09:20-10:15 or 11:15-13:15. The first stop is beyond the broken
+  level (or the breakout candle) plus 0.35 ATR, judged on closes; a stop that would risk more than 30% of the premium
+  skips the trade.
+- **Live** (`live/rider.py`): every index and F&O stock at each closed 5-minute bar, inside the 5-minute scan (its own
+  thread since 2.81); per-symbol readings and a row per bar are kept for the coming sub-charts. A passing setup is a
+  trial alert ("trend_rider", shadow): recorded, graded on its levels (live/trials.py) and paper-tested on the test
+  bench. Nothing you see or trade changes. At most 2 signals a symbol a day, 30 minutes apart.
+- **Bullets:** every number in `rules/buy_setup.json` (valid from 23 Nov); a missing or broken file means the
+  defaults, a symbol's bad data is logged and skipped.
+- **Replay check (19 Nov, the Mac's recording, a trend-up day):** 63 trial signals over 224 symbols (49 of them
+  09:20-10:15), graded on their levels: 12 hit, 23 missed, 28 timed out, average +0.23R. On the test bench the same
+  signals bought ATM averaged +4.4% a trade (51% won) against -4.0% for every other alert's ATM buy that day (6,312
+  trades). One day only: the Lab test and live trial decide. Move vs decay mostly passes on index options (it is a
+  gate against slow expensive options, not a filter that bites often); the Lab will tune its level. The pass over all
+  symbols took 0.39 s.
+- System page: a new check (Trend Rider on trial). Tests: `tests/test_rider.py` (9).
+
 ## 2.83: Multiverse strict pick rule, in shadow (22 Nov 2026)
 - **Mandeep (22 Nov):** "Go", after checking the evening AI analyst's three flags (22 Nov note):
   - "A test-bench rule leaked into regime picks": it shows (quiet day: "Library / book rule (test bench only)",

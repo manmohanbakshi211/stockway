@@ -255,6 +255,8 @@ class LiveEngine:
         self.watch = {"stalled": False, "since": None}
         from .chartdata import ChartData
         self.charts = ChartData(self)
+        from .rider import Rider                     # 2.84: Trend Rider indicators for every index and F&O stock (on trial)
+        self.rider = Rider(self)
         from .edgebook import EdgeBook
         self.edge = EdgeBook(self.data_dir)
         from .analog import Scenarios

@@ -1,0 +1,17 @@
+{
+  "about": "2.84 Trend Rider v1, the option-buying setup (Mandeep, 22 Nov 2026: 'ek achhi option buying ka set-up banana hai'; plan: the project doc claude/buying_setup_plan.md). Every index and F&O stock, 1 lot, sized by the capital chosen in the app. On trial (registry 'trend_rider', shadow): recorded, graded and paper-tested on the test bench only; nothing you see or trade changes until Mandeep switches it on. windows: minutes since 09:15 at the bar's close (5-60 = 09:20-10:15, 120-240 = 11:15-13:15). Starting numbers from the 5-19 Nov bench data and the research in the plan; the Lab tunes them.",
+  "valid_from": "2026-11-23",
+  "on": true,
+  "windows": [[5, 60], [120, 240]],
+  "trend_day": {"min": 50, "weights": {"narrow": 1.0, "drive": 1.0, "extension": 1.0, "vwap_side": 1.5, "vwap_slope": 1.0}},
+  "vwap": {"dist_atr": [0.1, 1.5], "slope_bars": 3},
+  "breakout": {"min_quality": 55, "retest_bars": 6, "retest_atr": 0.3, "room_cap_atr": 2.0},
+  "chase": {"max": 65},
+  "agreement": {"min_families": 3, "weights": {"trend": 1.0, "momentum": 1.0, "structure": 1.0, "vwap": 1.0, "flow": 1.0, "option": 1.0}},
+  "move_vs_decay": {"horizon_min": 45, "min": 1.0, "charges_per_lot": 60.0},
+  "tradability": {"min": 40, "max_spread_pct": 4.0, "lot_share_of_capital": 0.25},
+  "stop": {"buffer_atr": 0.35, "max_premium_risk_pct": 30.0},
+  "flow_gates": false,
+  "cooldown_min": 30,
+  "max_signals_per_symbol_day": 2
+}

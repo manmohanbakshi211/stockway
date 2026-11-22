@@ -280,6 +280,18 @@ def static_checks(cfg: dict | None = None) -> list:
                   and "lab/factory.py" in _fac._SIG_MODULES,
                   "each symbol's rows kept in lab/bars_cache; a change to the build's code, strike / exit settings or cost "
                   "rates prices that symbol again in full; the table equals a full build (tests/test_bars_cache.py)"))
+    try:                                                  # 2.84: Trend Rider (lab/rider.py), on trial
+        from lab import rider as _rid
+        from live import chartdata as _cdm, registry as _reg
+        rc = _rid.cfg()
+        rid_ok = (_reg.is_shadow("trend_rider") and "rd.on_bar(now, slot, emit)" in inspect.getsource(_cdm.ChartData.scan)
+                  and bool(rc.get("windows")))
+        rid_det = (f"on trial for every index and F&O stock: windows {rc.get('windows')}, trend-day score {rc['trend_day']['min']}+, "
+                   f"breakout quality {rc['breakout']['min_quality']}+, {rc['agreement']['min_families']}+ families, move vs decay "
+                   f"{rc['move_vs_decay']['min']}+ (rules/buy_setup.json)" if rc.get("on", True) else "off (rules/buy_setup.json on: false)")
+    except Exception as e:
+        rid_ok, rid_det = False, str(e)[:160]
+    out.append(_c("trend_rider", "Trend Rider option-buying setup, on trial (2.84)", rid_ok, rid_det))
     try:                                                  # 2.83: the multiverse's strict pick rule, in shadow
         from lab import multiverse as _mvx
         src_ = _mvx.strict_rule(_mvx.cfg())

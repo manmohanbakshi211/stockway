@@ -675,6 +675,13 @@ class ChartData:
             except Exception as ex:
                 if self._rate(f"scan_err:{sym}", 600):
                     self.e.log(f"Setup scan {sym} skipped: {ex}")
+        rd = getattr(self.e, "rider", None)        # 2.84: Trend Rider (lab/rider.py), on trial; a bug here never stops the scan
+        if rd is not None:
+            try:
+                rd.on_bar(now, slot, emit)
+            except Exception as ex:
+                if self._rate("rider_err", 600):
+                    self.e.log(f"Trend Rider check failed: {ex}")
 
     def _scan_one(self, sym, m, now, slot, emit):
         b = self.five_min(sym, now.date())
