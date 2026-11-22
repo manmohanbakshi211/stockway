@@ -118,6 +118,17 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.88: Trades on a day without an NSE session are void (22 Nov 2026)
+- **Why:** Mandeep's status check (22 Nov): 10 Nov 2026 was an NSE holiday, yet the main paper account shows -₹22,753
+  of trades that day (opened on stale prices before 2.48 checked the NSE calendar). They are not real results.
+- **What** (gun, `live/voidday.py`, once at every start, idempotent): a paper trade of the real market whose day had
+  no NSE session (weekend or holiday, `live/session.py`; a special session such as Muhurat counts as a session) gets
+  status "void" and "void: no NSE session that day" in its reason; a test-bench trade of such a day moves to the source
+  "<source>|void". Nothing is deleted. Every money figure counts only closed / open trades of its own source, so void
+  trades leave the accounts (main and extra), free money, the bench board, the strict test and the multiverse.
+  Practice sources (sim, replay) are left alone. The start log says how many trades were voided and which days.
+- Tests: `tests/test_voidday.py` (3).
+
 ## 2.87: Trend Rider tested on the Lab's history, by days (22 Nov 2026)
 - **Why:** the 19 Nov replay was one day. Before any Trend Rider number changes, the setup and its exit are measured on
   every day of the Lab's option history (the year of stocks and indices; five years of Nifty / Bank Nifty once that

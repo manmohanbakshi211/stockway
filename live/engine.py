@@ -107,11 +107,20 @@ class LiveEngine:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.store = Store(self.data_dir / "live.db")
+        self._void_log: list = []
+        try:                                         # 2.88: trades on a day NSE had no session are void (live/voidday.py)
+            from . import voidday
+            from .bench import db_for
+            voidday.run(self.store, log=self._void_log.append, bench_db=db_for(self.store))
+        except Exception as e:
+            self._void_log.append(f"Void-day check skipped: {e}")
         self.tokens = TokenStore(self.data_dir / "upstox_token.json")
         from .kite import KiteTokenStore
         self.kite_tokens = KiteTokenStore(self.data_dir / "kite_token.json")     # 2.52: Kite backup feed (market data only)
         self.logs = collections.deque(maxlen=400)
         self.lock = threading.RLock()
+        for m in self._void_log:
+            self.log(m)
         self.telegram = Telegram(get_cfg, self.log)
         self.ai = AI(get_cfg, self.log)
         self.news = News(self.log)
