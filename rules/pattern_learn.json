@@ -1,0 +1,561 @@
+{
+ "about": "Pattern learning (lab/pattern_learn.py, 2.93). Mandeep, 23 Nov 2026: 'patterens to observe karte raho or ye dekhna hai humein ki system patterens achhe se pakdna seekhe toh do the best'. Every candle pattern occurrence is described by its situation (the dims below) and the system learns, per pattern, which situations make it pay after costs: the pattern's own average plus each situation's difference from it, shrunk toward zero by shrink_k occurrences (a few lucky trades cannot decide). Days are split train / validation / holdout; the pick (top x% quality) is chosen on validation; every number shown is from the holdout days. Sources: 'lab' = years of 5-minute history in the Strategy Lab's bar table (the ATM option bought its way, real option prices, every cost: pnl_<exit> / premium; and, learned separately, whether the price itself moved the pattern's way in the next fwd_bars bars: 'caught', judged by catch_bar_pct / catch_lift_pct) and 'bench' = the live test bench (every timeframe, honest 1-lot fills, R after costs). Live (shadow): each candle pattern the test bench takes gets its quality 0-100 in its bench record (tag pq); the forward check compares high-quality patterns with all of them on days after the model was built. Nothing here alerts, trades or changes a paper account.",
+ "valid_from": "2026-11-23",
+ "split": [
+  0.6,
+  0.2,
+  0.2
+ ],
+ "pick_top_pct": [
+  50,
+  30,
+  20,
+  10
+ ],
+ "lab": {
+  "exit": "std",
+  "shrink_k": 200,
+  "min_pattern_n": 2000,
+  "min_pick_n": 300,
+  "min_lift": 0.005,
+  "fwd_bars": 6,
+  "indices": [
+   "NIFTY",
+   "BANKNIFTY",
+   "FINNIFTY",
+   "MIDCPNIFTY",
+   "SENSEX",
+   "BANKEX",
+   "NIFTYNXT50"
+  ],
+  "patterns": {
+   "cdl_engulf": "Engulfing",
+   "cdl_harami": "Harami",
+   "cdl_doji_dir": "Doji (with a direction)",
+   "cdl_hammer": "Hammer / shooting star",
+   "cdl_pin": "Pin bar",
+   "cdl_star": "Morning / evening star",
+   "cdl_tweezer": "Tweezer",
+   "cdl_outside": "Outside bar",
+   "ib_break": "Inside-bar breakout",
+   "ib_fakey": "Inside-bar fakey",
+   "rect_break": "Range breakout",
+   "rect_fail": "Failed range breakout"
+  },
+  "dims": [
+   {
+    "name": "dir",
+    "fact": "dir",
+    "type": "sign",
+    "words": {
+     "1": "bullish",
+     "-1": "bearish"
+    }
+   },
+   {
+    "name": "index",
+    "fact": "is_index",
+    "type": "sign",
+    "words": {
+     "1": "on an index",
+     "0": "on a stock"
+    }
+   },
+   {
+    "name": "trend",
+    "fact": "d_trend",
+    "type": "sign",
+    "align": "mul",
+    "words": {
+     "1": "with the daily trend",
+     "-1": "against the daily trend",
+     "0": "no clear daily trend"
+    }
+   },
+   {
+    "name": "tod",
+    "fact": "tod",
+    "type": "bins",
+    "cuts": [
+     30,
+     60,
+     120,
+     240
+    ],
+    "words": [
+     "first 30 minutes",
+     "30-60 minutes in",
+     "1-2 hours in",
+     "2-4 hours in",
+     "last part of the day"
+    ]
+   },
+   {
+    "name": "day",
+    "fact": "day_ret",
+    "type": "bins",
+    "align": "mul",
+    "cuts": [
+     -0.5,
+     -0.1,
+     0.1,
+     0.5
+    ],
+    "words": [
+     "day down 0.5%+ against it",
+     "day a little against it",
+     "flat day",
+     "day a little its way",
+     "day 0.5%+ its way"
+    ]
+   },
+   {
+    "name": "avg",
+    "fact": "vs_twap",
+    "type": "bins",
+    "align": "mul",
+    "cuts": [
+     -0.3,
+     0,
+     0.3
+    ],
+    "words": [
+     "well on the wrong side of the day's average price",
+     "just on the wrong side of the day's average",
+     "just on the right side of the day's average",
+     "well on the right side of the day's average"
+    ]
+   },
+   {
+    "name": "rsi",
+    "fact": "rsi",
+    "type": "bins",
+    "align": "flip100",
+    "cuts": [
+     30,
+     45,
+     55,
+     70
+    ],
+    "words": [
+     "momentum strongly against it (RSI)",
+     "momentum against it",
+     "momentum neutral",
+     "momentum its way",
+     "momentum stretched its way (RSI 70+)"
+    ]
+   },
+   {
+    "name": "range",
+    "fact": "pos_in_range",
+    "type": "bins",
+    "align": "flip01",
+    "cuts": [
+     0.2,
+     0.4,
+     0.6,
+     0.8
+    ],
+    "words": [
+     "at the day's far end (the low for a buy)",
+     "lower part of the day's range (for a buy)",
+     "middle of the day's range",
+     "upper part of the day's range (for a buy)",
+     "at the day's near end (the high for a buy)"
+    ]
+   },
+   {
+    "name": "level",
+    "fact": "lvl_atr",
+    "type": "bins",
+    "cuts": [
+     0.3,
+     0.7,
+     1.5
+    ],
+    "words": [
+     "at a key level (under 0.3 ATR)",
+     "near a key level",
+     "about 1 ATR from a key level",
+     "far from key levels"
+    ]
+   },
+   {
+    "name": "touch",
+    "fact": "lvl_touch",
+    "type": "sign",
+    "align": "mul",
+    "words": {
+     "1": "bounced off a key level its way",
+     "-1": "turned back at a key level against it",
+     "0": "no key-level touch"
+    }
+   },
+   {
+    "name": "move",
+    "fact": "ret_b6",
+    "type": "bins",
+    "align": "mul",
+    "cuts": [
+     -0.3,
+     0,
+     0.3
+    ],
+    "words": [
+     "after a sharp 30-minute move against it",
+     "after a small move against it",
+     "after a small move its way",
+     "after a sharp 30-minute move its way"
+    ]
+   },
+   {
+    "name": "size",
+    "fact": "range_x",
+    "type": "bins",
+    "cuts": [
+     0.7,
+     1.2,
+     2.0
+    ],
+    "words": [
+     "small candle",
+     "normal candle",
+     "big candle",
+     "very big candle (2x normal)"
+    ]
+   },
+   {
+    "name": "adx",
+    "fact": "adx",
+    "type": "bins",
+    "cuts": [
+     18,
+     25,
+     35
+    ],
+    "words": [
+     "no trend (ADX under 18)",
+     "weak trend",
+     "trending",
+     "strong trend (ADX 35+)"
+    ]
+   },
+   {
+    "name": "d20",
+    "fact": "d_pos20",
+    "type": "bins",
+    "align": "flip01",
+    "cuts": [
+     0.2,
+     0.5,
+     0.8
+    ],
+    "words": [
+     "at the 20-day far end (the low for a buy)",
+     "lower half of the 20-day range (for a buy)",
+     "upper half of the 20-day range (for a buy)",
+     "at the 20-day near end (the high for a buy)"
+    ]
+   },
+   {
+    "name": "expiry",
+    "fact": "dte",
+    "type": "bins",
+    "cuts": [
+     0.5,
+     2.5,
+     7.5
+    ],
+    "words": [
+     "expiry day",
+     "1-2 days to expiry",
+     "3-7 days to expiry",
+     "over a week to expiry"
+    ]
+   },
+   {
+    "name": "vix",
+    "fact": "vix",
+    "type": "bins",
+    "cuts": [
+     12,
+     15,
+     18
+    ],
+    "words": [
+     "VIX under 12",
+     "VIX 12-15",
+     "VIX 15-18",
+     "VIX 18+"
+    ]
+   }
+  ],
+  "catch_bar_pct": 55,
+  "catch_lift_pct": 3
+ },
+ "bench": {
+  "style": "buy",
+  "shrink_k": 50,
+  "min_days": 8,
+  "min_pattern_n": 300,
+  "min_pick_n": 100,
+  "min_lift": 0.02,
+  "dims": [
+   {
+    "name": "tf",
+    "fact": "tf",
+    "type": "cat",
+    "words": {
+     "5m": "5-minute candle",
+     "15m": "15-minute candle",
+     "30m": "30-minute candle",
+     "1H": "1-hour candle",
+     "75m": "75-minute candle",
+     "4H": "4-hour candle",
+     "1D": "daily candle",
+     "1W": "weekly candle"
+    }
+   },
+   {
+    "name": "early",
+    "fact": "early",
+    "type": "cat",
+    "words": {
+     "1": "taken before the candle closed (70% through)",
+     "0": "taken at the candle's close"
+    }
+   },
+   {
+    "name": "dir",
+    "fact": "dir",
+    "type": "sign",
+    "words": {
+     "1": "bullish",
+     "-1": "bearish"
+    }
+   },
+   {
+    "name": "index",
+    "fact": "is_index",
+    "type": "sign",
+    "words": {
+     "1": "on an index",
+     "0": "on a stock"
+    }
+   },
+   {
+    "name": "vol",
+    "fact": "rel_vol",
+    "type": "bins",
+    "cuts": [
+     0.7,
+     1.0,
+     1.5,
+     2.5
+    ],
+    "words": [
+     "volume under 0.7x normal",
+     "volume 0.7-1x normal",
+     "volume 1-1.5x normal",
+     "volume 1.5-2.5x normal",
+     "volume 2.5x+ normal"
+    ]
+   },
+   {
+    "name": "tod",
+    "fact": "mins",
+    "type": "bins",
+    "cuts": [
+     30,
+     60,
+     120,
+     240
+    ],
+    "words": [
+     "first 30 minutes",
+     "30-60 minutes in",
+     "1-2 hours in",
+     "2-4 hours in",
+     "last part of the day"
+    ]
+   },
+   {
+    "name": "trend",
+    "fact": "htf_d_al",
+    "type": "sign",
+    "words": {
+     "1": "with the daily trend",
+     "-1": "against the daily trend",
+     "0": "no clear daily trend"
+    }
+   },
+   {
+    "name": "vwap",
+    "fact": "vwap_al",
+    "type": "bins",
+    "cuts": [
+     -0.3,
+     0,
+     0.3
+    ],
+    "words": [
+     "well on the wrong side of VWAP",
+     "just on the wrong side of VWAP",
+     "just on the right side of VWAP",
+     "well on the right side of VWAP"
+    ]
+   },
+   {
+    "name": "nifty",
+    "fact": "nifty_al",
+    "type": "bins",
+    "cuts": [
+     -0.3,
+     0.3
+    ],
+    "words": [
+     "Nifty moving against it",
+     "Nifty flat",
+     "Nifty moving its way"
+    ]
+   },
+   {
+    "name": "room",
+    "fact": "htf_room_atr",
+    "type": "bins",
+    "cuts": [
+     0.3,
+     1,
+     2
+    ],
+    "words": [
+     "next daily level within 0.3 ATR",
+     "0.3-1 ATR of room to the next daily level",
+     "1-2 ATR of room",
+     "2+ ATR of room"
+    ]
+   },
+   {
+    "name": "tfs",
+    "fact": "cdl_al_sum",
+    "type": "bins",
+    "cuts": [
+     -0.5,
+     0.5,
+     1.5
+    ],
+    "words": [
+     "other timeframes' candles against it",
+     "other timeframes neutral",
+     "one other timeframe's candle agrees",
+     "2+ other timeframes' candles agree"
+    ]
+   },
+   {
+    "name": "regime",
+    "fact": "regime",
+    "type": "cat",
+    "words": {
+     "opening": "opening minutes",
+     "quiet": "quiet market",
+     "range": "range-bound market",
+     "trend_up": "market trending up",
+     "trend_down": "market trending down",
+     "volatile": "volatile market"
+    }
+   },
+   {
+    "name": "d20",
+    "fact": "htf_pos20",
+    "type": "bins",
+    "align": "flip01",
+    "cuts": [
+     0.2,
+     0.5,
+     0.8
+    ],
+    "words": [
+     "at the 20-day far end (the low for a buy)",
+     "lower half of the 20-day range (for a buy)",
+     "upper half of the 20-day range (for a buy)",
+     "at the 20-day near end (the high for a buy)"
+    ]
+   },
+   {
+    "name": "expiry",
+    "fact": "dte",
+    "type": "bins",
+    "cuts": [
+     0.5,
+     2.5,
+     7.5
+    ],
+    "words": [
+     "expiry day",
+     "1-2 days to expiry",
+     "3-7 days to expiry",
+     "over a week to expiry"
+    ]
+   },
+   {
+    "name": "events",
+    "fact": "ev_level",
+    "type": "cat",
+    "words": {
+     "0": "no event risk",
+     "1": "low event risk",
+     "2": "medium event risk",
+     "3": "high event risk"
+    }
+   },
+   {
+    "name": "against",
+    "fact": "against",
+    "type": "bins",
+    "cuts": [
+     0.5,
+     1.5,
+     2.5
+    ],
+    "words": [
+     "no other signal against it",
+     "1 other signal against it",
+     "2 other signals against it",
+     "3+ other signals against it"
+    ]
+   },
+   {
+    "name": "move",
+    "fact": "ret5_al",
+    "type": "bins",
+    "cuts": [
+     -0.3,
+     0,
+     0.3
+    ],
+    "words": [
+     "after a sharp move against it",
+     "after a small move against it",
+     "after a small move its way",
+     "after a sharp move its way"
+    ]
+   },
+   {
+    "name": "ivhv",
+    "fact": "iv_hv",
+    "type": "bins",
+    "cuts": [
+     0.9,
+     1.1,
+     1.4
+    ],
+    "words": [
+     "options cheap vs the real move (IV/HV under 0.9)",
+     "options fairly priced",
+     "options a bit rich",
+     "options rich (IV/HV 1.4+)"
+    ]
+   }
+  ]
+ }
+}

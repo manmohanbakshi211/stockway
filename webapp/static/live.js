@@ -3412,6 +3412,51 @@ async function labRider() {
     const poll = async () => { if (state.page !== "lab") return; let x; try { x = await api("/api/lab/rider"); } catch (_) { return; } if (x.busy) setTimeout(poll, 5000); else labRider(); };
     setTimeout(poll, 4000); };
 }
+async function labPatterns() {
+  // 2.93: pattern learning (lab/pattern_learn.py): which candle patterns pay, in which situation; shadow only
+  const el = $("#lab-pat"); if (!el) return;
+  let v; try { v = await api("/api/lab/patlearn"); } catch (e) { el.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; return; }
+  const sg = (x, f) => x == null ? "–" : `<span class="nw ${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : "−"}${f(Math.abs(x))}</span>`;
+  const R = (x) => sg(x, (a) => a.toFixed(2) + "R"), P = (x) => sg(x, (a) => (a * 100).toFixed(1) + "%");
+  const PILL = { pays: ["p-up", "pays after costs"], learns: ["p-amber", "loses less"], no: ["", "no better"], wait: ["", "waiting"], catches: ["p-up", "catches the move"] };
+  const pill = (vd) => { const p = PILL[(vd || {}).code] || ["", (vd || {}).code || "–"]; return `<span class="pill ${p[0]}" title="${esc((vd || {}).text || "")}">${p[1]}</span>`; };
+  const st = (x, f) => !x || !x.n ? `<span class="muted">–</span>` : `${f(x.avg)} <small class="muted">${x.n.toLocaleString("en-IN")} · ${Math.round(x.win_pct)}% won${x.caught_pct != null ? ` · ${Math.round(x.caught_pct)}% moved its way` : ""}</small>`;
+  const ctx = (a) => (a || []).slice(0, 2).map((b) => esc(b.what)).join("; ") || `<span class="muted">–</span>`;
+  const quint = (r, f) => `<div class="table-wrap"><table class="mini"><thead><tr><th>Quality (holdout)</th>${(r.quintiles || []).map((q) => `<th class="r">${esc(q.q)}</th>`).join("")}</tr></thead>
+    <tbody><tr><td>Average</td>${(r.quintiles || []).map((q) => `<td class="r">${q.n ? f(q.avg) : "–"}</td>`).join("")}</tr>
+    ${(r.quintiles || []).some((q) => q.caught_pct != null) ? `<tr><td>Moved its way</td>${(r.quintiles || []).map((q) => `<td class="r">${q.caught_pct == null ? "–" : Math.round(q.caught_pct) + "%"}</td>`).join("")}</tr>` : ""}
+    <tr><td class="muted">Times</td>${(r.quintiles || []).map((q) => `<td class="r muted">${(q.n || 0).toLocaleString("en-IN")}</td>`).join("")}</tr></tbody></table></div>`;
+  const block = (r, f, what) => {
+    if (!r) return `<p class="small muted">Not run yet: it runs every night after the Lab (market hours never), or Run now.</p>`;
+    if (r.error) return `<p class="small muted">${esc(r.error)}</p>`;
+    const mv = r.move;
+    return `<p class="small" style="margin:0 0 6px">${pill(r.verdict)} <b>All patterns ${f(r.hold_all.avg)} → the top ${r.pick_top_pct}% by quality ${f(r.hold_pick.avg)}</b>
+        <span class="muted">a trade, on ${esc(r.valid_to || "")} → ${esc(r.last || "")} (holdout: never used to learn). ${esc(what)} · ${r.days} days · learned from ${(r.train_n || 0).toLocaleString("en-IN")} earlier ones.</span></p>
+      ${mv ? `<p class="small" style="margin:0 0 6px">${pill(mv.verdict)} Did the price itself move the pattern's way in the next 30 minutes? ${esc((mv.verdict || {}).text || "")}</p>` : ""}
+      ${quint(r, f)}
+      <div class="table-wrap" style="margin-top:6px"><table class="small"><thead><tr><th>Pattern</th><th>All (holdout)</th><th>Top quality</th><th></th><th>Works better</th><th>Works worse</th></tr></thead><tbody>
+      ${(r.patterns || []).map((p) => `<tr><td>${esc(p.name)}${p.own_model ? "" : ` <small class="muted">(few: learns with all patterns)</small>`}</td><td>${st(p.all, f)}</td><td>${st(p.picked, f)}</td><td>${pill(p.verdict)}</td><td class="small">${ctx(p.best)}</td><td class="small">${ctx(p.worst)}</td></tr>`).join("")}</tbody></table></div>`;
+  };
+  const fw = v.forward || {};
+  const fwd = !fw.n ? `<p class="small muted" style="margin:0">${esc(fw.note || fw.error || "Fills from the next market day: every candle pattern the test bench takes is scored by the model first.")}</p>`
+    : `<p class="small" style="margin:0">${fw.n.toLocaleString("en-IN")} scored patterns on ${fw.days} day(s) after ${esc(fw.since)}: all ${R(fw.all.avg)}, quality ${Math.round(fw.pick_q)}+ ${R(fw.picked.avg)} (${fw.picked.n}) ${fw.lift != null ? `· difference ${R(fw.lift)}` : ""}</p>
+       <p class="small muted" style="margin:2px 0 0">${(fw.buckets || []).map((b) => `quality ${esc(b.q)}: ${b.n ? R(b.avg) + ` (${b.n})` : "–"}`).join(" · ")}</p>`;
+  const runs = (v.runs || []).slice(-12).reverse().map((r) => `<tr><td>${esc((r.at || "").slice(0, 16).replace("T", " "))}</td><td>${r.src === "bench" ? "Test bench" : "History"}</td><td class="r">${r.days}</td><td class="r">${r.src === "bench" ? R(r.hold_all) : P(r.hold_all)}</td><td class="r">${r.src === "bench" ? R(r.hold_pick) : P(r.hold_pick)}</td><td>${pill({ code: r.verdict })}</td></tr>`).join("");
+  el.innerHTML = `<h3 style="margin-top:0">Pattern learning: which candle patterns pay, and where <span class="pill p-amber">on trial</span></h3>
+    <p class="small" style="margin:0 0 8px">Every candle pattern is tagged with its situation (daily trend with or against it, time of day, key levels, volume, VWAP, Nifty, other timeframes' candles, expiry ...). The system learns, pattern by pattern, which situations make it pay after every cost, then is judged on later days it never learned from. Live, each pattern the test bench takes gets a quality 0-100; nothing alerts or trades on it until it beats taking every pattern.</p>
+    <h4 style="margin:8px 0 4px">Live test bench (15-min to weekly candles, honest 1-lot fills, R after costs)</h4>${block(v.bench, R, "Bought its way, 1 lot")}
+    <h4 style="margin:12px 0 4px">Years of history (5-minute candles, the at-the-money option, real prices and charges)</h4>${block(v.lab, P, `${(v.lab || {}).syms || "–"} symbols, % of the premium paid`)}
+    ${v.lab5 ? `<h4 style="margin:12px 0 4px">Five years (the 5-year archive)</h4>${block(v.lab5, P, `${v.lab5.syms || "–"} symbols, % of the premium paid`)}` : ""}
+    <h4 style="margin:12px 0 4px">Forward check (the only test the model could not have seen)</h4>${fwd}
+    ${runs ? `<details style="margin-top:10px"><summary class="small"><b>Learning curve</b> <span class="muted">every run: is the picking getting better as days pile up?</span></summary>
+      <div class="table-wrap"><table class="mini"><thead><tr><th>Run</th><th>Source</th><th class="r">Days</th><th class="r">All</th><th class="r">Top quality</th><th></th></tr></thead><tbody>${runs}</tbody></table></div></details>` : ""}
+    <p style="margin:8px 0 0"><button class="btn" id="pat-run" ${v.busy ? "disabled" : ""}>${v.busy ? "Learning…" : "Run now"}</button>${v.error ? ` <span class="small down">${esc(v.error)}</span>` : ""}
+      ${v.built ? `<span class="small muted"> · learned ${esc(v.built.replace("T", " "))}</span>` : ""}</p>`;
+  const b = $("#pat-run"); if (!b) return;
+  b.onclick = async () => { b.disabled = true; b.textContent = "Learning…"; try { await api("/api/lab/patlearn/run", { method: "POST" }); } catch (e) { toast(e.message); }
+    const poll = async () => { if (state.page !== "lab") return; let x; try { x = await api("/api/lab/patlearn"); } catch (_) { return; } if (x.busy) setTimeout(poll, 5000); else labPatterns(); };
+    setTimeout(poll, 4000); };
+}
 function sitBtn() {
   const b = $("#sit-learn"); if (!b) return;
   b.onclick = async () => { b.disabled = true; b.textContent = "Learning…"; try { await api("/api/lab/situation/learn", { method: "POST" }); } catch (e) { toast(e.message); }
@@ -3452,6 +3497,7 @@ async function pageLab() {
           <li><b>Click any strategy or rule</b> to see every stock and index it was tested on, with its result in each exam.</li>
           <li><b>The numbers:</b> trades · average ₹ per trade after charges · <b>t</b> = how sure (2+ strong, 1–2 some, below 1 could be luck) · green = % of days that ended in profit.</li></ol></div>
       <div class="panel tight" id="lab-rider" style="margin-top:14px"></div>
+      <div class="panel tight" id="lab-pat" style="margin-top:14px"></div>
       <div class="panel tight" id="lab-sit" style="margin-top:14px"></div>
       <div class="panel tight" id="lab-mass" style="margin-top:14px"></div>
       <div class="panel tight" id="lab-packs" style="margin-top:14px"></div>
@@ -3505,6 +3551,7 @@ async function pageLab() {
     drawPacks();
     labSituation();
     labRider();
+    labPatterns();
     main.querySelectorAll("[data-rexp]").forEach((tr) => tr.onclick = (ev) => { if (ev.target.closest("input,label,a,button")) return;
       const row = main.querySelector(`[data-rrow="${CSS.escape(tr.dataset.rexp)}"]`); if (!row) return;
       row.hidden = !row.hidden; if (!row.hidden && !row.dataset.done) { row.dataset.done = "1"; labRuleDetail(row.firstElementChild, [tr.dataset.rexp], ["1y"]); } });

@@ -118,6 +118,37 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.93: Pattern learning: which candle patterns pay, and where (23 Nov 2026)
+- **Mandeep (23 Nov):** "patterens to observe karte raho or ye dekhna hai humein ki system patterens achhe se pakdna
+  seekhe toh do the best." The candle-pattern test bench keeps running exactly as before; the system now learns from it.
+- **Gun (once): `lab/pattern_learn.py`.** Every candle pattern occurrence is tagged with its situation and the system
+  learns, pattern by pattern, which situations make it pay after every cost: the pattern's own average plus each
+  situation's difference from it (measured against the occurrences where that fact is known), shrunk toward zero by
+  shrink_k occurrences (the situation picker's method). Days split train 60 / validation 20 / holdout 20: learned on
+  train, the pick (top x% by quality) chosen on validation, every number shown is from the holdout days.
+  Two sources: years of history (the Lab's 5-minute bar table: the at-the-money option bought its way at real prices
+  with every charge, and, learned separately, whether the price itself moved the pattern's way in the next 30 minutes)
+  and the live test bench (15-minute to weekly candles, honest 1-lot fills, R after costs).
+- **Bullets: `rules/pattern_learn.json`.** The situations (daily trend with / against, time of day, key levels and
+  touches, volume, VWAP / day's average side, Nifty with / against, other timeframes' candles, room to the next daily
+  level, RSI, ADX, candle size, expiry, event risk, IV vs HV ...), cut points, words, shrinkage, pick sizes, bars.
+- **Live, shadow only:** every candle pattern the test bench takes gets a quality 0-100 from the model learned on every
+  bench day so far (bench record tag `pq`). Nothing alerts, trades or changes a paper account on it. The **forward
+  check** compares high-quality patterns with all of them on days after the model was built: the one test it could not
+  have seen. A failing learner never stops the bench (tested).
+- **Runs** every night after the Lab (1-year table + bench; the 5-year table too), never in market hours; Strategy Lab
+  page → "Pattern learning" (Run now, learning curve). System & logins lists it.
+- **First results (Mac data, holdout days only):**
+  - 5 years, 51 symbols, 737,879 five-minute patterns: all −6.2% of the premium a trade; the top 10% by quality −2.3%;
+    quality fifths −8.5% → −3.6%. Price moved the pattern's way 49% of the time (picked 50%): **no better than a coin**.
+  - 1 year, 32 symbols, 278,880 patterns: all −6.4%, top 10% −1.8%; moved its way 48% (picked 51%).
+  - Live bench, 11 days, 39,466 patterns (15m-1W): all −0.18R, top half −0.14R; quality fifths −0.26R → −0.10R.
+  - What the learning found: indices lose far less than stocks (spreads), expiry day is the worst, high volume and the
+    1-hour / 75-minute candles are better, the wrong side of VWAP is worse. It **learns to sort**, but no candle pattern
+    pays after costs on its own yet, and none predicts direction: patterns stay information next to other factors.
+- Lab regression: lab/factory.py and lab/exits.py untouched (only read), so every saved rule rescores identically.
+  Tests: `tests/test_pattern_learn.py` (8). Headless check of the Lab page at 1440 / 390, light / dark.
+
 ## 2.92: A shorter menu with tabs, smaller backups, no ₹40K left on screen (23 Nov 2026)
 - **Mandeep (23 Nov), after the clean-up check:** alerts unchanged; candle patterns keep being observed on the test bench
   ("patterens to observe karte raho ... system patterens achhe se pakdna seekhe"); "pure system mein ab 40K jaisa kuch

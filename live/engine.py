@@ -1722,6 +1722,15 @@ class LiveEngine:
         a = {"sym": sym, "kind": kind, "direction": direction, "option": self._suggest(sym, direction), "data": {}}
         return self._bench_add(a, now, name=name, variant=variant)
 
+    def pattern_quality(self, a, variant, ctx, why=False):
+        """2.93: a candle pattern's quality 0-100 from the pattern learner (lab/pattern_learn.py; shadow: only recorded
+        on its test-bench record and shown, never used to alert or trade). None until the learner has run."""
+        pl = getattr(self, "_pq_live", None)
+        if pl is None:
+            from lab import pattern_learn as PL
+            pl = self._pq_live = PL.Live(self.data_dir)
+        return pl.score(a.get("kind"), variant, a.get("direction"), ctx, why=why)
+
     def pack_signal(self, sym, direction, now, r):
         """2.69: a strategy-file signal for the paper accounts that take strategy files (rules/paper_books.json "pack"),
         e.g. the Ghanshyam account on Nifty and Bank Nifty. No alert, no main account. Paper only."""
@@ -2909,6 +2918,10 @@ class LiveEngine:
                 proc.run("rider", self.data_dir, log=log, pause=self.lab_paused)
             except Exception as e:
                 log(f"Trend Rider test failed: {e}")
+            try:                                          # 2.93: which candle patterns pay, in which situation (shadow)
+                proc.run("patlearn", self.data_dir, log=log, pause=self.lab_paused)
+            except Exception as e:
+                log(f"Pattern learning failed: {e}")
             try:                                          # the 5-year Lab (challenger) keeps searching too, once it has data
                 from lab import dhan_hist
                 r5 = dhan_hist.root(self.data_dir)
@@ -2928,6 +2941,10 @@ class LiveEngine:
                         proc.run("rider", r5, log=lambda m: log("[5y] " + m), pause=self.lab_paused)
                     except Exception as e:
                         log(f"[5y] Trend Rider test failed: {e}")
+                    try:                                  # 2.93: pattern learning on five years of 5-minute candles
+                        proc.run("patlearn", r5, log=lambda m: log("[5y] " + m), pause=self.lab_paused)
+                    except Exception as e:
+                        log(f"[5y] Pattern learning failed: {e}")
             except Exception as e:
                 log(f"5-year Lab failed: {e}")
             self._fact_rules = (0.0, [])

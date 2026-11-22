@@ -272,6 +272,15 @@ class Bench:
                                  ("focus", ad.get("focus")), ("muted", bool(ad.get("muted")) if "muted" in ad else None),
                                  ("focus_ch", [n for n, r in (ad.get("focus_ch") or {}).items() if (r or {}).get("pick")] or None))
                if v is not None}
+        if str(a.get("kind") or "").startswith("candle_"):   # 2.93: the pattern learner's quality (shadow, lab/pattern_learn.py)
+            pq = getattr(engine, "pattern_quality", None)
+            if callable(pq):
+                try:
+                    q = pq(a, variant, ctx)
+                    if q:
+                        tag["pq"], tag["pexp"] = q["q"], q["exp"]
+                except Exception:
+                    pass
         styles, _ = load_styles()
         guard = getattr(engine, "dguard", None)
         rows = []

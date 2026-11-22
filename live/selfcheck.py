@@ -323,6 +323,24 @@ def static_checks(cfg: dict | None = None) -> list:
     except Exception as e:
         rl_ok, rl_det = False, str(e)[:160]
     out.append(_c("rider_lab", "Trend Rider tested on the Lab's history (2.87)", rl_ok, rl_det))
+    try:                                                  # 2.93: pattern learning (which candle patterns pay, and where)
+        import json as _json
+        from lab import pattern_learn as _pl
+        from lab import proc as _pp
+        c_ = _pl.cfg()
+        pl_ok = "patlearn" in _pp.JOBS and bool(c_["bench"]["dims"]) and bool(c_["lab"]["dims"])
+        f_ = Path(__file__).resolve().parents[1] / "data" / "lab" / _pl.OUT
+        if f_.exists():
+            r_ = _json.loads(f_.read_text())
+            b_, l_ = r_.get("bench") or {}, r_.get("lab") or {}
+            pl_det = (f"learned {str(r_.get('built', '?'))[:16]}: test bench {((b_.get('verdict') or {}).get('code')) or b_.get('error', '–')}, "
+                      f"history {((l_.get('verdict') or {}).get('code')) or l_.get('error', '–')}; live quality on candle patterns "
+                      f"(shadow) {'on' if (b_.get('live') or {}).get('models') else 'waiting for the first bench model'}")[:300]
+        else:
+            pl_det = "runs every night after the Lab (paused in market hours); no model yet, so candle patterns get no quality score"
+    except Exception as e:
+        pl_ok, pl_det = False, str(e)[:160]
+    out.append(_c("pattern_learn", "Pattern learning: which candle patterns pay, and where (2.93, shadow)", pl_ok, pl_det))
     try:                                                  # 2.83: the multiverse's strict pick rule, in shadow
         from lab import multiverse as _mvx
         src_ = _mvx.strict_rule(_mvx.cfg())

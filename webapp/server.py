@@ -859,6 +859,43 @@ def lab_rider_run():
     return {"started": True}
 
 
+# ----------------------------------------------------------------- 2.93: pattern learning (lab/pattern_learn.py)
+_PAT_LAB: dict = {}
+
+
+@app.get("/api/lab/patlearn")
+def lab_patlearn():
+    """Which candle patterns pay, in which situation: years of history, the live test bench, the learning curve and the
+    forward check of the live quality scores (shadow)."""
+    from lab import dhan_hist, pattern_learn
+    out = {"busy": bool(_PAT_LAB.get("busy")), "error": _PAT_LAB.get("error")}
+    try:
+        out.update(pattern_learn.view(ROOT / "data", dhan_hist.root(ROOT / "data")))
+    except Exception as ex:
+        out["error"] = str(ex)
+    return clean(out)
+
+
+@app.post("/api/lab/patlearn/run")
+def lab_patlearn_run():
+    """Run the pattern learner now (its own low-priority process; about a minute)."""
+    import threading
+    from lab import proc
+    if _PAT_LAB.get("busy"):
+        return {"busy": True}
+
+    def go():
+        _PAT_LAB.update(busy=True, error=None)
+        try:
+            proc.run("patlearn", ROOT / "data", log=lambda m: None)
+        except Exception as ex:
+            _PAT_LAB["error"] = str(ex)
+        finally:
+            _PAT_LAB["busy"] = False
+    threading.Thread(target=go, daemon=True, name="pattern-learn").start()
+    return {"started": True}
+
+
 # ----------------------------------------------------------------- Strategy Lab (lab/factory.py, lab/ebooks.py)
 @app.get("/api/factory")
 def factory_view():
