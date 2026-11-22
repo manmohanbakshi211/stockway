@@ -99,3 +99,83 @@ def test_lab_measures_every_way_without_moving_the_live_numbers():
     assert names[:24] == [f"w{w}_nm{n}_em{e}" for w in (15, 30, 45) for n in (3, 4, 6, 99) for e in (35, 25)]
     assert {"ema:w15_nm3_em35", "trig:w15_nm3_em35", "w15_nm3_em35_t10", "ema:w15_nm3_em35_t10",
             "trig:w15_nm3_em35_t10"} <= set(names) and RL.V1 in names
+
+
+# ---------------------------------------------------------------------- 2.90: confidence, every factor at once
+def test_confidence_counts_every_factor_and_says_what_it_could_not_see():
+    b = _b(UP + [ALERT, (109.9, 110.4, 108.9, 110.2)])
+    c_ = R.cfg()
+    r = R.readings(b, {}, c_, None, None, None, None, None, None, [])
+    alone = R.confidence(r, 1, c_)
+    assert alone["score"] is not None and 0 <= alone["score"] <= 100
+    assert {"ghanshyam", "strategies", "mindgame", "forecast", "flow", "option"} <= set(alone["no_view"])
+    up = R.confidence(r, 1, c_, {"ghanshyam": 1, "strategies": 1, "mindgame": 1, "forecast": 1,
+                                 "ghanshyam_why": "1 with (Ghanshyam 9:20), 0 against"})
+    dn = R.confidence(r, 1, c_, {"ghanshyam": -1, "strategies": -1, "mindgame": -1, "forecast": -1})
+    assert up["score"] > alone["score"] > dn["score"]
+    assert "ghanshyam" in up["with"] and "ghanshyam" in dn["against"] and up["why"]["ghanshyam"].startswith("1 with")
+    every = {k: 1 for k in c_["confidence"]["weights"]}
+    r2 = {"breakout": {"dir": 1, "quality": 90}, "trend_day": {"score": 80, "dir": 1}, "rs": 1.0,
+          "up": {"agree_ema": {"checked": ["trend", "momentum", "structure", "vwap", "flow", "option", "ema"],
+                               "agree": ["trend", "momentum", "structure", "vwap", "flow", "option", "ema"]},
+                 "chase": 10, "mvd": 5, "trad": {"score": 90}}, "down": {}}
+    top = R.confidence(r2, 1, c_, every)
+    assert top["against"] == [] and top["label"] == "strong"
+    assert top["score"] < 100 and set(top["neutral"]) == {"chase", "tradability"}       # "not late" / "tradable" are neutral
+
+
+def test_confidence_is_shown_but_not_used_until_switched_on():
+    b = _b(UP + [ALERT, (109.9, 110.0, 108.2, 108.4)])
+    c_ = R.cfg()
+    assert c_["confidence"]["use_in_decision"] is False
+    r = R.readings(b, {}, c_, None, None, None, None, None, None, [])
+    on = {**c_, "ema_videos": {**c_["ema_videos"], "as_trigger": True}}
+    base = R.decide(b, r, 30.0, on)
+    r["conf"] = {-1: {"score": 20.0, "label": "weak"}, 1: {"score": 80.0, "label": "strong"}}
+    gated = R.decide(b, r, 30.0, {**on, "confidence": {**c_["confidence"], "use_in_decision": True}})
+    assert not any(f.startswith("confidence") for f in base["fails"])
+    assert "confidence 20.0" in gated["fails"]
+
+
+def test_live_rider_gathers_ghanshyam_and_the_other_strategies_from_the_same_scan():
+    import datetime as dt
+    import types
+    from live.rider import Rider
+    now = dt.datetime(2026, 11, 19, 10, 0, 5)
+    ts = now.timestamp()
+    e = types.SimpleNamespace(CONF_WINDOW_S=900, mind=None)
+    e._conf = {"NIFTY": [(ts - 60, 1, "Pg1"), (ts - 30, 1, "Pg2"), (ts - 10, -1, "Lx1"), (ts - 2000, -1, "Pg3")]}
+    e.charts = types.SimpleNamespace(_pack_rules=lambda: [
+        {"_variant": "Pg1", "_pack": "ghanshyam_course", "_strategy": "9:20 breakout"},
+        {"_variant": "Pg2", "_pack": "ghanshyam_course", "_strategy": "VWAP hold"},
+        {"_variant": "Pg3", "_pack": "ghanshyam_course", "_strategy": "old"}])
+    e.forecast_facts = lambda sym, d, n: {"fc5_al": 0.5 if d == "up" else -0.5}
+    rd = Rider.__new__(Rider)
+    rd.e, rd._packs, rd._mind_s = e, (0.0, {}), 0.0
+    x = rd.ext("NIFTY", now, {1: True, -1: False})
+    assert x[1]["ghanshyam"] == 1 and x[-1]["ghanshyam"] == -1 and "2 with" in x[1]["ghanshyam_why"]
+    assert x[1]["strategies"] == -1 and x[1]["forecast"] == 1 and x[-1]["forecast"] == -1
+    assert "Pg3" not in x[1]["ghanshyam_why"]                                              # older than 15 minutes
+    assert rd.ext("SBIN", now, {1: True, -1: True})[1].get("ghanshyam") is None             # no Ghanshyam view on a stock
+
+
+def test_the_live_record_is_split_by_confidence(tmp_path):
+    import datetime as dt
+    from live.rider import Rider
+    from live.store import Store
+    from live.trials import Trials
+    st = Store(tmp_path / "live.db")
+    Trials(st, "upstox", log=lambda m: None)
+    day = dt.date.today().isoformat()
+    rows = [(88.0, "hit", 2.0), (86.0, "miss", -1.0), (78.0, "time", 0.2), (60.0, "miss", -1.0), (None, "hit", 1.5)]
+    with st.lock:
+        for sc, res, rx in rows:
+            data = {"rider": {"confidence": {"score": sc}}} if sc is not None else {"rider": {}}
+            st.db.execute("INSERT INTO trial_alerts(ts, day, source, sym, kind, direction, data, result, r_exit) "
+                          "VALUES (0, ?, 'upstox', 'NIFTY', 'trend_rider', 'up', ?, ?, ?)", (day, json.dumps(data), res, rx))
+        st.db.commit()
+    v = Rider.by_confidence(st, "upstox")
+    b = v["buckets"]
+    assert v["min"] == 75 and v["strong"] == 85
+    assert b["strong"]["n"] == 2 and b["strong"]["hit_share"] == 0.5 and b["strong"]["avg_r"] == 0.5
+    assert b["ok"]["n"] == 1 and b["weak"]["n"] == 1 and b["weak"]["avg_r"] == -1.0 and b["none"]["n"] == 1

@@ -41,6 +41,9 @@ IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 VERSION = 2                                    # 2.89: signals per entry way (the EMA videos)
 N_MIN = 375
 ENTRIES = ("base", "ema", "trig")              # 2.89: as live; + the EMA videos' family counted; + their trigger
+# 2.90: no Lab way for the confidence gate: what it adds (Ghanshyam, the other strategies, MindGame, the forecast) only
+# exists live; the factors the Lab can see score 80-90 on every signal that passes anyway (19 Nov: 67 of 67 above 79).
+# Confidence is graded on the live record instead (live/rider.py by_confidence).
 WIN_STARTS = (15, 30, 45)                      # minutes after 09:15 of the first look (live's first look is 09:30)
 NOMOVE = (3, 4, 6, 99)                         # 99 = never
 EMERG = (35.0, 25.0)

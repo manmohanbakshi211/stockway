@@ -35,9 +35,20 @@ DEFAULTS = {
     "flow_gates": False,
     "ema_videos": {"on": True, "count_in_agreement": False, "as_trigger": False, "recent_bars": 3,
                    "alert": {"n": 5, "tf_bars": {"down": 1, "up": 3}}, "pullback": {"n": 10, "tf_bars": 1}},
+    "confidence": {"on": True, "use_in_decision": False, "min": 75, "strong": 85,
+                   "weights": {"breakout": 1.5, "trend_day": 1.0, "trend": 1.0, "momentum": 1.0, "structure": 1.0,
+                               "vwap": 1.0, "flow": 1.0, "option": 1.0, "ema": 1.0, "chase": 1.0, "move_vs_decay": 1.0,
+                               "tradability": 1.0, "strength": 0.5, "ghanshyam": 1.5, "strategies": 1.0,
+                               "mindgame": 1.0, "forecast": 0.5}},
     "cooldown_min": 30,
     "max_signals_per_symbol_day": 2,
 }
+
+FACTOR_WORDS = {"breakout": "breakout", "trend_day": "trend day", "trend": "EMA 9/21 trend", "momentum": "momentum",
+                "structure": "higher lows / lower highs", "vwap": "VWAP side", "flow": "order flow",
+                "option": "option thrust", "ema": "EMA videos", "chase": "not chasing", "move_vs_decay": "move vs decay",
+                "tradability": "tradable option", "strength": "strength vs Nifty", "ghanshyam": "Ghanshyam points",
+                "strategies": "other strategies", "mindgame": "MindGame buyers / sellers", "forecast": "candle forecast"}
 
 
 def cfg() -> dict:
@@ -460,6 +471,63 @@ def readings(b, ctx: dict, c_: dict | None = None, nifty: dict | None = None, op
     return out
 
 
+def confidence(r: dict, d: int, c_: dict | None = None, ext: dict | None = None) -> dict:
+    """2.90: one confidence score for direction d from every factor at once (Mandeep, 22 Nov 2026: "ek hi time par
+    ghanshyam wale points bhi check kiye ... or ye bhi check kiya or sab milake confidence or strong kiya").
+
+    Each factor votes +1 (with d), -1 (against d), 0 (looked, neutral) or None (no view: not known here, e.g. order
+    flow in the Lab or Ghanshyam's points on a stock). Score = 50 + 50 x (sum of weight x vote) / (sum of the weights
+    of the factors with a view): 50 = as much for as against, 100 = everything with it. Weights: rules/buy_setup.json
+    "confidence". ext = what only the live engine knows: {"ghanshyam": vote, "strategies": vote, "mindgame": vote,
+    "forecast": vote, plus "*_why" words}. Returns {score, label, with, against, neutral, no_view, votes}."""
+    c_ = c_ or cfg()
+    cc = c_.get("confidence") or {}
+    w = cc.get("weights") or {}
+    side = r.get("up" if d > 0 else "down") or {}
+    other = r.get("down" if d > 0 else "up") or {}
+    v: dict = {}
+    bo = r.get("breakout")
+    if bo:
+        good = bo.get("quality") is not None and bo["quality"] >= float((c_.get("breakout") or {}).get("min_quality", 55))
+        v["breakout"] = (1 if good else 0) if bo["dir"] == d else (-1 if good else 0)
+    else:
+        v["breakout"] = 0
+    td = r.get("trend_day") or {}
+    if td.get("score") is None:
+        v["trend_day"] = None
+    else:
+        strong = td["score"] >= float((c_.get("trend_day") or {}).get("min", 50))
+        v["trend_day"] = (1 if td.get("dir") == d else -1 if td.get("dir") == -d else 0) if strong else 0
+    ag, ag_o = side.get("agree_ema") or side.get("agree") or {}, other.get("agree_ema") or other.get("agree") or {}
+    for fam in ("trend", "momentum", "structure", "vwap", "flow", "option", "ema"):
+        if fam not in (ag.get("checked") or []):
+            v[fam] = None
+        else:
+            v[fam] = 1 if fam in (ag.get("agree") or []) else -1 if fam in (ag_o.get("agree") or []) else 0
+    ch = side.get("chase")
+    v["chase"] = None if ch is None else (-1 if ch > float((c_.get("chase") or {}).get("max", 65)) else 0)
+    mvd = side.get("mvd")
+    v["move_vs_decay"] = None if mvd is None else (1 if mvd >= float((c_.get("move_vs_decay") or {}).get("min", 1.0)) else -1)
+    tr = side.get("trad") or {}
+    v["tradability"] = None if tr.get("score") is None else (0 if tr["score"] >= float((c_.get("tradability") or {}).get("min", 40)) else -1)
+    rs = _f(r.get("rs"))
+    v["strength"] = None if rs is None else (1 if rs * d > 0.2 else -1 if rs * d < -0.2 else 0)
+    for k in ("ghanshyam", "strategies", "mindgame", "forecast"):
+        x = (ext or {}).get(k)
+        v[k] = None if x is None else int(max(-1, min(1, round(float(x)))))
+    known = {k: x for k, x in v.items() if x is not None and float(w.get(k, 1.0)) > 0}
+    den = sum(float(w.get(k, 1.0)) for k in known)
+    num = sum(float(w.get(k, 1.0)) * x for k, x in known.items())
+    score = round(50 + 50 * num / den, 1) if den else None
+    lab = None if score is None else ("strong" if score >= float(cc.get("strong", 70)) else
+                                      "ok" if score >= float(cc.get("min", 60)) else "weak")
+    why = {k: (ext or {}).get(f"{k}_why") for k in ("ghanshyam", "strategies", "mindgame", "forecast") if (ext or {}).get(f"{k}_why")}
+    return {"score": score, "label": lab, "votes": v,
+            "with": [k for k, x in known.items() if x > 0], "against": [k for k, x in known.items() if x < 0],
+            "neutral": [k for k, x in known.items() if x == 0], "no_view": [k for k, x in v.items() if x is None],
+            **({"why": why} if why else {})}
+
+
 def in_window(tod: float, c_: dict) -> bool:
     return any(float(w[0]) <= tod <= float(w[1]) for w in (c_.get("windows") or []))
 
@@ -525,6 +593,13 @@ def decide(b, r: dict, tod: float, c_: dict | None = None, opt: dict | None = No
         fails.append(f"tradability: {tr.get('why')}")
     if c_.get("flow_gates") and r.get("flow") is not None and r["flow"] * d <= 0:
         fails.append("flow against")
+    cc = c_.get("confidence") or {}
+    if cc.get("use_in_decision"):                 # 2.90 bullet, off by default (decision = 2.84 until the data says so)
+        cf = (r.get("conf") or {}).get(d) or confidence(r, d, c_)
+        if cf.get("score") is None or cf["score"] < float(cc.get("min", 60)):
+            fails.append(f"confidence {cf.get('score') if cf.get('score') is not None else '-'}")
+        else:
+            why.append(f"confidence {cf['score']:.0f} ({cf['label']})")
     a = r.get("atr")
     stop = structure_stop(b, a or 0, d, bo.get("level"), float(c_["stop"]["buffer_atr"]))
     risk_pct = None

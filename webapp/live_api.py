@@ -356,7 +356,10 @@ def live_rider(sym: str):
                       "mvd": (c.get("move_vs_decay") or {}).get("min"), "trad": (c.get("tradability") or {}).get("min"),
                       "windows": c.get("windows"),
                       "ema_counted": bool((c.get("ema_videos") or {}).get("count_in_agreement")),
-                      "ema_trigger": bool((c.get("ema_videos") or {}).get("as_trigger"))},
+                      "ema_trigger": bool((c.get("ema_videos") or {}).get("as_trigger")),
+                      "conf_min": (c.get("confidence") or {}).get("min"), "conf_strong": (c.get("confidence") or {}).get("strong"),
+                      "conf_used": bool((c.get("confidence") or {}).get("use_in_decision"))},
+           "words": __import__("lab.rider", fromlist=["FACTOR_WORDS"]).FACTOR_WORDS,
            "running": bool(getattr(e, "running", False))}
     if not out["ready"]:
         out["message"] = ("Builds at each closed 5-minute bar while the live scanner runs (from 09:30)." if out["running"]

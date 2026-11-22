@@ -40,6 +40,8 @@ class Rider:
         self.flow_snap: dict = {}            # key -> deque of (cvd, vol) at each bar
         self.day = None
         self.ms = 0.0                        # time of the last pass (for the System page)
+        self._packs = (0.0, {})              # 2.90: strategy id -> (strategy file, name), re-read hourly
+        self._mind_s = 0.0                   # 2.90: MindGame time spent in this pass (capped)
 
     # ------------------------------------------------------------------ inputs
     def _closed(self, sym, day, slot):
@@ -125,6 +127,81 @@ class Rider:
         except Exception:
             return None
 
+    # ------------------------------------------------------------------ 2.90: what only the live engine knows
+    def _pack_map(self) -> dict:
+        import time as _t
+        at, mp = self._packs
+        if _t.time() - at < 3600 and mp:
+            return mp
+        mp = {}
+        try:
+            for v in self.e.charts._pack_rules():
+                mp[v["_variant"]] = (str(v.get("_pack") or ""), str(v.get("_strategy") or v.get("_name") or ""))
+        except Exception:
+            pass
+        self._packs = (_t.time(), mp)
+        return mp
+
+    @staticmethod
+    def _vote(w: int, a: int):
+        if not w and not a:
+            return None
+        return 1 if w > a else -1 if a > w else 0
+
+    def ext(self, sym, now, cand: dict | None = None) -> dict:
+        """Votes from outside Trend Rider for both directions, for its confidence: Ghanshyam's points and the other
+        named strategies (library, book, strategy files, fusions) that fired on this symbol in the last 15 minutes
+        (the engine's confluence record, filled by the same scan just before), the candle forecast (the forming 5-min
+        candle's forecast, else the next-candle chance), and MindGame's buyer / seller lean for the directions in
+        cand = {d: True} (about 80 ms a symbol, so only where the setup passes; time-capped per pass)."""
+        out = {1: {}, -1: {}}
+        ts = now.timestamp()
+        win = float(getattr(self.e, "CONF_WINDOW_S", 900))
+        q = [x for x in ((self.e.__dict__.get("_conf") or {}).get(sym) or []) if ts - win <= x[0] <= ts + 1]
+        mp = self._pack_map() if q else {}
+        g = {1: set(), -1: set()}
+        o = {1: set(), -1: set()}
+        names = {}
+        for _t, dd, who in q:
+            pk, nm = mp.get(who, ("", ""))
+            (g if pk.startswith("ghanshyam") else o)[1 if dd > 0 else -1].add(who)
+            names[who] = nm
+        for d in (1, -1):
+            gw, ga = len(g[d]), len(g[-d])
+            ow, oa = len(o[d]), len(o[-d])
+            out[d]["ghanshyam"] = self._vote(gw, ga)
+            if gw or ga:
+                out[d]["ghanshyam_why"] = (f"{gw} with" + (f" ({', '.join(sorted({names[x] for x in g[d] if names.get(x)})[:3])})" if gw else "")
+                                           + f", {ga} against")
+            out[d]["strategies"] = self._vote(ow, oa)
+            if ow or oa:
+                out[d]["strategies_why"] = f"{ow} with, {oa} against (last 15 min)"
+            try:
+                ff = self.e.forecast_facts(sym, "up" if d > 0 else "down", now) if hasattr(self.e, "forecast_facts") else {}
+                fc = next((x for x in (_f(ff.get(k)) for k in ("fc5_al", "nc5_al", "fc15_al", "nc15_al")) if x is not None), None)
+                if fc is not None:
+                    out[d]["forecast"] = 1 if fc > 0.2 else -1 if fc < -0.2 else 0
+            except Exception:
+                pass
+        cand = cand or {}
+        mind = getattr(self.e, "mind", None)
+        if mind is not None and any(cand.values()) and self._mind_s < 1.5:
+            import time as _t
+            t1 = _t.perf_counter()
+            try:
+                from .mindgame import combine
+                reads, _ = mind.small(sym, ("5m",), ts)
+                bias = (combine(reads) or {}).get("bias")
+                if bias is not None:
+                    for d in (1, -1):
+                        if cand.get(d):
+                            out[d]["mindgame"] = 1 if bias * d >= 15 else -1 if bias * d <= -15 else 0
+                            out[d]["mindgame_why"] = f"lean {bias:+d}"
+            except Exception:
+                pass
+            self._mind_s += _t.perf_counter() - t1
+        return out
+
     # ------------------------------------------------------------------ every closed bar
     def on_bar(self, now, slot, emit) -> int:
         c_ = R.cfg()
@@ -141,6 +218,7 @@ class Rider:
         except Exception:
             nifty = None
         cap = self._capital()
+        self._mind_s = 0.0
         n = 0
         for sym, m in list(self.e.metrics.items()):
             try:
@@ -163,7 +241,19 @@ class Rider:
         hist = [x.get("ema_now") or [] for x in (self.series.get(sym) or []) if x["t"] < t_last]
         r = R.readings(b, ctx, c_, nifty if sym != "NIFTY" else None, up, dn, cap, flow, thrust, hist)
         bo = r.get("breakout")
-        dec = R.decide(b, r, tod, c_, (up if bo and bo["dir"] > 0 else dn) if bo else None, opts={1: up, -1: dn})
+        cc = c_.get("confidence") or {}
+        ex = None
+        if cc.get("on", True):                             # 2.90: every factor at once, both directions
+            ex = self.ext(sym, now)
+            r["conf"] = {d: R.confidence(r, d, c_, ex[d]) for d in (1, -1)}
+        c_pre = {**c_, "confidence": {**cc, "use_in_decision": False}} if cc.get("use_in_decision") else c_
+        dec = R.decide(b, r, tod, c_pre, (up if bo and bo["dir"] > 0 else dn) if bo else None, opts={1: up, -1: dn})
+        if ex is not None and dec.get("go"):               # the setup passes: add MindGame's lean, then score again
+            d0 = dec["dir"]
+            ex[d0].update(self.ext(sym, now, {d0: True})[d0])
+            r["conf"][d0] = R.confidence(r, d0, c_, ex[d0])
+            if cc.get("use_in_decision"):                  # only when switched on: the confidence gate decides
+                dec = R.decide(b, r, tod, c_, (up if bo and bo["dir"] > 0 else dn) if bo else None, opts={1: up, -1: dn})
         ev = r.get("ema") or {}
         a_ = r.get("atr") or 0
         c_last = float(b["c"][-1])
@@ -181,7 +271,9 @@ class Rider:
                "e10_dist": round((c_last - ev["ema_slow"]) / a_, 3) if ev.get("ema_slow") is not None and a_ else None,
                "ema_now": list(ev.get("now") or []),
                "ema_fired": [[dd, x["alert"]] for dd in (1, -1) for x in ((ev.get("fired") or {}).get(dd) or [])],
-               "ema_up": bool((ev.get("vote") or {}).get(1)), "ema_dn": bool((ev.get("vote") or {}).get(-1))}
+               "ema_up": bool((ev.get("vote") or {}).get(1)), "ema_dn": bool((ev.get("vote") or {}).get(-1)),
+               "conf_up": ((r.get("conf") or {}).get(1) or {}).get("score"),
+               "conf_dn": ((r.get("conf") or {}).get(-1) or {}).get("score")}
         ser = self.series.setdefault(sym, [])
         if ser and ser[-1]["t"] == row["t"]:
             ser[-1] = row
@@ -201,10 +293,15 @@ class Rider:
         stop = dec.get("stop")
         risk = abs(e_ - stop) if stop is not None else None
         side = r["up" if d > 0 else "down"]
+        cf = (r.get("conf") or {}).get(d) or {}
+        W = R.FACTOR_WORDS
+        conf_txt = (f" Confidence {cf['score']:.0f}/100 ({cf['label']}): saath {', '.join(W.get(k, k) for k in cf['with']) or '-'}"
+                    f"; khilaaf {', '.join(W.get(k, k) for k in cf['against']) or '-'}." if cf.get("score") is not None else "")
         emit({"sym": sym, "kind": self.KIND, "direction": "up" if d > 0 else "down", "severity": 2,
               "title": f"{sym} Trend Rider: BUY {'call' if d > 0 else 'put'} (on trial)",
               "detail": ("Kyun: " + "; ".join(dec["why"]) + "."
                          + (f" Stop {stop:,.2f} (5-min close pe, wick pe nahi)." if stop is not None else "")
+                         + conf_txt
                          + " On trial: recorded and graded only."),
               "price": e_,
               "data": {"trial_key": self.KIND,
@@ -215,10 +312,40 @@ class Rider:
                                  "flow": flow, "rs": r.get("rs"), "thrust": side.get("thrust"),
                                  "ema_vote": bool((ev.get("vote") or {}).get(d)),
                                  "ema_fired": [x["alert"] for x in ((ev.get("fired") or {}).get(d) or [])],
-                                 "ema10": ev.get("ema_slow")},
+                                 "ema10": ev.get("ema_slow"),
+                                 "confidence": {k: cf.get(k) for k in ("score", "label", "with", "against", "no_view", "why")}},
                        **({"setup_levels": {"entry": round(e_, 2), "stop": stop, "target": round(e_ + d * 2 * risk, 2),
                                             "rr": 2.0}} if risk else {})}})
         return 1
+
+    # ------------------------------------------------------------------ 2.90: is a high confidence worth more?
+    @staticmethod
+    def by_confidence(store, source: str, days: int = 60) -> dict:
+        """The graded Trend Rider trial alerts split by the confidence they carried (weak / ok / strong at the rules'
+        min and strong): how many, how many reached the target, average R at the exit. The record that decides
+        whether confidence may ever gate entries (rules/buy_setup.json confidence.use_in_decision)."""
+        import json as _json
+        c = R.cfg().get("confidence") or {}
+        lo, hi = float(c.get("min", 60)), float(c.get("strong", 70))
+        cut = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+        with store.lock:
+            rows = store.db.execute("SELECT data, result, r_exit FROM trial_alerts WHERE source=? AND kind='trend_rider' "
+                                    "AND day >= ? AND result IS NOT NULL AND result != 'ungraded'", (source, cut)).fetchall()
+        out = {k: {"n": 0, "hit": 0, "r": 0.0} for k in ("weak", "ok", "strong", "none")}
+        for data, res, rx in rows:
+            try:
+                sc = (((_json.loads(data or "{}").get("rider") or {}).get("confidence")) or {}).get("score")
+            except Exception:
+                sc = None
+            k = "none" if sc is None else "strong" if sc >= hi else "ok" if sc >= lo else "weak"
+            out[k]["n"] += 1
+            out[k]["hit"] += int(res == "hit")
+            out[k]["r"] += float(rx or 0)
+        for v in out.values():
+            v["hit_share"] = round(v["hit"] / v["n"], 3) if v["n"] else None
+            v["avg_r"] = round(v["r"] / v["n"], 3) if v["n"] else None
+            v.pop("r")
+        return {"min": lo, "strong": hi, "days": days, "buckets": out}
 
     # ------------------------------------------------------------------ for the screens
     def view(self, sym) -> dict:

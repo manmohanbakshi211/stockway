@@ -823,6 +823,13 @@ def lab_rider():
     import json as _json
     from lab import dhan_hist
     out = {"busy": bool(_RIDER_LAB.get("busy")), "error": _RIDER_LAB.get("error")}
+    try:                                                 # 2.90: the live record by confidence (graded trial alerts)
+        from live.rider import Rider
+        from webapp.live_api import engine as _eng
+        e = _eng()
+        out["live_by_conf"] = Rider.by_confidence(e.store, e.source or "upstox")
+    except Exception as ex:
+        out["live_by_conf"] = {"error": str(ex)}
     for name, d in (("1y", ROOT / "data"), ("5y", dhan_hist.root(ROOT / "data"))):
         f = d / "lab" / "rider_lab.json"
         try:

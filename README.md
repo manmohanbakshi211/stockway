@@ -118,6 +118,38 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.90: Trend Rider confidence: every factor at once, Ghanshyam included (23 Nov 2026)
+- **Mandeep (22 Nov, 23:46):** "ye ensure karna ki ye sirf entry exit check hai sab baaki factors ke saath jaise ek hi
+  time par ghanshyam wale points bhi check kiye live market or chart mein or ye bhi check kiya or sab milake confidence
+  or strong kiya". Until now the EMA videos sat in Trend Rider's check, but Ghanshyam's points ran apart (his own paper
+  account on Nifty / Bank Nifty) and Trend Rider never looked at them or at the other strategies.
+- **Gun** (`lab/rider.py` `confidence`): one score 0-100 per direction on the same closed 5-minute bar. Each factor
+  votes with (+1) / against (-1) / neutral (0) / no view: breakout, trend day, the families (EMA 9/21 trend, momentum,
+  higher lows / lower highs, VWAP side, order flow, option thrust, the EMA videos), not chasing, move vs decay, a
+  tradable option, strength vs Nifty, and what only the live engine knows: Ghanshyam's points (his strategy file on
+  Nifty / Bank Nifty), the other named strategies (library, books, strategy files, fusions) that fired on the symbol
+  in the last 15 minutes, MindGame's 5-minute buyer / seller lean (only for a direction with a trigger, time-capped)
+  and the candle forecast. Score = 50 + 50 x weighted net vote / weights with a view (50 = as much for as against).
+  Labels at the rules' min 75 (ok) and 85 (strong): a signal that passes Trend Rider's own checks already scores about
+  75-90 (19 Nov replay: 77 / 82 / 89 at the 10th / 50th / 90th percentile), so these split the signals that pass.
+- **Same scan, same bar:** the strategies (Ghanshyam included) are checked first in the 5-minute scan and recorded in
+  the engine's confluence record; Trend Rider runs right after and reads them, so they are on the same bar.
+- **Bullet** (`rules/buy_setup.json` "confidence"): weights, min, strong; `use_in_decision` **false**. Shown and
+  recorded, the decision is exactly 2.84's.
+- **Shown:** the alert says "Confidence 72/100 (strong): saath ...; khilaaf ..." and carries the votes; a seventh
+  sub-chart "Confidence" (calls / puts, min and 50 lines; on by default); the reading card's "Confidence" line (both
+  sides, with / against / no view, Ghanshyam's and the strategies' counts).
+- **Graded on the live record:** the Strategy Lab panel shows the graded Trend Rider trial alerts split strong / ok /
+  weak (signals, reached target, average R). Confidence may gate entries only if strong beats weak there and Mandeep
+  says so. There is no Lab way for it: what it adds exists only live, and the factors the Lab can see score 80-90 on
+  every signal that passes anyway (19 Nov: 67 of 67 above 79).
+- **19 Nov replay (one day):** 67 signals, all with a confidence; MindGame voted on 46 (45 with), Ghanshyam on none (his
+  rules fired once on Nifty before 11:00, not near a Trend Rider signal), the candle forecast on none (at the bar close
+  the new candle's forecast is not out yet). By score: under 80 n 20, 10% reached target, +0.19 R; 80-85 n 32, 12%,
+  +0.28 R; 85+ n 15, 27%, +0.25 R. Not proven: the live record decides. A pass takes ~0.45 s (MindGame capped at
+  1.5 s a pass, only where the setup passes).
+- Regression: as-live signals on 19 Nov identical (224 of 224 symbol-days). Tests: `tests/test_ema_videos.py` (+4).
+
 ## 2.89: The 5 EMA and 10 EMA videos inside Trend Rider, on trial (22 Nov 2026)
 - **Mandeep (22 Nov):** "jo 10 EMA or 5 EMA wali transcript thi uska bhi kuch use hua hai? ... saare factors ke sath ye
   bhi include karo jo transcript me hai". Until now: both videos were built in Tanu (13 Nov, research 0004 / 0005) and

@@ -2016,12 +2016,13 @@ const CH_TOGGLES = [["smart", "Smart lines (drawn by the app, with their record)
   ["rd_ag", "Trend Rider: agreement strip"], ["rd_opt", "Trend Rider: option (move vs decay, tradability)"],
   ["rd_trend", "Trend Rider: trend day + VWAP distance"], ["rd_bo", "Trend Rider: breakout quality + chase"],
   ["rd_flow", "Trend Rider: order flow + strength vs Nifty"],
-  ["rd_ema", "Trend Rider: EMA videos (5 EMA alert, 10 EMA pullback; on trial)"]];
-const RD_KEYS = ["rd_trend", "rd_bo", "rd_flow", "rd_opt", "rd_ag", "rd_ema"];
+  ["rd_ema", "Trend Rider: EMA videos (5 EMA alert, 10 EMA pullback; on trial)"],
+  ["rd_conf", "Trend Rider: confidence (every factor at once, incl. Ghanshyam)"]];
+const RD_KEYS = ["rd_trend", "rd_bo", "rd_flow", "rd_opt", "rd_ag", "rd_ema", "rd_conf"];
 const PAT_SHORT = { double_top: "DT", double_bottom: "DB", head_shoulders: "H&S", inv_hs: "iH&S", triangle: "Tri", flag: "Flag",
   breakout_retest: "Retest", rsi_divergence: "Div", candle_at_level: "Candle" };
 // 2.29: a clean chart by default (candles + the move prediction); every layer is one click away and remembered
-function chOn(k) { return LS.get("ch2_" + k, ["scen", "em", "smart", "rd_ag", "rd_opt"].includes(k)); }
+function chOn(k) { return LS.get("ch2_" + k, ["scen", "em", "smart", "rd_ag", "rd_opt", "rd_conf"].includes(k)); }
 // 2.69 (Mandeep: "main chart par seconds ki timeline bhi"): 5s / 15s / 30s candles from the app's own prices (today only)
 const CH_TFS = ["5s", "15s", "30s", "1m", "3m", "5m", "15m", "30m", "1H", "1D", "1W", "1M"];
 const CH_MIN = { "5s": 5 / 60, "15s": 0.25, "30s": 0.5, "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60, "1D": 1440, "1W": 10080, "1M": 43200 };
@@ -2564,6 +2565,7 @@ function buildChart() {
     S.rd_tu = ln(alpha(C.up, .5), 1, 2, pane, { priceScaleId: "rdtr" }); S.rd_td = ln(alpha(C.down, .5), 1, 2, pane, { priceScaleId: "rdtr" }); S.rdPanes.opt = pane++; }
   if (intra && chOn("rd_ema")) { S.rd_e5 = ln("#0A84C1", 2, 0, pane, { lastValueVisible: true, title: "vs 5 EMA" }); S.rd_e10 = ln("#E07B00", 2, 0, pane, { lastValueVisible: true, title: "vs 10 EMA" });
     S.rd_emk = LW.createSeriesMarkers(S.rd_e5, []); S.rdPanes.ema = pane++; }
+  if (intra && chOn("rd_conf")) { S.rd_cu = ln(C.up, 2, 0, pane, { lastValueVisible: true, title: "Calls conf" }); S.rd_cd = ln(C.down, 2, 0, pane, { lastValueVisible: true, title: "Puts conf" }); S.rdPanes.conf = pane++; }
   if (intra && chOn("rd_ag")) { const whole = { priceFormat: { type: "price", precision: 0, minMove: 1 } };
     S.rd_au = hist(pane, { lastValueVisible: true, title: "Calls agree", ...whole }); S.rd_ad = hist(pane, { lastValueVisible: true, title: "Puts agree", ...whole }); S.rdPanes.ag = pane++;
     S.rd_mk = LW.createSeriesMarkers(S.rd_au, []); }
@@ -2576,7 +2578,7 @@ function buildChart() {
     const v = (k) => { const x = S[k] && p.seriesData.get(S[k]); return x && x.value != null ? x.value : null; };
     const bits = [["VWAP", v("vwap")], ["EMA9", v("ema9")], ["EMA21", v("ema21")], ["RSI", v("rsi")], ["Trend day", v("rd_tds")],
       ["VWAP dist", v("rd_vw")], ["Breakout", v("rd_bq")], ["Chase", v("rd_ch")], ["Flow", v("rd_fl")], ["vs Nifty %", v("rd_rs")],
-      ["Call MvD", v("rd_mu")], ["Put MvD", v("rd_md")], ["Calls agree", v("rd_au")], ["Puts agree", v("rd_ad") != null ? -v("rd_ad") : null], ["vs 5 EMA", v("rd_e5")], ["vs 10 EMA", v("rd_e10")]].filter((x) => x[1] != null)
+      ["Call MvD", v("rd_mu")], ["Put MvD", v("rd_md")], ["Calls agree", v("rd_au")], ["Puts agree", v("rd_ad") != null ? -v("rd_ad") : null], ["vs 5 EMA", v("rd_e5")], ["vs 10 EMA", v("rd_e10")], ["Calls conf", v("rd_cu")], ["Puts conf", v("rd_cd")]].filter((x) => x[1] != null)
       .map(([n, x]) => `<span>${n} <b>${fx(x)}</b></span>`).join("");
     const dtm = new Date((p.time - 19800) * 1000);
     const t = intra ? dtm.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })
@@ -2741,13 +2743,24 @@ function drawRiderPanes() {
   put(S.rd_tu, (x) => x.trad_up); put(S.rd_td, (x) => x.trad_dn);
   put(S.rd_au, (x) => x.ag_up, () => alpha(C.up, .6)); put(S.rd_ad, (x) => (x.ag_dn != null ? -x.ag_dn : null), () => alpha(C.down, .6));
   put(S.rd_e5, (x) => x.e5_dist); put(S.rd_e10, (x) => x.e10_dist);
+  put(S.rd_cu, (x) => x.conf_up); put(S.rd_cd, (x) => x.conf_dn);
   if (S.rd_emk) S.rd_emk.setMarkers(pts.flatMap(([t, x]) => (x.ema_fired || []).map(([dd, nm]) => ({ time: t, position: dd > 0 ? "belowBar" : "aboveBar", color: dd > 0 ? C.up : C.down, shape: dd > 0 ? "arrowUp" : "arrowDown", text: (/^5 /.test(nm) ? "5E" : "10E") + (dd > 0 ? "▲" : "▼") }))));
   if (S.rd_mk) S.rd_mk.setMarkers(pts.filter(([, x]) => x.go).map(([t, x]) => ({ time: t, position: x.go > 0 ? "aboveBar" : "belowBar", color: x.go > 0 ? C.up : C.down, shape: x.go > 0 ? "arrowUp" : "arrowDown", text: x.go > 0 ? "CALL" : "PUT" })));
   (CH.rdLines || []).forEach(([ser, pl]) => { try { ser.removePriceLine(pl); } catch (_) {} });
   CH.rdLines = [];
   const L = r.limits || {}, line = (ser, price, color, title) => { if (ser && price != null) CH.rdLines.push([ser, ser.createPriceLine({ price, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title })]); };
   line(S.rd_tds, L.trend_day, C.muted, "min"); line(S.rd_bq, L.breakout, C.muted, "min"); line(S.rd_ch, L.chase, C.down, "late");
-  line(S.rd_e5, 0, C.muted, "EMA"); line(S.rd_mu, L.mvd, C.muted, "worth it"); line(S.rd_au, L.families, C.up, ""); line(S.rd_ad, L.families != null ? -L.families : null, C.down, "");
+  line(S.rd_e5, 0, C.muted, "EMA"); line(S.rd_mu, L.mvd, C.muted, "worth it"); line(S.rd_cu, L.conf_min, C.muted, "min"); line(S.rd_cu, 50, C.muted, "even"); line(S.rd_au, L.families, C.up, ""); line(S.rd_ad, L.families != null ? -L.families : null, C.down, "");
+}
+
+function confLine(cf, L, W) {
+  const u = cf["1"] || cf[1] || {}, d = cf["-1"] || cf[-1] || {};
+  const best = (d.score ?? -1) > (u.score ?? -1) ? [d, "puts"] : [u, "calls"];
+  const sc = (x) => x.score == null ? "–" : `${Math.round(x.score)}${x.label ? ` (${x.label})` : ""}`;
+  const nm = (ks) => (ks || []).map((k) => W[k] || k).join(", ") || "–";
+  const why = Object.entries(best[0].why || {}).map(([k, t]) => `${W[k] || k}: ${t}`).join("; ");
+  return `calls ${sc(u)} · puts ${sc(d)} <span class="muted">(min ${L.conf_min ?? "–"}${L.conf_used ? ", used in the decision" : ", on trial: not used yet"})</span><br>
+    <span class="small">For ${best[1]}: <span class="up">with</span> ${esc(nm(best[0].with))} · <span class="down">against</span> ${esc(nm(best[0].against))}${(best[0].no_view || []).length ? ` · <span class="muted">no view: ${esc(nm(best[0].no_view))}</span>` : ""}${why ? `<br><span class="muted">${esc(why)}</span>` : ""}</span>`;
 }
 
 function emaLine(e) {
@@ -2774,6 +2787,7 @@ function riderCard(r) {
       <li><b>Flow</b> ${sg(R.flow)} <span class="muted">(+ = buyers)</span> · vs Nifty ${R.rs == null ? "–" : sg(R.rs) + "%"}</li>
       <li><b>Option</b> move vs decay: call ${n(up.mvd, 2)} · put ${n(dn.mvd, 2)} <span class="muted">(worth it from ${n(L.mvd, 1)})</span> · tradability: call ${n((up.trad || {}).score)} · put ${n((dn.trad || {}).score)}</li>
       <li><b>Agreement</b> calls ${(up.agree || {}).families ?? "–"} (${esc(fam(up))}) · puts ${(dn.agree || {}).families ?? "–"} (${esc(fam(dn))}) <span class="muted">(needs ${n(L.families)})</span></li>
+      ${R.conf ? `<li><b>Confidence</b> ${confLine(R.conf, L, r.words || {})}</li>` : ""}
       ${R.ema ? `<li><b>EMA videos</b> ${emaLine(R.ema)} <span class="muted">(on trial: ${L.ema_counted ? "counted in agreement" : "not counted yet"}${L.ema_trigger ? ", can trigger" : ""})</span></li>` : ""}</ul>
     <p class="note" style="margin-top:6px">The ${when} bar. The same numbers as the Trend Rider sub-charts under the candles (Indicators &amp; levels to show more). On trial: its own paper account only.</p>`;
 }
@@ -3340,6 +3354,15 @@ async function labSituation() {
     <p class="small muted" style="margin:6px 0 0">Learned ${v.made ? new Date(v.made * 1000).toLocaleString("en-IN") : "–"} · again every night after the Lab. <button class="btn" id="sit-learn" ${v.busy ? "disabled" : ""}>${v.busy ? "Learning…" : "Learn now"}</button></p>`;
   sitBtn();
 }
+function confBlock(c) {
+  if (!c || c.error || !c.buckets) return `<p class="small muted">${esc((c && c.error) || "No live record yet.")}</p>`;
+  const B = c.buckets, rows = [["strong", `${c.strong}+`], ["ok", `${c.min}–${c.strong}`], ["weak", `under ${c.min}`]];
+  if (!rows.some(([k]) => B[k] && B[k].n)) return `<p class="small muted">No graded Trend Rider signal with a confidence yet: it fills from the live market (2.90 on).</p>`;
+  return `<div class="table-wrap"><table class="small"><thead><tr><th>Confidence</th><th class="r">Signals</th><th class="r">Reached target</th><th class="r">Avg R at exit</th></tr></thead><tbody>
+    ${rows.map(([k, t]) => `<tr><td>${t} (${k})</td><td class="r">${B[k].n}</td><td class="r">${B[k].hit_share == null ? "–" : Math.round(B[k].hit_share * 100) + "%"}</td><td class="r">${B[k].avg_r == null ? "–" : (B[k].avg_r >= 0 ? "+" : "") + B[k].avg_r.toFixed(2)}</td></tr>`).join("")}</tbody></table></div>
+    <p class="small muted" style="margin:4px 0 0">Last ${c.days} days of graded trial alerts. Confidence starts deciding entries only if strong beats weak here and you say so.</p>`;
+}
+
 /* 2.87: Trend Rider on every Lab day (lab/rider_lab.py), graded by days; reports only */
 async function labRider() {
   const el = $("#lab-rider"); if (!el) return;
@@ -3371,6 +3394,7 @@ async function labRider() {
     <p class="small" style="margin:0 0 8px">The option-buying setup and its exit replayed on every day of option history, 1 lot of each signal, real charges, judged by days (a day's trades are not independent). Reports only: no rule changes until you say so.</p>
     <h4 style="margin:8px 0 4px">Stocks and indices, 1 year</h4>${block("1y", v["1y"])}
     <h4 style="margin:12px 0 4px">Nifty and Bank Nifty, 5 years</h4>${block("5y", v["5y"])}
+    <h4 style="margin:12px 0 4px">Live record by confidence (every factor at once, incl. Ghanshyam)</h4>${confBlock(v.live_by_conf)}
     <p style="margin:8px 0 0"><button class="btn" id="rider-run" ${v.busy ? "disabled" : ""}>${v.busy ? "Running…" : "Run now"}</button>${v.error ? ` <span class="small down">${esc(v.error)}</span>` : ""}</p>`;
   const b = $("#rider-run"); if (!b) return;
   b.onclick = async () => { b.disabled = true; b.textContent = "Running…"; try { await api("/api/lab/rider/run", { method: "POST" }); } catch (e) { toast(e.message); }
