@@ -479,8 +479,8 @@ function lpApply(only) {
   });
 }
 function lpStream() {
-  if (!window.WebSocket || state.page !== "live") return;
-  const syms = [...new Set([...document.querySelectorAll("[data-lp]")].map((el) => el.dataset.lp))].slice(0, 60);
+  if (!window.WebSocket) return;                  // 2.91: any page with [data-lp] prices (Live, Scanner, Watchlist, ...)
+  const syms = [...new Set([...document.querySelectorAll("[data-lp]")].map((el) => el.dataset.lp))].slice(0, 250);
   const key = syms.join(",");
   if (!syms.length) return;
   if (L.lpWs && L.lpWs.readyState <= 1) { if (key !== L.lpSyms && L.lpWs.readyState === 1) { L.lpSyms = key; L.lpWs.send(JSON.stringify({ syms })); } return; }
@@ -491,8 +491,19 @@ function lpStream() {
     if (!d.px) return; const got = {};
     Object.entries(d.px).forEach(([sym, a]) => { got[sym] = L.lp[sym] = { p: a[0], c: a[1], tt: a[2], at: Date.now() }; });
     lpApply(got); };
-  ws.onclose = () => { if (L.lpWs === ws) { L.lpWs = null; if (state.page === "live") setTimeout(lpStream, 5000); } };
+  ws.onclose = () => { if (L.lpWs === ws) { L.lpWs = null; setTimeout(() => { if (document.querySelector("[data-lp]")) lpStream(); }, 5000); } };
 }
+
+/* 2.91 (Mandeep: "prices live aa rhe ho saari jagah par ... sab same speed as upstox"): one watcher for every page. Any
+   price on screen marked [data-lp] (a symbol) or [data-qk] / [data-qx] (an option or any instrument) is streamed from the
+   app's own live prices (~0.1 s), on every page, whatever the page's own refresh is. */
+function liveStreams() {
+  try {
+    if (document.querySelector("[data-lp]")) { lpStream(); lpApply(); } else if (L.lpWs) lpStreamStop();
+    if (document.querySelector("[data-qk],[data-qx]")) { qStream(state.page); qApply(); } else if (L.qWs) qStreamStop();
+  } catch (_) {}
+}
+setInterval(liveStreams, 1000);
 
 /* 2.71 (Mandeep: "paper trading slow capturing price ... use websockets where it can be"): live quotes of any instrument
    keys (open paper trades' options, the option chain's streamed strikes) over /ws/quotes, ~every 0.2 s, applied to the
@@ -857,7 +868,7 @@ function drawScanner() {
   const cols = simple ? 5 : SCAN_COLS.length;
   tb.innerHTML = (simple
     ? rows.slice(0, 150).map((m) => `<tr class="click" data-sym="${esc(m.sym)}"><td><b>${esc(m.sym)}</b><br><small class="muted">${esc(m.name || "")}</small></td>
-        <td class="r"><b>${fx(m.spot)}</b> ${pxTime(m)}<br><small class="${(m.chg_pct || 0) >= 0 ? "up" : "down"}">${(m.chg_pct || 0) >= 0 ? "+" : ""}${(m.chg_pct || 0).toFixed(2)}%</small></td>
+        <td class="r"><b data-lp="${esc(m.sym)}">${fx(m.spot)}</b> ${pxTime(m)}<br><small data-lpc="${esc(m.sym)}">${fpc(m.chg_pct)}</small></td>
         <td>${scanRead(m.score)}</td><td class="small">${esc(scanWords(m)) || "<span class='muted'>quiet</span>"}</td>
         <td class="nw small"><a href="#/chart?s=${encodeURIComponent(m.sym)}">Chart</a> · <a href="#/sym?s=${encodeURIComponent(m.sym)}">Chain</a> · <a href="#" data-watch="${esc(m.sym)}">+ Watch</a></td></tr>`).join("")
     : rows.map((m) => `<tr class="click" data-sym="${esc(m.sym)}">${SCAN_COLS.map(([k, , fn, r]) => `<td class="${r ? "r" : ""}">${fn(m)}</td>`).join("")}</tr>`).join("")) ||
@@ -3304,7 +3315,7 @@ function drawWatchlist(w) {
     const act = pick ? `<button class="link-btn" data-wl="add" data-sym="${esc(r.sym)}">+ Watch</button>` : `<button class="link-btn muted" data-wl="remove" data-sym="${esc(r.sym)}" title="Remove">✕</button>`;
     if (!r.live) return `<tr><td><a href="#/chart?s=${encodeURIComponent(r.sym)}"><b>${esc(r.sym)}</b></a>${pick ? `<br><small class="muted">${esc(r.why || "")}</small>` : ""}</td><td colspan="8" class="muted small">No live data (scanner off, or not in today's scan).</td><td>${act}</td></tr>`;
     return `<tr><td><a href="#/chart?s=${encodeURIComponent(r.sym)}"><b>${esc(r.sym)}</b></a> ${r.paper_open ? `<span class="pill p-amber" title="Open paper position">paper</span>` : ""}<br><small class="muted">${pick ? esc(r.why || "") : esc((r.reasons || []).join(" · "))}</small></td>
-      <td class="r"><b>${fx(r.spot)}</b><br>${pc(r.chg_pct)}</td>
+      <td class="r"><b data-lp="${esc(r.sym)}">${fx(r.spot)}</b><br><span data-lpc="${esc(r.sym)}">${pc(r.chg_pct)}</span></td>
       <td class="r">${pc(r.ret_5m)}<br><small class="muted">15m ${pc(r.ret_15m)}</small></td>
       <td class="r">${pc(r.vs_vwap_pct)}<br><small class="muted">vs VWAP</small></td>
       <td class="r">${r.rel_vol ? r.rel_vol.toFixed(1) + "×" : "–"}<br><small class="muted">volume</small></td>
@@ -3772,9 +3783,9 @@ function drawGhanshyam(d, first) {
   const openKeys = new Set([...el.querySelectorAll("details[open]")].map((x) => x.dataset.k));
   const a = d.account || {}, A = a.account || {}, T = d.totals || {};
   const cls = (v) => (v || 0) >= 0 ? "up" : "down";
-  const open = (a.open || []).map((t) => `<tr><td><span class="pill ${(t.dir || 1) > 0 ? "p-up" : "p-down"}">BUY</span> <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(t.strategy || "")}</small></td>
-      <td>${esc(t.sym)}</td><td>${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r">${fx(t.last)}</td><td class="r">${fx(t.target)} / ${fx(t.stop)}</td>
-      <td class="r ${t.unreal >= 0 ? "up" : "down"}"><b>${rupees(t.unreal)}</b></td><td><button class="link-btn" data-gh-close="${t.id}">Exit</button></td></tr>`).join("");
+  const open = (a.open || []).map((t) => `<tr data-qk="${esc(t.opt_key || "")}" data-entry="${t.entry}" data-qty="${(t.lot || 0) * (t.lots || 0)}" data-dir="${t.dir || 1}"><td><span class="pill ${(t.dir || 1) > 0 ? "p-up" : "p-down"}">BUY</span> <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(t.strategy || "")}</small></td>
+      <td>${esc(t.sym)}</td><td>${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r" data-q="now">${fx(t.last)}</td><td class="r">${fx(t.target)} / ${fx(t.stop)}</td>
+      <td class="r ${t.unreal >= 0 ? "up" : "down"}" data-q="pnl"><b>${rupees(t.unreal)}</b></td><td><button class="link-btn" data-gh-close="${t.id}">Exit</button></td></tr>`).join("");
   const closed = (a.closed || []).slice(0, 15).map((t) => `<tr><td><b>${esc(t.label)}</b>${t.strategy ? `<br><small class="muted">${esc(t.strategy)}</small>` : ""}</td><td>${esc(t.sym)}</td><td class="nw">${esc((t.day || "").slice(5))} ${hm(t.entry_ts)}–${hm(t.exit_ts)}</td>
       <td class="r nw">${fx(t.entry)} → ${fx(t.exit)}</td><td class="nw">${esc(t.reason || "")}</td><td class="r ${t.net >= 0 ? "up" : "down"}"><b>${rupees(t.net)}</b></td></tr>`).join("");
   const strat = (d.strategies || []).map((s, i) => `<tr><td><details data-k="s${i}" ${openKeys.has("s" + i) ? "open" : ""}><summary><b>${esc(s.name)}</b></summary>

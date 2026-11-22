@@ -118,6 +118,26 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.91: Live prices on every page, as fast as the chart (23 Nov 2026)
+- **Mandeep (23 Nov):** "har chart jitni speed se upstox mein chal rha hai utni hi speed se app par bhi ho. prices live aa
+  rhe ho saari jagah par live page, paper trade ya jahan bhi sab same speed as upstox".
+- **How a price travels (checked):** Upstox websocket -> the feed's own process (2.71) -> a pipe -> straight into the
+  app's prices (no batching) -> the browser over the app's websockets. The chart already moved on every price (/ws/ticks,
+  0.1 s); the Live page's prices (/ws/prices) and open paper trades / the option chain (/ws/quotes) every 0.2 s; other
+  pages only on their own refresh (Scanner 2 s, Watchlist 3 s, Ghanshyam 6 s).
+- **Now:** one watcher on every page streams any price the page shows (a symbol's price and day change, an option's
+  price and the trade's P&L), whatever page it is: Live, Scanner, Watchlist, Paper trades (every account), Ghanshyam, the
+  option chain. Prices and quotes are pushed every 0.1 s (like the chart; were 0.2 s), alerts / paper changes every
+  0.15 s (were 0.2 s); up to 250 symbols a page (were 60). `rules/chart_stream.json`.
+- **Why the Mac felt slow on 19 Nov (its log):** the Mac still runs 2.78. Two Lab builds (1 year and 5 years) ran
+  during market hours and the Upstox feed timed out 24 times that day ("ping/pong timed out", each a 1-3 s freeze while
+  it reconnects), clustered while the Lab worked; the analysis pass also took 3-10 s every 5 minutes (stats and the
+  setup scan inside the loop). Both are fixed since 2.80 (the Lab waits outside market hours) and 2.81 (stats and the
+  scan off the loop): they reach the Mac with the next Start Radar restart. Replay of 19 Nov on 2.91: a pass 0.1 s
+  (95% under 0.25 s); threads never waited more than 5 ms in 99% of checks.
+- Headless check on the 19 Nov replay (Scanner, Watchlist, Paper, Ghanshyam, Live; 1440 and 390): prices move on
+  screen without a page refresh, no console errors. Tests: `tests/test_streams_everywhere.py` (2).
+
 ## 2.90: Trend Rider confidence: every factor at once, Ghanshyam included (23 Nov 2026)
 - **Mandeep (22 Nov, 23:46):** "ye ensure karna ki ye sirf entry exit check hai sab baaki factors ke saath jaise ek hi
   time par ghanshyam wale points bhi check kiye live market or chart mein or ye bhi check kiya or sab milake confidence

@@ -95,7 +95,7 @@ def prices(e, syms: list) -> dict:
     out = {}
     if not getattr(e, "running", False) or getattr(e, "state", None) is None:
         return out
-    for s in syms[:60]:
+    for s in syms[:250]:
         k = _key(e, s)
         i = e.state.get(k) if k else None
         if i is None or not getattr(i, "ltp", None):

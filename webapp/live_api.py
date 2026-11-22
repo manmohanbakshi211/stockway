@@ -719,7 +719,7 @@ async def ws_prices(ws: WebSocket):
             except (ValueError, TypeError):
                 continue
             if isinstance(m, dict) and isinstance(m.get("syms"), list):
-                sub["syms"] = [str(x).upper()[:30] for x in m["syms"]][:60]
+                sub["syms"] = [str(x).upper()[:30] for x in m["syms"]][:250]
     task = asyncio.create_task(reader())
     last, beat = {}, 0.0
     try:
