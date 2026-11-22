@@ -501,24 +501,97 @@ _DAYS: dict = {}            # (db path, source, day) -> grouped rows of a finish
 _DAYS_LOCK = threading.Lock()
 
 
+def days_with_trades(con, source: str, first: str, before: str) -> list:
+    """2.94: the days in [first, before) that have bench trades, one index seek per day (reading every trade's index entry
+    for DISTINCT took ~1 s on the Mac's 400k trades)."""
+    out, d = [], first
+    q = "SELECT MIN(day) FROM bench_trades WHERE source=? AND day >= ? AND day < ?"
+    while True:
+        r = con.execute(q, (source, d, before)).fetchone()[0]
+        if r is None:
+            return out
+        out.append(r)
+        d = r + "\x00"                                     # the next day strictly after r
+
+
+CACHE_V = 1
+
+
+def _cache_file(bdb, source: str, day: str) -> Path:
+    import re as _re
+    return Path(bdb.path).parent / "bench_cache" / f"{_re.sub(r'[^A-Za-z0-9_.-]', '_', source)}__{day}.json.gz"
+
+
+def _day_stamp(con, source: str, day: str) -> list:
+    """A finished day's fingerprint from the index alone: [trades, highest id]. Its trades never change after the day
+    (open ones are not carried over a restart); a voided day (2.88) moves them to another source, so this changes."""
+    return list(con.execute("SELECT COUNT(*), MAX(rowid) FROM bench_trades WHERE source=? AND day=?", (source, day)).fetchone())
+
+
+def _disk_get(bdb, con, source: str, day: str):
+    import gzip
+    f = _cache_file(bdb, source, day)
+    try:
+        j = json.loads(gzip.decompress(f.read_bytes()))
+    except Exception:
+        return None
+    if j.get("v") != CACHE_V or j.get("stamp") != _day_stamp(con, source, day):
+        return None
+    cols = j["cols"]
+    return [dict(zip(cols, r)) for r in j["rows"]]
+
+
+def _disk_put(bdb, con, source: str, day: str, rows: list):
+    """2.94: a finished day's groups kept on disk (compressed), so a restart doesn't read every trade again (5 s)."""
+    import gzip
+    f = _cache_file(bdb, source, day)
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        cols = list(rows[0].keys()) if rows else []
+        body = {"v": CACHE_V, "stamp": _day_stamp(con, source, day), "cols": cols, "rows": [[r[c] for c in cols] for r in rows]}
+        tmp = f.with_name(f.name + ".tmp")
+        tmp.write_bytes(gzip.compress(json.dumps(body).encode(), 5))
+        tmp.replace(f)
+    except Exception:
+        pass
+
+
 def day_groups(bdb: BenchDB, source: str, days: int, today: str | None = None) -> list:
     """Closed bench trades grouped by day x strategy x style x day type, for the last `days` days. Finished days are
-    computed once and kept in memory; only today is read again. Uses its own read-only connection (never blocks)."""
+    computed once and kept in memory and (2.94) on disk; only today is read again. Uses its own read-only connection
+    (never blocks)."""
     import datetime as _dt
     today = today or _dt.date.today().isoformat()
     first = (_dt.date.fromisoformat(today) - _dt.timedelta(days=days)).isoformat()
     con = bdb.reader()
     try:
-        have = [r[0] for r in con.execute("SELECT DISTINCT day FROM bench_trades WHERE source=? AND day >= ? AND day < ?",
-                                          (source, first, today)).fetchall()]
+        have = days_with_trades(con, source, first, today)
         with _DAYS_LOCK:
             missing = [d for d in have if (str(bdb.path), source, d) not in _DAYS]
         if missing:
-            got: dict = {d: [] for d in missing}
-            for k in range(0, len(missing), 200):
-                part = missing[k:k + 200]
+            got: dict = {}
+            todo = []
+            for d in missing:
+                rows = _disk_get(bdb, con, source, d)
+                if rows is None:
+                    todo.append(d)
+                else:
+                    got[d] = rows
+            got.update({d: [] for d in todo})
+            for k in range(0, len(todo), 200):
+                part = todo[k:k + 200]
                 for r in con.execute(GROUP_SQL.format(where=f"day IN ({','.join('?' * len(part))})"), (source, *part)).fetchall():
                     got[r["day"]].append(dict(r))
+            for d in todo:
+                _disk_put(bdb, con, source, d, got[d])
+            if todo:                                       # cached days older than any board window are dropped
+                try:
+                    old = (_dt.date.fromisoformat(today) - _dt.timedelta(days=400)).isoformat()
+                    for f in (Path(bdb.path).parent / "bench_cache").glob("*.json.gz"):
+                        if f.name.split("__")[-1][:10] < old:
+                            f.unlink()
+                except Exception:
+                    pass
             with _DAYS_LOCK:
                 if len(_DAYS) > 5000:
                     _DAYS.clear()

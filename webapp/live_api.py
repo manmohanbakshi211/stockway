@@ -1261,7 +1261,10 @@ def live_board(regime: str = "auto", days: int = 60, source: str | None = None, 
     if reg == "opening":
         reg = None
     fam = family if family in bench.FAMILIES else None
+    from webapp import perf as _perf
+    mark = _perf.Marks("board")                          # 2.94: which piece of the Strategy board is slow
     out = bench.board(e.store, src, cap, risk, reg, max(1, min(365, days)), today=e.clock.now().date().isoformat(), family=fam)
+    mark("bench results")
     out.update(day_type=now_reg.get("label") if e.running else None, day_code=now_reg.get("code") if e.running else None, source=src,
                styles=[{"style": k, "label": v["label"], "family": v["family"]} for k, v in bench.load_styles()[0].items()])
     try:                                                  # 2.66: the 09:45 day-type forecast (lab/daytype.py), on trial
@@ -1269,6 +1272,7 @@ def live_board(regime: str = "auto", days: int = 60, source: str | None = None, 
         out["daytype"] = daytype.today(e.data_dir, e.clock.now().date().isoformat())
     except Exception:
         out["daytype"] = None
+    mark("day-type forecast")
     return clean(out)
 
 

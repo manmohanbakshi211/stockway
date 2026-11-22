@@ -332,39 +332,70 @@ def version_check(force: bool = False):
     return {**running, "state": state, "checked_at": _VERSION_CHECK["at"], "latest": remote[:7] if remote else None}
 
 
+VIEW_CACHE = ROOT / "data" / "view_cache"                  # 2.94: answers kept until their files change (webapp/memo.py)
+
+
+def _model_meta(c: dict):
+    """The Daily Radar model's dates: the model file (and the ML libraries) is loaded only when that file changes."""
+    from webapp import memo
+    f = Path(c["model_dir"]) / model.MODEL_FILE
+
+    def load():
+        b = model.load_bundle(c)
+        return clean(None if b is None else {k: b.get(k) for k in ("trained_at", "data_end", "demo", "news")})
+    import hashlib
+    tag = hashlib.md5(str(f).encode()).hexdigest()[:10]
+    return memo.memo("status_model|" + str(f), memo.stamp(f), load, disk=VIEW_CACHE / f"status_model_{tag}.json")
+
+
+def _market_files(c: dict) -> list:
+    """Days and date range of each downloaded market file, read again only when a file changes."""
+    from webapp import memo
+    items = [(name, sym, Path(c["cache_dir"]) / f"mkt_{name}.parquet") for name, sym in c["tickers"].items()]
+
+    def load():
+        data = []
+        for name, sym, f in items:
+            if f.exists():
+                d = ns_frame(pd.read_parquet(f))
+                data.append({"name": name, "symbol": sym, "days": len(d),
+                             "from": str(d.index.min().date()), "to": str(d.index.max().date())})
+            else:
+                data.append({"name": name, "symbol": sym, "days": 0, "from": None, "to": None})
+        return clean(data)
+    fp = [[n, s] for n, s, _ in items] + memo.stamp(*[f for _, _, f in items])
+    import hashlib
+    tag = hashlib.md5(str(c["cache_dir"]).encode()).hexdigest()[:10]
+    return memo.memo("status_data|" + str(c["cache_dir"]), fp, load, disk=VIEW_CACHE / f"status_data_{tag}.json")
+
+
+def _csv_rows(f: Path) -> int:
+    from webapp import memo
+    return memo.memo("csv_rows|" + str(f), memo.stamp(f), lambda: int(len(pd.read_csv(f))))
+
+
 @app.get("/api/status")
 def status(idx: str | None = None):
     if idx:                                               # 2.67: one index's model and training only
         ci = rcfg(idx)
-        b = model.load_bundle(ci)
-        return clean({"model": None if b is None else {k: b.get(k) for k in ("trained_at", "data_end", "demo", "news")},
+        return clean({"model": _model_meta(ci),
                       "training": read_json(Path(ci["output_dir"]) / "last_training.json"),
                       "has_forecast": (Path(ci["output_dir"]) / "forecast_latest.json").exists(), "job": job_summary()})
     c = cfg()
     out = Path(c["output_dir"])
-    bundle = model.load_bundle(c)
-    data = []
-    for name, sym in c["tickers"].items():
-        f = Path(c["cache_dir"]) / f"mkt_{name}.parquet"
-        if f.exists():
-            d = ns_frame(pd.read_parquet(f))
-            data.append({"name": name, "symbol": sym, "days": len(d),
-                         "from": str(d.index.min().date()), "to": str(d.index.max().date())})
-        else:
-            data.append({"name": name, "symbol": sym, "days": 0, "from": None, "to": None})
     hl = Path(c["news"]["headlines_csv"])
     ev = Path(c["events_csv"]) if c.get("events_csv") else None
     s = c.get("schedule", {})
     return clean({
-        "model": None if bundle is None else {k: bundle.get(k) for k in ("trained_at", "data_end", "demo", "news")},
+        "model": _model_meta(c),
         "training": read_json(out / "last_training.json"),
         "has_forecast": (out / "forecast_latest.json").exists(),
         "job": job_summary(),
-        "data": data,
+        "data": _market_files(c),
         "news": {"gdelt": news.gdelt_progress(c), "gdelt_queries": len(c["news"].get("gdelt_queries", {})),
                  "headlines_file": hl.exists(), "headlines_mb": round(hl.stat().st_size / 1e6, 1) if hl.exists() else 0,
                  "events_file": bool(ev and ev.exists()),
-                 "events_rows": int(len(pd.read_csv(ev))) if ev and ev.exists() else 0},
+                 "events_rows": _csv_rows(ev) if ev and ev.exists() else 0},
         "schedule": {"enabled": s.get("enabled"), "time": s.get("time"), "weekly_retrain": s.get("weekly_retrain")},
         "version": app_version(),
     })
@@ -1013,8 +1044,14 @@ async def factory_rule_live(rid: str, req: Request):
 # ---- 2.45 trade journeys (live/paths.py): bench signals held to 15:15, built from the day's recording
 @app.get("/api/paths")
 def paths_view(days: int = 60):
+    """2.94: worked out again only when the journeys change (a nightly job) or a new day starts; kept across restarts."""
     from live import paths
-    return clean(paths.view(ROOT / "data", days=max(1, min(int(days), 365))))
+    from webapp import memo
+    days = max(1, min(int(days), 365))
+    db = paths.db_path(ROOT / "data")
+    fp = [days, dt.date.today().isoformat()] + memo.stamp(db, Path(str(db) + "-wal"))
+    return memo.memo(f"paths|{days}", fp, lambda: clean(paths.view(ROOT / "data", days=days)),
+                     disk=VIEW_CACHE / f"paths_{days}.json")
 
 
 @app.post("/api/paths/run")
@@ -1664,6 +1701,31 @@ def _start_live():
     threading.Thread(target=live_engine, daemon=True).start()   # starts the 9:00 auto-start watcher
 
 
+def _warm_board():
+    from live import bench
+    e = live_engine()
+    src = e.source or e.cfg()["live"].get("source") or "upstox"
+    bench.day_groups(bench.db_for(e.store), src, 60, e.clock.now().date().isoformat())
+
+
+@app.on_event("startup")
+def _warm_views():
+    """2.94: the screens that read the most (Daily Radar status, Strategy board, Trade journeys) are worked out once in
+    the background right after the start, so the first visit after a restart doesn't wait for them."""
+    import sys
+    if "pytest" in sys.modules:
+        return
+
+    def go():
+        time.sleep(5)
+        for f in (status, _warm_board, lambda: paths_view(60)):
+            try:
+                f()
+            except Exception:
+                pass
+    threading.Thread(target=go, daemon=True, name="warm-views").start()
+
+
 # ----------------------------------------------------------------- UI
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -1726,6 +1788,8 @@ def system_view():
     from lab import dhan_auto, dhan_budget, dhan_token
     from live import selfcheck
     from webapp.live_api import engine as _eng
+    from webapp import perf as _perf
+    mark = _perf.Marks("system")                         # 2.94: which piece of this page is slow
     e = _eng()
     c = cfg()
     lc = e.cfg()["live"]
@@ -1832,13 +1896,15 @@ def system_view():
                + (f"; not reachable: {', '.join(bad_src)}" if bad_src else "")) if srcs else "First read within a minute of starting"
         svcs.append(_svc("official", "Official feeds (RBI, SEBI, Govt, NSE, BSE)", st, msg,
                          sources=[{"name": n, **v} for n, v in srcs]))
+    mark("services")
     # jobs
     d5 = DHAN5Y.view()
     cur = JOBS.current or {}
     from lab import factory
-    try:
-        fst = factory.load(ROOT / "data")
-        lab_last = fst.get("updated")
+    from webapp import memo
+    try:                                                  # 2.94: the 5 MB results file is parsed only when it changes
+        ff = ROOT / "data" / "lab" / "factory.json"
+        lab_last = memo.memo("lab_updated", memo.stamp(ff), lambda: factory.load(ROOT / "data").get("updated"))
     except Exception:
         lab_last = None
     jobs = {"dhan5y_running": d5.get("running"), "research5y_running": cur.get("kind") == "factory5y" and cur.get("status") == "running",
@@ -1877,17 +1943,28 @@ def system_view():
         p = probs.setdefault(key, {"text": m.group(4)[:180], "n": 0, "last": line[:8]})
         p["n"] += 1
         p["last"], p["text"] = line[:8], m.group(4)[:180]
-    checks = selfcheck.static_checks(e.cfg()) + selfcheck.runtime_checks(e, ROOT / "data", jobs)
+    mark("jobs and log")
+    # 2.94: the static checks (settings, rule files, the Lab's reports) at most once a minute; the live ones every call
+    checks = memo.memo("static_checks", None, lambda: selfcheck.static_checks(e.cfg()), ttl=60)
+    mark("checks (settings and reports)")
+    checks = checks + selfcheck.runtime_checks(e, ROOT / "data", jobs)
+    mark("checks (live)")
     bad = [x for x in svcs if x["status"] == "bad"] + [x for x in checks if x["ok"] is False]
     warn = [x for x in svcs if x["status"] == "warn"]
     free = shutil.disk_usage(ROOT / "data").free / 1e9
+    bullets, rules_ = _registry_list(), _rules_check()
+    mark("bullets and rules")
+    vault = _vault_view(e)
+    mark("data vault")
+    health = e.health.view() if getattr(e, "health", None) is not None else None
+    events = _events_view(e)
+    mark("health and events")
     return clean({"version": RUNNING_VERSION, "up_since": _ago(APP_STARTED), "free_gb": round(free, 1),
                   "overall": "bad" if bad else "warn" if warn else "ok", "services": svcs, "jobs": job_rows,
                   "checks": checks, "problems": sorted(probs.values(), key=lambda p: p["last"], reverse=True)[:12],
-                  "bullets": _registry_list(), "rules": _rules_check(), "vault": _vault_view(e),
-                  "health": e.health.view() if getattr(e, "health", None) is not None else None,
+                  "bullets": bullets, "rules": rules_, "vault": vault, "health": health,
                   "perf": _perf_view(),
-                  "events": _events_view(e)})
+                  "events": events})
 
 
 def _events_view(e):
@@ -1899,8 +1976,9 @@ def _events_view(e):
 
 
 def _vault_view(e):
-    try:
-        return e.vault_view()
+    from webapp import memo
+    try:                                                  # 2.94: the recording folders are measured at most every 30 s
+        return memo.memo("vault_view", None, e.vault_view, ttl=30)
     except Exception as ex:
         return {"error": str(ex)[:160]}
 

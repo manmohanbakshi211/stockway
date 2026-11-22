@@ -4015,14 +4015,15 @@ async function pageSystem() {
 function speedPanel(p) {
   if (!p || p.error) return "";
   const t = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "–";
-  const slow = (p.slow || []).slice(0, 8).map((x) => `<tr><td class="small">${t(x.at)}</td><td class="small"><code>${esc(x.path.length > 60 ? x.path.slice(0, 60) + "…" : x.path)}</code></td><td class="r small"><b class="down">${(x.ms / 1000).toFixed(1)} s</b></td></tr>`).join("");
+  const slow = (p.slow || []).slice(0, 8).map((x) => `<tr><td class="small">${t(x.at)}${x.startup ? ` <span class="muted">just after start</span>` : ""}</td><td class="small"><code>${esc(x.path.length > 60 ? x.path.slice(0, 60) + "…" : x.path)}</code></td><td class="r small"><b class="down">${(x.ms / 1000).toFixed(1)} s</b></td></tr>`).join("");
   const top = (p.slowest || []).slice(0, 6).map((x) => `<tr><td class="small"><code>${esc(x.call)}</code></td><td class="r small">${x.avg_ms} ms</td><td class="r small muted">max ${x.max_ms} ms · ${x.n}×</td></tr>`).join("");
   const lab = p.lab_last;
-  return `<div class="panel tight" style="margin-top:12px"><h3>Speed <span class="pill ${p.slow_last_hour ? "p-down" : "p-up"}">${p.slow_last_hour ? `${p.slow_last_hour} slow in the last hour` : "quick"}</span></h3>
+  return `<div class="panel tight" style="margin-top:12px"><h3>Speed <span class="pill ${p.slow_last_hour_running ? "p-down" : p.slow_last_hour ? "p-amber" : "p-up"}">${p.slow_last_hour ? `${p.slow_last_hour} slow in the last hour${p.slow_last_hour_running == 0 ? " (all just after start)" : ""}` : "quick"}</span></h3>
     <p class="small muted" style="margin:0 0 6px">Every screen's data call is timed; over ${(p.slow_ms / 1000).toFixed(1)} s counts as slow. ${(p.calls || 0).toLocaleString("en-IN")} calls since ${t(p.since)}.
       The Strategy Lab runs in its own low-priority process${lab ? ` (last: ${esc(lab.job)}, ${esc(lab.how)}, ${Math.round(lab.secs / 60)} min, ended ${t(lab.at)})` : ""}; the 5-year Dhan download gives way to screens, news and movers${p.dhan_gave_way ? ` (${p.dhan_gave_way.toLocaleString("en-IN")} times so far)` : ""}.</p>
     ${slow ? `<div class="table-wrap"><table class="mini"><thead><tr><th>When</th><th>Slow call</th><th class="r">Took</th></tr></thead><tbody>${slow}</tbody></table></div>` : ""}
-    ${top ? `<details><summary class="small muted">Slowest kinds of call (average)</summary><div class="table-wrap"><table class="mini"><tbody>${top}</tbody></table></div></details>` : ""}</div>`;
+    ${top ? `<details><summary class="small muted">Slowest kinds of call (average)</summary><div class="table-wrap"><table class="mini"><tbody>${top}</tbody></table></div>
+      ${(p.parts || []).length ? `<p class="small muted" style="margin:6px 0 2px">Inside them (2.94):</p><div class="table-wrap"><table class="mini"><tbody>${p.parts.slice(0, 8).map((x) => `<tr><td class="small">${esc(x.part)}</td><td class="r small">${x.avg_ms} ms</td><td class="r small muted">max ${x.max_ms} ms · ${x.n}×</td></tr>`).join("")}</tbody></table></div>` : ""}</details>` : ""}</div>`;
 }
 
 /* 2.33 health monitor: is the app really collecting data right now? */

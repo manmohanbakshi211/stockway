@@ -118,6 +118,26 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.94: Quicker screens: slow work done once, not on every call (23 Nov 2026)
+- **Mandeep (23 Nov, the System page's Speed panel): "check the speed one".** Read from the running app (2.93, 3 minutes
+  after a restart, 5-year download running): Trade journeys 9.4 s, Strategy board 5.3 s (later calls ~2 s), Daily Radar
+  status up to 3.9 s (avg 0.9 s on 12 calls, every page load), System page 1.1-1.7 s on every refresh.
+- **Why:** each call redid the same slow work. The status loaded the Daily Radar model file (and its ML libraries) and
+  17 price files every time; the board read all ~400k bench trades after every restart and scanned the whole index for
+  its days on every call; the System page parsed the Strategy Lab's 5 MB results to show one date and re-ran ~60 settings
+  checks; Trade journeys decoded every recorded path again.
+- **Fix (`webapp/memo.py`, gun):** an answer is kept until a file it came from changes (path, modified time, size), on
+  disk too where a restart would pay again. Status: model dates and price files read only when they change. Board:
+  finished days kept on disk, compressed (`data/bench_cache`, a day's fingerprint from the index: trades and highest id,
+  so a voided day is read again; days older than 400 dropped); its days found by one index seek each. System: Lab date by
+  file, settings checks at most once a minute, recording folders every 30 s; live checks every call. Trade journeys:
+  until the nightly job changes them. The three heaviest are worked out in the background right after a start.
+- Measured: board days index 0.4 ms (was 19 ms; ~1 s on the Mac); 408k test trades: first board 1.9 s, after a restart
+  0.4 s (was 1.9 s every restart); repeat calls ~2 ms. Answers identical (tests).
+- **Speed panel:** a slow call in the first 2 minutes after a start is marked "just after start"; the pill says when all
+  of them were; "Inside them" shows which piece of the System page / Strategy board took the time.
+- Tests: `tests/test_speed_294.py` (6). Headless check of System, Strategy board, Tomorrow at 1440 / 390, light / dark.
+
 ## 2.93: Pattern learning: which candle patterns pay, and where (23 Nov 2026)
 - **Mandeep (23 Nov):** "patterens to observe karte raho or ye dekhna hai humein ki system patterens achhe se pakdna
   seekhe toh do the best." The candle-pattern test bench keeps running exactly as before; the system now learns from it.
