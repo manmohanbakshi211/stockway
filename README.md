@@ -118,6 +118,29 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.86: Trend Rider sub-charts under the candles and its reading card (22 Nov 2026)
+- **Mandeep (22 Nov):** "candle chart ke niche jo sub charts hain system unpar sab par sabkuch apply karre or analyse
+  kare taaki main par dependent na ho or main chart clean rahe ... main chart ke side mein jo bhi analysis ya text hain
+  vo bhi subchart ki reading se system lele".
+- **Chart page, five sub-charts under the candles** (Indicators & levels → "Trend Rider: …"; agreement and option on by
+  default, the rest one click away; intraday timeframes only; nothing is drawn on the candles' pane):
+  - Trend & day: the trend-day score (line, its 50 bar dashed) and the distance from VWAP in ATRs (bars).
+  - Breakout & chase: breakout quality when a level breaks (green up / red down bars, 55 bar) and the chase meter of
+    that side (late above 65).
+  - Flow: bid/ask + order-flow imbalance (bars, + = buyers) and strength vs Nifty.
+  - Option: move vs decay for the call and the put (1 = worth it) and their tradability (dashed).
+  - Agreement strip: how many families agree for calls (up) and puts (down), the 3 bar, and CALL / PUT marks where
+    the whole setup passed.
+  Each 5-minute reading sits on the bar it falls in, so the panes line up on 1m, 3m, 15m, 30m and 1H too.
+- **Side card "Trend Rider reading"** (top of the chart's side column): the decision on the last closed bar (passes:
+  which option, trigger and stop; or no trade and the first failed checks) and one line per sub-chart, from the same
+  server numbers the sub-charts plot (`/api/live/rider/{sym}`: the rows of `live/rider.py`, the latest reading and
+  the limits from `rules/buy_setup.json`).
+- Side cards of the chart page are fetched again when you change timeframe (before, the engine eval card could stay
+  empty for up to 20 seconds).
+- Headless check on the 19 Nov replay (Nifty, TVS Motor; 1440 and 390 wide; light and dark; 5m, 1m, 15m, 1D): no
+  console errors, no sideways scroll. Tests: `tests/test_rider_ui.py` (3).
+
 ## 2.85: Trend Rider exit and its own paper account, on trial (22 Nov 2026)
 - **Mandeep (22 Nov):** "loss less ho, time limit tak sirf premium na ghista rahe agar koi movement ka chance nahi hai
   toh, reversal ho toh trail humara profit bachaye rakhe but ... ye nahi ki sl hit karwake aage ka achha move na le

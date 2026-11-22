@@ -2011,11 +2011,16 @@ const CH = { chart: null, sym: null, tf: "5m", tfMin: 5, series: {}, lines: [], 
 const CH_TOGGLES = [["smart", "Smart lines (drawn by the app, with their record)"], ["scen", "Move prediction (scenarios)"], ["em", "Expected move (from options)"], ["vol", "Volume"],
   ["vwap", "VWAP + bands"], ["ema", "EMA 9/21/50"], ["st", "Supertrend"], ["prev", "Yesterday H/L/C"], ["cpr", "CPR + pivots"],
   ["or", "Opening range"], ["oi", "OI walls + max pain"], ["gamma", "Gamma levels"], ["marks", "Alerts + trades"],
-  ["rsi", "RSI"], ["macd", "MACD"], ["pat", "Chart patterns"], ["swing", "Swing labels (HH / HL / LH / LL)"]];
+  ["rsi", "RSI"], ["macd", "MACD"], ["pat", "Chart patterns"], ["swing", "Swing labels (HH / HL / LH / LL)"],
+  // 2.86: Trend Rider's indicators, each in its own sub-chart under the candles (values from the server, live/rider.py)
+  ["rd_ag", "Trend Rider: agreement strip"], ["rd_opt", "Trend Rider: option (move vs decay, tradability)"],
+  ["rd_trend", "Trend Rider: trend day + VWAP distance"], ["rd_bo", "Trend Rider: breakout quality + chase"],
+  ["rd_flow", "Trend Rider: order flow + strength vs Nifty"]];
+const RD_KEYS = ["rd_trend", "rd_bo", "rd_flow", "rd_opt", "rd_ag"];
 const PAT_SHORT = { double_top: "DT", double_bottom: "DB", head_shoulders: "H&S", inv_hs: "iH&S", triangle: "Tri", flag: "Flag",
   breakout_retest: "Retest", rsi_divergence: "Div", candle_at_level: "Candle" };
 // 2.29: a clean chart by default (candles + the move prediction); every layer is one click away and remembered
-function chOn(k) { return LS.get("ch2_" + k, ["scen", "em", "smart"].includes(k)); }
+function chOn(k) { return LS.get("ch2_" + k, ["scen", "em", "smart", "rd_ag", "rd_opt"].includes(k)); }
 // 2.69 (Mandeep: "main chart par seconds ki timeline bhi"): 5s / 15s / 30s candles from the app's own prices (today only)
 const CH_TFS = ["5s", "15s", "30s", "1m", "3m", "5m", "15m", "30m", "1H", "1D", "1W", "1M"];
 const CH_MIN = { "5s": 5 / 60, "15s": 0.25, "30s": 0.5, "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1H": 60, "1D": 1440, "1W": 10080, "1M": 43200 };
@@ -2047,6 +2052,7 @@ const IND = {
 
 async function pageChart() {
   stopPageTimer();
+  CH.rdAt = 0; CH.evalAt = 0;                 // 2.86: the side cards are rebuilt with the page: fetch them again
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   CH.sym = (params.get("s") || LS.get("lastSym", "NIFTY")).toUpperCase();
   CH.tf = chTf(params.get("tf") || LS.get("ch2_tf", "5m"));
@@ -2067,7 +2073,8 @@ async function pageChart() {
       <span class="btn-row" style="margin:0"><button class="btn buy" id="ch-buy" title="Paper: buy the at-the-money call, 1 lot">Paper BUY</button><button class="btn sell" id="ch-sell" title="Paper: buy the at-the-money put, 1 lot">Paper SELL</button></span>
     </div>
     <div class="ch-wrap"><div id="ch-chart" class="ch-chart"></div>
-      <aside class="ch-side"><div class="panel tight"><h3>Buyer / seller scene <span class="pill p-amber">on trial</span> <span class="muted small">MindGame · 1m, 3m, 5m</span></h3><div id="ch-mind"><p class="muted small">Loading…</p></div></div>
+      <aside class="ch-side"><div class="panel tight"><h3>Trend Rider reading <span class="pill p-amber">on trial</span> <span class="muted small">from the sub-charts</span></h3><div id="ch-rider"><p class="muted small">Loading…</p></div></div>
+        <div class="panel tight"><h3>Buyer / seller scene <span class="pill p-amber">on trial</span> <span class="muted small">MindGame · 1m, 3m, 5m</span></h3><div id="ch-mind"><p class="muted small">Loading…</p></div></div>
         <div class="panel tight" id="ch-eval"></div><div class="panel tight" id="ch-smart-wrap"><h3>Smart lines <span class="pill p-amber">new</span> <span class="muted small">drawn by the app</span></h3><div id="ch-smart"><p class="muted small">Loading…</p></div></div>
         <div class="panel tight"><h3>Trade signals <span class="muted small">BUY / SELL marks on the chart</span></h3><div id="ch-sigs"><p class="muted small">Focus alerts on this symbol show here.</p></div></div>
         <div class="panel tight"><h3>All timeframes read <span class="muted small">5m → weekly</span></h3><div id="ch-mtfread"><p class="muted small">Loading…</p></div></div>
@@ -2546,14 +2553,27 @@ function buildChart() {
   if (chOn("vol")) { S.vol = chart.addSeries(LW.HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false }, pane); S.volPane = pane++; }
   if (chOn("rsi")) { S.rsi = ln(C.signal, 1, 0, pane, { lastValueVisible: true }); S.rsi.createPriceLine({ price: 70, color: C.down, lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsi.createPriceLine({ price: 30, color: C.up, lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); S.rsiPane = pane++; }
   if (chOn("macd")) { S.macd_hist = chart.addSeries(LW.HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, pane); S.macd = ln("#0A84C1", 1, 0, pane); S.macd_sig = ln("#E07B00", 1, 0, pane); S.macdPane = pane++; }
-  chart.panes().forEach((p, i) => p.setStretchFactor(i === 0 ? 4 : 1));
+  // 2.86: Trend Rider sub-charts (intraday only); the main pane stays clean
+  const hist = (p, extra = {}) => chart.addSeries(LW.HistogramSeries, { priceLineVisible: false, lastValueVisible: false, ...extra }, p);
+  S.rdPanes = {};
+  if (intra && chOn("rd_trend")) { S.rd_vw = hist(pane, { priceScaleId: "rdvw", title: "" }); S.rd_tds = ln(C.signal, 2, 0, pane, { lastValueVisible: true, title: "Trend day" }); S.rdPanes.trend = pane++; }
+  if (intra && chOn("rd_bo")) { S.rd_bq = hist(pane, { title: "" }); S.rd_ch = ln("#E07B00", 2, 0, pane, { lastValueVisible: true, title: "Chase" }); S.rdPanes.bo = pane++; }
+  if (intra && chOn("rd_flow")) { S.rd_fl = hist(pane, { lastValueVisible: true, title: "Flow" }); S.rd_rs = ln(C.muted, 1, 0, pane, { priceScaleId: "rdrs" }); S.rdPanes.flow = pane++; }
+  if (intra && chOn("rd_opt")) { S.rd_mu = ln(C.up, 2, 0, pane, { lastValueVisible: true, title: "Call MvD" }); S.rd_md = ln(C.down, 2, 0, pane, { lastValueVisible: true, title: "Put MvD" });
+    S.rd_tu = ln(alpha(C.up, .5), 1, 2, pane, { priceScaleId: "rdtr" }); S.rd_td = ln(alpha(C.down, .5), 1, 2, pane, { priceScaleId: "rdtr" }); S.rdPanes.opt = pane++; }
+  if (intra && chOn("rd_ag")) { const whole = { priceFormat: { type: "price", precision: 0, minMove: 1 } };
+    S.rd_au = hist(pane, { lastValueVisible: true, title: "Calls agree", ...whole }); S.rd_ad = hist(pane, { lastValueVisible: true, title: "Puts agree", ...whole }); S.rdPanes.ag = pane++;
+    S.rd_mk = LW.createSeriesMarkers(S.rd_au, []); }
+  chart.panes().forEach((p, i) => p.setStretchFactor(i === 0 ? 4 : i === S.rdPanes.ag ? 0.7 : 1));
   S.markers = LW.createSeriesMarkers(S.candle, []);
   const lg = document.createElement("div"); lg.className = "ch-legend"; el.appendChild(lg);
   chart.subscribeCrosshairMove((p) => {
     const c = p && p.time ? p.seriesData.get(S.candle) : null;
     if (!c) { lg.innerHTML = ""; return; }
     const v = (k) => { const x = S[k] && p.seriesData.get(S[k]); return x && x.value != null ? x.value : null; };
-    const bits = [["VWAP", v("vwap")], ["EMA9", v("ema9")], ["EMA21", v("ema21")], ["RSI", v("rsi")]].filter((x) => x[1] != null)
+    const bits = [["VWAP", v("vwap")], ["EMA9", v("ema9")], ["EMA21", v("ema21")], ["RSI", v("rsi")], ["Trend day", v("rd_tds")],
+      ["VWAP dist", v("rd_vw")], ["Breakout", v("rd_bq")], ["Chase", v("rd_ch")], ["Flow", v("rd_fl")], ["vs Nifty %", v("rd_rs")],
+      ["Call MvD", v("rd_mu")], ["Put MvD", v("rd_md")], ["Calls agree", v("rd_au")], ["Puts agree", v("rd_ad") != null ? -v("rd_ad") : null]].filter((x) => x[1] != null)
       .map(([n, x]) => `<span>${n} <b>${fx(x)}</b></span>`).join("");
     const dtm = new Date((p.time - 19800) * 1000);
     const t = intra ? dtm.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })
@@ -2563,6 +2583,7 @@ function buildChart() {
   });
   chart.timeScale().subscribeVisibleLogicalRangeChange((r) => { if (r && r.from < 30) loadOlder(); });
   CH.chart = chart; CH.series = S; CH.lines = []; CH.sig = ""; CH.patSeries = []; CH.psig = null; CH.smartLines = []; CH.smartSeries = []; CH.smartSig = null;
+  CH.rdLines = []; CH.rdSig = null;
 }
 
 /* candles and the indicators computed from them (all loaded history) */
@@ -2684,6 +2705,64 @@ function drawChart(d, first) {
   $("#ch-levels").innerHTML = `<ul class="plain lv">${d.levels.slice().sort((a, b) => b.price - a.price).map((l) => `<li class="${l.price > spot ? "abv" : "blw"}"><span><i style="background:${l.color}"></i>${esc(l.name)}</span><b>${fx(l.price)}</b><small>${((l.price / spot - 1) * 100).toFixed(2)}%</small></li>`).join("")}</ul>`;
   const sm = $("#ch-smart"); if (sm) sm.innerHTML = smartPanel(d.smart, spot);
   if (!CH.evalAt || Date.now() - CH.evalAt > 20000 || CH.evalSym !== d.sym) { CH.evalAt = Date.now(); CH.evalSym = d.sym; drawEval(d.sym); }
+  if (!CH.rdAt || Date.now() - CH.rdAt > 20000 || (CH.rd && CH.rd.sym !== d.sym)) { CH.rdAt = Date.now(); loadRider(d.sym); }
+  else drawRiderPanes();
+}
+
+/* 2.86: Trend Rider (live/rider.py, on trial). The sub-charts under the candles and the side card read the same
+   server values: one row per closed 5-minute bar. Information only. */
+async function loadRider(sym) {
+  let r; try { r = await api(`/api/live/rider/${encodeURIComponent(sym)}`); } catch (_) { return; }
+  if (state.page !== "chart" || CH.sym !== sym) return;
+  CH.rd = r; drawRiderPanes(); riderCard(r);
+}
+
+function drawRiderPanes() {
+  const S = CH.series, r = CH.rd; if (!CH.chart || !S || !S.rdPanes || !r || r.sym !== CH.sym) return;
+  const rows = r.series || [];
+  const sig = JSON.stringify([rows.length, rows.length ? rows[rows.length - 1] : null, CH.tf, Object.keys(S.rdPanes), (CH.bars || []).length]);
+  if (sig === CH.rdSig) return;
+  CH.rdSig = sig;
+  const at = new Map();                      // each 5-minute reading goes on the bar it falls in (any timeframe)
+  rows.forEach((x) => { const t = chBarTime(x.time); if (t != null) at.set(t, x); });
+  const pts = [...at.entries()].sort((a, b) => a[0] - b[0]);
+  const put = (ser, f, color) => { if (!ser) return; ser.setData(pts.map(([t, x]) => { const v = f(x); return v == null || !isFinite(v) ? null : color ? { time: t, value: v, color: color(x, v) } : { time: t, value: v }; }).filter(Boolean)); };
+  const sideOf = (x) => x.bo_dir || 0;
+  put(S.rd_tds, (x) => x.tds);
+  put(S.rd_vw, (x) => x.vwap_dist, (x, v) => alpha(v >= 0 ? C.up : C.down, .35));
+  put(S.rd_bq, (x) => (x.bo_dir ? x.bq : null), (x) => alpha(x.bo_dir > 0 ? C.up : C.down, .55));
+  put(S.rd_ch, (x) => (sideOf(x) > 0 ? x.chase_up : sideOf(x) < 0 ? x.chase_dn : Math.max(x.chase_up ?? -1, x.chase_dn ?? -1)));
+  put(S.rd_fl, (x) => x.flow, (x, v) => alpha(v >= 0 ? C.up : C.down, .6));
+  put(S.rd_rs, (x) => x.rs);
+  put(S.rd_mu, (x) => x.mvd_up); put(S.rd_md, (x) => x.mvd_dn);
+  put(S.rd_tu, (x) => x.trad_up); put(S.rd_td, (x) => x.trad_dn);
+  put(S.rd_au, (x) => x.ag_up, () => alpha(C.up, .6)); put(S.rd_ad, (x) => (x.ag_dn != null ? -x.ag_dn : null), () => alpha(C.down, .6));
+  if (S.rd_mk) S.rd_mk.setMarkers(pts.filter(([, x]) => x.go).map(([t, x]) => ({ time: t, position: x.go > 0 ? "aboveBar" : "belowBar", color: x.go > 0 ? C.up : C.down, shape: x.go > 0 ? "arrowUp" : "arrowDown", text: x.go > 0 ? "CALL" : "PUT" })));
+  (CH.rdLines || []).forEach(([ser, pl]) => { try { ser.removePriceLine(pl); } catch (_) {} });
+  CH.rdLines = [];
+  const L = r.limits || {}, line = (ser, price, color, title) => { if (ser && price != null) CH.rdLines.push([ser, ser.createPriceLine({ price, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title })]); };
+  line(S.rd_tds, L.trend_day, C.muted, "min"); line(S.rd_bq, L.breakout, C.muted, "min"); line(S.rd_ch, L.chase, C.down, "late");
+  line(S.rd_mu, L.mvd, C.muted, "worth it"); line(S.rd_au, L.families, C.up, ""); line(S.rd_ad, L.families != null ? -L.families : null, C.down, "");
+}
+
+function riderCard(r) {
+  const el = $("#ch-rider"); if (!el) return;
+  if (!r || !r.read) { el.innerHTML = `<p class="muted small">${esc((r && r.message) || "No reading yet.")}</p>`; return; }
+  const x = r.read, R = x.readings || {}, dcs = x.decision || {}, L = r.limits || {};
+  const n = (v, k = 0) => (v == null || !isFinite(v) ? "–" : Number(v).toFixed(k));
+  const sg = (v, k = 2) => (v == null || !isFinite(v) ? "–" : `${v > 0 ? "+" : ""}${Number(v).toFixed(k)}`);
+  const when = hm(x.t);
+  const td = R.trend_day || {}, vw = R.vwap || {}, bo = R.breakout, up = R.up || {}, dn = R.down || {};
+  const head = dcs.go ? `<p style="margin:0 0 6px"><b class="${dcs.dir > 0 ? "up" : "down"}">Setup passes: buy the ${dcs.dir > 0 ? "call" : "put"}</b> <span class="muted small">(${esc(dcs.trigger || "")}; stop ${fx(dcs.stop)})</span></p>`
+    : `<p style="margin:0 0 6px"><b>No trade</b><span class="muted small">${(dcs.fails || []).length ? ": " + esc(dcs.fails.slice(0, 3).join("; ")) : ""}</span></p>`;
+  const fam = (s) => (s.agree && s.agree.agree && s.agree.agree.length ? s.agree.agree.join(", ") : "none");
+  el.innerHTML = `${head}<ul class="plain small rd-list">
+      <li><b>Trend day</b> ${n(td.score)} <span class="muted">(needs ${n(L.trend_day)})</span> · VWAP: ${vw.side > 0 ? "above" : vw.side < 0 ? "below" : "on it"} by ${n(Math.abs(vw.dist_atr ?? NaN), 2)} ATR, lean ${sg(vw.slope_atr)}</li>
+      <li><b>Breakout</b> ${bo ? `${esc(bo.level_name)} ${bo.dir > 0 ? "▲" : "▼"} quality ${n(bo.quality)} <span class="muted">(needs ${n(L.breakout)})</span>, room ${n(bo.room_atr, 1)} ATR${bo.retest ? ", retest" : ""}` : `<span class="muted">none on this bar</span>`} · Chase ▲ ${n(up.chase)} ▼ ${n(dn.chase)} <span class="muted">(late above ${n(L.chase)})</span></li>
+      <li><b>Flow</b> ${sg(R.flow)} <span class="muted">(+ = buyers)</span> · vs Nifty ${R.rs == null ? "–" : sg(R.rs) + "%"}</li>
+      <li><b>Option</b> move vs decay: call ${n(up.mvd, 2)} · put ${n(dn.mvd, 2)} <span class="muted">(worth it from ${n(L.mvd, 1)})</span> · tradability: call ${n((up.trad || {}).score)} · put ${n((dn.trad || {}).score)}</li>
+      <li><b>Agreement</b> calls ${(up.agree || {}).families ?? "–"} (${esc(fam(up))}) · puts ${(dn.agree || {}).families ?? "–"} (${esc(fam(dn))}) <span class="muted">(needs ${n(L.families)})</span></li></ul>
+    <p class="note" style="margin-top:6px">The ${when} bar. The same numbers as the Trend Rider sub-charts under the candles (Indicators &amp; levels to show more). On trial: its own paper account only.</p>`;
 }
 
 /* 2.61 engine evaluation (chess-engine style): this symbol's alerts of the last 45 minutes, each with what the multiverse

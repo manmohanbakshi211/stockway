@@ -334,6 +334,34 @@ def live_chart(sym: str, tf: int = 5, days: int = 3):
 _CHART_MEMO: dict = {}
 
 
+@router.get("/api/live/rider/{sym}")
+def live_rider(sym: str):
+    """2.86: Trend Rider's readings for one symbol (live/rider.py): one row per closed 5-minute bar for the chart's
+    sub-charts (time on the chart's IST axis) and the latest reading with the decision for the side card. The card
+    and the sub-charts read the same numbers. Information only; the setup is on trial."""
+    e = engine()
+    rd = getattr(e, "rider", None)
+    if rd is None:
+        return {"ready": False, "message": "Trend Rider is not loaded."}
+    try:
+        v = rd.view(sym.upper())
+    except Exception as ex:
+        return {"ready": False, "message": f"Trend Rider reading failed: {ex}"}
+    from live.chartdata import IST_SHIFT
+    rows = [{**r, "time": int(r["t"]) + IST_SHIFT} for r in (v.get("series") or []) if r.get("t") is not None]
+    c = v.get("config") or {}
+    out = {"ready": bool(rows or v.get("read")), "sym": sym.upper(), "series": rows, "read": v.get("read"),
+           "limits": {"trend_day": (c.get("trend_day") or {}).get("min"), "breakout": (c.get("breakout") or {}).get("min_quality"),
+                      "chase": (c.get("chase") or {}).get("max"), "families": (c.get("agreement") or {}).get("min_families"),
+                      "mvd": (c.get("move_vs_decay") or {}).get("min"), "trad": (c.get("tradability") or {}).get("min"),
+                      "windows": c.get("windows")},
+           "running": bool(getattr(e, "running", False))}
+    if not out["ready"]:
+        out["message"] = ("Builds at each closed 5-minute bar while the live scanner runs (from 09:30)." if out["running"]
+                          else "The live scanner is not running: Trend Rider reads every closed 5-minute bar once it is.")
+    return clean(out)
+
+
 @router.post("/api/live/chart/{sym}/ai")
 def live_chart_ai(sym: str):
     from live.notify import SYSTEM_STYLE, _compact_json, _slim_metrics
