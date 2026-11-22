@@ -335,7 +335,8 @@ class Books:
                     d = dict(a.get("data") or {})
                     d.update(risk={"verdict": "PASS", "lots": 1},
                              factory={"plan": {"style": "rider", "R": abs(float(a.get("price") or 0) - float(r["stop"])),
-                                               "stop": float(r["stop"]), "atr": float(r["atr"])}})
+                                               "stop": float(r["stop"]), "atr": float(r["atr"]),
+                                               **({"ema": float(r["ema10"])} if r.get("ema10") is not None else {})}})
                     a2 = {**a, "data": d, "severity": max(1, int(a.get("severity") or 1)),
                           "title": (a.get("title") or "Trend Rider")[:200]}
                     before = dict(bk.skipped)

@@ -159,9 +159,14 @@ class Rider:
         up, dn = self._opt(sym, "up", day), self._opt(sym, "down", day)
         flow = self._flow(sym)
         thrust = {1: self._thrust(sym, up, 1), -1: self._thrust(sym, dn, -1)}
-        r = R.readings(b, ctx, c_, nifty if sym != "NIFTY" else None, up, dn, cap, flow, thrust)
+        t_last = float(b["t"][-1])
+        hist = [x.get("ema_now") or [] for x in (self.series.get(sym) or []) if x["t"] < t_last]
+        r = R.readings(b, ctx, c_, nifty if sym != "NIFTY" else None, up, dn, cap, flow, thrust, hist)
         bo = r.get("breakout")
-        dec = R.decide(b, r, tod, c_, (up if bo and bo["dir"] > 0 else dn) if bo else None)
+        dec = R.decide(b, r, tod, c_, (up if bo and bo["dir"] > 0 else dn) if bo else None, opts={1: up, -1: dn})
+        ev = r.get("ema") or {}
+        a_ = r.get("atr") or 0
+        c_last = float(b["c"][-1])
         self.read[sym] = {"t": float(b["t"][-1]), "tod": tod, "readings": r, "decision": dec,
                           "options": {"up": (up or {}).get("label"), "down": (dn or {}).get("label")}}
         row = {"t": float(b["t"][-1]), "tds": r["trend_day"].get("score"), "vwap_dist": r["vwap"].get("dist_atr"),
@@ -170,7 +175,13 @@ class Rider:
                "ag_up": r["up"]["agree"]["families"], "ag_dn": r["down"]["agree"]["families"],
                "mvd_up": r["up"]["mvd"], "mvd_dn": r["down"]["mvd"],
                "trad_up": r["up"]["trad"].get("score"), "trad_dn": r["down"]["trad"].get("score"),
-               "flow": flow, "rs": r.get("rs"), "go": dec["dir"] if dec.get("go") else 0}
+               "flow": flow, "rs": r.get("rs"), "go": dec["dir"] if dec.get("go") else 0,
+               # 2.89: the EMA videos (5 EMA alert, 10 EMA pullback), on trial
+               "e5_dist": round((c_last - ev["ema_fast"]) / a_, 3) if ev.get("ema_fast") is not None and a_ else None,
+               "e10_dist": round((c_last - ev["ema_slow"]) / a_, 3) if ev.get("ema_slow") is not None and a_ else None,
+               "ema_now": list(ev.get("now") or []),
+               "ema_fired": [[dd, x["alert"]] for dd in (1, -1) for x in ((ev.get("fired") or {}).get(dd) or [])],
+               "ema_up": bool((ev.get("vote") or {}).get(1)), "ema_dn": bool((ev.get("vote") or {}).get(-1))}
         ser = self.series.setdefault(sym, [])
         if ser and ser[-1]["t"] == row["t"]:
             ser[-1] = row
@@ -201,7 +212,10 @@ class Rider:
                                  "risk_pct": dec.get("risk_pct"), "tds": r["trend_day"].get("score"),
                                  "bq": bo["quality"] if bo else None, "chase": side["chase"],
                                  "agree": side["agree"]["agree"], "mvd": side["mvd"], "trad": side["trad"].get("score"),
-                                 "flow": flow, "rs": r.get("rs"), "thrust": side.get("thrust")},
+                                 "flow": flow, "rs": r.get("rs"), "thrust": side.get("thrust"),
+                                 "ema_vote": bool((ev.get("vote") or {}).get(d)),
+                                 "ema_fired": [x["alert"] for x in ((ev.get("fired") or {}).get(d) or [])],
+                                 "ema10": ev.get("ema_slow")},
                        **({"setup_levels": {"entry": round(e_, 2), "stop": stop, "target": round(e_ + d * 2 * risk, 2),
                                             "rr": 2.0}} if risk else {})}})
         return 1

@@ -33,7 +33,7 @@ def test_rider_api_gives_the_chart_rows_and_the_same_latest_reading(monkeypatch)
     assert r["series"][0]["time"] == int(rows[0]["t"]) + IST_SHIFT          # on the chart's IST axis
     assert r["series"][0]["tds"] == 75.0 and r["read"]["decision"]["dir"] == -1   # the card reads the same numbers
     assert r["limits"] == {"trend_day": 50, "breakout": 55, "chase": 65, "families": 3, "mvd": 1.0, "trad": 40,
-                           "windows": [[5, 60], [120, 240]]}
+                           "windows": [[5, 60], [120, 240]], "ema_counted": False, "ema_trigger": False}
 
 
 def test_rider_api_explains_an_empty_answer(monkeypatch):
@@ -46,11 +46,11 @@ def test_rider_api_explains_an_empty_answer(monkeypatch):
 
 
 def test_chart_page_has_the_rider_sub_charts_off_the_main_pane():
-    for k in ("rd_trend", "rd_bo", "rd_flow", "rd_opt", "rd_ag"):
+    for k in ("rd_trend", "rd_bo", "rd_flow", "rd_opt", "rd_ag", "rd_ema"):
         assert f'["{k}", "Trend Rider' in JS
     assert '"rd_ag", "rd_opt"].includes(k)' in JS                 # agreement + option shown by default
     # every rider series is created on a sub-chart pane (the candles' pane 0 stays clean)
     made = re.findall(r"S\.rd_\w+ = (?:hist|ln)\((.*?)\);", JS)
-    assert len(made) == 12 and all("pane" in m for m in made)
+    assert len(made) == 14 and all("pane" in m for m in made)
     assert "/api/live/rider/" in JS and 'id="ch-rider"' in JS and "riderCard(r)" in JS
     assert "chBarTime(x.time)" in JS                               # each reading on the bar it falls in, any timeframe

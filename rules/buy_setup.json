@@ -12,9 +12,13 @@
   "tradability": {"min": 40, "max_spread_pct": 4.0, "lot_share_of_capital": 0.25},
   "stop": {"buffer_atr": 0.35, "max_premium_risk_pct": 30.0},
   "flow_gates": false,
+  "ema_videos": {"on": true, "count_in_agreement": false, "as_trigger": false, "recent_bars": 3,
+                 "alert": {"n": 5, "tf_bars": {"down": 1, "up": 3}}, "pullback": {"n": 10, "tf_bars": 1}},
+  "ema_videos_about": "2.89 (Mandeep, 22 Nov 2026: 'saare factors ke sath ye bhi include karo jo transcript me hai'): the two videos he sent on 13 Nov, rules copied from Tanu 0.11 / 0.12. 5 EMA alert: a candle closing above the 5 EMA with its low off it, the next candle breaks its low = put (stop: its high), on 5-min candles (tf_bars.down 1); the mirror on 15-min candles for calls (tf_bars.up 3). 10 EMA pullback: above the 10 EMA a red candle off the EMA, the next candle breaks its high = call (stop: the EMA); the mirror for puts. They form a sixth agreement family 'ema' (fired in that direction within recent_bars bars). On trial: computed, recorded, on the chart and the reading card; count_in_agreement and as_trigger stay false (the decision is exactly 2.84's) until the Lab test (variants ema:, trig:, _t10) wins on the holdout and Mandeep says so. Tanu's research 0004 / 0005 on 524 days of real option prices: on their own both lost after costs (5 EMA puts -137, calls -276, 10 EMA -229 a trade).",
   "cooldown_min": 15,
   "max_signals_per_symbol_day": 2,
   "exit": {"lock_r": 1.0, "lock_buffer_atr": 0.05, "trail_loose_atr": 2.5, "trail_tight_atr": 1.5, "reversal_signs_for_tight": 2,
-           "nomove_bars": 3, "nomove_progress_atr": 0.3, "emergency_premium_pct": 35.0, "exit_hhmm": "15:10"},
+           "nomove_bars": 3, "nomove_progress_atr": 0.3, "emergency_premium_pct": 35.0, "exit_hhmm": "15:10",
+           "trail_mode": "atr", "ema_trail": {"n": 10, "after_r": 2.0}},
   "exit_about": "2.85 exit (lab/rider_exit.py), on 5-minute closes of the index / stock, never on a wick: first stop beyond the broken level + stop.buffer_atr; at lock_r x risk the stop moves to entry + lock_buffer_atr ATR (1 lot: locking is the booking); then a trail trail_loose_atr ATRs behind the best price, tightened to trail_tight_atr only when reversal_signs_for_tight reversal signs show (rejection candle, two closes against, a close beyond the previous bar's far end); out if after nomove_bars closes the move is under nomove_progress_atr ATR and the option is not above entry; emergency stop on the premium at -emergency_premium_pct % on any tick; out at exit_hhmm. cooldown_min 15 with max_signals_per_symbol_day 2: the second signal of a day is the re-entry after a stop."
 }

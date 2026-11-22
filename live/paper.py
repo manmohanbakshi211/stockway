@@ -241,7 +241,8 @@ class PaperBook:
             d_ = 1 if opt["side"] == "CE" else -1
             if d_ * (t["und_entry"] - float(plan["stop"])) <= 0:
                 return self._skip("price already through the setup's stop")
-            rp = RiderPlan(t["und_entry"], d_, float(plan["stop"]), float(plan["atr"]), entry, now.timestamp(), ec)
+            rp = RiderPlan(t["und_entry"], d_, float(plan["stop"]), float(plan["atr"]), entry, now.timestamp(), ec,
+                           ema=plan.get("ema"))      # 2.89: the setup's 10 EMA, for the 10 EMA trail when it is on
             t["plan"] = _json.dumps(rp.to_dict())
             t["target"] = round(entry * 100, 2)            # no premium target: the trail decides
             t["stop"] = round(entry * (1 - float(ec["emergency_premium_pct"]) / 100), 2)

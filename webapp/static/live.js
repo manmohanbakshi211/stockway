@@ -2015,8 +2015,9 @@ const CH_TOGGLES = [["smart", "Smart lines (drawn by the app, with their record)
   // 2.86: Trend Rider's indicators, each in its own sub-chart under the candles (values from the server, live/rider.py)
   ["rd_ag", "Trend Rider: agreement strip"], ["rd_opt", "Trend Rider: option (move vs decay, tradability)"],
   ["rd_trend", "Trend Rider: trend day + VWAP distance"], ["rd_bo", "Trend Rider: breakout quality + chase"],
-  ["rd_flow", "Trend Rider: order flow + strength vs Nifty"]];
-const RD_KEYS = ["rd_trend", "rd_bo", "rd_flow", "rd_opt", "rd_ag"];
+  ["rd_flow", "Trend Rider: order flow + strength vs Nifty"],
+  ["rd_ema", "Trend Rider: EMA videos (5 EMA alert, 10 EMA pullback; on trial)"]];
+const RD_KEYS = ["rd_trend", "rd_bo", "rd_flow", "rd_opt", "rd_ag", "rd_ema"];
 const PAT_SHORT = { double_top: "DT", double_bottom: "DB", head_shoulders: "H&S", inv_hs: "iH&S", triangle: "Tri", flag: "Flag",
   breakout_retest: "Retest", rsi_divergence: "Div", candle_at_level: "Candle" };
 // 2.29: a clean chart by default (candles + the move prediction); every layer is one click away and remembered
@@ -2561,6 +2562,8 @@ function buildChart() {
   if (intra && chOn("rd_flow")) { S.rd_fl = hist(pane, { lastValueVisible: true, title: "Flow" }); S.rd_rs = ln(C.muted, 1, 0, pane, { priceScaleId: "rdrs" }); S.rdPanes.flow = pane++; }
   if (intra && chOn("rd_opt")) { S.rd_mu = ln(C.up, 2, 0, pane, { lastValueVisible: true, title: "Call MvD" }); S.rd_md = ln(C.down, 2, 0, pane, { lastValueVisible: true, title: "Put MvD" });
     S.rd_tu = ln(alpha(C.up, .5), 1, 2, pane, { priceScaleId: "rdtr" }); S.rd_td = ln(alpha(C.down, .5), 1, 2, pane, { priceScaleId: "rdtr" }); S.rdPanes.opt = pane++; }
+  if (intra && chOn("rd_ema")) { S.rd_e5 = ln("#0A84C1", 2, 0, pane, { lastValueVisible: true, title: "vs 5 EMA" }); S.rd_e10 = ln("#E07B00", 2, 0, pane, { lastValueVisible: true, title: "vs 10 EMA" });
+    S.rd_emk = LW.createSeriesMarkers(S.rd_e5, []); S.rdPanes.ema = pane++; }
   if (intra && chOn("rd_ag")) { const whole = { priceFormat: { type: "price", precision: 0, minMove: 1 } };
     S.rd_au = hist(pane, { lastValueVisible: true, title: "Calls agree", ...whole }); S.rd_ad = hist(pane, { lastValueVisible: true, title: "Puts agree", ...whole }); S.rdPanes.ag = pane++;
     S.rd_mk = LW.createSeriesMarkers(S.rd_au, []); }
@@ -2573,7 +2576,7 @@ function buildChart() {
     const v = (k) => { const x = S[k] && p.seriesData.get(S[k]); return x && x.value != null ? x.value : null; };
     const bits = [["VWAP", v("vwap")], ["EMA9", v("ema9")], ["EMA21", v("ema21")], ["RSI", v("rsi")], ["Trend day", v("rd_tds")],
       ["VWAP dist", v("rd_vw")], ["Breakout", v("rd_bq")], ["Chase", v("rd_ch")], ["Flow", v("rd_fl")], ["vs Nifty %", v("rd_rs")],
-      ["Call MvD", v("rd_mu")], ["Put MvD", v("rd_md")], ["Calls agree", v("rd_au")], ["Puts agree", v("rd_ad") != null ? -v("rd_ad") : null]].filter((x) => x[1] != null)
+      ["Call MvD", v("rd_mu")], ["Put MvD", v("rd_md")], ["Calls agree", v("rd_au")], ["Puts agree", v("rd_ad") != null ? -v("rd_ad") : null], ["vs 5 EMA", v("rd_e5")], ["vs 10 EMA", v("rd_e10")]].filter((x) => x[1] != null)
       .map(([n, x]) => `<span>${n} <b>${fx(x)}</b></span>`).join("");
     const dtm = new Date((p.time - 19800) * 1000);
     const t = intra ? dtm.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })
@@ -2737,12 +2740,21 @@ function drawRiderPanes() {
   put(S.rd_mu, (x) => x.mvd_up); put(S.rd_md, (x) => x.mvd_dn);
   put(S.rd_tu, (x) => x.trad_up); put(S.rd_td, (x) => x.trad_dn);
   put(S.rd_au, (x) => x.ag_up, () => alpha(C.up, .6)); put(S.rd_ad, (x) => (x.ag_dn != null ? -x.ag_dn : null), () => alpha(C.down, .6));
+  put(S.rd_e5, (x) => x.e5_dist); put(S.rd_e10, (x) => x.e10_dist);
+  if (S.rd_emk) S.rd_emk.setMarkers(pts.flatMap(([t, x]) => (x.ema_fired || []).map(([dd, nm]) => ({ time: t, position: dd > 0 ? "belowBar" : "aboveBar", color: dd > 0 ? C.up : C.down, shape: dd > 0 ? "arrowUp" : "arrowDown", text: (/^5 /.test(nm) ? "5E" : "10E") + (dd > 0 ? "▲" : "▼") }))));
   if (S.rd_mk) S.rd_mk.setMarkers(pts.filter(([, x]) => x.go).map(([t, x]) => ({ time: t, position: x.go > 0 ? "aboveBar" : "belowBar", color: x.go > 0 ? C.up : C.down, shape: x.go > 0 ? "arrowUp" : "arrowDown", text: x.go > 0 ? "CALL" : "PUT" })));
   (CH.rdLines || []).forEach(([ser, pl]) => { try { ser.removePriceLine(pl); } catch (_) {} });
   CH.rdLines = [];
   const L = r.limits || {}, line = (ser, price, color, title) => { if (ser && price != null) CH.rdLines.push([ser, ser.createPriceLine({ price, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title })]); };
   line(S.rd_tds, L.trend_day, C.muted, "min"); line(S.rd_bq, L.breakout, C.muted, "min"); line(S.rd_ch, L.chase, C.down, "late");
-  line(S.rd_mu, L.mvd, C.muted, "worth it"); line(S.rd_au, L.families, C.up, ""); line(S.rd_ad, L.families != null ? -L.families : null, C.down, "");
+  line(S.rd_e5, 0, C.muted, "EMA"); line(S.rd_mu, L.mvd, C.muted, "worth it"); line(S.rd_au, L.families, C.up, ""); line(S.rd_ad, L.families != null ? -L.families : null, C.down, "");
+}
+
+function emaLine(e) {
+  const f = (d) => ((e.fired || {})[d] || []).map((x) => x.alert);
+  const now = [...f(1).map((x) => `${x} ▲ call`), ...f(-1).map((x) => `${x} ▼ put`)];
+  const vote = [(e.vote || {})[1] ? "calls" : "", (e.vote || {})[-1] ? "puts" : ""].filter(Boolean);
+  return `${now.length ? "fired now: " + esc(now.join(", ")) : "nothing fired on this bar"} · family agrees for ${vote.length ? vote.join(" and ") : "neither side"} · 5 EMA ${fx(e.ema_fast)}, 10 EMA ${fx(e.ema_slow)}`;
 }
 
 function riderCard(r) {
@@ -2761,7 +2773,8 @@ function riderCard(r) {
       <li><b>Breakout</b> ${bo ? `${esc(bo.level_name)} ${bo.dir > 0 ? "▲" : "▼"} quality ${n(bo.quality)} <span class="muted">(needs ${n(L.breakout)})</span>, room ${n(bo.room_atr, 1)} ATR${bo.retest ? ", retest" : ""}` : `<span class="muted">none on this bar</span>`} · Chase ▲ ${n(up.chase)} ▼ ${n(dn.chase)} <span class="muted">(late above ${n(L.chase)})</span></li>
       <li><b>Flow</b> ${sg(R.flow)} <span class="muted">(+ = buyers)</span> · vs Nifty ${R.rs == null ? "–" : sg(R.rs) + "%"}</li>
       <li><b>Option</b> move vs decay: call ${n(up.mvd, 2)} · put ${n(dn.mvd, 2)} <span class="muted">(worth it from ${n(L.mvd, 1)})</span> · tradability: call ${n((up.trad || {}).score)} · put ${n((dn.trad || {}).score)}</li>
-      <li><b>Agreement</b> calls ${(up.agree || {}).families ?? "–"} (${esc(fam(up))}) · puts ${(dn.agree || {}).families ?? "–"} (${esc(fam(dn))}) <span class="muted">(needs ${n(L.families)})</span></li></ul>
+      <li><b>Agreement</b> calls ${(up.agree || {}).families ?? "–"} (${esc(fam(up))}) · puts ${(dn.agree || {}).families ?? "–"} (${esc(fam(dn))}) <span class="muted">(needs ${n(L.families)})</span></li>
+      ${R.ema ? `<li><b>EMA videos</b> ${emaLine(R.ema)} <span class="muted">(on trial: ${L.ema_counted ? "counted in agreement" : "not counted yet"}${L.ema_trigger ? ", can trigger" : ""})</span></li>` : ""}</ul>
     <p class="note" style="margin-top:6px">The ${when} bar. The same numbers as the Trend Rider sub-charts under the candles (Indicators &amp; levels to show more). On trial: its own paper account only.</p>`;
 }
 
@@ -3333,13 +3346,21 @@ async function labRider() {
   let v; try { v = await api("/api/lab/rider"); } catch (e) { el.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; return; }
   const rs = (x) => x == null ? "–" : `<span class="nw ${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : "−"}₹${Math.abs(Math.round(x)).toLocaleString("en-IN")}</span>`;
   const day = (x) => !x || !x.days ? `<span class="muted">–</span>` : `${rs(x.per_day)} a day · lower bound ${rs(x.lcb)} · ${x.days} days · ${Math.round((x.green || 0) * 100)}% green`;
-  const NAME = (k) => k === "fixed" ? "Bench exit (+30% / −20% / 60 min)" : k === "w15_nm3_em35" ? "As live (first look 09:30, no move 3 bars, −35%)"
-    : k.replace(/^w(\d+)_nm(\d+)_em(\d+)$/, (_, w, n, e) => `First look ${["09:30", "09:45", "10:00"][[15, 30, 45].indexOf(+w)] || w}, ${n === "99" ? "no no-move exit" : `no move ${n} bars`}, −${e}%`);
+  const NAME = (k) => {
+    if (k === "fixed") return "Bench exit (+30% / −20% / 60 min)";
+    if (k === "w15_nm3_em35") return "As live (first look 09:30, no move 3 bars, −35%)";
+    const m = /^(?:(ema|trig):)?w(\d+)_nm(\d+)_em(\d+)(_t10)?$/.exec(k); if (!m) return k;
+    const [, ent, w, n, e, t10] = m, bits = [];
+    if (ent === "ema") bits.push("EMA videos counted in agreement"); if (ent === "trig") bits.push("EMA video trigger allowed");
+    if (t10) bits.push("10 EMA trail after 1:2");
+    if (!ent && !t10) bits.push(`first look ${["09:30", "09:45", "10:00"][[15, 30, 45].indexOf(+w)] || w}`, n === "99" ? "no no-move exit" : `no move ${n} bars`, `−${e}%`);
+    const t = bits.join(", "); return t.charAt(0).toUpperCase() + t.slice(1);
+  };
   const block = (lab, r) => {
     if (!r) return `<p class="small muted">${lab === "5y" ? "5-year Nifty / Bank Nifty: runs once that archive is downloaded." : "Not run yet: it runs every night after the Lab (market hours never), or Run now."}</p>`;
     if (r.error) return `<p class="small down">${esc(r.error)}</p>`;
     const vs = r.variants || {}, w = r.walk || {}, best = r.best_on_train;
-    const keys = ["w15_nm3_em35", "fixed", best].filter((k, i, a) => k && vs[k] && a.indexOf(k) === i);
+    const keys = ["w15_nm3_em35", "fixed", best, "ema:w15_nm3_em35", "trig:w15_nm3_em35", "w15_nm3_em35_t10"].filter((k, i, a) => k && vs[k] && a.indexOf(k) === i);
     return `<p class="small" style="margin:0 0 6px"><b>${esc(r.verdict || "")}</b></p>
       <div class="table-wrap"><table class="small"><thead><tr><th>Way</th><th class="r">Trades</th><th class="r">Won</th><th>All days</th><th>Holdout (from ${esc(r.holdout_from || "–")})</th></tr></thead><tbody>
       ${keys.map((k) => `<tr><td>${esc(NAME(k))}${k === best && k !== "w15_nm3_em35" ? ` <span class="pill p-amber">best on train</span>` : ""}</td><td class="r">${vs[k].trades}</td><td class="r">${vs[k].won == null ? "–" : Math.round(vs[k].won * 100) + "%"}</td><td>${day(vs[k])}</td><td><b>${day(vs[k].holdout)}</b></td></tr>`).join("")}</tbody></table></div>

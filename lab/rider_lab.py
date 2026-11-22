@@ -38,8 +38,9 @@ from . import rider as R
 from . import rider_exit as X
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
-VERSION = 1
+VERSION = 2                                    # 2.89: signals per entry way (the EMA videos)
 N_MIN = 375
+ENTRIES = ("base", "ema", "trig")              # 2.89: as live; + the EMA videos' family counted; + their trigger
 WIN_STARTS = (15, 30, 45)                      # minutes after 09:15 of the first look (live's first look is 09:30)
 NOMOVE = (3, 4, 6, 99)                         # 99 = never
 EMERG = (35.0, 25.0)
@@ -100,28 +101,39 @@ def _ctx_rows(table) -> dict:
 
 
 # ------------------------------------------------------------------ the setup on one day
-def _signals_day(d, sym: str, ctx: dict, c_: dict, lot: int, capital: float, nifty_spot=None) -> list:
-    """Every closed bar inside the windows where the setup passes: [bar, dir, stop, atr, s0]. No cooldown here (each
-    variant applies its own first window, cooldown and 2-a-day)."""
+def _signals_day(d, sym: str, ctx: dict, c_: dict, lot: int, capital: float, nifty_spot=None) -> dict:
+    """Every closed bar inside the windows where the setup passes, per entry way (ENTRIES): [bar, dir, stop, atr, s0,
+    ema10]. No cooldown here (each variant applies its own first window, cooldown and 2-a-day)."""
     spot = np.asarray(d.spot, float)
     if not np.isfinite(spot).all():
         return []
     wins = [[min(float(w[0]), float(WIN_STARTS[0])), float(w[1])] for w in (c_.get("windows") or [])]
     cw = {**c_, "windows": wins}
-    out = []
+    out = {k: [] for k in ENTRIES}
+    ev0 = c_.get("ema_videos") or {}
+    modes = {"base": cw,                                                     # 2.89: one reading, three entry ways
+             "ema": {**cw, "ema_videos": {**ev0, "on": True, "count_in_agreement": True, "as_trigger": False}},
+             "trig": {**cw, "ema_videos": {**ev0, "on": True, "count_in_agreement": False, "as_trigger": True}}}
+    hist: list = []
     for j in range(2, N_MIN // 5):                 # bar j closes at slot j+1; live looks from slot 3 (09:30)
         tod = 5.0 * (j + 1)
-        if not R.in_window(tod, cw):
-            continue
         b = _bars(spot, j)
+        if not R.in_window(tod, cw):
+            if (c_.get("ema_videos") or {}).get("on", True):              # keep the EMA rules' memory going
+                hist.append(R.ema_videos(b, modes["ema"], hist)["now"])
+            continue
         m = 5 * j + 4
         up, dn = _opt(d, sym, "CE", m, lot, ctx.get("dte")), _opt(d, sym, "PE", m, lot, ctx.get("dte"))
         nb = _bars(nifty_spot, j) if nifty_spot is not None and sym != "NIFTY" else None
-        r = R.readings(b, ctx, c_, nb, up, dn, capital, None, None)
+        r = R.readings(b, ctx, modes["ema"], nb, up, dn, capital, None, None, hist)
+        hist.append(list((r.get("ema") or {}).get("now") or []))
         bo = r.get("breakout")
-        dec = R.decide(b, r, tod, cw, (up if bo and bo["dir"] > 0 else dn) if bo else None)
-        if dec.get("go") and dec.get("stop") is not None and r.get("atr"):
-            out.append([j, int(dec["dir"]), float(dec["stop"]), float(r["atr"]), float(spot[m])])
+        e10 = (r.get("ema") or {}).get("ema_slow")
+        for k, cm in modes.items():
+            dec = R.decide(b, r, tod, cm, (up if bo and bo["dir"] > 0 else dn) if bo else None, opts={1: up, -1: dn})
+            if dec.get("go") and dec.get("stop") is not None and r.get("atr"):
+                out[k].append([j, int(dec["dir"]), float(dec["stop"]), float(r["atr"]), float(spot[m]),
+                               float(e10) if e10 is not None else None])
     return out
 
 
@@ -146,7 +158,7 @@ def pick(sigs: list, start: float, cooldown_min: float, per_day: int) -> list:
 def simulate(d, sym: str, s: list, lot: int, ec: dict | None = None, fixed: tuple | None = None) -> dict | None:
     """One signal [bar, dir, stop, atr, s0] traded: the rider exit (ec) or the fixed exit (target %, stop %, minutes)."""
     from .engine import charge_amount, slip
-    j, dr, stop, atr, s0 = s
+    j, dr, stop, atr, s0 = s[:5]
     m0 = 5 * j + 4
     side = "CE" if dr > 0 else "PE"
     k = d.atm(m0)
@@ -156,7 +168,8 @@ def simulate(d, sym: str, s: list, lot: int, ec: dict | None = None, fixed: tupl
     entry = px0 + slip(sym, px0)
     st0 = dt.datetime.combine(d.date, dt.time(9, 15), IST).timestamp()
     stop_m = (dt.datetime.combine(d.date, dt.time(15, 10), IST).timestamp() - st0) // 60
-    plan = X.RiderPlan(s0, dr, stop, atr, entry, st0 + 60 * (m0 + 1), ec) if fixed is None else None
+    plan = X.RiderPlan(s0, dr, stop, atr, entry, st0 + 60 * (m0 + 1), ec,
+                       ema=(s[5] if len(s) > 5 else None)) if fixed is None else None
     why, mx, last = None, None, None
     for m in range(m0 + 1, N_MIN):
         o = d.price(k, side, m)
@@ -217,7 +230,18 @@ def _by_day(trades: list, keep=lambda t: True) -> dict:
 
 
 def _variants() -> list:
-    return [(f"w{w}_nm{n}_em{int(e)}", w, n, e) for w in WIN_STARTS for n in NOMOVE for e in EMERG]
+    """(name, entry way, first look, no-move bars, emergency %, 10 EMA trail). The 24 of 2.87 keep their names; 2.89
+    adds the EMA videos (Mandeep, 22 Nov: "saare factors ke sath ye bhi include karo jo transcript me hai"): their
+    family counted ("ema:"), their trigger standing in for a missing breakout ("trig:"), and the 10 EMA trail
+    ("_t10"), each at the live first look and exit."""
+    out = [(f"w{w}_nm{n}_em{int(e)}", "base", w, n, e, False) for w in WIN_STARTS for n in NOMOVE for e in EMERG]
+    w, n, e = WIN_STARTS[0], NOMOVE[0], EMERG[0]
+    for ent in ENTRIES:
+        for t10 in (False, True):
+            if ent == "base" and not t10:
+                continue
+            out.append((f"{'' if ent == 'base' else ent + ':'}w{w}_nm{n}_em{int(e)}{'_t10' if t10 else ''}", ent, w, n, e, t10))
+    return out
 
 
 # ------------------------------------------------------------------ the run
@@ -277,21 +301,26 @@ def run(data_dir, log=print, should_stop=lambda: False, syms=None, out_dir=None,
                     cache["rows"][key] = sigs
                     new_days += 1
                 n_days += 1
-                if not sigs:
+                if isinstance(sigs, list):                 # a 2.87 cache row: base signals only
+                    sigs = {"base": sigs}
+                if not any(sigs.values()):
                     continue
                 fx_done: dict = {}
                 sim_done: dict = {}
-                for name, w, nm, em in vs:
-                    for s in pick(sigs, w, cool, per_day):
-                        sk = (s[0], nm, em)
+                for name, ent, w, nm, em, t10 in vs:
+                    for s in pick(sigs.get(ent) or [], w, cool, per_day):
+                        sk = (s[0], s[1], s[2], nm, em, t10)
                         if sk not in sim_done:
-                            sim_done[sk] = simulate(d, sym, s, lot, {**base_exit, "nomove_bars": nm, "emergency_premium_pct": em})
+                            ec = {**base_exit, "nomove_bars": nm, "emergency_premium_pct": em}
+                            if t10:
+                                ec["trail_mode"] = "ema"
+                            sim_done[sk] = simulate(d, sym, s, lot, ec)
                         r = sim_done[sk]
                         if r:
                             trades[name].append({"date": d.date.isoformat(), "sym": sym, "bar": s[0], "dir": s[1], **r})
                         if name == V1 and r:
                             reasons[r["why"]] = reasons.get(r["why"], 0) + 1
-                        if w == WIN_STARTS[0] and nm == NOMOVE[0] and em == EMERG[0] and s[0] not in fx_done:
+                        if name == V1 and s[0] not in fx_done:
                             fx_done[s[0]] = simulate(d, sym, s, lot, fixed=FIXED)
                             if fx_done[s[0]]:
                                 trades["fixed"].append({"date": d.date.isoformat(), "sym": sym, "bar": s[0], "dir": s[1],

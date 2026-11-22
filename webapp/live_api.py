@@ -354,7 +354,9 @@ def live_rider(sym: str):
            "limits": {"trend_day": (c.get("trend_day") or {}).get("min"), "breakout": (c.get("breakout") or {}).get("min_quality"),
                       "chase": (c.get("chase") or {}).get("max"), "families": (c.get("agreement") or {}).get("min_families"),
                       "mvd": (c.get("move_vs_decay") or {}).get("min"), "trad": (c.get("tradability") or {}).get("min"),
-                      "windows": c.get("windows")},
+                      "windows": c.get("windows"),
+                      "ema_counted": bool((c.get("ema_videos") or {}).get("count_in_agreement")),
+                      "ema_trigger": bool((c.get("ema_videos") or {}).get("as_trigger"))},
            "running": bool(getattr(e, "running", False))}
     if not out["ready"]:
         out["message"] = ("Builds at each closed 5-minute bar while the live scanner runs (from 09:30)." if out["running"]

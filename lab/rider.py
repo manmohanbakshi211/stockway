@@ -33,6 +33,8 @@ DEFAULTS = {
     "tradability": {"min": 40, "max_spread_pct": 4.0, "lot_share_of_capital": 0.25},
     "stop": {"buffer_atr": 0.35, "max_premium_risk_pct": 30.0},
     "flow_gates": False,
+    "ema_videos": {"on": True, "count_in_agreement": False, "as_trigger": False, "recent_bars": 3,
+                   "alert": {"n": 5, "tf_bars": {"down": 1, "up": 3}}, "pullback": {"n": 10, "tf_bars": 1}},
     "cooldown_min": 30,
     "max_signals_per_symbol_day": 2,
 }
@@ -235,6 +237,98 @@ def chase(b, a: float, d: int, ctx: dict) -> float | None:
     return round(100 * (dist + runs + last + dayr) / 4, 1)
 
 
+# ------------------------------------------------------------------ 2.89: the two EMA videos (13 Nov 2026), as gun pieces
+def tf_groups(b, k: int) -> tuple[dict, int]:
+    """k closed 5-minute bars -> one candle (k = 3: 15 minutes), aligned to 09:15. Returns the complete candles and the
+    index of the candle the last 5-minute bar belongs to (it may still be forming)."""
+    k = max(1, int(k))
+    o, h, l, c = (np.asarray(b[x], float) for x in ("o", "h", "l", "c"))
+    n = len(c) // k
+    if n == 0:
+        return {"o": o[:0], "h": h[:0], "l": l[:0], "c": c[:0]}, 0
+    sl = slice(0, n * k)
+    g = {"o": o[sl][::k], "c": c[sl][k - 1::k], "h": h[sl].reshape(n, k).max(1), "l": l[sl].reshape(n, k).min(1)}
+    return g, (len(c) - 1) // k
+
+
+def ema_alert(b, n: int = 5, k: int = 1) -> dict:
+    """The "5 EMA" alert candle (video sent by Mandeep, 13 Nov 2026; rule copied from Tanu 0.11.0, engine/tf.py), on
+    candles of k x 5 minutes and an EMA(n) of their closes. A candle that closes above the EMA with its low off it is a
+    down-alert (the put side); one that closes below with its high off it is an up-alert (the call side). During the
+    NEXT candle, a break of the down-alert's low fires -1 (stop: the alert's high), a break of the up-alert's high fires
+    +1 (stop: the alert's low); the alert is then used up and lasts one candle. Judged on closed 5-minute bars: fired =
+    the last 5-minute bar made the first break. Returns {+1: {...} | None, -1: {...} | None, "ema": value}."""
+    out = {1: None, -1: None, "ema": None}
+    g, cur = tf_groups(b, k)
+    j = cur - 1                                   # the candle before the one the last bar belongs to
+    if j < 0 or j >= len(g["c"]):
+        return out
+    e = ema(g["c"][: j + 1], n)[-1]
+    out["ema"] = round(float(e), 4)
+    ah, al, ac = float(g["h"][j]), float(g["l"][j]), float(g["c"][j])
+    h, l = np.asarray(b["h"], float), np.asarray(b["l"], float)
+    first = cur * max(1, int(k))                  # the first 5-minute bar of the following candle
+    last = len(h) - 1
+    if al > e and ac > e:                         # down-alert (put side)
+        before = l[first:last]
+        if l[last] < al and (not len(before) or before.min() >= al):
+            out[-1] = {"level": al, "stop": ah, "alert": "5 EMA alert" if n == 5 else f"{n} EMA alert"}
+    if ah < e and ac < e:                         # up-alert (call side)
+        before = h[first:last]
+        if h[last] > ah and (not len(before) or before.max() <= ah):
+            out[1] = {"level": ah, "stop": al, "alert": "5 EMA alert" if n == 5 else f"{n} EMA alert"}
+    return out
+
+
+def ema_pullback(b, n: int = 10, k: int = 1) -> dict:
+    """The "10 EMA" trend pullback trigger (video sent by Mandeep, 13 Nov 2026; Tanu 0.12.0): above the EMA a RED
+    candle whose low stays off the EMA is a long trigger; below it a GREEN candle whose high stays off it is a short
+    trigger. During the next candle, a break of the long trigger's high fires +1, of the short trigger's low -1; the
+    stop is the EMA at the trigger candle's close; a trigger lasts one candle. Returns {+1, -1, "ema"} as ema_alert."""
+    out = {1: None, -1: None, "ema": None}
+    g, cur = tf_groups(b, k)
+    j = cur - 1
+    if j < 0 or j >= len(g["c"]):
+        return out
+    e = float(ema(g["c"][: j + 1], n)[-1])
+    out["ema"] = round(e, 4)
+    to, th, tl, tc = (float(g[x][j]) for x in ("o", "h", "l", "c"))
+    h, l = np.asarray(b["h"], float), np.asarray(b["l"], float)
+    first, last = cur * max(1, int(k)), len(h) - 1
+    if tc < to and tl > e:                        # red, above the EMA: long trigger
+        before = h[first:last]
+        if h[last] > th and (not len(before) or before.max() <= th):
+            out[1] = {"level": th, "stop": e, "alert": f"{n} EMA pullback"}
+    if tc > to and th < e:                        # green, below the EMA: short trigger
+        before = l[first:last]
+        if l[last] < tl and (not len(before) or before.min() >= tl):
+            out[-1] = {"level": tl, "stop": e, "alert": f"{n} EMA pullback"}
+    return out
+
+
+def ema_videos(b, c_: dict, hist: list | None = None) -> dict:
+    """Both video rules on the last closed bar, with what the bullets say (rules/buy_setup.json "ema_videos"): which
+    fired now, per direction, and the family vote (+1 / -1 fired within the last recent_bars bars, from hist = the
+    earlier bars' fired lists, newest last)."""
+    ev = c_.get("ema_videos") or {}
+    al, pb = ev.get("alert") or {}, ev.get("pullback") or {}
+    tfa = al.get("tf_bars") or {}
+    a_up = ema_alert(b, int(al.get("n", 5)), int(tfa.get("up", 3)))
+    a_dn = ema_alert(b, int(al.get("n", 5)), int(tfa.get("down", 1))) if int(tfa.get("down", 1)) != int(tfa.get("up", 3)) else a_up
+    p = ema_pullback(b, int(pb.get("n", 10)), int(pb.get("tf_bars", 1)))
+    fired = {1: [x for x in (a_up[1], p[1]) if x], -1: [x for x in (a_dn[-1], p[-1]) if x]}
+    c = np.asarray(b["c"], float)
+    e_n = int(pb.get("n", 10))
+    e10 = float(ema(c, e_n)[-1]) if len(c) else None
+    e5 = float(ema(c, int(al.get("n", 5)))[-1]) if len(c) else None
+    recent = int(ev.get("recent_bars", 3))
+    past = list(hist or [])[-(recent - 1):] if recent > 1 else []
+    vote = {d: bool(fired[d]) or any(d in (x or []) for x in past) for d in (1, -1)}
+    return {"fired": fired, "vote": vote, "ema_fast": round(e5, 4) if e5 is not None else None,
+            "ema_slow": round(e10, 4) if e10 is not None else None,
+            "now": [d for d in (1, -1) if fired[d]]}
+
+
 def agreement(b, d: int, vp: dict, w: dict, flow: float | None = None, thrust: float | None = None) -> dict:
     """Which independent families point the same way as d: trend (EMA 9 over 21 and price over EMA 21), momentum
     (RSI 7 and the last 3-bar move), structure (rising lows or falling highs), VWAP (side and lean), flow (when
@@ -334,9 +428,10 @@ def structure_stop(b, a: float, d: int, level: float | None, buffer_atr: float) 
 # ------------------------------------------------------------------ all of them for one symbol, and the decision
 def readings(b, ctx: dict, c_: dict | None = None, nifty: dict | None = None, opt_up: dict | None = None,
              opt_dn: dict | None = None, capital: float | None = None, flow: float | None = None,
-             thrust: dict | None = None) -> dict:
+             thrust: dict | None = None, ema_hist: list | None = None) -> dict:
     """Every indicator for the last closed bar. opt_up / opt_dn = the call / put an alert would suggest (ltp, bid,
-    ask, delta, theta, lot, dte); thrust = {+1: x, -1: y} when known; flow = -1..+1 (+ = buyers) when known."""
+    ask, delta, theta, lot, dte); thrust = {+1: x, -1: y} when known; flow = -1..+1 (+ = buyers) when known;
+    ema_hist = the directions the EMA video rules fired on the earlier bars today (newest last), for their vote."""
     c_ = c_ or cfg()
     a = atr(b["h"], b["l"], b["c"])
     vp = vwap_pull_go(b, a, int(c_["vwap"].get("slope_bars", 3)))
@@ -344,11 +439,21 @@ def readings(b, ctx: dict, c_: dict | None = None, nifty: dict | None = None, op
     bo = breakout(b, a, ctx, c_["breakout"])
     out = {"atr": round(a, 3) if math.isfinite(a) else None, "vwap": vp, "trend_day": td, "breakout": bo,
            "rs": rel_strength(b, nifty), "flow": flow, "tod": None}
+    ev = ema_videos(b, c_, ema_hist) if (c_.get("ema_videos") or {}).get("on", True) else None
+    out["ema"] = ev
     for d, opt in ((1, opt_up), (-1, opt_dn)):
         key = "up" if d > 0 else "down"
         th = (thrust or {}).get(d)
+        ag = agreement(b, d, vp, c_["agreement"].get("weights") or {}, flow, th)
+        if ev is not None:                        # 2.89: the "ema" family (the two videos), counted only when switched on
+            yes = ev["vote"][d]
+            ag_e = {**ag, "checked": ag["checked"] + ["ema"]}
+            if yes:
+                ag_e.update(families=ag["families"] + 1, agree=ag["agree"] + ["ema"],
+                            weighted=round(ag["weighted"] + float((c_["agreement"].get("weights") or {}).get("ema", 1.0)), 2))
+            ag["ema_vote"] = yes
         out[key] = {"chase": chase(b, a, d, ctx),
-                    "agree": agreement(b, d, vp, c_["agreement"].get("weights") or {}, flow, th),
+                    "agree": ag, "agree_ema": ag_e if ev is not None else ag,
                     "mvd": move_vs_decay(a, opt, float(c_["move_vs_decay"].get("horizon_min", 45)), td.get("score"),
                                          float(c_["move_vs_decay"].get("charges_per_lot", 60))),
                     "trad": tradability(opt, ctx, c_["tradability"], capital), "thrust": th}
@@ -359,21 +464,35 @@ def in_window(tod: float, c_: dict) -> bool:
     return any(float(w[0]) <= tod <= float(w[1]) for w in (c_.get("windows") or []))
 
 
-def decide(b, r: dict, tod: float, c_: dict | None = None, opt: dict | None = None) -> dict:
+def decide(b, r: dict, tod: float, c_: dict | None = None, opt: dict | None = None, opts: dict | None = None) -> dict:
     """The Trend Rider decision on the last closed bar: go (True / False), direction, trigger, the first stop, and
     the plain reasons (why, and which checks failed). opt = the option for the breakout's direction (for the stop's
-    premium risk)."""
+    premium risk); opts = {+1: call, -1: put} instead, when the trigger's direction is not known before (2.89).
+    2.89 bullets (rules/buy_setup.json "ema_videos", both off = exactly 2.84): count_in_agreement counts the EMA
+    videos' family; as_trigger lets a video trigger that fired on this bar stand in for a missing breakout (every
+    other check still applies; its stop is the video's stop: the alert candle's far end or the EMA)."""
     c_ = c_ or cfg()
+    ev_c = c_.get("ema_videos") or {}
     bo = r.get("breakout")
     fails, why = [], []
     if not in_window(tod, c_):
         fails.append("outside the time windows")
-    if not bo:
+    vid = None
+    if not bo and ev_c.get("as_trigger") and r.get("ema") and r["ema"].get("now"):
+        d0 = r["ema"]["now"][0]
+        x = r["ema"]["fired"][d0][0]
+        vid = {"dir": d0, "level_name": x["alert"], "level": x["stop"], "quality": None, "video": True}
+    if not bo and not vid:
         return {"go": False, "dir": 0, "fails": fails + ["no breakout"], "why": []}
+    bo = bo or vid
     d = bo["dir"]
+    if opts is not None:
+        opt = opts.get(d)
     side = r["up" if d > 0 else "down"]
     td = r["trend_day"].get("score")
-    if bo["quality"] < float(c_["breakout"]["min_quality"]):
+    if bo.get("video"):
+        why.append(f"{bo['level_name']} fired (video rule, on trial)")
+    elif bo["quality"] < float(c_["breakout"]["min_quality"]):
         fails.append(f"breakout quality {bo['quality']:.0f}")
     else:
         why.append(f"{bo['level_name']} broke, quality {bo['quality']:.0f}")
@@ -391,7 +510,7 @@ def decide(b, r: dict, tod: float, c_: dict | None = None, opt: dict | None = No
     ch = side.get("chase")
     if ch is not None and ch > float(c_["chase"]["max"]):
         fails.append(f"chase meter {ch:.0f} (late)")
-    ag = side["agree"]
+    ag = side.get("agree_ema", side["agree"]) if ev_c.get("count_in_agreement") else side["agree"]
     if ag["families"] < int(c_["agreement"]["min_families"]):
         fails.append(f"{ag['families']} families agree")
     else:

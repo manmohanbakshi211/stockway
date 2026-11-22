@@ -121,7 +121,7 @@ def test_the_live_scan_keeps_readings_and_series_and_respects_the_limits(monkeyp
     b = _bars(list(100 + np.arange(14) * 0.6) + [109.5], wick=0.3)
     e = _engine({"NIFTY": b, "SBIN": b})
     rd = Rider(e)
-    monkeypatch.setattr(R, "decide", lambda bars, r, tod, c_=None, opt=None: {"go": True, "dir": 1, "trigger": "day high",
+    monkeypatch.setattr(R, "decide", lambda bars, r, tod, c_=None, opt=None, **kw: {"go": True, "dir": 1, "trigger": "day high",
                                                                                 "level": 108.0, "stop": 107.5, "risk_pct": 10.0,
                                                                                 "fails": [], "why": ["test"]})
     got = []

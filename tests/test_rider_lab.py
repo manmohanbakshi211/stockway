@@ -54,9 +54,10 @@ def test_the_setup_runs_on_lab_days_without_live_only_inputs():
     d = _day(drift=1.2, seed=5)
     ctx = {"pdh": 25010.0, "pdl": 24800.0, "datr": 180.0, "adr": 170.0, "dte": 3}
     sigs = RL._signals_day(d, "NIFTY", ctx, RL.R.cfg(), 65, 500000.0)
-    assert isinstance(sigs, list)
-    for s in sigs:                                                   # [bar, dir, stop, atr, s0], inside the windows
-        assert len(s) == 5 and s[1] in (1, -1) and 5 * (s[0] + 1) >= RL.WIN_STARTS[0]
+    assert set(sigs) == set(RL.ENTRIES)                              # 2.89: as live, EMA family counted, EMA trigger
+    for s in sum(sigs.values(), []):                                 # [bar, dir, stop, atr, s0, ema10], inside windows
+        assert len(s) == 6 and s[1] in (1, -1) and 5 * (s[0] + 1) >= RL.WIN_STARTS[0]
+    assert {tuple(x[:2]) for x in sigs["base"]} <= {tuple(x[:2]) for x in sigs["trig"]}   # the trigger only adds
 
 
 def _trades(per_day_by_month: dict, n=9):

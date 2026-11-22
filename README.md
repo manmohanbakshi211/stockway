@@ -118,6 +118,35 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.89: The 5 EMA and 10 EMA videos inside Trend Rider, on trial (22 Nov 2026)
+- **Mandeep (22 Nov):** "jo 10 EMA or 5 EMA wali transcript thi uska bhi kuch use hua hai? ... saare factors ke sath ye
+  bhi include karo jo transcript me hai". Until now: both videos were built in Tanu (13 Nov, research 0004 / 0005) and
+  lost on 524 days of real option prices (5 EMA puts -₹137, calls -₹276, 10 EMA -₹229 a trade; random entry -₹349);
+  when Tanu was removed (2.78) they were not copied, so Trend Rider did not use them.
+- **Gun** (`lab/rider.py`, rules copied from Tanu's `engine/tf.py`, judged on closed 5-minute bars):
+  - `ema_alert(b, n, k)`: the 5 EMA alert candle on k x 5-minute candles. A candle closing above the EMA with its low
+    off it is a put-side alert (a later such candle replaces it); a break of its low in the next candle fires a put,
+    stop = the alert's high; the mirror for calls. An alert lasts one candle.
+  - `ema_pullback(b, n, k)`: the 10 EMA trend pullback. Above the EMA a red candle whose low stays off it; a break of
+    its high in the next candle fires a call, stop = the EMA; the mirror (green below, break of its low) for puts.
+  - `tf_groups` (15-minute candles from 5-minute bars, aligned to 09:15); `ema_videos` = both, with the bullets.
+  - Exit (`lab/rider_exit.py`): `trail_mode` "ema" = the 10 EMA video's trail (after +1R the stop sits at entry;
+    from 1:2 it follows the 10 EMA of the 5-minute closes). Default "atr" = exactly 2.85.
+- **Bullets** (`rules/buy_setup.json` "ema_videos"): puts on 5-minute candles, calls on 15-minute (as the video), 10 EMA
+  on 5-minute; a sixth agreement family "ema" = a video trigger in that direction within the last 3 bars.
+  `count_in_agreement` and `as_trigger` are **false**: computed, recorded and shown, the decision is exactly 2.84's.
+- **Live:** every bar's row has the distance from the 5 / 10 EMA (ATRs), what fired and the family vote; the alert
+  carries them; the paper plan carries the setup's 10 EMA.
+- **Chart:** a sixth sub-chart "EMA videos" (close vs 5 EMA and vs 10 EMA in ATRs, 5E / 10E marks where a rule fired);
+  the reading card has an "EMA videos" line (what fired, which side the family agrees with, counted or not).
+- **Lab** (`lab/rider_lab.py`, nightly): one reading, three entry ways per bar: as live, + the EMA family counted
+  ("ema:"), + an EMA trigger standing in for a missing breakout ("trig:"); each also with the 10 EMA trail ("_t10").
+  Signal cache rebuilt once (new format). The Strategy Lab panel shows those rows next to as live and the bench exit.
+- **Regression:** on the 19 Nov days (224 symbols) the as-live signals are identical to 2.88 (224 of 224 symbol-days)
+  and its result is the same (+₹17,274 on 52 trades). The other ways that day: EMA family counted 56 trades
+  +₹16,303; EMA trigger 65 trades +₹17,320; 10 EMA trail +₹19,367 (as live entries), bench exit -₹28,310. One day.
+- Tests: `tests/test_ema_videos.py` (7); Trend Rider tests updated.
+
 ## 2.88: Trades on a day without an NSE session are void (22 Nov 2026)
 - **Why:** Mandeep's status check (22 Nov): 10 Nov 2026 was an NSE holiday, yet the main paper account shows -₹22,753
   of trades that day (opened on stale prices before 2.48 checked the NSE calendar). They are not real results.
