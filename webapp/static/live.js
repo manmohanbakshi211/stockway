@@ -4197,7 +4197,132 @@ async function pageLens() {
   };
   draw();
 }
+/* 2.98 Day calendar (live/daybook.py): every market day green or red; a day's market, trades, why, misses, AI review */
+const CAL = { month: null, day: null, acct: "all", data: null };
+const kRs = (v) => { const a = Math.abs(v || 0); const s = v < 0 ? "−" : v > 0 ? "+" : ""; return a >= 100000 ? `${s}₹${(a / 100000).toFixed(1)}L` : a >= 1000 ? `${s}₹${(a / 1000).toFixed(1)}k` : `${s}₹${Math.round(a)}`; };
+function calSpark(path, w = 150, h = 34) {
+  if (!path || path.length < 2) return "";
+  const lo = Math.min(...path), hi = Math.max(...path), span = hi - lo || 1;
+  const pts = path.map((v, i) => `${(i / (path.length - 1) * w).toFixed(1)},${(h - 2 - (v - lo) / span * (h - 4)).toFixed(1)}`).join(" ");
+  const up = path[path.length - 1] >= path[0];
+  return `<svg class="cal-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline fill="none" stroke="var(${up ? "--up" : "--down"})" stroke-width="1.6" points="${pts}"/></svg>`;
+}
+function calNet(d) { return CAL.acct === "all" ? d.net : ((d.accounts || {})[CAL.acct] || {}).net || 0; }
+function calGrid(c) {
+  const [y, m] = c.month.split("-").map(Number);
+  const byDay = Object.fromEntries((c.days || []).map((d) => [d.day, d]));
+  const max = Math.max(1, ...(c.days || []).map((d) => Math.abs(calNet(d))));
+  const first = new Date(Date.UTC(y, m - 1, 1)), last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const cells = [];
+  let lead = (first.getUTCDay() + 6) % 7; if (lead > 4) lead = 0;
+  for (let i = 0; i < lead; i++) cells.push(`<div></div>`);
+  for (let dd = 1; dd <= last; dd++) {
+    const dt_ = new Date(Date.UTC(y, m - 1, dd)), wd = dt_.getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    const key = `${c.month}-${String(dd).padStart(2, "0")}`, d = byDay[key];
+    if (!d) { cells.push(`<div class="cal-day empty" aria-hidden="true"><span class="d"><span>${dd}</span></span>${key === c.today ? `<span class="x">today</span>` : ""}</div>`); continue; }
+    const net = calNet(d), a = Math.round(12 + 40 * Math.min(1, Math.abs(net) / max));
+    const bg = net ? `background: color-mix(in srgb, var(${net > 0 ? "--up" : "--down"}) ${a}%, var(--paper))` : "";
+    const tags = `${d.expiry ? `<span class="cal-tag" title="Options expiring that day were traded">Expiry</span>` : ""}${(d.reviews || []).length ? `<span class="cal-tag" title="AI review written">AI</span>` : ""}`;
+    cells.push(`<button class="cal-day ${CAL.day === key ? "sel" : ""}" data-cal="${key}" style="${bg}" aria-label="${key}: ${rupees(net)}">
+      <span class="d"><span>${dd}${key === c.today ? `<span class="x"> · today</span>` : ""}</span><span class="tags">${tags}</span></span>
+      <span class="n">${net ? kRs(net) : "₹0"}</span>
+      <span class="x">${d.n} closed${d.open ? ` · ${d.open} open` : ""}${d.nifty_chg != null ? ` · Nifty ${d.nifty_chg > 0 ? "+" : ""}${d.nifty_chg}%` : ""}</span></button>`);
+  }
+  return `<div class="cal-grid">${["Mon", "Tue", "Wed", "Thu", "Fri"].map((w) => `<div class="cal-head">${w}</div>`).join("")}${cells.join("")}</div>`;
+}
+function calReview(r, notes) {
+  if (!r) return "";
+  const rep = r.report, when = r.slot && /^\d{4}$/.test(r.slot) ? `${r.slot.slice(0, 2)}:${r.slot.slice(2)}` : "on request";
+  if (!rep) return `<p class="small muted">AI review (${esc(when)}): ${esc(r.note || "no answer")}</p>`;
+  Object.assign(notes, rep.trade_notes || {});
+  const sec = (t, xs) => xs && xs.length ? `<h4>${t}</h4><ul class="small">${xs.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+  return `<div class="cal-review"><p class="small muted" style="margin:0">AI review written at ${esc(when)}${r.ideas_added ? ` · ${r.ideas_added} idea(s) put on trial in the multiverse` : ""}</p>
+    ${rep.market ? `<p style="margin:6px 0">${esc(rep.market)}</p>` : ""}
+    ${sec("What went right", rep.right)}${sec("What went wrong", rep.wrong)}${sec("Missed, late or left early", rep.missed)}
+    ${sec("Trades the system could have taken", rep.could_take)}${sec("What the system can learn", rep.learn)}${sec("What to change in its training", rep.training)}
+    ${rep.next ? `<p class="small"><b>Next session:</b> ${esc(rep.next)}</p>` : ""}</div>`;
+}
+async function calShowDay(day) {
+  const el = $("#cal-detail"); if (!el) return;
+  CAL.day = day;
+  document.querySelectorAll("[data-cal]").forEach((b) => b.classList.toggle("sel", b.dataset.cal === day));
+  el.innerHTML = `<p class="muted">Loading ${esc(day)}…</p>`;
+  let b; try { b = await api(`/api/live/day/${day}`); } catch (e) { el.innerHTML = `<p class="down">${esc(e.message)}</p>`; return; }
+  const notes = {}, revs = (b.reviews || []).slice().reverse();
+  const revHtml = revs.length ? calReview(revs[0], notes) : `<p class="small muted">No AI review for this day yet: it is written at ${esc((CAL.data && CAL.data.times || []).join(" and "))} on market days, or now with the button.</p>`;
+  const older = revs.slice(1).map((r) => `<details><summary class="small muted">Earlier review (${esc(r.slot)})</summary>${calReview(r, {})}</details>`).join("");
+  const dt_ = new Date(day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const acc = (b.accounts || []).map((a) => `<span class="chip ${a.net > 0 ? "good" : a.net < 0 ? "bad" : ""}">${esc(a.name)} ${rupees(a.net)}${a.open_pnl ? ` · open ${rupees(a.open_pnl)}` : ""}</span>`).join("");
+  const nf = (v) => Number(v).toLocaleString("en-IN", { maximumFractionDigits: 1 });
+  const mk = (b.market || []).map((m) => `<tr><td><b>${esc(m.sym)}</b></td><td class="r">${nf(m.open)}</td><td class="r">${nf(m.last)} <small class="muted">${esc(m.last_at)}</small></td>
+      <td class="r ${m.chg_from_open >= 0 ? "up" : "down"}">${m.chg_from_open > 0 ? "+" : ""}${m.chg_from_open}%</td><td class="small nw">high ${nf(m.high)} at ${esc(m.high_at)}<br>low ${nf(m.low)} at ${esc(m.low_at)}</td><td>${calSpark(m.path)}</td></tr>`).join("");
+  const rows = (b.trades || []).filter((t) => CAL.acct === "all" || t.account === CAL.acct).map((t) => {
+    const seg = `${t.seg === "index" ? "Index" : "Stock"} ${esc(t.side || "")}${t.same_day ? ` <span class="cal-tag">expiry today</span>` : ""}`;
+    const pc = t.pct == null ? "" : ` <small class="${t.pct >= 0 ? "up" : "down"}">${t.pct > 0 ? "+" : ""}${t.pct}%</small>`;
+    const chips = (t.chips || []).filter((c) => c.code !== "target" && c.code !== "stop").map((c) => `<span class="chip ${c.tone}">${esc(c.text)}</span>`).join("");
+    const note = notes[t.id] ? `<div class="small" style="margin-top:3px"><b>AI:</b> ${esc(notes[t.id])}</div>` : "";
+    return `<tr><td class="small nw">${esc(t.entry_at)}–${esc(t.exit_at)}</td><td class="small">${esc(t.account_name)}</td><td><b>${esc(t.label || t.sym)}</b><div class="small muted">${seg}</div></td>
+      <td class="small">${esc(t.kind_name || t.kind || "")}${t.alert_at && t.alert_at !== "–" ? ` <span class="muted">alert ${esc(t.alert_at)}</span>` : ""}</td>
+      <td class="r small">${t.entry} → ${t.exit != null ? t.exit : "open"}${pc}${t.peak_pct != null ? `<div class="muted">best ${t.peak_pct > 0 ? "+" : ""}${t.peak_pct}%</div>` : ""}</td>
+      <td class="r nw ${t.net > 0 ? "up" : t.net < 0 ? "down" : ""}"><b>${t.status === "closed" ? rupees(t.net) : "open"}</b></td>
+      <td class="small"><div>${esc(t.why)}</div><div>${chips}</div>${note}</td></tr>`;
+  }).join("");
+  const missed = (b.missed || []).map((m) => `<li>${esc(m.text)}</li>`).join("");
+  const lessons = (b.lessons || []).map((x) => `<li>${esc(x.text)}</li>`).join("");
+  el.innerHTML = `<div class="panel" style="margin-top:14px">
+    <h2 style="margin:0 0 4px">${esc(dt_)} <span class="${b.net >= 0 ? "up" : "down"}">${rupees(b.net)}</span></h2>
+    <p class="small muted" style="margin:0 0 8px">${b.n} closed (${b.won} won)${b.open ? ` · ${b.open} open` : ""} · every paper account, after charges${(b.gaps || []).length ? ` · app not running: ${b.gaps.map((g) => esc(g.join("–"))).join(", ")}` : ""}</p>
+    <div style="margin-bottom:10px">${acc || `<span class="muted small">No paper trades this day.</span>`}</div>
+    ${mk ? `<h3 style="margin:10px 0 4px">The market</h3><div class="table-wrap"><table class="mini"><thead><tr><th>Index</th><th class="r">Open</th><th class="r">Last</th><th class="r">Day</th><th>Range</th><th>Path</th></tr></thead><tbody>${mk}</tbody></table></div>` : ""}
+    <h3 style="margin:14px 0 4px">AI review</h3>${revHtml}${older}
+    <p style="margin:8px 0 0"><button class="btn" id="cal-ai" ${b.reviewing ? "disabled" : ""}>${b.reviewing ? "Writing the review…" : "Write the AI review now"}</button> <span class="small muted">one deep AI message (a minute or two); its ideas go on trial, nothing trades on them</span></p>
+    ${lessons ? `<h3 style="margin:14px 0 4px">What cost money (rule checks)</h3><ul class="small" style="margin:0 0 0 18px">${lessons}</ul>` : ""}
+    <h3 style="margin:14px 0 4px">Every trade and why</h3>
+    ${rows ? `<div class="table-wrap"><table class="mini"><thead><tr><th>Time</th><th>Account</th><th>Trade</th><th>Signal</th><th class="r">Entry → exit</th><th class="r">Net</th><th>Why it made or lost money</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="small muted">No trades${CAL.acct !== "all" ? " in this account" : ""} this day.</p>`}
+    ${missed ? `<h3 style="margin:14px 0 4px">Missed</h3><ul class="small" style="margin:0 0 0 18px">${missed}</ul>` : ""}</div>`;
+  const btn = $("#cal-ai");
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = "Writing the review…";
+    try { await api(`/api/live/day/${day}/review`, { method: "POST" }); } catch (e) { toast(e.message); }
+    const poll = async () => { if (state.page !== "calendar" || CAL.day !== day) return; let x; try { x = await api(`/api/live/day/${day}`); } catch (_) { return; }
+      if (x.reviewing) setTimeout(poll, 5000); else { calShowDay(day); calLoad(CAL.month, true); } };
+    setTimeout(poll, 5000);
+  };
+}
+async function calLoad(month, keepDay) {
+  const el = $("#cal-grid"); if (!el) return;
+  let c; try { c = await api(`/api/live/calendar?month=${month}`); } catch (e) { el.innerHTML = `<p class="down">${esc(e.message)}</p>`; return; }
+  CAL.data = c; CAL.month = c.month;
+  const t = c.total || {};
+  const sel = $("#cal-acct");
+  if (sel) { const cur = CAL.acct; sel.innerHTML = `<option value="all">All accounts</option>` + Object.entries(c.names || {}).map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join(""); sel.value = cur; }
+  const tot = CAL.acct === "all" ? t.net : (c.days || []).reduce((s, d) => s + calNet(d), 0);
+  $("#cal-month").textContent = new Date(c.month + "-01T00:00:00").toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  $("#cal-total").innerHTML = `Month <b class="${tot >= 0 ? "up" : "down"}">${rupees(tot)}</b> · ${t.green || 0} green, ${t.red || 0} red of ${t.days || 0} days`;
+  el.innerHTML = calGrid(c);
+  el.querySelectorAll("[data-cal]").forEach((b) => b.onclick = () => calShowDay(b.dataset.cal));
+  if (!keepDay) {
+    const pick = (c.days || []).some((d) => d.day === CAL.day) ? CAL.day : (c.days || []).length ? c.days[c.days.length - 1].day : null;
+    if (pick) calShowDay(pick); else $("#cal-detail").innerHTML = `<p class="muted" style="margin-top:12px">No paper trades in this month.</p>`;
+  }
+}
+async function pageCalendar() {
+  main.innerHTML = `<h1 class="page-title">Day calendar</h1>
+    <p class="muted" style="margin-top:0">Every market day green or red: the net after charges of all paper accounts (or one). Click a day for what the market did, every trade with its segment and why it made or lost money, what was missed, and the AI's review (written at 13:30 and after the close).</p>
+    <div class="cal-bar"><button class="btn" id="cal-prev" aria-label="Previous month">‹</button><b id="cal-month" style="min-width:130px;text-align:center"></b><button class="btn" id="cal-next" aria-label="Next month">›</button>
+      <label class="small">Account <select id="cal-acct"><option value="all">All accounts</option></select></label><span class="small" id="cal-total"></span></div>
+    <div id="cal-grid"><p class="muted">Loading…</p></div><div id="cal-detail"></div>`;
+  const shift = (n) => { const [y, m] = (CAL.month || new Date().toISOString().slice(0, 7)).split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); calLoad(d.toISOString().slice(0, 7)); };
+  $("#cal-prev").onclick = () => shift(-1);
+  $("#cal-next").onclick = () => shift(1);
+  $("#cal-acct").onchange = (e) => { CAL.acct = e.target.value; calLoad(CAL.month, true); if (CAL.day) calShowDay(CAL.day); };
+  const q = new URLSearchParams(location.hash.split("?")[1] || "");
+  if (q.get("d")) CAL.day = q.get("d");
+  await calLoad((q.get("d") || CAL.month || "").slice(0, 7) || new Date().toISOString().slice(0, 7));
+}
 Object.assign(PAGES, { lens: pageLens, board: pageBoard });
+Object.assign(PAGES, { calendar: pageCalendar });
 
 /* ---------------- 2.30: amounts the way people write them ("40k", "1.5 lakh", "2,00,000") */
 function parseAmount(text) {

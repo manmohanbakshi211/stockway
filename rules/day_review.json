@@ -1,0 +1,26 @@
+{
+ "about": "2.98 Day calendar and AI day review (live/daybook.py). Mandeep, 23 Nov 2026: a calendar with every day green or red; click a day to see what happened, which trade, which segment and why it made or lost money; an AI report by 13:30 on what the system could take, what it missed (entry delay, missed trend) and why, a note per trade, what the system can learn and what to improve in its training. times: when the AI review is written on market days (HH:MM, IST; a late start writes only the latest one). The checks on each trade: delay_s = entry this many seconds after its alert; chase_min / chase_pct = the underlying had already moved this much our way in the minutes before entry (index / stock); late_pct = a stop-loss exit this many % of the premium past the stop; giveback_peak_pct = the option was this much up at best and closed at a loss; after_stop_pct = after a losing exit the underlying went this much our way by the end of the day; miss_move_pct / miss_window_min = an index move this big inside this window with no trade that way open; miss_alert_o60 = a Focus-level alert whose option was this % up an hour later, not traded. max_trades_ai = trades sent to the AI (biggest first). telegram: send the review's short version to your phone. Paper only: nothing here trades or changes a setting.",
+ "valid_from": "2026-11-23",
+ "times": [
+  "13:30",
+  "15:45"
+ ],
+ "ai": true,
+ "telegram": false,
+ "delay_s": 60,
+ "chase_min": 20,
+ "chase_pct": {
+  "index": 0.6,
+  "stock": 1.2
+ },
+ "late_pct": 8,
+ "giveback_peak_pct": 30,
+ "after_stop_pct": {
+  "index": 0.4,
+  "stock": 1.0
+ },
+ "miss_move_pct": 0.6,
+ "miss_window_min": 30,
+ "miss_alert_o60": 20,
+ "max_trades_ai": 40
+}

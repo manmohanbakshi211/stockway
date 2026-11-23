@@ -341,6 +341,18 @@ def static_checks(cfg: dict | None = None) -> list:
     except Exception as e:
         pl_ok, pl_det = False, str(e)[:160]
     out.append(_c("pattern_learn", "Pattern learning: which candle patterns pay, and where (2.93, shadow)", pl_ok, pl_det))
+    try:                                                  # 2.98: the day calendar and the AI day review
+        from . import daybook as _dbk
+        from .engine import LiveEngine as _LE
+        c_ = _dbk.cfg()
+        dr_ok = bool(c_.get("times")) and hasattr(_LE, "_day_review_slot") and hasattr(_LE, "day_book")
+        d_ = Path(__file__).resolve().parents[1] / "data" / "dayreview"
+        last_ = sorted(d_.glob("*.json"))[-1].stem if d_.exists() and any(d_.glob("*.json")) else None
+        dr_det = (f"AI review at {' and '.join(c_['times'])} on market days ({'AI on' if c_.get('ai', True) else 'AI off: rule checks only'}"
+                  f"{', Telegram on' if c_.get('telegram') else ''}); last written: {last_ or 'none yet'}; paper and market data only")
+    except Exception as e:
+        dr_ok, dr_det = False, str(e)[:160]
+    out.append(_c("day_review", "Day calendar and AI day review (2.98)", dr_ok, dr_det))
     try:                                                  # 2.83: the multiverse's strict pick rule, in shadow
         from lab import multiverse as _mvx
         src_ = _mvx.strict_rule(_mvx.cfg())

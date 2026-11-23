@@ -752,7 +752,7 @@ const TABS = {
   chain: { label: "Option chain", tabs: [["sym", "Option chain"], ["lens", "Options lens"]] },
   market: { label: "Market & news", tabs: [["context", "Market context"], ["world", "World"], ["insiders", "Insider trades"], ["briefs", "Briefs"]] },
   radar: { label: "Daily radar", tabs: [["grand", "All indices"], ["tomorrow", "Tomorrow"], ["history", "History"], ["biggest", "Biggest days"], ["drivers", "What drives moves"], ["check", "Model check"]] },
-  results: { label: "Results", tabs: [["board", "Strategy board"], ["strict", "Strict track"], ["scorecard", "Scorecard"], ["desk", "Strategy desk"]] },
+  results: { label: "Results", tabs: [["calendar", "Day calendar"], ["board", "Strategy board"], ["strict", "Strict track"], ["scorecard", "Scorecard"], ["desk", "Strategy desk"]] },
   system: { label: "System & settings", tabs: [["system", "System & logins"], ["connect", "Live setup"], ["data", "Data & settings"]] },
 };
 function groupOf(page) { return Object.keys(TABS).find((g) => TABS[g].tabs.some((t) => t[0] === page)) || null; }

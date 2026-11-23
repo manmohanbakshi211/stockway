@@ -118,6 +118,43 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.98: Day calendar and the AI day review (23 Nov 2026)
+- **Mandeep (23 Nov, 13:48):** "ab ek chart calender bhi banao jisme daily day green ya red se mark ho or us par click
+  karke pata chale kya hua, konsi trade konsa segment ki trade or kis wajah se trade ne profit or loss kiya. ai bhi
+  daale taaki 1:30 tak ek report banaye ..." (what the system could take, what was missed, entry delay, missed trend,
+  why, a summary of every trade, what it can learn, what to change in its training).
+- **Gun / bullet split:** the gun is `live/daybook.py` (reads paper trades, alerts, graded outcomes and the day's
+  1-minute candles; checks every trade; saves the AI review); the bullets are `rules/day_review.json` (the times, the
+  check thresholds: entry delay 60 s, chase 0.6% index / 1.2% stock in 20 min, late exit 8% of the premium past the
+  stop, give-back after +30%, the move that came after a stop 0.4% / 1.0%, a missed move 0.6% in 30 min) and the AI task
+  `day_review` (deep) in `rules/ai_models.json`. Numbers change in the file, not in code.
+- **New: Results → Day calendar** (`#/calendar`, the first Results tab): every market day of the month green or red by
+  the net after charges of all paper accounts (or one, from the Account list); today includes the open trades' P&L;
+  same-day expiry days and days with an AI review are tagged. Click a day:
+  - **The market:** each index's open, last, high and low with their times, and its path.
+  - **Every trade and why:** account, trade (index / stock, CE / PE, same-day expiry), the signal and its alert time,
+    entry → exit with % and the best % it reached, net, and one line on why it made or lost money, with checks:
+    target / stop, entered N s after the alert, entered after the move (chasing), with / against the day's move, price
+    went our way but the option lost (time decay), after we were out the move came (right idea, wrong timing),
+    same-day expiry, exit past the stop (with the time the app was not running, if that was the cause), profit given
+    back with no lock, the same signal in several accounts.
+  - **What cost money:** each check added up over the day with its rupees (e.g. "Profit given back: about ₹40,414 given
+    back from the best price").
+  - **Missed:** index moves of 0.6%+ in 30 min with no index trade that way open (one line when several indices moved
+    together), and strong graded alerts (option +20% an hour later) that were not traded, with why they were skipped.
+  - **AI review:** written by itself at **13:30** (the market still open: what to watch for the rest of the day) and
+    **15:45** (after the close) on market days, or now with **"Write the AI review now"**: the market, what went right
+    and wrong, what was missed / late / left early and why, trades the system could have taken, a note per trade, what
+    the system can learn, what to change in its training, and one line for the next session. Its filter ideas go on
+    trial in the multiverse ("AI day review"), tested on days they never saw: nothing trades on them by being proposed.
+    Saved in `data/dayreview/<day>_<HHMM>.json`; a restart never writes the same slot twice; a late start writes only
+    the latest slot. Never for a practice source (sim / replay). Telegram off by default (`"telegram": true` to send).
+- Paper and market data only: nothing here places an order, changes a setting or touches a trading account. Nothing
+  changes what the app alerts or trades: the calendar reads, the AI writes a report.
+- System page: a "Day calendar and AI day review" check (times, AI on / off, last review written).
+- Lab regression: identical by construction (no file of the Lab table build changed).
+- Tests: `tests/test_daybook.py` (14); full suite; headless desktop + phone, light and dark, clean.
+
 ## 2.97: Where the time goes: a read-only look inside the running app (23 Nov 2026)
 - **Mandeep (23 Nov, 10:27, on 2.96):** the paper-exit watcher is fixed (52 ms → 2.6 ms a check, was 2.5-4.1 s) and
   live.db runs in WAL, but the Live page refresh and Paper trades still took 2-4 s (one 29 s); the first analysis pass

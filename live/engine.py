@@ -2743,6 +2743,64 @@ class LiveEngine:
             self.store.put(f"report:{day}", rep)
         return rep
 
+    def _real_source(self) -> str:
+        src = self.source or self.cfg()["live"]["source"]
+        return self.cfg()["live"]["source"] if is_practice(src) else src
+
+    def day_book(self, day: str | None = None, open_pnl: dict | None = None) -> dict:
+        """2.98: one day's trades of every paper account, why each made or lost money, what was missed (live/daybook.py).
+        Today: the live 1-minute candles and the health monitor's gaps (the app not running)."""
+        from . import daybook
+        base = self._real_source()
+        sday = self.session_day().isoformat()
+        day = day or sday
+        live_bars, gaps, now_ts = None, [], None
+        if day == sday and self.state is not None and self.source == base:
+            t0 = dt.datetime.fromisoformat(day + "T09:15:00").replace(tzinfo=IST).timestamp()
+            with self.state.lock:
+                raw = {sym: tuple(b.bars) for sym, b in list(self.state.bars.items())}
+            live_bars = {sym: [x for x in rows if x[0] >= t0] for sym, rows in raw.items()}
+            live_bars = {k: v for k, v in live_bars.items() if v}
+            now_ts = time.time()
+            try:
+                gaps = [(g["from"], g["to"]) for g in (self.health.view().get("gaps_today") or []) if g.get("market_mins")]
+            except Exception:
+                gaps = []
+        return daybook.build(self.store, self.data_dir, base, day, live_bars=live_bars, gaps=gaps, now_ts=now_ts,
+                             open_pnl=open_pnl)
+
+    def _day_review_slot(self, now: dt.datetime, source: str) -> str | None:
+        """2.98: the review slot due now ('1330', '1545'), once a day each; a late start runs only the latest slot.
+        Market days only, never for a practice source, never twice when the file is already written."""
+        from . import daybook
+        today = now.date().isoformat()
+        hm_now = now.strftime("%H:%M")
+        due = sorted(str(hm) for hm in (daybook.cfg().get("times") or []) if hm_now >= str(hm))
+        if not due or is_practice(source) or not SESSION.session(now.date()):
+            return None
+        if ("dayreview", today, due[-1]) in self.brief_done:
+            return None
+        for hm in due:
+            self.brief_done.add(("dayreview", today, hm))
+        slot = due[-1].replace(":", "")
+        if (Path(self.data_dir) / "dayreview" / f"{today}_{slot}.json").exists():
+            return None
+        return slot
+
+    def day_review_run(self, day: str, slot: str, book: dict | None = None) -> dict | None:
+        """2.98: the AI day review (one at a time); saved to data/dayreview/<day>_<HHMM>.json."""
+        from . import daybook
+        lk = self.__dict__.setdefault("_day_review_lock", threading.Lock())
+        if not lk.acquire(blocking=False):
+            return None
+        try:
+            return daybook.review(self, self.data_dir, day, slot, book=book, log=self.log)
+        except Exception as e:
+            self.log(f"Day review failed: {e}")
+            return None
+        finally:
+            lk.release()
+
     def briefs_view(self, day=None) -> dict:
         days = self.store.get("brief_days", []) or []
         day = day or (days[0] if days else dt.datetime.now(IST).date().isoformat())
@@ -2807,6 +2865,14 @@ class LiveEngine:
                         threading.Thread(target=self.strict_run, daemon=True, name="strict-test").start()
                 except Exception as e:
                     self.log(f"Strict test not started: {e}")
+                try:                                       # 2.98: the AI day review at the set times (13:30, after the close)
+                    slot = self._day_review_slot(now, self.source or c["source"])
+                    if slot:
+                        threading.Thread(target=self.day_review_run, args=(today, slot), daemon=True,
+                                         name="day-review").start()
+                except Exception as e:
+                    if self._every("day_review_err", 3600, clock_time=False):
+                        self.log(f"Day review not started: {e}")
                 lab_on = (self.cfg().get("lab") or {}).get("nightly", True)
                 if lab_on and now.time() >= dt.time(16, 15) and ("lab", today) not in self.brief_done and not self.running:
                     self.brief_done.add(("lab", today))

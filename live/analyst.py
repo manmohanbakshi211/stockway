@@ -145,7 +145,7 @@ def parse(text: str | None, names: set) -> dict | None:
             "ideas": ideas[:5], "tomorrow": str(d.get("tomorrow") or "")[:240]}
 
 
-def add_ideas(data_dir, ideas: list, day: str) -> int:
+def add_ideas(data_dir, ideas: list, day: str, source: str = "AI analyst") -> int:
     """Append to data/multiverse_ideas.json (deduplicated; the oldest drop off past MAX_IDEAS)."""
     p = Path(data_dir) / IDEAS
     try:
@@ -160,7 +160,7 @@ def add_ideas(data_dir, ideas: list, day: str) -> int:
             continue
         keys.add(k)
         cur.append({"name": f"AI idea: {x['name']}", "fact": x["fact"], "op": x["op"], "v": x["v"], "why": x["why"],
-                    "source": "AI analyst", "added": day})
+                    "source": source, "added": day})
         n += 1
     cur = cur[-MAX_IDEAS:]
     tmp = p.with_suffix(".tmp")

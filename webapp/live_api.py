@@ -1066,6 +1066,61 @@ def live_book_close(bid: str, trade_id: int):
     return clean(r)
 
 
+# ----------------------------------------------------------------- 2.98: day calendar and AI day review (live/daybook.py)
+def _open_today(e) -> dict:
+    """{account: open P&L} of every paper account now (the calendar's and the day's 'today')."""
+    try:
+        t = live_paper_total()
+        return {r["id"]: r.get("open_pnl") or 0 for r in t.get("accounts") or [] if "error" not in r}
+    except Exception:
+        return {}
+
+
+@router.get("/api/live/calendar")
+def live_calendar(month: str | None = None):
+    """Every day of a month green / red: the net after charges of every paper account, trades, won, the Nifty's day."""
+    from live import daybook
+    e = engine()
+    today = e.session_day().isoformat()
+    month = (month or today[:7])[:7]
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        raise HTTPException(400, "month is YYYY-MM")
+    extra = {today: _open_today(e)} if month == today[:7] and e.paper else None
+    out = daybook.calendar(e.store, e.data_dir, e._real_source(), month, today=extra)
+    out.update(today=today, times=daybook.cfg().get("times"))
+    return clean(out)
+
+
+@router.get("/api/live/day/{day}")
+def live_day(day: str):
+    """One day: the market, every trade of every account with its segment and why it made or lost money, what was
+    missed, the lessons and the AI reviews."""
+    from live import daybook
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(400, "day is YYYY-MM-DD")
+    e = engine()
+    live_ = day == e.session_day().isoformat() and e.paper
+    b = e.day_book(day, open_pnl=_open_today(e) if live_ else None)
+    b["reviews"] = daybook.reviews(e.data_dir, day)
+    b["reviewing"] = bool(getattr(e, "_day_review_lock", None) and e._day_review_lock.locked())
+    return clean(b)
+
+
+@router.post("/api/live/day/{day}/review")
+def live_day_review(day: str):
+    """Write the AI day review now (one at a time; a deep-tier AI message, a minute or more)."""
+    import threading
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(400, "day is YYYY-MM-DD")
+    e = engine()
+    lk = getattr(e, "_day_review_lock", None)
+    if lk is not None and lk.locked():
+        return {"busy": True}
+    slot = dt.datetime.now(IST).strftime("%H%M") if day == e.session_day().isoformat() else "manual"
+    threading.Thread(target=e.day_review_run, args=(day, slot), daemon=True, name="day-review").start()
+    return {"started": True}
+
+
 @router.get("/api/live/paper/total")
 def live_paper_total(source: str | None = None):
     """2.69 (Mandeep: "sabhi trades ka mila ke bhi dikhao"): every paper account added up: booked, open, today."""
