@@ -11,6 +11,8 @@ Market data only: nothing is traded.
 """
 from __future__ import annotations
 
+from .store import reading                # 2.99: reads off the writer lock
+
 import json
 import time
 from .practice import PRACTICE
@@ -129,11 +131,11 @@ def board(store, source, days: int = 90, recent: int = 40) -> dict:
     """Per trial kind: how many, hits (target first), misses (stop first), timed out, average R. Plus the latest trials."""
     from . import registry
     try:
-        with store.lock:
-            rows = [dict(r) for r in store.db.execute(
+        with reading(store) as db_:
+            rows = [dict(r) for r in db_.execute(
                 "SELECT kind, variant, sym, result, r_exit, r15, day FROM trial_alerts WHERE source=? AND day >= date('now', ?)",
                 (source, f"-{days} day")).fetchall()]
-            last = [dict(r) for r in store.db.execute(
+            last = [dict(r) for r in db_.execute(
                 "SELECT id, ts, day, sym, kind, direction, entry, stop, target, title, result, reason, r_exit FROM trial_alerts "
                 "WHERE source=? ORDER BY id DESC LIMIT ?", (source, recent)).fetchall()]
     except Exception:

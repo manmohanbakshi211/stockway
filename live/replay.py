@@ -98,6 +98,8 @@ def prepare_store(store, day: str, data_dir=None, log=print) -> dict:
             except Exception:
                 pass
         store.db.commit()
+    if hasattr(store, "paper_changed"):                  # 2.99: the store's cached paper rows are out of date
+        store.paper_changed()
     daily = store.get(f"daily:upstox:{day}") or {}
     if daily:
         store.put(f"daily:replay:{day}", daily)

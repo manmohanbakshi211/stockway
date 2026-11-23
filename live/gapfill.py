@@ -38,13 +38,30 @@ def recording_bars(path: Path, t0: float, t1: float) -> dict[str, list[list]]:
     out: dict[str, list[list]] = {}
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
     try:
-        for s, t, o, h, l, c, v in con.execute("SELECT sym, t, o, h, l, c, v FROM bars WHERE t >= ? AND t < ? ORDER BY t", (t0, t1)):
-            out.setdefault(s, []).append([_minute(t), o, h, l, c, v or 0.0])
+        for a, b in _slices(t0, t1, SLICE_S):              # 2.99: short reads; the live recorder writes in between
+            for s, t, o, h, l, c, v in con.execute("SELECT sym, t, o, h, l, c, v FROM bars WHERE t >= ? AND t < ? ORDER BY t",
+                                                   (a, b)).fetchall():
+                out.setdefault(s, []).append([_minute(t), o, h, l, c, v or 0.0])
+            time.sleep(0.005)
     except sqlite3.Error:
         return {}
     finally:
         con.close()
     return out
+
+
+SLICE_S = 900          # 2.99: 15 minutes of a day's recording per read
+
+
+def _slices(t0: float, t1: float, step: float):
+    """2.99: [t0, t1) in pieces. One read of the whole day's minute snapshots (~900,000 rows) kept the recording locked
+    while it ran, so the live recorder could not write ("Saving 1-minute candles failed: database is locked", the Data
+    vault step waiting 12 s after the 15:07 restart on 23 Nov). The rows and their order are the same."""
+    a = float(t0)
+    while a < t1:
+        b = min(float(t1), a + step)
+        yield a, b
+        a = b
 
 
 def recording_hist(path: Path, since: float, until: float) -> dict[str, list[tuple]]:
@@ -54,10 +71,12 @@ def recording_hist(path: Path, since: float, until: float) -> dict[str, list[tup
     out: dict[str, list[tuple]] = {}
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
     try:
-        for ts, k, ltp, vol, oi, iv in con.execute(
-                "SELECT ts, key, ltp, vol, oi, iv FROM minutes WHERE ts >= ? AND ts < ? ORDER BY ts", (since, until)):
-            if ltp:
-                out.setdefault(k, []).append((int(ts), ltp, vol, oi, iv))
+        for a, b in _slices(since, until, SLICE_S):          # 2.99: short reads; the live recorder writes in between
+            for ts, k, ltp, vol, oi, iv in con.execute(
+                    "SELECT ts, key, ltp, vol, oi, iv FROM minutes WHERE ts >= ? AND ts < ? ORDER BY ts", (a, b)).fetchall():
+                if ltp:
+                    out.setdefault(k, []).append((int(ts), ltp, vol, oi, iv))
+            time.sleep(0.005)
     except sqlite3.Error:
         return {}
     finally:

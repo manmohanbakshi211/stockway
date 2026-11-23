@@ -6,6 +6,8 @@ user sees changes: the results only say, on real live alerts, which way of setti
 """
 from __future__ import annotations
 
+from .store import reading                # 2.99: reads off the writer lock
+
 from lab.exits import STYLES, LivePlan
 
 SQL = """
@@ -96,8 +98,8 @@ class ShadowExits:
 def board(store, source, days: int = 60) -> dict:
     """Per exit style on live alerts: trades, average option return, wins. (2.92: no ₹40K subset; fits40 stays in the
     table for the record only.)"""
-    with store.lock:
-        rows = store.db.execute("SELECT style, opt_pct, cost, fits40, day FROM plan_outcomes WHERE source=? "
+    with reading(store) as db_:
+        rows = db_.execute("SELECT style, opt_pct, cost, fits40, day FROM plan_outcomes WHERE source=? "
                                 "AND day >= date('now', ?)", (source, f"-{days} day")).fetchall()
     out = {}
     for st, pct, cost, f40, day in rows:

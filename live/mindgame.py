@@ -15,6 +15,8 @@ trade, no Lab result depends on it. Market data only.
 """
 from __future__ import annotations
 
+from .store import reading                # 2.99: reads off the writer lock
+
 import datetime as dt
 import json
 import threading
@@ -644,8 +646,8 @@ class Book:
         """rows: closed candles [t, o, h, l, c, ...] of this timeframe."""
         g = int((cfg()["grade_bars"] or {}).get(tf, 6))
         gu = float(cfg()["grade_units"] or 1.0)
-        with self.store.lock:
-            todo = self.store.db.execute("SELECT bullet, side, t, price, unit FROM mind_reads WHERE source=? AND sym=? AND tf=? "
+        with reading(self.store) as db_:
+            todo = db_.execute("SELECT bullet, side, t, price, unit FROM mind_reads WHERE source=? AND sym=? AND tf=? "
                                          "AND result IS NULL", (self.source, sym, tf)).fetchall()
         if not todo or not rows:
             return 0
@@ -684,8 +686,8 @@ class Book:
     def stats(self, days: int = 60) -> dict:
         """{bullet: {...}, (bullet, tf): {...}} with n graded, right, wrong, flat, right_pct, status."""
         since = (dt.date.today() - dt.timedelta(days=days)).isoformat()
-        with self.store.lock:
-            rows = self.store.db.execute("SELECT bullet, tf, result, COUNT(*) FROM mind_reads WHERE source=? AND day>=? AND result IS NOT NULL "
+        with reading(self.store) as db_:
+            rows = db_.execute("SELECT bullet, tf, result, COUNT(*) FROM mind_reads WHERE source=? AND day>=? AND result IS NOT NULL "
                                          "GROUP BY bullet, tf, result", (self.source, since)).fetchall()
         tw = cfg()["trust"]
         out: dict = {}

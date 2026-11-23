@@ -143,6 +143,7 @@ def fires(data_dir, rule: dict, feats: dict, i: int | None = None) -> bool:
     f = Path(data_dir) / "lab" / "ml" / rule["ml"]
     if f not in _CACHE:
         import joblib
-        _CACHE[f] = joblib.load(f)
+        from live.learn import single_thread                   # 2.99: one-row predictions on one thread
+        _CACHE[f] = single_thread(joblib.load(f))
     x = matrix({k: [feats[k][i]] for k in F.ML_FEATURES}, [rule["dir"]])
     return float(_CACHE[f].predict_proba(x)[0, 1]) > rule["thr"]

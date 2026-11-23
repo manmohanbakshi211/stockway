@@ -12,6 +12,8 @@ logged and skipped, never stopping the scan.
 """
 from __future__ import annotations
 
+from .store import reading                # 2.99: reads off the writer lock
+
 import collections
 import datetime as dt
 import math
@@ -328,8 +330,8 @@ class Rider:
         c = R.cfg().get("confidence") or {}
         lo, hi = float(c.get("min", 60)), float(c.get("strong", 70))
         cut = (dt.date.today() - dt.timedelta(days=days)).isoformat()
-        with store.lock:
-            rows = store.db.execute("SELECT data, result, r_exit FROM trial_alerts WHERE source=? AND kind='trend_rider' "
+        with reading(store) as db_:
+            rows = db_.execute("SELECT data, result, r_exit FROM trial_alerts WHERE source=? AND kind='trend_rider' "
                                     "AND day >= ? AND result IS NOT NULL AND result != 'ungraded'", (source, cut)).fetchall()
         out = {k: {"n": 0, "hit": 0, "r": 0.0} for k in ("weak", "ok", "strong", "none")}
         for data, res, rx in rows:

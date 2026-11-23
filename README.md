@@ -118,6 +118,37 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.99: Why it was still slow: measured inside the running app, five causes fixed (23 Nov 2026)
+- **Mandeep (23 Nov, 15:03, on 2.96): "why the system is still slow ... check thoroughly"** (Speed panel: Alerts 3.4-5.2 s,
+  chart / multi-timeframe / Fortune 3.6 s together at 13:35, System page 2.8 s, Paper cards ~2 s). Read from the app's
+  own timings and log, the 2.97 "Where the time goes" look (twice, on 2.98 after his 15:07 restart) and live.db:
+  - **The conviction model split every prediction over 10 threads.** It is a 300-tree forest trained with all cores; a
+    one-row prediction then also used all cores. Each alert gets one; the 5-minute scan raises 20-53 alerts at once
+    (4,933 alerts today), and "Setup / Lab rules alerts" took 1.2-6.6 s in the loop every 5 minutes, every screen
+    waiting. Measured: 41 ms → 9 ms a prediction; with the app busy ~970 ms → 72 ms. **Fix:** predictions on one
+    thread (`live/learn.py` single_thread; the same for Strategy Lab ML models). Same trees, same probabilities (summed
+    in tree order, within 1e-16); training unchanged.
+  - **The Dhan scrip master (30 MB, 236,742 rows) was read again for every stock chart** (0.6 s each). After a start the
+    chart warm-up took 309 s at ~90% of the one Python core, and any stock chart or multi-timeframe view paid it again.
+    **Fix:** read once per file version (`lab/dhan_hist.py`); the same ids and lots.
+  - **The 5-minute scorecard read 5,000 graded alerts holding the store's writer lock** (~2.8 s): the alert tracker
+    and every alert / paper write waited ("Alert tracker 2-3.4 s", 13 of today's slow passes). The Alerts page's shadow
+    Focus picks (~2.4 s a call) and other reports did the same. **Fix:** these reads use a reader connection, never the
+    writer's lock (`live/store.py` reading(); scorecard, shadow Focus, day report, credibility, exits board, trials, line
+    grades, Trend Rider, MindGame); a new index outcomes(source, ts) replaces a sort of every graded alert.
+  - **Every screen read through one connection and one lock (2.96):** while the Alerts page read 5,000 alerts, Paper
+    trades and the 0.25 s paper-exit check waited (the check was waiting ~40% of the time). **Fix:** each thread reads
+    on its own connection; the open paper trades and paper cards are read again only when a paper row changes (2 s at
+    most): the exit check asked 10 times every 0.25 s, now about once a second. The Alerts page keeps the day's alerts
+    and today's shadow picks until a new alert arrives (20 s / 60 s at most).
+  - **After the restart the recording was locked:** the gap fill read the whole day's minute snapshots in one go and
+    the recorder could not write ("Saving 1-minute candles failed: database is locked" at 15:08, Data vault 12 s).
+    **Fix:** the gap fill reads 15 minutes at a time (same rows, same order); the candle save tries again after 10 s.
+- Not changed: every alert, filter, exit, paper rule, score and model result. Python already switches threads every
+  1 ms (2.71). The Mac was on battery (64-70%): macOS slows the CPU; keep the charger in during market hours.
+- Lab regression: identical by construction (no file of the Lab table build changed).
+- Tests: `tests/test_speed_299.py` (11); full suite.
+
 ## 2.98: Day calendar and the AI day review (23 Nov 2026)
 - **Mandeep (23 Nov, 13:48):** "ab ek chart calender bhi banao jisme daily day green ya red se mark ho or us par click
   karke pata chale kya hua, konsi trade konsa segment ki trade or kis wajah se trade ne profit or loss kiya. ai bhi

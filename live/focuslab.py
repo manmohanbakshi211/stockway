@@ -12,6 +12,8 @@ are replayed with the same code and marked "replayed". Read-only: nothing here t
 """
 from __future__ import annotations
 
+from .store import reading                # 2.99: reads off the writer lock
+
 import json
 import math
 import threading
@@ -167,8 +169,8 @@ class FocusLab:
         """After a restart: rebuild today's picks from the alerts already saved (so the cap and the gap carry on)."""
         n = 0
         try:
-            with self.store.lock:
-                rows = self.store.db.execute(
+            with reading(self.store) as db_:
+                rows = db_.execute(
                     "SELECT ts, sym, kind, data FROM alerts WHERE day=? AND source=? AND data LIKE '%\"focus_ch\"%' ORDER BY ts",
                     (day, self.source)).fetchall()
         except Exception:
@@ -260,13 +262,13 @@ _FIELDS = ("SELECT id, ts, sym, kind, direction, severity, json_extract(data, '$
 def _alerts_of_day(store, source: str, day: str) -> list:
     """The day's directional alerts with only what the selectors need (SQLite pulls the few fields out of each alert's
     saved data; without SQLite's JSON functions the data is read in Python)."""
-    with store.lock:
+    with reading(store) as db_:
         try:
             raw = [(i, ts, sym, kind, di, sev, f, m, c, json.loads(ch) if ch else None)
-                   for i, ts, sym, kind, di, sev, f, m, c, ch in store.db.execute(_FIELDS, (day, source)).fetchall()]
+                   for i, ts, sym, kind, di, sev, f, m, c, ch in db_.execute(_FIELDS, (day, source)).fetchall()]
         except Exception:
             raw = []
-            for i, ts, sym, kind, di, sev, data in store.db.execute(
+            for i, ts, sym, kind, di, sev, data in db_.execute(
                     "SELECT id, ts, sym, kind, direction, severity, data FROM alerts WHERE day=? AND source=? "
                     "AND direction IN ('up', 'down') ORDER BY ts, id", (day, source)).fetchall():
                 try:
@@ -275,7 +277,7 @@ def _alerts_of_day(store, source: str, day: str) -> list:
                     d = {}
                 raw.append((i, ts, sym, kind, di, sev, d.get("focus"), d.get("muted"), d.get("conviction"), d.get("focus_ch")))
         try:
-            ix = dict(store.db.execute("SELECT alert_id, is_index FROM outcomes WHERE day=? AND source=?", (day, source)).fetchall())
+            ix = dict(db_.execute("SELECT alert_id, is_index FROM outcomes WHERE day=? AND source=?", (day, source)).fetchall())
         except Exception:
             ix = {}
     return [{"id": i, "ts": ts, "sym": sym, "kind": kind, "direction": di, "severity": int(sev or 0),
@@ -372,8 +374,8 @@ def _grades(store, source: str, days: list, style: str) -> tuple[dict, dict]:
     except Exception:
         pass
     try:
-        with store.lock:
-            for aid, res, o60, o0 in store.db.execute(f"SELECT alert_id, result, o60, o0 FROM outcomes WHERE source=? AND day IN ({q})",
+        with reading(store) as db_:
+            for aid, res, o60, o0 in db_.execute(f"SELECT alert_id, result, o60, o0 FROM outcomes WHERE source=? AND day IN ({q})",
                                                       (source, *days)).fetchall():
                 outs[aid] = (res, o60 if o0 else None)
     except Exception:
@@ -405,8 +407,8 @@ def compare(store, source: str, days: int = 10, today: str | None = None, lc: di
     import datetime as _dt
     cfg = load()
     today = today or _dt.date.today().isoformat()
-    with store.lock:
-        dl = [r[0] for r in store.db.execute("SELECT DISTINCT day FROM alerts WHERE source=? ORDER BY day DESC LIMIT ?",
+    with reading(store) as db_:
+        dl = [r[0] for r in db_.execute("SELECT DISTINCT day FROM alerts WHERE source=? ORDER BY day DESC LIMIT ?",
                                              (source, max(1, min(int(days), 60)))).fetchall()]
     dl = sorted(dl)
     main = cfg["main"]

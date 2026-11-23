@@ -8,6 +8,8 @@ Also keeps your own line book fresh: once the session is over it rebuilds data/l
 """
 from __future__ import annotations
 
+from .store import reading                # 2.99: reads off the writer lock
+
 import datetime as dt
 import time
 from pathlib import Path
@@ -116,8 +118,8 @@ class LineGrader:
             return c[1]
         since = (dt.date.today() - dt.timedelta(days=days)).isoformat()
         q = "SELECT type, verdict, p_hold, matters, result FROM line_touches WHERE source=? AND day>=?" + (" AND sym=?" if sym else "")
-        with self.store.lock:
-            rows = self.store.db.execute(q, (self.source, since) + ((sym,) if sym else ())).fetchall()
+        with reading(self.store) as db_:
+            rows = db_.execute(q, (self.source, since) + ((sym,) if sym else ())).fetchall()
         dec = [r for r in rows if r[4] in ("hold", "break")]
         by_v = {}
         for v in ("likely holds", "likely breaks", "coin flip", "not tested yet"):
@@ -137,8 +139,8 @@ class LineGrader:
                "by_type": {t: {"n": v[0], "held_pct": round(v[1] / v[0] * 100, 1)} for t, v in sorted(by_t.items(), key=lambda x: -x[1][0])},
                "expected_hold": round(float(np.mean([a for a, _ in ps])), 1) if ps else None,
                "actual_hold": round(float(np.mean([b for _, b in ps])) * 100, 1) if ps else None}
-        with self.store.lock:
-            f = self.store.db.execute("SELECT MIN(day) FROM line_touches WHERE source=?", (self.source,)).fetchone()
+        with reading(self.store) as db_:
+            f = db_.execute("SELECT MIN(day) FROM line_touches WHERE source=?", (self.source,)).fetchone()
         out["since"] = f[0] if f else None
         self._sum[k] = (time.time(), out)
         return out

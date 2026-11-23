@@ -1,9 +1,11 @@
 """SQLite storage for alerts, paper trades and small cached values."""
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 SCHEMA = """
@@ -25,6 +27,19 @@ ALERT_COLS = ("id", "ts", "day", "source", "sym", "kind", "direction", "severity
               "price", "data", "option", "ai", "story")
 
 
+@contextlib.contextmanager
+def reading(store):
+    """2.99: a connection for reads: the thread's own reader connection (WAL), without the store's writer lock; else the
+    shared connection under the lock (a store on a disk without WAL, or a test's stand-in). Pages and reports that read
+    held the writer lock while they read (the Alerts page's shadow Focus picks ~2.4 s a call), and every alert, paper
+    trade and grade written in that time waited."""
+    if getattr(store, "rdb", None) is not None and hasattr(store, "_rconn"):
+        yield store._rconn()
+    else:
+        with store.lock:
+            yield store.db
+
+
 class Store:
     def __init__(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -44,11 +59,13 @@ class Store:
                 self.db.execute("PRAGMA synchronous=NORMAL")
         except sqlite3.Error:
             self.wal = False
-        self.rlock = threading.Lock()
+        self.rlock = threading.Lock()                 # kept for older callers; 2.99: reads no longer queue on it
         self.rdb = None
+        self._tl = threading.local()
+        self._pver = 0                                # 2.99: paper rows' version (every write through the store)
+        self._tcache: dict = {}
         if self.wal:
-            self.rdb = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
-            self.rdb.row_factory = sqlite3.Row
+            self.rdb = self._rconn()
         with self.lock:
             self.db.executescript(SCHEMA)
             cols = {r[1] for r in self.db.execute("PRAGMA table_info(alerts)").fetchall()}
@@ -63,15 +80,33 @@ class Store:
                     self.db.execute(f"ALTER TABLE paper ADD COLUMN {c} {t}")
             self.db.commit()
 
+    def _rconn(self):
+        """2.99: each thread reads on its own connection (WAL readers never wait for each other or for the writer).
+        2.96 had one read connection and one lock: the Alerts page reading 5,000 alerts held the paper-exit watcher and
+        Paper trades behind it (seen in the running app: the watcher waiting on that lock ~40% of the time)."""
+        c = getattr(self._tl, "c", None)
+        if c is None:
+            c = sqlite3.connect(str(self.path), check_same_thread=False, timeout=30)
+            c.row_factory = sqlite3.Row
+            try:
+                c.execute("PRAGMA cache_size=-1024")      # 1 MB a reader (the OS keeps the file's pages anyway)
+            except sqlite3.Error:
+                pass
+            self._tl.c = c
+        return c
+
     def _read(self, q, args=(), one=False):
         """2.96: screens read on their own connection (WAL), never waiting for a commit; else the shared one."""
         if self.rdb is not None:
-            with self.rlock:
-                cur = self.rdb.execute(q, args)
-                return cur.fetchone() if one else cur.fetchall()
+            cur = self._rconn().execute(q, args)
+            return cur.fetchone() if one else cur.fetchall()
         with self.lock:
             cur = self.db.execute(q, args)
             return cur.fetchone() if one else cur.fetchall()
+
+    def paper_changed(self):
+        """2.99: paper rows changed (the store's own writes call this; so must any code that writes them directly)."""
+        self._pver += 1
 
     # ---------------- kv
     def get(self, k, default=None):
@@ -142,12 +177,14 @@ class Store:
             cur = self.db.execute(f"INSERT INTO paper({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
                                   [t[c] for c in cols])
             self.db.commit()
+            self._pver += 1
             return cur.lastrowid
 
     def update_trade(self, tid: int, **f):
         with self.lock:
             self.db.execute(f"UPDATE paper SET {', '.join(k + '=?' for k in f)} WHERE id=?", [*f.values(), tid])
             self.db.commit()
+            self._pver += 1
 
     def trades(self, status=None, limit=500, source=None):
         q, args = "SELECT * FROM paper WHERE 1=1", []
@@ -159,7 +196,18 @@ class Store:
             args.append(source)
         q += " ORDER BY id DESC LIMIT ?"
         args.append(limit)
-        return [dict(r) for r in self._read(q, args)]
+        # 2.99: the same rows again until a paper row changes (or 2 s at most): the paper-exit watcher asked for every
+        # account's open trades every 0.25 s (10 queries), and each page's paper card read up to 2,000 rows again
+        key = (status, source, int(limit))
+        v, now = self._pver, time.monotonic()
+        hit = self._tcache.get(key)
+        if hit is not None and hit[0] == v and now - hit[1] < 2.0:
+            return [dict(r) for r in hit[2]]
+        rows = [dict(r) for r in self._read(q, args)]
+        if len(self._tcache) > 64:
+            self._tcache.clear()
+        self._tcache[key] = (v, now, rows)
+        return [dict(r) for r in rows]
 
     def clear_source(self, source):
         """Remove simulator data so it never mixes with real results."""
@@ -167,3 +215,4 @@ class Store:
             self.db.execute("DELETE FROM alerts WHERE source=?", (source,))
             self.db.execute("DELETE FROM paper WHERE source=?", (source,))
             self.db.commit()
+            self._pver += 1

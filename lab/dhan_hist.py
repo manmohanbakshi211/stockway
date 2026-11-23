@@ -90,28 +90,50 @@ def _scrips(cache_dir, fetch=True) -> Path | None:
     return f
 
 
+_SCRIP_MAPS: dict = {}
+_SCRIP_LOCK = threading.Lock()
+
+
+def _scrip_maps(f) -> tuple[dict, dict]:
+    """2.99: the scrip master (30 MB, ~237,000 rows) read once per file version: every NSE stock's id and every stock
+    option's lot. It was read in full for every stock chart (0.6 s each; the 220-symbol chart warm-up after a start took
+    309 s at ~90% of a core, and every screen waited)."""
+    f = Path(f)
+    try:
+        st = f.stat()
+        key = (str(f), st.st_mtime, st.st_size)
+    except OSError:
+        key = (str(f), None, None)
+    with _SCRIP_LOCK:
+        hit = _SCRIP_MAPS.get("v")
+        if hit and hit[0] == key:
+            return hit[1], hit[2]
+        ids, lots = {}, {}
+        with open(f, newline="", encoding="utf-8", errors="ignore") as fh:
+            for row in csv.DictReader(fh):
+                ex = row.get("SEM_EXM_EXCH_ID")
+                inst = row.get("SEM_INSTRUMENT_NAME")
+                sym = row.get("SEM_TRADING_SYMBOL", "")
+                if ex == "NSE" and inst == "EQUITY" and row.get("SEM_SERIES", "EQ") in ("EQ", ""):
+                    ids[sym] = int(float(row["SEM_SMST_SECURITY_ID"]))
+                elif ex == "NSE" and inst == "OPTSTK":
+                    und = sym.split("-")[0]
+                    if und not in lots:
+                        try:
+                            lots[und] = int(float(row.get("SEM_LOT_UNITS") or 0))
+                        except ValueError:
+                            lots[und] = 0
+        _SCRIP_MAPS["v"] = (key, ids, lots)
+        return ids, lots
+
+
 def stock_ids(cache_dir, syms: list, fetch=True) -> dict:
-    """symbol -> {"id": Dhan security id of the stock, "lot": option lot}. With syms=None: every NSE stock with options."""
+    """symbol -> {"id": Dhan security id of the stock, "lot": option lot}. With syms=None: every NSE stock with options.
+    2.99: the same answer from the scrip master read once (see _scrip_maps)."""
     f = _scrips(cache_dir, fetch)
     if not f:
         return {}
-    want = set(syms) if syms is not None else None
-    ids, lots = {}, {}
-    with open(f, newline="", encoding="utf-8", errors="ignore") as fh:
-        for row in csv.DictReader(fh):
-            ex = row.get("SEM_EXM_EXCH_ID")
-            inst = row.get("SEM_INSTRUMENT_NAME")
-            sym = row.get("SEM_TRADING_SYMBOL", "")
-            if ex == "NSE" and inst == "EQUITY" and row.get("SEM_SERIES", "EQ") in ("EQ", ""):
-                if want is None or sym in want:
-                    ids[sym] = int(float(row["SEM_SMST_SECURITY_ID"]))
-            elif ex == "NSE" and inst == "OPTSTK":
-                und = sym.split("-")[0]
-                if (want is None or und in want) and und not in lots:
-                    try:
-                        lots[und] = int(float(row.get("SEM_LOT_UNITS") or 0))
-                    except ValueError:
-                        lots[und] = 0
+    ids, lots = _scrip_maps(f)
     keys = syms if syms is not None else sorted(lots)
     return {s: {"id": ids[s], "lot": lots.get(s) or 1} for s in keys if s in ids and (syms is not None or s in lots)}
 

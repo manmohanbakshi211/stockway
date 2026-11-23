@@ -12,6 +12,8 @@ Paper only: nothing here places an order.
 """
 from __future__ import annotations
 
+from .store import reading                # 2.99: reads off the writer lock
+
 import datetime as dt
 import json
 import time
@@ -47,8 +49,7 @@ def _focus(a: dict) -> bool:
 
 
 def build(store, source: str, day: str, indices: list | None = None) -> dict:
-    db = store.db
-    with store.lock:
+    with reading(store) as db:
         paper = [dict(zip([c[0] for c in cur.description], r)) for cur in [db.execute(
             "SELECT * FROM paper WHERE day=? AND source=? ORDER BY entry_ts", (day, source))] for r in cur.fetchall()]
         alerts = [dict(zip([c[0] for c in cur.description], r)) for cur in [db.execute(

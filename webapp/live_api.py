@@ -788,6 +788,18 @@ async def live_lens_market():
                 "error": f"Market lens could not read the recording: {ex}"}
 
 
+_ALERTS_DAY: dict = {}          # 2.99: the Alerts page's day of alerts, until a new alert arrives (20 s at most)
+_SHADOW_IDS: dict = {}          # 2.99: today's shadow Focus picks, until a new alert arrives (60 s at most)
+
+
+def _alerts_fp(e, day):
+    try:
+        r = e.store._read("SELECT MAX(id), COUNT(*) FROM alerts WHERE day=?", (day,), one=True)
+        return (r[0], r[1]) if r else None
+    except Exception:
+        return None
+
+
 @router.get("/api/live/alerts")
 def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1, source: str | None = None, limit: int = 1000,
                 focus: bool = False, view: str | None = None):
@@ -802,7 +814,15 @@ def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1
         from live.dayreport import _focus
         from webapp import perf as _perf
         mark = _perf.Marks("alerts")                     # 2.95: which piece of the Alerts page is slow
-        al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=1, source=source, limit=6000)
+        fp = _alerts_fp(e, day) if day else None
+        key = (day, sym.upper() if sym else None, source, fp)
+        hit = _ALERTS_DAY.get("v")
+        if fp is not None and hit and hit[0] == key and time.time() - hit[1] < 20:
+            al = hit[2]                                  # 2.99: ~5,000 alerts parsed once per new alert, not per call
+        else:
+            al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=1, source=source, limit=6000)
+            if fp is not None:
+                _ALERTS_DAY["v"] = (key, time.time(), al)
         mark("read the day's alerts")
         pick = {"act": lambda a: a["severity"] >= 3,
                 "focus": lambda a: _focus(a) or (a["severity"] >= 2 and not (a.get("data") or {}).get("muted")),
@@ -813,8 +833,15 @@ def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1
             fl = focuslab.load()
             if fl["main"] and day:
                 src = source or e.source or e.cfg()["live"].get("source") or "upstox"
-                ids = focuslab.picks(e.store, src, day, fl["main"], e.cfg().get("live") or {},
-                                     today=e.clock.now().date().isoformat() if getattr(e, "clock", None) else None)
+                sk = (src, day, fl["main"], fp)
+                sh = _SHADOW_IDS.get("v")
+                if fp is not None and sh and sh[0] == sk and time.time() - sh[1] < 60:
+                    ids = sh[2]                          # 2.99: was worked out again on every call (~2.4 s)
+                else:
+                    ids = focuslab.picks(e.store, src, day, fl["main"], e.cfg().get("live") or {},
+                                         today=e.clock.now().date().isoformat() if getattr(e, "clock", None) else None)
+                    if fp is not None:
+                        _SHADOW_IDS["v"] = (sk, time.time(), ids)
                 pick["shadow"] = lambda a: a["id"] in ids
                 shadow = {"version": fl["main"], "label": fl["versions"][fl["main"]]["label"]}
         except Exception:

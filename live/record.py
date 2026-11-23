@@ -267,6 +267,7 @@ CREATE TABLE IF NOT EXISTS outcomes (
   r5 REAL, r15 REAL, r60 REAL, o5 REAL, o15 REAL, o60 REAL, mfe REAL, mae REAL, omax REAL, omin REAL,
   result TEXT, resolved_ts REAL, features TEXT);
 CREATE INDEX IF NOT EXISTS outcomes_kind ON outcomes(source, kind);
+CREATE INDEX IF NOT EXISTS outcomes_src_ts ON outcomes(source, ts);
 """
 
 
@@ -372,6 +373,13 @@ def outcomes(store, source=None, day=None, limit=5000, cols: str = "*") -> list:
         args.append(day)
     q += " ORDER BY ts DESC LIMIT ?"
     args.append(limit)
+    if getattr(store, "rdb", None) is not None:
+        # 2.99: on a reader connection, not under the store's lock: the 5-minute scorecard read 5,000 rows here holding
+        # the lock for ~2.8 s, and the alert tracker (and every alert and paper write) waited behind it
+        try:
+            return [dict(r) for r in store._read(q, args)]
+        except sqlite3.OperationalError:
+            return []
     with store.lock:
         try:
             return [dict(r) for r in store.db.execute(q, args).fetchall()]

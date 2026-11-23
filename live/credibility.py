@@ -17,6 +17,8 @@ Read-only. Information for deciding what to trust; it changes nothing by itself.
 """
 from __future__ import annotations
 
+from .store import reading                # 2.99: reads off the writer lock
+
 import datetime as dt
 import json
 import math
@@ -90,9 +92,9 @@ def _trend(rows: list) -> str:
 def alerts_check(store, source: str, days: int = 60) -> dict:
     """Test 1: graded live alerts by what the app said about them."""
     cut = (dt.datetime.now(IST).date() - dt.timedelta(days=days)).isoformat()
-    with store.lock:
+    with reading(store) as db_:
         try:
-            rows = store.db.execute("SELECT o.alert_id, o.day, o.ts, o.kind, o.direction, o.severity, o.is_index, o.result, "
+            rows = db_.execute("SELECT o.alert_id, o.day, o.ts, o.kind, o.direction, o.severity, o.is_index, o.result, "
                                     "o.o60, a.data FROM outcomes o JOIN alerts a ON a.id = o.alert_id "
                                     "WHERE o.source=? AND o.day >= ? AND o.result IS NOT NULL", (source, cut)).fetchall()
         except Exception:

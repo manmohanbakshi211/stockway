@@ -1,6 +1,8 @@
 """Live engine: feed -> state -> metrics -> alerts -> scoring, notifications, paper trades, briefs."""
 from __future__ import annotations
 
+from .store import reading                # 2.99: reads off the writer lock
+
 import collections
 import datetime as dt
 import html
@@ -1707,10 +1709,15 @@ class LiveEngine:
 
         def go():
             t0 = time.time()
-            try:
-                self._save_bars()
-            except Exception as e:
-                self.log(f"Saving 1-minute candles failed: {e}")
+            for i in range(3):                           # 2.99: a reader holding the recording ("database is locked"
+                try:                                     # at 15:08 on 23 Nov, during the restart's gap fill): try again
+                    self._save_bars()
+                    break
+                except Exception as e:
+                    if "locked" in str(e).lower() and i < 2 and not self.stop_evt.wait(10):
+                        continue
+                    self.log(f"Saving 1-minute candles failed: {e}")
+                    break
             self.status["bars_save_ms"] = round((time.time() - t0) * 1000)
         self._bars_th = threading.Thread(target=go, daemon=True, name="save-bars")
         self._bars_th.start()
@@ -3486,9 +3493,9 @@ class LiveEngine:
         titles = {}
         if recent:
             ids = [r["alert_id"] for r in recent]
-            with self.store.lock:
+            with reading(self.store) as db_:
                 q = f"SELECT id, title FROM alerts WHERE id IN ({','.join('?' * len(ids))})"
-                titles = dict(self.store.db.execute(q, ids).fetchall())
+                titles = dict(db_.execute(q, ids).fetchall())
         for r in recent:
             r["title"] = titles.get(r["alert_id"])
             r.pop("features", None)

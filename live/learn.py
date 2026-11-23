@@ -200,6 +200,21 @@ def make_model(kind: str, cols: list):
                                                      n_jobs=-1, random_state=0))
 
 
+def single_thread(model):
+    """2.99: predictions on one thread. A forest trained with n_jobs=-1 split every one-row prediction over all cores
+    (10 threads on the Mac): 41 ms a prediction, ~1 s while the app was busy, during the 5-minute alert bursts. One
+    thread: 9 ms (72 ms busy). The trees and the probabilities are the same (summed in tree order). Training is
+    unchanged (make_model keeps n_jobs=-1)."""
+    try:
+        steps = [s for _n, s in getattr(model, "steps", [])] or [model]
+        for est in steps:
+            if getattr(est, "n_jobs", None) not in (None, 1):
+                est.n_jobs = 1
+    except Exception:
+        pass
+    return model
+
+
 MODEL_NAMES = {"hgb": "gradient-boosted trees", "logit": "logistic regression", "forest": "random forest",
                "hgb_plus": "gradient-boosted trees + bigger picture (daily / weekly trend, results ahead)"}
 
@@ -219,6 +234,7 @@ class Ranker:
             try:
                 import joblib
                 self.model, self.info, self.cuts = joblib.load(self.path)
+                single_thread(self.model)
             except Exception:
                 self.model = None
 
@@ -287,6 +303,7 @@ class Ranker:
             except Exception:
                 pass
             joblib.dump((self.model, self.info, self.cuts), self.path)
+            single_thread(self.model)                          # 2.99: live predictions on one thread
             self.log(f"Conviction model: {len(rows)} graded alerts over {len(days)} days, holdout AUC {auc:.2f} ({info['why']})")
         except Exception as e:
             self.info = {"trained": False, "n": len(rows), "days": len(days), "error": str(e)[:160]}
