@@ -988,8 +988,8 @@ class LiveEngine:
                 self._prof["Setup / Lab rules scan"] = time.perf_counter() - t1
             if self.cdl is not None and open_:
                 self._guard("Candle scanner", self.cdl.tick, now)
-            if self._every("vault_bars", 1800):
-                self._guard("Saving 1-minute candles", self._save_bars)
+            if self._every("vault_bars", 1800):              # 2.96: its own thread (it held the loop 11.7 s after a restart)
+                self._save_bars_bg()
             try:
                 if open_:
                     self.desk.tick(now)
@@ -1693,10 +1693,27 @@ class LiveEngine:
         them to the next day's, and they are backtest data)."""
         if self.recorder is None or self.state is None:
             return
-        with self.state.lock:
-            snap = {s: [list(x) for x in tuple(b.bars)] for s, b in list(self.state.bars.items()) if b.bars}
+        with self.state.lock:                                # 2.96: only the quick copy under the price lock
+            raw = {s: tuple(b.bars) for s, b in list(self.state.bars.items()) if b.bars}
+        snap = {s: [list(x) for x in rows] for s, rows in raw.items()}
         if snap:
             self.recorder.bars(snap)
+
+    def _save_bars_bg(self):
+        """2.96: the 30-minute save of the day's candles in its own thread, never inside the analysis pass; one at a time."""
+        th = getattr(self, "_bars_th", None)
+        if th is not None and th.is_alive():
+            return
+
+        def go():
+            t0 = time.time()
+            try:
+                self._save_bars()
+            except Exception as e:
+                self.log(f"Saving 1-minute candles failed: {e}")
+            self.status["bars_save_ms"] = round((time.time() - t0) * 1000)
+        self._bars_th = threading.Thread(target=go, daemon=True, name="save-bars")
+        self._bars_th.start()
 
     def candles_now(self, sym) -> dict:
         if self.cdl is None or not self.running:

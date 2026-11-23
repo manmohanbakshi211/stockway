@@ -29,9 +29,26 @@ class Store:
     def __init__(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.path = Path(path)
-        self.db = sqlite3.connect(str(path), check_same_thread=False)
+        self.db = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
         self.db.row_factory = sqlite3.Row
         self.lock = threading.Lock()
+        # 2.96 (Mandeep, 23 Nov, market open: "clash bhi hai or delay bhi"): live.db was in SQLite's old journal mode,
+        # so every commit (alerts, paper marks, outcomes, several a second) wrote and synced a journal file while holding
+        # the one lock every screen and the paper-exit watcher wait for (the watcher's 0.25 s check took 2.5-4 s). WAL:
+        # a commit appends to one log (synced at checkpoints; a crash of the app loses nothing; only a power cut can lose
+        # the last moments), and the screens read on their own connection without waiting for the writer.
+        self.wal = False
+        try:
+            self.wal = str(self.db.execute("PRAGMA journal_mode=WAL").fetchone()[0]).lower() == "wal"
+            if self.wal:
+                self.db.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.Error:
+            self.wal = False
+        self.rlock = threading.Lock()
+        self.rdb = None
+        if self.wal:
+            self.rdb = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
+            self.rdb.row_factory = sqlite3.Row
         with self.lock:
             self.db.executescript(SCHEMA)
             cols = {r[1] for r in self.db.execute("PRAGMA table_info(alerts)").fetchall()}
@@ -46,10 +63,19 @@ class Store:
                     self.db.execute(f"ALTER TABLE paper ADD COLUMN {c} {t}")
             self.db.commit()
 
+    def _read(self, q, args=(), one=False):
+        """2.96: screens read on their own connection (WAL), never waiting for a commit; else the shared one."""
+        if self.rdb is not None:
+            with self.rlock:
+                cur = self.rdb.execute(q, args)
+                return cur.fetchone() if one else cur.fetchall()
+        with self.lock:
+            cur = self.db.execute(q, args)
+            return cur.fetchone() if one else cur.fetchall()
+
     # ---------------- kv
     def get(self, k, default=None):
-        with self.lock:
-            r = self.db.execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
+        r = self._read("SELECT v FROM kv WHERE k=?", (k,), one=True)
         return json.loads(r[0]) if r else default
 
     def put(self, k, v):
@@ -98,18 +124,15 @@ class Store:
             args.append(source)
         q += " ORDER BY id DESC LIMIT ?"
         args.append(limit)
-        with self.lock:
-            rows = self.db.execute(q, args).fetchall()
+        rows = self._read(q, args)
         return [self._alert(r) for r in rows]
 
     def alert(self, alert_id):
-        with self.lock:
-            r = self.db.execute("SELECT * FROM alerts WHERE id=?", (alert_id,)).fetchone()
+        r = self._read("SELECT * FROM alerts WHERE id=?", (alert_id,), one=True)
         return self._alert(r) if r else None
 
     def alert_days(self, limit=30):
-        with self.lock:
-            rows = self.db.execute("SELECT day, COUNT(*) n FROM alerts GROUP BY day ORDER BY day DESC LIMIT ?", (limit,)).fetchall()
+        rows = self._read("SELECT day, COUNT(*) n FROM alerts GROUP BY day ORDER BY day DESC LIMIT ?", (limit,))
         return [dict(r) for r in rows]
 
     # ---------------- paper trades
@@ -136,8 +159,7 @@ class Store:
             args.append(source)
         q += " ORDER BY id DESC LIMIT ?"
         args.append(limit)
-        with self.lock:
-            return [dict(r) for r in self.db.execute(q, args).fetchall()]
+        return [dict(r) for r in self._read(q, args)]
 
     def clear_source(self, source):
         """Remove simulator data so it never mixes with real results."""

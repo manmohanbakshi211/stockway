@@ -11,6 +11,7 @@ import json
 import math
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 HORIZONS = (5, 15, 60)
@@ -178,7 +179,17 @@ class Recorder:
         return len(rows)
 
     def health(self) -> dict:
-        """What today's recording holds so far (the System page's Data vault card)."""
+        """What today's recording holds so far (the System page's Data vault card). 2.96: counted at most once a minute:
+        13 counts over the day's tables held the recording's lock (and so the live loop's saving) for 1-4 s on every
+        System page refresh."""
+        hit = getattr(self, "_health", None)
+        if hit and time.time() - hit[0] < 60:
+            return dict(hit[1])
+        out = self._health_now()
+        self._health = (time.time(), out)
+        return dict(out)
+
+    def _health_now(self) -> dict:
         out = {}
         with self.lock:
             for t, q in (("minute_rows", "SELECT COUNT(*) FROM minutes"), ("minutes", "SELECT COUNT(DISTINCT ts) FROM minutes"),

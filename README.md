@@ -118,6 +118,25 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.96: The clash: live.db commits held every screen and the paper exits (23 Nov 2026)
+- **Mandeep (23 Nov, 09:38, restarted on 2.95 in market hours): "clash bhi hai or delay bhi".** Read from the app:
+  the paper-exit watcher's 0.25 s check took 2.5-4.1 s; Paper trades calls 2.3 s on average (one 20 s), the Live page
+  refresh 1.2-5.5 s; System page "health and events" 2.6 s and "checks (live)" 2.1 s; one analysis pass 15.3 s, of
+  which "Saving 1-minute candles" 11.7 s; the Mac on battery.
+- **Cause 1, the clash:** live.db (alerts, paper trades, outcomes, settings) was in SQLite's old journal mode with one
+  connection and one lock. Every commit (several a second: alerts, paper marks, trackers) created, synced and deleted a
+  journal file while holding the lock that every screen, the paper-exit watcher and the health view wait for.
+  **Fix:** WAL (a commit appends to one log; synced at checkpoints: an app crash loses nothing, only a power cut can lose
+  the last moments, the same as the test bench since 2.30), and the screens read on their own connection, never waiting
+  for a commit (alerts, alert days, paper trades, settings). Measured on a 311 MB copy: 0.69 ms → 0.01 ms per commit
+  here; much more on the Mac, where each sync is slower. Backups (SQLite's own copy) and every reader work the same.
+- **Cause 2:** the System page counted the day's recording (13 counts over minutes, chains, news) on every refresh while
+  holding the recording's lock, so the live loop's saving waited. Now counted at most once a minute.
+- **Cause 3:** the 30-minute save of the day's 1-minute candles ran inside the analysis pass (11.7 s right after a
+  restart). Now in its own thread (one at a time), with only a quick copy under the price lock.
+- Keep the Mac on the charger in market hours: on battery macOS slows the CPU.
+- Tests: `tests/test_speed_296.py` (4): a read during a 3-second write returns at once and sees the write after its commit.
+
 ## 2.95: Market-hours speed: the 5-year download waits, the System page and board do less (23 Nov 2026)
 - **Mandeep (23 Nov, 09:19, market open): "check"** the Speed panel. Read from the running 2.94: System page 4.5 s on
   average (max 10 s), of which "jobs and log" 3.7 s; Strategy board 3.9 s (max 12 s); Alerts 1.8 s; live analysis pass
