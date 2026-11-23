@@ -3988,6 +3988,11 @@ async function pageSystem() {
       <div class="panel tight" style="margin-top:12px"><h3>Problems in the last hour</h3>${x.problems.length ? `<table class="mini"><tbody>${x.problems.map((p) => `<tr><td class="small">${esc(p.last)}</td><td class="r small">${p.n}×</td><td class="small">${esc(p.text)}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:0">None.</p>`}</div>`;
     const act = (id, fn) => { const b = $(id); if (b) b.onclick = async () => { try { await fn(b); } catch (e) { toast(e.message); } }; };
     act("#sy-refresh", () => draw());
+    act("#sy-where", async (b) => {                       // 2.97: 20 s look at every thread of the running app
+      b.disabled = true; b.textContent = "Looking for 20 s…";
+      try { window.SYS_WHERE = await api("/api/debug/where?secs=20"); } finally { b.disabled = false; }
+      const el = $("#sy-where-out"); if (el) el.innerHTML = wherePanel(window.SYS_WHERE); b.textContent = "Look again (20 s)";
+    });
     act("#sy-check", async (b) => { b.disabled = true; b.textContent = "Checking…"; const r = await post("/api/system/check", {}); live = Object.fromEntries(r.checks.map((c) => [c.id, c])); toast(`Live check done at ${r.at}`); draw(); });
     act("#sy-uplogout", async () => { await post("/api/live/logout", {}); toast("Logged out of Upstox"); draw(); });
     const saveDhan = async () => { const body = { "lab.dhan_client_id": $("#sy-cid").value.trim() }; const t = $("#sy-tok").value.trim(); if (t) body["lab.dhan_token"] = t; await post("/api/settings", body); };
@@ -4012,6 +4017,17 @@ async function pageSystem() {
   await draw();
 }
 /* 2.38: how quickly the app answers (every /api call timed), the Lab's own process, the Dhan download giving way */
+function wherePanel(w) {
+  // 2.97: which threads were running app code, and which code (webapp/sampler.py)
+  if (!w) return "";
+  if (w.busy) return `<p class="small muted">${esc(w.note)}</p>`;
+  const share = Object.entries(w.busy_threads || {}).map(([k, v]) => `${k} busy: ${v}%`).join(" · ");
+  return `<p class="small" style="margin:8px 0 4px"><b>Where the time went</b> <span class="muted">(${w.secs} s, ${w.samples} looks, ${w.threads} threads; on average ${w.busy_threads_avg} threads wanted the one Python core at once: ${esc(share)})</span></p>
+    <div class="table-wrap"><table class="mini"><thead><tr><th>Thread</th><th class="r">Busy</th><th>App code it was in (share of the 20 s)</th></tr></thead><tbody>
+    ${(w.rows || []).slice(0, 14).map((r) => `<tr><td class="small">${esc(r.thread)}${r.threads > 1 ? ` <span class="muted">×${r.threads}</span>` : ""}</td><td class="r small">${r.busy_pct}%</td>
+      <td class="small">${r.top.slice(0, 3).map((t) => `<code>${esc(t.code)}</code> ${t.pct}%`).join("<br>")}</td></tr>`).join("")}</tbody></table></div>
+    <p class="small muted" style="margin:4px 0 0">${esc(w.note)}</p>`;
+}
 function speedPanel(p) {
   if (!p || p.error) return "";
   const t = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "–";
@@ -4023,7 +4039,10 @@ function speedPanel(p) {
       The Strategy Lab runs in its own low-priority process${lab ? ` (last: ${esc(lab.job)}, ${esc(lab.how)}, ${Math.round(lab.secs / 60)} min, ended ${t(lab.at)})` : ""}; the 5-year Dhan download gives way to screens, news and movers${p.dhan_gave_way ? ` (${p.dhan_gave_way.toLocaleString("en-IN")} times so far)` : ""}.</p>
     ${slow ? `<div class="table-wrap"><table class="mini"><thead><tr><th>When</th><th>Slow call</th><th class="r">Took</th></tr></thead><tbody>${slow}</tbody></table></div>` : ""}
     ${top ? `<details><summary class="small muted">Slowest kinds of call (average)</summary><div class="table-wrap"><table class="mini"><tbody>${top}</tbody></table></div>
-      ${(p.parts || []).length ? `<p class="small muted" style="margin:6px 0 2px">Inside them (2.94):</p><div class="table-wrap"><table class="mini"><tbody>${p.parts.slice(0, 8).map((x) => `<tr><td class="small">${esc(x.part)}</td><td class="r small">${x.avg_ms} ms</td><td class="r small muted">max ${x.max_ms} ms · ${x.n}×</td></tr>`).join("")}</tbody></table></div>` : ""}</details>` : ""}</div>`;
+      ${(p.parts || []).length ? `<p class="small muted" style="margin:6px 0 2px">Inside them (2.94):</p><div class="table-wrap"><table class="mini"><tbody>${p.parts.slice(0, 8).map((x) => `<tr><td class="small">${esc(x.part)}</td><td class="r small">${x.avg_ms} ms</td><td class="r small muted">max ${x.max_ms} ms · ${x.n}×</td></tr>`).join("")}</tbody></table></div>` : ""}</details>` : ""}
+    <p style="margin:8px 0 0"><button class="btn" id="sy-where">${window.SYS_WHERE ? "Look again (20 s)" : "Where the time goes (20 s)"}</button>
+      <span class="small muted">a 20-second look at every part of the running app; changes nothing</span></p>
+    <div id="sy-where-out">${wherePanel(window.SYS_WHERE)}</div></div>`;
 }
 
 /* 2.33 health monitor: is the app really collecting data right now? */

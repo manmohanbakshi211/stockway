@@ -1173,7 +1173,12 @@ async def watchlist_change(request: Request):
 
 @router.get("/api/live/paper/mini")
 def live_paper_mini():
-    """For the side bar: today's net (booked + open) and the demo account."""
+    """For the side bar: today's net (booked + open) and the demo account. 2.97: every open page asks; one answer per 2 s."""
+    from webapp import memo
+    return memo.memo("paper_mini", None, _paper_mini_now, ttl=2)
+
+
+def _paper_mini_now():
     e = engine()
     if not e.paper:
         return {"running": False}

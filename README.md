@@ -118,6 +118,19 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.97: Where the time goes: a read-only look inside the running app (23 Nov 2026)
+- **Mandeep (23 Nov, 10:27, on 2.96):** the paper-exit watcher is fixed (52 ms → 2.6 ms a check, was 2.5-4.1 s) and
+  live.db runs in WAL, but the Live page refresh and Paper trades still took 2-4 s (one 29 s); the first analysis pass
+  after the 10:22 restart took 95 s; later passes 146 ms; the 5-minute scan 7.2 s and the scorecard 4.8 s, each in
+  its own thread. Python runs one thread at a time, so the screens wait for whichever work holds the core: guessing
+  which is not good enough.
+- **New: System page → Speed → "Where the time goes (20 s)"** (`webapp/sampler.py`, `/api/debug/where`): for 20 s it
+  looks at every thread of the app 100 times a second and shows which threads were busy and which of the app's
+  functions they were in, and how many threads wanted the one Python core at once. Read-only, runs only when asked,
+  one look at a time, a few % of one core while it runs. The next fix moves or slows exactly what it shows.
+- The side bar's paper figure (asked by every open page every few seconds) is worked out once per 2 s for all of them.
+- Tests: `tests/test_speed_297.py` (2).
+
 ## 2.96: The clash: live.db commits held every screen and the paper exits (23 Nov 2026)
 - **Mandeep (23 Nov, 09:38, restarted on 2.95 in market hours): "clash bhi hai or delay bhi".** Read from the app:
   the paper-exit watcher's 0.25 s check took 2.5-4.1 s; Paper trades calls 2.3 s on average (one 20 s), the Live page

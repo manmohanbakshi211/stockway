@@ -890,6 +890,13 @@ def lab_rider_run():
     return {"started": True}
 
 
+@app.get("/api/debug/where")
+def debug_where(secs: float = 20):
+    """2.97: a short look at every thread of the running app: which code is busy (webapp/sampler.py). Read-only."""
+    from webapp import sampler
+    return clean(sampler.look(secs))
+
+
 # ----------------------------------------------------------------- 2.93: pattern learning (lab/pattern_learn.py)
 _PAT_LAB: dict = {}
 
