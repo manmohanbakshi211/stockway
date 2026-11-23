@@ -1318,8 +1318,13 @@ class Dhan5y(StockHist):
             try:
                 d = Dhan(c["dhan_client_id"], c["dhan_token"])
                 d.background = True                 # 2.38: gives way to charts, news and movers on the shared Dhan pace
-                res = dhan_hist.download(d, ROOT / "data", syms, log=log, should_stop=self._stop.is_set, progress=prog)
-                self.st["status"] = "stopped" if self._stop.is_set() else res.get("result", "done")
+                stop = lambda: self._stop.is_set() or _market_pause()     # 2.95: never during market hours
+                res = dhan_hist.download(d, ROOT / "data", syms, log=log, should_stop=stop, progress=prog)
+                if not self._stop.is_set() and _market_pause():
+                    self.st["status"] = "paused"
+                    log("Paused for market hours (the live scanner gets the Mac); continues by itself after the close.")
+                else:
+                    self.st["status"] = "stopped" if self._stop.is_set() else res.get("result", "done")
                 self.st["result_day"] = dt.date.today().isoformat()
             except PermissionError as e:
                 self.st["status"], self.st["error"] = "token", str(e)
@@ -1343,7 +1348,7 @@ class Dhan5y(StockHist):
     def overview(self):
         from lab import dhan_hist
         t, ov = self._ov
-        if not ov or time.time() - t > 20:
+        if not ov or time.time() - t > 60:              # 2.95: the manifest is read at most once a minute
             try:
                 ov = dhan_hist.overview(ROOT / "data")
             except Exception as e:
@@ -1352,10 +1357,13 @@ class Dhan5y(StockHist):
         return ov
 
     def should_auto_start(self) -> bool:
-        """Resume by itself: app reopened, network back, new day's budget, new token. Not after a Stop by hand today."""
+        """Resume by itself: app reopened, network back, new day's budget, new token. Not after a Stop by hand today,
+        and (2.95) not in market hours: the same window as the nightly Lab (15 min before the open to 5 min after)."""
         from lab import dhan_budget, dhan_token
         c = _lab_cfg()
         if self.running() or not (c.get("dhan_client_id") and c.get("dhan_token")) or dhan_token.is_dead():
+            return False
+        if _market_pause():
             return False
         if self.user_stop == dt.date.today().isoformat():
             return False
@@ -1383,11 +1391,26 @@ class Dhan5y(StockHist):
                "months": months, "dhan": bool(_lab_cfg().get("dhan_client_id") and _lab_cfg().get("dhan_token")),
                "overview": self.overview(), "token": dhan_token.status(), "calls_today": dhan_budget.used(),
                "user_stop": self.user_stop == dt.date.today().isoformat()}
-        try:
-            out["compare"] = dhan_hist.compare(ROOT / "data")
+        try:                                               # 2.95: two big results files, parsed only when they change
+            from webapp import memo
+            fp = memo.stamp(ROOT / "data" / "lab" / "factory.json", dhan_hist.root(ROOT / "data") / "lab" / "factory.json")
+            out["compare"] = memo.memo("d5_compare", fp, lambda: dhan_hist.compare(ROOT / "data"))
         except Exception as e:
             out["compare"] = {"error": str(e)}
         return out
+
+    def brief(self) -> dict:
+        """2.95: just what the System page shows (running, status, % done): no folder listing, no Lab comparison."""
+        return {"running": self.running(), "status": self.st.get("status"), "overview": self.overview()}
+
+
+def _market_pause() -> bool:
+    """2.95: heavy background work (the 5-year download) waits in market hours, like the nightly Lab (engine.lab_paused:
+    config.yaml lab: pause_in_market)."""
+    try:
+        return bool(live_engine().lab_paused())
+    except Exception:
+        return False
 
 
 DHAN5Y = Dhan5y()
@@ -1898,7 +1921,7 @@ def system_view():
                          sources=[{"name": n, **v} for n, v in srcs]))
     mark("services")
     # jobs
-    d5 = DHAN5Y.view()
+    d5 = DHAN5Y.brief()                                  # 2.95: was the full view (two 5 MB Lab files parsed each call)
     cur = JOBS.current or {}
     from lab import factory
     from webapp import memo

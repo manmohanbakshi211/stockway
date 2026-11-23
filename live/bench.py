@@ -629,6 +629,53 @@ def trades(store, source, kind: str, variant: str | None, style: str, limit: int
     return out
 
 
+_ACC: dict = {}
+_ACC_LOCK = threading.Lock()
+
+
+def _blank() -> dict:
+    return {"n": 0, "s": 0.0, "s2": 0.0, "wins": 0, "win_s": 0.0, "loss_s": 0.0, "worst": None}
+
+
+def _merge(a: dict, r: dict):
+    a["n"] += r["n"]
+    a["s"] += r["s"] or 0
+    a["s2"] += r["s2"] or 0
+    a["wins"] += r["wins"] or 0
+    a["win_s"] += r["win_s"] or 0
+    a["loss_s"] += r["loss_s"] or 0
+    a["worst"] = r["worst"] if a["worst"] is None else min(a["worst"], r["worst"])
+
+
+def _accumulate(groups: dict, rows: list, family, regime, today) -> int:
+    """Adds day groups into the board's per strategy x style totals; returns the trades added."""
+    n_closed = 0
+    for r in rows:
+        fam = style_family(r["style"], r.get("family"))
+        if family and fam != family:
+            continue
+        n_closed += r["n"]
+        g = groups.setdefault((r["kind"], r["variant"] or "", r["style"]), {"all": _blank(), "reg": _blank(), "today": _blank(), "cost": 0.0,
+                                                                          "risk": 0.0, "need": 0.0, "need_n": 0, "name": r["name"],
+                                                                          "days": set(), "family": fam, "first": None, "last": None})
+        if r.get("first_ts") is not None:                 # 2.38: when this strategy's trades happened
+            g["first"] = r["first_ts"] if g["first"] is None else min(g["first"], r["first_ts"])
+            g["last"] = r["last_ts"] if g["last"] is None else max(g["last"], r["last_ts"])
+        _merge(g["all"], r)
+        g["cost"] += (r["cost"] or 0) * r["n"]
+        g["risk"] += (r["risk"] or 0) * r["n"]
+        if r["need"] is not None:
+            g["need"] += r["need"] * r["n"]
+            g["need_n"] += r["n"]
+        g["days"].add(r["day"])
+        g["name"] = g["name"] or r["name"]
+        if regime and r["regime"] == regime:
+            _merge(g["reg"], r)
+        if today and r["day"] == today:
+            _merge(g["today"], r)
+    return n_closed
+
+
 def board(store, source, capital: float, risk_pct: float, regime: str | None = None, days: int = 60, today: str | None = None,
           min_n: int = 5, family: str | None = None) -> dict:
     """Every strategy (alert type / Lab rule / idea on trial / mover test) x style, ranked by money made per trade after costs.
@@ -650,43 +697,24 @@ def board(store, source, capital: float, risk_pct: float, regime: str | None = N
     except Exception:
         groups_in, n_open = [], 0
     styles = load_styles()[0]
-    groups = {}
-    n_closed = 0
-
-    def blank():
-        return {"n": 0, "s": 0.0, "s2": 0.0, "wins": 0, "win_s": 0.0, "loss_s": 0.0, "worst": None}
-
-    def merge(a, r):
-        a["n"] += r["n"]
-        a["s"] += r["s"] or 0
-        a["s2"] += r["s2"] or 0
-        a["wins"] += r["wins"] or 0
-        a["win_s"] += r["win_s"] or 0
-        a["loss_s"] += r["loss_s"] or 0
-        a["worst"] = r["worst"] if a["worst"] is None else min(a["worst"], r["worst"])
-    for r in groups_in:
-        fam = style_family(r["style"], r.get("family"))
-        if family and fam != family:
-            continue
-        n_closed += r["n"]
-        g = groups.setdefault((r["kind"], r["variant"] or "", r["style"]), {"all": blank(), "reg": blank(), "today": blank(), "cost": 0.0,
-                                                                          "risk": 0.0, "need": 0.0, "need_n": 0, "name": r["name"],
-                                                                          "days": set(), "family": fam, "first": None, "last": None})
-        if r.get("first_ts") is not None:                 # 2.38: when this strategy's trades happened
-            g["first"] = r["first_ts"] if g["first"] is None else min(g["first"], r["first_ts"])
-            g["last"] = r["last_ts"] if g["last"] is None else max(g["last"], r["last_ts"])
-        merge(g["all"], r)
-        g["cost"] += (r["cost"] or 0) * r["n"]
-        g["risk"] += (r["risk"] or 0) * r["n"]
-        if r["need"] is not None:
-            g["need"] += r["need"] * r["n"]
-            g["need_n"] += r["n"]
-        g["days"].add(r["day"])
-        g["name"] = g["name"] or r["name"]
-        if regime and r["regime"] == regime:
-            merge(g["reg"], r)
-        if today and r["day"] == today:
-            merge(g["today"], r)
+    # 2.95: the finished days are added up once per (days, family, day type) and kept; each call adds only today's rows
+    t_day = today or _dt.date.today().isoformat()
+    past = [r for r in groups_in if r["day"] != t_day]
+    now_rows = [r for r in groups_in if r["day"] == t_day]
+    key = (str(getattr(bdb, "path", "")), source, family, regime, t_day, tuple(sorted({r["day"] for r in past})), len(past))
+    with _ACC_LOCK:
+        hit = _ACC.get(key)
+    if hit is None:
+        g0: dict = {}
+        n0 = _accumulate(g0, past, family, regime, today)
+        hit = (g0, n0)
+        with _ACC_LOCK:
+            if len(_ACC) >= 12:
+                _ACC.clear()
+            _ACC[key] = hit
+    groups = {k: {**g, "all": dict(g["all"]), "reg": dict(g["reg"]), "today": dict(g["today"]), "days": set(g["days"])}
+              for k, g in hit[0].items()}
+    n_closed = hit[1] + _accumulate(groups, now_rows, family, regime, today)
 
     def stats(a):
         n = a["n"]

@@ -118,6 +118,25 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 2.95: Market-hours speed: the 5-year download waits, the System page and board do less (23 Nov 2026)
+- **Mandeep (23 Nov, 09:19, market open): "check"** the Speed panel. Read from the running 2.94: System page 4.5 s on
+  average (max 10 s), of which "jobs and log" 3.7 s; Strategy board 3.9 s (max 12 s); Alerts 1.8 s; live analysis pass
+  2.8 s at the open (95% within 10.9 s, then 0.3 s); the 5-year Dhan download still running in market hours
+  (23,581 calls by 09:19) inside the app, competing with the live scanner for the same Python.
+- **System page:** "jobs and log" was the 5-year download's full view: it parsed both Strategy Lab results files
+  (5.3 + 4.2 MB) for a comparison the System page never shows, and listed every downloaded file. Now a brief (running,
+  status, % done); the full view (5-year Lab panel) parses the two files only when they change; the manifest is read at
+  most once a minute.
+- **5-year download waits out market hours**, the same window as the nightly Lab (15 min before the open to 5 min after
+  the close, config.yaml lab: pause_in_market). It stops at a safe point, shows "paused" and resumes by itself after the
+  close. Dhan's daily cap (92,000 calls) is reached at night anyway, so the download is no slower.
+- **Strategy board:** the finished days are added up once (per days, family, day type) and kept; each call adds only
+  today's rows. Pages share an answer for 10 s; the Live page's "what works today" asks for the board without its
+  ~4,000 rows (`mini=1`). Same answers (tests: cached = fresh, today's new trades show at once).
+- **Alerts page:** its pieces are now timed (read, shadow Focus picks, days list, packing) under "Inside them" for the
+  next fix.
+- Tests: `tests/test_speed_295.py` (3).
+
 ## 2.94: Quicker screens: slow work done once, not on every call (23 Nov 2026)
 - **Mandeep (23 Nov, the System page's Speed panel): "check the speed one".** Read from the running app (2.93, 3 minutes
   after a restart, 5-year download running): Trade journeys 9.4 s, Strategy board 5.3 s (later calls ~2 s), Daily Radar

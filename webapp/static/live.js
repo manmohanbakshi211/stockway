@@ -4472,7 +4472,7 @@ function eventsMini(v) {
 
 /* Live page: what works today (top of the Strategy board) */
 async function loadBoardMini() {
-  let b; try { b = await api("/api/live/board?regime=auto"); } catch (_) { return; }
+  let b; try { b = await api("/api/live/board?regime=auto&mini=1"); } catch (_) { return; }   // 2.95: no rows needed here
   b.fetched = Date.now() / 1000;
   L.boardMini = b; const el = $("#lv-board"); if (el) el.outerHTML = boardMini(b);
 }

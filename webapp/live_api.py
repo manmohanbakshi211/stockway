@@ -800,7 +800,10 @@ def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1
         day = days[0]["day"] if days else None
     if view in ("act", "focus", "all", "shadow"):
         from live.dayreport import _focus
+        from webapp import perf as _perf
+        mark = _perf.Marks("alerts")                     # 2.95: which piece of the Alerts page is slow
         al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=1, source=source, limit=6000)
+        mark("read the day's alerts")
         pick = {"act": lambda a: a["severity"] >= 3,
                 "focus": lambda a: _focus(a) or (a["severity"] >= 2 and not (a.get("data") or {}).get("muted")),
                 "all": lambda a: True}
@@ -816,6 +819,7 @@ def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1
                 shadow = {"version": fl["main"], "label": fl["versions"][fl["main"]]["label"]}
         except Exception:
             shadow = None
+        mark("shadow Focus picks")
         if view == "shadow" and "shadow" not in pick:
             view = "focus"
         counts = {k: sum(1 for a in al if f(a)) for k, f in pick.items()}
@@ -823,8 +827,11 @@ def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1
         for a in out:                              # 2.50 (speed): the shadow Focus challengers' notes are read by nothing here
             if isinstance(a.get("data"), dict) and "focus_ch" in a["data"]:
                 a["data"] = {k: v for k, v in a["data"].items() if k != "focus_ch"}
-        return clean({"day": day, "alerts": out, "total": len(al), "counts": counts, "view": view, "days": e.store.alert_days(60),
-                      "shadow": shadow})
+        days_ = e.store.alert_days(60)
+        mark("days list")
+        res = clean({"day": day, "alerts": out, "total": len(al), "counts": counts, "view": view, "days": days_, "shadow": shadow})
+        mark("counts and packing")
+        return res
     al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=min_sev, source=source,
                         limit=6000 if focus else max(1, min(int(limit), 6000)))
     total = len(al)
@@ -1247,8 +1254,23 @@ def live_scorecard(source: str | None = None):
 
 
 @router.get("/api/live/board")
-def live_board(regime: str = "auto", days: int = 60, source: str | None = None, family: str | None = None):
-    """Strategy board (2.30): every strategy paper-tested on the test bench, ranked for today's day type and your capital."""
+def live_board(regime: str = "auto", days: int = 60, source: str | None = None, family: str | None = None, mini: int = 0):
+    """Strategy board (2.30): every strategy paper-tested on the test bench, ranked for today's day type and your capital.
+    mini=1 (2.95, the Live page's "what works today"): the same answer without the ~4,000 rows."""
+    out = _live_board(regime, days, source, family)
+    if mini:
+        out = {k: v for k, v in out.items() if k != "rows"}
+    return out
+
+
+def _live_board(regime, days, source, family):
+    from webapp import memo
+    e = engine()
+    key = f"board|{source}|{regime}|{days}|{family}|{e.clock.now().date().isoformat()}|{int(e.running)}"
+    return memo.memo(key, None, lambda: _live_board_now(regime, days, source, family), ttl=10)   # 2.95: pages share 10 s
+
+
+def _live_board_now(regime: str, days: int, source: str | None, family: str | None):
     from live import bench
     e = engine()
     src = source or e.source or e.cfg()["live"].get("source") or "upstox"
