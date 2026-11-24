@@ -108,19 +108,27 @@ def test_pro_accounts_buy_only_strong_signals_of_their_segment(tmp_path):
         == "no Pro reading on this signal"
 
 
-def test_pro_rules_expiry_cutoff_and_cool_off(tmp_path):
+def test_pro_rules_no_time_locks_expiry_by_the_decay_check(tmp_path):
+    """3.04 (Mandeep, 24 Nov: "koi aisa lock nahi chahiye ki aache alert aaye toh system trade hi na le; market situation
+    dekhni hai but opportunity miss nahi karni")."""
     st = Store(tmp_path / "t.db")
     day = _t(DAY, 11, 5)
     pick = {"rider": True, "pro": True, "segment": "index"}
+    src = "upstox#pro_index"
     a = _alert(expiry=day.date().isoformat())
-    assert P.block(pick, a, day, st, "upstox#pro_index").startswith("same-day expiry after 11:00")
-    assert P.block(pick, a, _t(DAY, 10, 55), st, "upstox#pro_index") is None
-    assert P.block(pick, _alert(expiry="2030-01-01"), day, st, "upstox#pro_index") is None
-    st.add_trade({"source": "upstox#pro_index", "day": day.date().isoformat(), "sym": "NIFTY", "side": "CE", "status": "closed",
+    assert P.block(pick, a, day, st, src) is None                          # strong, decay check not against: bought
+    dec = {**a, "data": {**a["data"], "pro": {**a["data"]["pro"], "against": ["move_vs_decay"]}}}
+    assert P.block(pick, dec, day, st, src).startswith("same-day expiry after 11:00 and the move vs decay check votes against")
+    assert P.block(pick, dec, _t(DAY, 10, 55), st, src) is None
+    assert P.block(pick, {**dec, "option": {**dec["option"], "expiry": "2030-01-01"}}, day, st, src) is None
+    st.add_trade({"source": src, "day": day.date().isoformat(), "sym": "NIFTY", "side": "CE", "status": "closed",
                   "exit_ts": day.timestamp() - 300, "entry": 1.0, "exit": 2.0, "net": 1.0})
-    assert P.block(pick, _alert(), day, st, "upstox#pro_index").startswith("cool-off: NIFTY CE closed 5 min ago")
-    assert P.block(pick, _alert(direction="down", key="P1"), day, st, "upstox#pro_index") is None     # the other side
-    assert P.block(pick, _alert(), day + dt.timedelta(minutes=11), st, "upstox#pro_index") is None
+    assert P.block(pick, _alert(), day, st, src) is None                   # no cool-off: a fresh strong signal is bought
+    old = {**P.cfg(), "expiry_needs": None, "cooloff_min": 15}            # the old rules still work if a file asks for them
+    assert P.block(pick, a, day, st, src, old).startswith("same-day expiry after 11:00")
+    assert P.block(pick, _alert(), day, st, src, old).startswith("cool-off: NIFTY CE closed 5 min ago")
+    assert P.block(pick, _alert(direction="down", key="P1"), day, st, src, old) is None     # the other side
+    assert P.block(pick, _alert(), day + dt.timedelta(minutes=11), st, src, old) is None
 
 
 def test_profit_lock_keeps_part_of_a_big_move():
@@ -296,3 +304,57 @@ def test_pro_calendar_compares_with_the_main_account_day_by_day(tmp_path, monkey
     js = (ROOT / "webapp" / "static" / "live.js").read_text()
     assert '["calendar", "Calendar"]' in js and "/api/live/day/${day}?acct=${acct}" in js and "function proCalSum(c)" in js
     assert "Main's full day" in js and "What Pro missed" in js and "Every Pro trade and why" in js
+
+
+def test_pro_and_no_locks_accounts_have_no_day_locks(tmp_path):
+    """3.04: the Pro accounts and the 'Main · no locks' challenger keep no trades-a-day count, day loss stop, cool-off or
+    good-day lock, whatever the main account's settings; the main account keeps its own."""
+    st = Store(tmp_path / "t.db")
+    main = {"capital": 300000, "max_trades_day": 6, "max_daily_loss_pct": 3, "cooloff_min": 30, "profit_lock": 5000,
+            "max_open": 6, "no_entry_after": "14:45", "kinds": "all", "min_severity": 2}
+    bs = B.Books("upstox", st, main, log=lambda m: None)
+    for bid in ("pro_index", "pro_stocks", "nolock"):
+        c = bs.books[bid].cfg
+        assert (c["max_trades_day"], c["max_daily_loss_pct"], c["cooloff_min"], c["profit_lock"], c["max_open"]) == (99, 100, 0, 0, 99), bid
+        assert c["capital"] == 300000                                      # the money set in the app
+    assert bs.books["pro_index"].cfg["no_entry_after"] == "15:00" and bs.books["nolock"].cfg["no_entry_after"] == "14:45"
+    assert bs.specs["nolock"]["pick"] == {"same_as_main": True, "risk_pass": True}
+    now = _t(DAY, 12, 0)
+    day = now.date().isoformat()
+    for k in range(8):                                                     # a bad day: 8 losing trades
+        st.add_trade({"source": "upstox#nolock", "day": day, "sym": f"S{k}", "status": "closed", "net": -5000.0,
+                      "reason": "stop loss", "exit_ts": now.timestamp() - 60, "entry": 1.0, "exit": 0.5})
+    assert bs.books["nolock"].guard(now)["blocked"] is False
+
+
+def test_day_book_says_what_the_day_locks_stopped(tmp_path):
+    from live import daybook as D
+    from live.record import OUTCOME_SQL
+    st = Store(tmp_path / "t.db")
+    with st.lock:
+        st.db.executescript(OUTCOME_SQL)
+    day = "2026-11-19"
+    t0 = dt.datetime(2026, 11, 19, 10, 30, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30))).timestamp()
+    def add(sym, reasons, focus=True, o60=None, omax=None, dt_=0):
+        aid = st.add_alert({"ts": t0 + dt_, "day": day, "source": "upstox", "sym": sym, "kind": "sharp_move", "direction": "up",
+                            "severity": 3, "title": sym, "detail": "", "price": 1.0,
+                            "data": {"focus": focus, "risk": {"verdict": "BLOCK", "reasons": reasons}}})
+        if o60 is not None:
+            with st.lock:
+                st.db.execute("INSERT INTO outcomes(alert_id, source, day, ts, sym, kind, direction, o60, omax) VALUES (?,?,?,?,?,?,?,?,?)",
+                              (aid, "upstox", day, t0 + dt_, sym, "sharp_move", "up", o60, omax))
+                st.db.commit()
+    g = "6 trades today: over-trading guard reached."
+    add("TCS", [g], o60=20.0, omax=40.0)
+    add("TCS", [g], o60=-50.0, omax=1.0, dt_=60)                          # the same symbol again: counted once
+    add("INFY", [g], o60=-10.0, omax=5.0, dt_=120)
+    add("SBIN", [g, "Reward:risk 0.8 is under your minimum 1.2."], o60=99.0, dt_=180)   # blocked by more than the lock
+    add("HDFC", [g], focus=False, o60=99.0, dt_=240)                       # not a Focus alert
+    add("ITC", ["Daily loss limit hit (₹-9,000). No new trades today."], dt_=300)
+    out = D.locked_out(st, "upstox", day)
+    a = next(x for x in out if x["lock"] == "trades-a-day count")
+    assert (a["n"], a["graded"], a["up"], a["big"], a["avg_o60"]) == (2, 2, 1, 1, 5.0) and a["from"] == "10:30"
+    b = next(x for x in out if x["lock"] == "daily loss stop")
+    assert b["n"] == 1 and "not graded yet" in b["text"]
+    assert any(m.get("what") == "lock" for m in D.build(st, tmp_path, "upstox", day)["missed"])
+    assert not any(m.get("what") == "lock" for m in D.build(st, tmp_path, "upstox", day, accounts=["pro_index"])["missed"])

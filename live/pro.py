@@ -16,8 +16,9 @@ How it works
 - Tiers: strong -> the Pro paper accounts (Index / Stocks) may buy it; medium -> the Pro page's watch list; low ->
   recorded only. Every signal keeps its votes (data.pro) so the after-market report can say which check lined up
   and worked.
-- Account rules on top: no same-day-expiry buy after 11:00, a 15-minute cool-off after an exit on the same symbol and
-  side, and a profit lock (+50% -> keep +25%) on top of the rider exit.
+- Account rules on top (3.04, Mandeep: no lock on good signals): no trades-a-day count, day loss stop or cool-off; after
+  11:00 on a same-day expiry a strong signal is bought unless the move-vs-decay check votes against it; a profit lock
+  (+50% -> keep +25%) on top of the rider exit. The cool-off code stays (cooloff_min 0 = off).
 - Learning from new days only (learn): a factor's weight moves only with 100+ graded signals, by 25% at most, as a
   challenger; it is used only if it beats the current weights on the next 5 market days it never saw.
 Paper and market data only: nothing here talks to a broker.
@@ -38,7 +39,7 @@ STATE = "pro_weights.json"
 INDEXES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"}
 DEFAULTS = {"on": True, "strong": 85, "medium": 75, "min_groups": 3, "weights": {}, "groups": {},
             "mind": {"tfs": ["5m"], "use": {}, "invert": {}}, "daytype": {"trend_lift": 5, "quiet_lift": 10, "index_only": True},
-            "expiry_cutoff": "11:00", "cooloff_min": 15, "exit": {},
+            "expiry_cutoff": "11:00", "expiry_needs": "move_vs_decay", "cooloff_min": 0, "exit": {},
             "learn": {"min_n": 100, "forward_days": 5, "min_strong": 20, "max_step": 0.25, "days": 60, "at": "16:05"}}
 _CFG: dict = {"m": None, "v": None}
 
@@ -195,7 +196,11 @@ def block(pick: dict, a: dict, now: dt.datetime, store, source: str, c: dict | N
     cut = str(pick.get("expiry_cutoff") or c.get("expiry_cutoff") or "")
     exp = str((a.get("option") or {}).get("expiry") or "")[:10]
     if cut and exp == now.date().isoformat() and now.strftime("%H:%M") >= cut:
-        return f"same-day expiry after {cut}"
+        need = pick.get("expiry_needs", c.get("expiry_needs"))
+        if not need:
+            return f"same-day expiry after {cut}"
+        if need in (pr.get("against") or []):            # 3.04: not a time lock; the decay check decides
+            return f"same-day expiry after {cut} and the {need.replace('_', ' ')} check votes against (time decay beats the move)"
     cool = float(pick.get("cooloff_min") or c.get("cooloff_min") or 0)
     if cool > 0 and store is not None:
         want = "CE" if a.get("direction") == "up" else "PE"

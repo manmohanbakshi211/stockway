@@ -118,6 +118,34 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 3.04: No lock on a good signal: Pro without day locks, a "Main · no locks" challenger (24 Nov 2026)
+- **Mandeep (24 Nov, 15:36):** "humein na koi aisa lock nahi chahiye ki aache alert ya opportunity aaye market time me
+  toh system trade hi na le. humein market situation dekhni hai but opportunity miss nahi karni".
+- **What the locks cost (Mac data, 5-23 Nov, read-only):**
+  - The main account's day locks stopped 233 Focus alerts that passed every other check, counting one per symbol a day.
+  - 206 of them were stopped by the trades-a-day count. It is 6 a day, from the capital tier "Medium account: 3 lots,
+    6 trades a day". The other 27 were stopped by the daily loss stop.
+  - Held 60 minutes, they averaged -3.2% and 85 of 233 went up. 28 of them went +30% or more at some point.
+  - So the locks mostly stopped average alerts, but they also stopped some big ones. That is why this is tested next to
+    the main account and does not replace it.
+- **Pro · Index / Pro · Stocks (on trial, live from 25 Nov):**
+  - No day locks: no trades-a-day count, no day loss stop, no two-stop-losses cool-off, no good-day lock and no limit on
+    open trades.
+  - The money set in the app is the only limit, with one trade per symbol at a time. Entries are allowed until 15:00.
+  - The 15-minute re-entry cool-off is off (`cooloff_min` 0; the code stays).
+  - Market situation is still read: Pro's score already carries the day-type, flow and decay votes. After 11:00 on a
+    same-day expiry, a strong signal is still bought unless the move-vs-decay check votes against it
+    (`expiry_needs`). That vote means the move does not beat the time decay.
+- **New paper account "Main · no locks" (challenger):**
+  - It takes exactly the main account's alerts, with risk check PASS on everything except the day locks.
+  - It has no trades-a-day count, daily loss stop, cool-off, good-day lock or open-trade limit.
+  - The main account keeps its locks until this account beats it (Mandeep's call).
+- **Day calendar › Missed:** each day lists what each day lock of the main account stopped: how many Focus alerts, from
+  what time, and how they did in the next hour (`daybook.locked_out`). The AI review reads it too.
+- Gun / bullet: the limits are bullets (`rules/paper_books.json`, `rules/pro.json`). The gun adds only
+  `daybook.locked_out` and the `expiry_needs` check in `pro.block`.
+- Tests: `tests/test_pro.py` (15); full suite; headless desktop and phone, light and dark.
+
 ## 3.03: Pro's own Calendar tab, day by day next to the main account (24 Nov 2026)
 - **Mandeep (24 Nov, 15:11):** "also make the separate calendar tab inside pro and so we can compare it with main one. add
   all the things as per the pro the main has".

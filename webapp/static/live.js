@@ -4520,7 +4520,7 @@ function proBody(d) {
   const t = PRO.tab;
   if (t === "watch") return `<p class="small muted">Score 75–85: worth watching, not bought. A watch signal that keeps getting stronger shows up in Strong.</p>${list(s.medium, false, `Nothing to watch on ${esc(d.day)}.`)}`;
   if (t === "recorded") return `<p class="small muted">Every other Trend Rider signal Pro scored below 75 on ${esc(d.day)}: recorded and graded, so the Checks tab can tell which checks really work.</p>${list(s.low, false, "Nothing recorded on this day.")}`;
-  if (t === "trades") return `${proTrades(d.trades)}<p class="small muted">Rules: strong only · 1 lot · no same-day-expiry buy after ${esc(r.expiry_cutoff || "")} · ${esc(String(r.cooloff_min || 0))} min cool-off after an exit on the same symbol and side · Trend Rider exit + profit lock (at +${esc(String(ex.lock_premium_pct || "–"))}% keep +${esc(String(ex.lock_keep_pct || "–"))}%).</p>`;
+  if (t === "trades") return `${proTrades(d.trades)}<p class="small muted">Rules: strong only · 1 lot · no day locks (no trades-a-day count, no day loss stop${Number(r.cooloff_min || 0) ? `, but a ${esc(String(r.cooloff_min))} min cool-off after an exit on the same symbol and side` : ", no cool-off"}; the money set in the app is the only limit) · after ${esc(r.expiry_cutoff || "")} on a same-day expiry: bought unless the time-decay check votes against · Trend Rider exit + profit lock (at +${esc(String(ex.lock_premium_pct || "–"))}% keep +${esc(String(ex.lock_keep_pct || "–"))}%).</p>`;
   if (t === "calendar") return proCalendar();
   if (t === "checks") return proFactors(d.factors);
   if (t === "learning") return proLearning(d);

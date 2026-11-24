@@ -406,6 +406,11 @@ def build(store, data_dir, base: str, day: str, live_bars: dict | None = None, g
            "net": round(sum(t["net"] for t in closed)), "n": len(closed), "won": sum(t["net"] > 0 for t in closed),
            "open": len(trades) - len(closed), "lessons": lessons, "gaps": [[_hm(a), _hm(b)] for a, b in (gaps or [])]}
     rep["missed"] = missed(store, base, day, pxs, trades, c)
+    if not accounts or "main" in accounts:               # 3.04: what the main account's day locks stopped
+        try:
+            rep["missed"] += locked_out(store, base, day)
+        except Exception:
+            pass
     try:                                                 # 3.01: Pro's checks that day (graded Trend Rider signals)
         from . import pro as _pro
         pf = _pro.factors(store, base, 1, day)
@@ -482,6 +487,50 @@ def missed(store, base: str, day: str, pxs: dict, trades: list, c: dict) -> list
         n += 1
         if n >= 6:
             break
+    return out
+
+
+# 3.04 (Mandeep, 24 Nov: "koi aisa lock nahi chahiye ki aache alert ya opportunity aaye market time me toh system trade
+# hi na le"): the day locks of the main account's risk guard (live/paper.py guard) and the words its reasons carry.
+LOCKS = (("guard reached", "trades-a-day count"), ("Daily loss limit", "daily loss stop"),
+         ("cool-off before the next trade", "two-stop-losses cool-off"), ("Good day locked in", "good-day lock"))
+
+
+def locked_out(store, base: str, day: str) -> list:
+    """Focus alerts that passed every check except a day lock (one per symbol, before the entry cut-off of the risk
+    check): how many each lock stopped and what the option did in the next hour (outcomes o60 / omax)."""
+    q = " OR ".join("instr(a.data, ?) > 0" for _ in LOCKS)
+    rows = _read(store, f"SELECT a.ts, a.sym, a.data, o.o60, o.omax FROM alerts a LEFT JOIN outcomes o ON o.alert_id = a.id "
+                        f"WHERE a.day=? AND a.source=? AND ({q}) ORDER BY a.ts", (day, base) + tuple(k for k, _ in LOCKS))
+    seen, by = set(), {}
+    for r in rows:
+        if r["sym"] in seen:
+            continue
+        try:
+            d = json.loads(r.get("data") or "{}")
+        except Exception:
+            continue
+        rs = (d.get("risk") or {}).get("reasons") or []
+        hit = [name for k, name in LOCKS if any(k in s for s in rs)]
+        if not d.get("focus") or not hit or len(hit) != len(rs):
+            continue                                     # another reason blocked it too: not the lock's doing
+        seen.add(r["sym"])
+        g = by.setdefault(hit[0], {"n": 0, "first": r["ts"], "o60": [], "big": 0})
+        g["n"] += 1
+        if r.get("o60") is not None:
+            g["o60"].append(float(r["o60"]))
+        if r.get("omax") is not None and float(r["omax"]) >= 30:
+            g["big"] += 1
+    out = []
+    for name, g in sorted(by.items(), key=lambda x: -x[1]["n"]):
+        o = g["o60"]
+        res = (f"held an hour they averaged {sum(o) / len(o):+.1f}%, {sum(v > 0 for v in o)} of {len(o)} up, "
+               f"{g['big']} went +30% or more at some point" if o else "not graded yet")
+        out.append({"what": "lock", "lock": name, "n": g["n"], "from": _hm(g["first"]),
+                    "avg_o60": round(sum(o) / len(o), 1) if o else None, "up": sum(v > 0 for v in o), "graded": len(o),
+                    "big": g["big"],
+                    "text": f"The main account's {name} stopped {g['n']} Focus alert(s) from {_hm(g['first'])} that passed "
+                            f"every other check (one per symbol): {res}. The 'Main · no locks' account takes them."})
     return out
 
 

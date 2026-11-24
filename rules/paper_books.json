@@ -91,6 +91,24 @@
     "index_slots": 1
    }
   },
+  "nolock": {
+   "name": "Main · no locks",
+   "short": "The main account's alerts, no trades-a-day count, no day loss stop, no cool-off",
+   "explain": "3.04 (Mandeep, 24 Nov 2026: 'koi aisa lock nahi chahiye ki aache alert ya opportunity aaye market time me toh system trade hi na le; market situation dekhni hai but opportunity miss nahi karni'). Takes exactly the alerts the main account would (same alert types and strength, risk check PASS on everything except the day locks, lots from its own money), but has no trades-a-day count, no daily loss stop, no two-stop-losses cool-off, no good-day lock and no limit on open trades: the money is the only limit, one trade per symbol at a time. Why: 5-23 Nov the main account's day locks stopped 233 Focus alerts that passed every other check (206 by the trades-a-day count, 27 by the daily loss stop). Held 60 minutes they averaged -3.2% (85 of 233 up), but 28 went +30% or more at some point. This account shows with real paper trades what taking them earns. The main account changes only if this one beats it (your call).",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "same_as_main": true,
+    "risk_pass": true
+   },
+   "paper": {
+    "max_open": 99,
+    "max_trades_day": 99,
+    "max_daily_loss_pct": 100,
+    "cooloff_min": 0,
+    "profit_lock": 0
+   }
+  },
   "ghanshyam": {
    "name": "Ghanshyam",
    "short": "Only Ghanshyam's strategies (course + 9:20), Nifty and Bank Nifty",
@@ -156,8 +174,8 @@
   },
   "pro_index": {
    "name": "Pro · Index",
-   "short": "Stockway Pro v1: strong index signals only, 1 lot, trail + profit lock",
-   "explain": "3.01 Stockway Pro v1 (Mandeep, 24 Nov 2026: option buying only, every input voting together, strong checks). Buys only Trend Rider signals that Pro scores STRONG (85+ with 3+ different groups of checks agreeing; rules/pro.json), 1 lot, with the money you set for the app. Not after 11:00 on a same-day expiry; not within 15 minutes of an exit on the same symbol and side. Exit: Trend Rider's (stop beyond the broken level on a 5-minute close, +1R stop to entry, ATR trail, no-move and 15:10 exits, -35% emergency) plus a profit lock: once the option is +50%, out if it falls back to +25%. Paper only, on trial: compare it with the main account day by day on the Day calendar. This account: indices (Nifty, Bank Nifty, Fin Nifty, Midcap Nifty...).",
+   "short": "Stockway Pro v1: strong index signals only, 1 lot, no day locks, trail + profit lock",
+   "explain": "3.01 Stockway Pro v1 (Mandeep, 24 Nov 2026: option buying only, every input voting together, strong checks). Buys only Trend Rider signals that Pro scores STRONG (85+ with 3+ different groups of checks agreeing; rules/pro.json), 1 lot, with the money you set for the app. 3.04 (Mandeep: no lock on good signals): no trades-a-day count, no day loss stop, no cool-off, no limit on open trades; the money you set for the app is the only limit, entries until 15:00. After 11:00 on a same-day expiry it still buys unless the move-vs-decay check votes against it. Exit: Trend Rider's (stop beyond the broken level on a 5-minute close, +1R stop to entry, ATR trail, no-move and 15:10 exits, -35% emergency) plus a profit lock: once the option is +50%, out if it falls back to +25%. Paper only, on trial: compare it with the main account day by day on the Day calendar. This account: indices (Nifty, Bank Nifty, Fin Nifty, Midcap Nifty...).",
    "on": true,
    "capital": null,
    "pick": {
@@ -167,16 +185,20 @@
    },
    "exit_style": "rider",
    "paper": {
-    "max_open": 2,
-    "max_trades_day": 6,
+    "max_open": 99,
+    "max_trades_day": 99,
+    "max_daily_loss_pct": 100,
+    "cooloff_min": 0,
+    "profit_lock": 0,
+    "no_entry_after": "15:00",
     "max_lots": 1
    },
    "section": "pro"
   },
   "pro_stocks": {
    "name": "Pro · Stocks",
-   "short": "Stockway Pro v1: strong F&O stock signals only, 1 lot, trail + profit lock",
-   "explain": "3.01 Stockway Pro v1 (Mandeep, 24 Nov 2026: option buying only, every input voting together, strong checks). Buys only Trend Rider signals that Pro scores STRONG (85+ with 3+ different groups of checks agreeing; rules/pro.json), 1 lot, with the money you set for the app. Not after 11:00 on a same-day expiry; not within 15 minutes of an exit on the same symbol and side. Exit: Trend Rider's (stop beyond the broken level on a 5-minute close, +1R stop to entry, ATR trail, no-move and 15:10 exits, -35% emergency) plus a profit lock: once the option is +50%, out if it falls back to +25%. Paper only, on trial: compare it with the main account day by day on the Day calendar. This account: F&O stocks.",
+   "short": "Stockway Pro v1: strong F&O stock signals only, 1 lot, no day locks, trail + profit lock",
+   "explain": "3.01 Stockway Pro v1 (Mandeep, 24 Nov 2026: option buying only, every input voting together, strong checks). Buys only Trend Rider signals that Pro scores STRONG (85+ with 3+ different groups of checks agreeing; rules/pro.json), 1 lot, with the money you set for the app. 3.04 (Mandeep: no lock on good signals): no trades-a-day count, no day loss stop, no cool-off, no limit on open trades; the money you set for the app is the only limit, entries until 15:00. After 11:00 on a same-day expiry it still buys unless the move-vs-decay check votes against it. Exit: Trend Rider's (stop beyond the broken level on a 5-minute close, +1R stop to entry, ATR trail, no-move and 15:10 exits, -35% emergency) plus a profit lock: once the option is +50%, out if it falls back to +25%. Paper only, on trial: compare it with the main account day by day on the Day calendar. This account: F&O stocks.",
    "on": true,
    "capital": null,
    "pick": {
@@ -186,8 +208,12 @@
    },
    "exit_style": "rider",
    "paper": {
-    "max_open": 3,
-    "max_trades_day": 8,
+    "max_open": 99,
+    "max_trades_day": 99,
+    "max_daily_loss_pct": 100,
+    "cooloff_min": 0,
+    "profit_lock": 0,
+    "no_entry_after": "15:00",
     "max_lots": 1
    },
    "section": "pro"
