@@ -2770,7 +2770,7 @@ class LiveEngine:
         src = self.source or self.cfg()["live"]["source"]
         return self.cfg()["live"]["source"] if is_practice(src) else src
 
-    def day_book(self, day: str | None = None, open_pnl: dict | None = None) -> dict:
+    def day_book(self, day: str | None = None, open_pnl: dict | None = None, accounts: list | None = None) -> dict:
         """2.98: one day's trades of every paper account, why each made or lost money, what was missed (live/daybook.py).
         Today: the live 1-minute candles and the health monitor's gaps (the app not running)."""
         from . import daybook
@@ -2790,7 +2790,7 @@ class LiveEngine:
             except Exception:
                 gaps = []
         return daybook.build(self.store, self.data_dir, base, day, live_bars=live_bars, gaps=gaps, now_ts=now_ts,
-                             open_pnl=open_pnl)
+                             open_pnl=open_pnl, accounts=accounts)
 
     def _day_review_slot(self, now: dt.datetime, source: str) -> str | None:
         """2.98: the review slot due now ('1330', '1545'), once a day each; a late start runs only the latest slot.

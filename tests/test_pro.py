@@ -260,3 +260,39 @@ def test_pro_page_has_a_tab_for_everything_it_watches(tmp_path, monkeypatch):
                 '["checks", "Checks"]', '["learning", "Learning"]'):
         assert tab in js
     assert 'id="pro-tabs"' in js and 'id="pro-day"' in js and "function proLearning(d)" in js and "function proFactors(f)" in js
+
+
+def test_pro_calendar_compares_with_the_main_account_day_by_day(tmp_path, monkeypatch):
+    """3.03 (Mandeep, 24 Nov: "make the separate calendar tab inside pro so we can compare it with main one; add all the
+    things as per the pro the main has")."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from live import daybook as D
+    from webapp import live_api, memo
+    st = Store(tmp_path / "t.db")
+    for src, sym, net in (("upstox", "NIFTY", -1000.0), ("upstox", "TCS", 300.0), ("upstox#pro_index", "NIFTY", 2500.0),
+                          ("upstox#pro_stocks", "TCS", -200.0), ("upstox#trail", "NIFTY", 50.0)):
+        st.add_trade({"source": src, "day": "2026-11-25", "sym": sym, "label": f"{sym} 100 CE 30 Dec", "status": "closed", "net": net,
+                      "entry": 100.0, "exit": 100.0 + net / 75, "qty": 75, "entry_ts": 1.0, "exit_ts": 2.0})
+    c = D.calendar(st, tmp_path, "upstox", "2026-11")
+    a = c["days"][0]["accounts"]
+    assert a["main"]["seg"] == {"index": {"net": -1000, "n": 1, "won": 0}, "stock": {"net": 300, "n": 1, "won": 1}}
+    assert a["pro_index"]["net"] == 2500 and a["pro_index"]["seg"]["index"]["n"] == 1 and a["pro_stocks"]["seg"]["stock"]["net"] == -200
+    b = D.build(st, tmp_path, "upstox", "2026-11-25", accounts=["pro_index"])
+    assert [t["account"] for t in b["trades"]] == ["pro_index"] and b["net"] == 2500
+    assert len(D.build(st, tmp_path, "upstox", "2026-11-25")["trades"]) == 5
+    e = types.SimpleNamespace(store=st, data_dir=tmp_path, paper=None, session_day=lambda: dt.date(2026, 11, 26),
+                              day_book=lambda day, open_pnl=None, accounts=None: D.build(st, tmp_path, "upstox", day, accounts=accounts))
+    monkeypatch.setattr(live_api, "engine", lambda: e)
+    for k in list(memo._mem):
+        memo._mem.pop(k, None)
+    app = FastAPI()
+    app.include_router(live_api.router)
+    cl = TestClient(app)
+    p = cl.get("/api/live/day/2026-11-25?acct=pro_index").json()
+    allday = cl.get("/api/live/day/2026-11-25").json()
+    assert [t["account"] for t in p["trades"]] == ["pro_index"] and len(allday["trades"]) == 5     # not mixed up in the cache
+    assert cl.get("/api/live/day/2026-11-25?acct=nope").status_code == 400
+    js = (ROOT / "webapp" / "static" / "live.js").read_text()
+    assert '["calendar", "Calendar"]' in js and "/api/live/day/${day}?acct=${acct}" in js and "function proCalSum(c)" in js
+    assert "Main's full day" in js and "What Pro missed" in js and "Every Pro trade and why" in js

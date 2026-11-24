@@ -116,7 +116,7 @@ def calendar(store, data_dir, base: str, month: str, today: dict | None = None) 
     y, m = int(month[:4]), int(month[5:7])
     first = dt.date(y, m, 1)
     nxt = dt.date(y + (m == 12), m % 12 + 1, 1)
-    rows = _read(store, "SELECT day, source, label, status, net, costs FROM paper WHERE day >= ? AND day < ? AND "
+    rows = _read(store, "SELECT day, source, sym, label, status, net, costs FROM paper WHERE day >= ? AND day < ? AND "
                         "(source = ? OR source LIKE ?)", (first.isoformat(), nxt.isoformat(), base, base + "#%"))
     names = {"main": "Main account", **book_names()}
     days: dict = {}
@@ -129,7 +129,8 @@ def calendar(store, data_dir, base: str, month: str, today: dict | None = None) 
             d["open"] += 1
             continue
         net = float(r["net"] or 0)
-        for x in (d, a):
+        sg = a.setdefault("seg", {}).setdefault("index" if r.get("sym") in INDEX else "stock", {"net": 0.0, "n": 0, "won": 0})
+        for x in (d, a, sg):                             # 3.03: each account split into index / stock (Pro's calendar)
             x["net"] += net
             x["n"] += 1
             x["won"] += net > 0
@@ -147,6 +148,8 @@ def calendar(store, data_dir, base: str, month: str, today: dict | None = None) 
         d["net"] = round(d["net"], 0)
         for a in d["accounts"].values():
             a["net"] = round(a["net"], 0)
+            for sg in (a.get("seg") or {}).values():
+                sg["net"] = round(sg["net"], 0)
         i = bisect.bisect_left(ks, d["day"])
         if i < len(ks) and ks[i] == d["day"] and i > 0:
             d["nifty_chg"] = round((closes[ks[i]] / closes[ks[i - 1]] - 1) * 100, 2)
@@ -326,10 +329,16 @@ def _cost_of(t: dict, code: str) -> float:
 
 
 def build(store, data_dir, base: str, day: str, live_bars: dict | None = None, gaps: list | None = None,
-          now_ts: float | None = None, open_pnl: dict | None = None) -> dict:
+          now_ts: float | None = None, open_pnl: dict | None = None, accounts: list | None = None) -> dict:
+    """accounts (3.03): only these accounts' trades (e.g. ["pro_index"] for Pro's calendar): their lessons and what they
+    missed; the market and the AI reviews are the day's."""
     c = cfg()
     rows = _read(store, "SELECT * FROM paper WHERE day=? AND (source=? OR source LIKE ?) ORDER BY entry_ts",
                  (day, base, base + "#%"))
+    if accounts:
+        keep = set(accounts)
+        rows = [r for r in rows if _acct(r["source"], base) in keep]
+        open_pnl = {k: v for k, v in (open_pnl or {}).items() if k in keep} or None
     ids = sorted({r["alert_id"] for r in rows if r.get("alert_id")})
     alerts = {}
     if ids:

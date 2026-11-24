@@ -924,6 +924,7 @@ table.gh-acc details summary { cursor: pointer; }
 .cal-day.sel { box-shadow: inset 0 0 0 2px var(--signal); }
 .cal-day .d { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 4px; }
 .cal-day .n { font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+.pcal-m { display: none; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
 .cal-day .x { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-day.empty { cursor: default; background: transparent; border-style: dashed; }
 .cal-day.empty:hover { border-color: var(--rule); }
@@ -938,6 +939,7 @@ table.gh-acc details summary { cursor: pointer; }
   .cal-day { min-height: 56px; padding: 4px 5px; }
   .cal-day .n { font-size: 12.5px; }
   .cal-day .x, .cal-day .tags { display: none; }
+  .pcal-m { display: block; }
 }
 
 /* 3.01: Stockway Pro page */

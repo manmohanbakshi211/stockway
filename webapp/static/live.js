@@ -4397,7 +4397,123 @@ function proLearning(d) {
       <tbody>${keys.map((k) => `<tr><td>${esc(proW(k))}</td><td class="r">${base[k]}</td><td class="r ${use[k] !== base[k] ? "up" : ""}">${use[k] ?? "–"}</td><td class="r">${ch[k] != null ? ch[k] : "–"}</td></tr>`).join("")}</tbody></table></div>
     ${hist.length ? `<h3 class="pro-h3">Earlier tests</h3><ul class="small">${hist.map((x) => `<li>${esc(x.day)}: ${x.won ? `<b class="up">used</b>` : `<span class="down">dropped</span>`} after ${x.days} new days (new ${x.challenger.avg_r ?? "–"}R vs current ${x.champion.avg_r ?? "–"}R a strong signal)</li>`).join("")}</ul>` : ""}`;
 }
-const PRO_TABS = [["strong", "Strong"], ["watch", "Watch"], ["recorded", "Recorded"], ["trades", "Trades"], ["checks", "Checks"], ["learning", "Learning"]];
+const PRO_TABS = [["strong", "Strong"], ["watch", "Watch"], ["recorded", "Recorded"], ["trades", "Trades"], ["calendar", "Calendar"], ["checks", "Checks"], ["learning", "Learning"]];
+
+/* 3.03 (Mandeep: "make the separate calendar tab inside pro so we can compare it with main one; add all the things as per
+   the pro the main has"): Pro's own calendar, every day next to the main account on the same segment. */
+function proCalVals(d) {
+  const acct = PRO.seg === "index" ? "pro_index" : "pro_stocks", sk = PRO.seg === "index" ? "index" : "stock";
+  const A = d.accounts || {}, pro = A[acct] || null, main = A.main || {};
+  return { pro, mainSeg: (main.seg || {})[sk] || null, mainAll: A.main ? main : null };
+}
+function proCalGrid(c) {
+  const [y, m] = c.month.split("-").map(Number);
+  const byDay = Object.fromEntries((c.days || []).map((d) => [d.day, d]));
+  const vals = (c.days || []).map((d) => proCalVals(d));
+  const max = Math.max(1, ...vals.map((v) => Math.abs(v.pro ? v.pro.net : 0)));
+  const first = new Date(Date.UTC(y, m - 1, 1)), last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const cells = [];
+  let lead = (first.getUTCDay() + 6) % 7; if (lead > 4) lead = 0;
+  for (let i = 0; i < lead; i++) cells.push(`<div></div>`);
+  for (let dd = 1; dd <= last; dd++) {
+    const wd = new Date(Date.UTC(y, m - 1, dd)).getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    const key = `${c.month}-${String(dd).padStart(2, "0")}`, d = byDay[key];
+    if (!d) { cells.push(`<div class="cal-day empty" aria-hidden="true"><span class="d"><span>${dd}</span></span></div>`); continue; }
+    const v = proCalVals(d), net = v.pro ? v.pro.net : 0, a = Math.round(12 + 40 * Math.min(1, Math.abs(net) / max));
+    const bg = v.pro && net ? `background: color-mix(in srgb, var(${net > 0 ? "--up" : "--down"}) ${a}%, var(--paper))` : "";
+    const ms = v.mainSeg ? v.mainSeg.net : 0;
+    cells.push(`<button class="cal-day ${PRO.calDay === key ? "sel" : ""}" data-pcal="${key}" style="${bg}" aria-label="${key}: Pro ${v.pro ? rupees(net) : "no trade"}, main ${rupees(ms)}">
+      <span class="d"><span>${dd}</span><span class="tags">${d.expiry ? `<span class="cal-tag">Expiry</span>` : ""}</span></span>
+      <span class="n">${v.pro ? kRs(net) : "–"}</span>
+      <span class="x">Main ${v.mainSeg ? kRs(ms) : "–"}${v.pro ? ` · ${v.pro.n} closed` : ""}</span><span class="pcal-m">M ${v.mainSeg ? kRs(ms) : "–"}</span></button>`);
+  }
+  return `<div class="cal-grid">${["Mon", "Tue", "Wed", "Thu", "Fri"].map((w) => `<div class="cal-head">${w}</div>`).join("")}${cells.join("")}</div>`;
+}
+function proCalSum(c) {
+  const days = c.days || [];
+  const add = (f) => days.reduce((s, d) => { const x = f(proCalVals(d)); if (x) { s.net += x.net || 0; s.n += x.n || 0; s.won += x.won || 0; s.d += 1; s.g += (x.net || 0) > 0; s.r += (x.net || 0) < 0; } return s; }, { net: 0, n: 0, won: 0, d: 0, g: 0, r: 0 });
+  const pro = add((v) => v.pro), ms = add((v) => v.mainSeg), ma = add((v) => v.mainAll);
+  const cell = (l, x) => `<tr><td>${l}</td><td class="r nw ${x.net >= 0 ? "up" : "down"}"><b>${rupees(x.net)}</b></td><td class="r">${x.n}</td><td class="r">${x.n ? Math.round(100 * x.won / x.n) + "%" : "–"}</td><td class="r">${x.g} / ${x.r}</td></tr>`;
+  const segName = PRO.seg === "index" ? "index" : "stock";
+  return `<div class="table-wrap"><table class="tbl"><thead><tr><th>This month</th><th class="r">Net</th><th class="r">Trades</th><th class="r">Won</th><th class="r">Green / red days</th></tr></thead>
+    <tbody>${cell(`<b>Pro · ${PRO.seg === "index" ? "Index" : "Stocks"}</b>`, pro)}${cell(`Main account, ${segName} trades`, ms)}${cell("Main account, all trades", ma)}</tbody></table></div>
+    <p class="small" style="margin:6px 0 10px">Pro vs main on ${segName} trades this month: <b class="${pro.net - ms.net >= 0 ? "up" : "down"}">${pro.net - ms.net >= 0 ? "+" : ""}${rupees(pro.net - ms.net)}</b> <span class="muted">(paper, after charges; a few days prove nothing, 20 market days is the bar)</span></p>`;
+}
+async function proCalDay(day) {
+  const el = $("#pro-cal-detail"); if (!el) return;
+  PRO.calDay = day;
+  document.querySelectorAll("[data-pcal]").forEach((b) => b.classList.toggle("sel", b.dataset.pcal === day));
+  el.innerHTML = `<p class="muted">Loading ${esc(day)}…</p>`;
+  const acct = PRO.seg === "index" ? "pro_index" : "pro_stocks";
+  let b, sg;
+  try { [b, sg] = await Promise.all([api(`/api/live/day/${day}?acct=${acct}`), api(`/api/live/pro?seg=${PRO.seg}&day=${day}`).catch(() => null)]); }
+  catch (e) { el.innerHTML = `<p class="down">${esc(e.message)}</p>`; return; }
+  const cd = ((PRO.calData || {}).days || []).find((x) => x.day === day);
+  const v = cd ? proCalVals(cd) : {};
+  const notes = {}, revs = (b.reviews || []).slice().reverse();
+  const revHtml = revs.length ? calReview(revs[0], notes) : `<p class="small muted">No AI review for this day yet (written at 13:30 and after the close on market days, or now with the button). It covers every account, Pro's checks included.</p>`;
+  const nf = (x) => Number(x).toLocaleString("en-IN", { maximumFractionDigits: 1 });
+  const mk = (b.market || []).map((m) => `<tr><td><b>${esc(m.sym)}</b></td><td class="r">${nf(m.open)}</td><td class="r">${nf(m.last)} <small class="muted">${esc(m.last_at)}</small></td>
+      <td class="r ${m.chg_from_open >= 0 ? "up" : "down"}">${m.chg_from_open > 0 ? "+" : ""}${m.chg_from_open}%</td><td>${calSpark(m.path)}</td></tr>`).join("");
+  const rows = (b.trades || []).map((t) => {
+    const pc = t.pct == null ? "" : ` <small class="${t.pct >= 0 ? "up" : "down"}">${t.pct > 0 ? "+" : ""}${t.pct}%</small>`;
+    const chips = (t.chips || []).filter((c) => c.code !== "target" && c.code !== "stop").map((c) => `<span class="chip ${c.tone}">${esc(c.text)}</span>`).join("");
+    const note = notes[t.id] ? `<div class="small" style="margin-top:3px"><b>AI:</b> ${esc(notes[t.id])}</div>` : "";
+    return `<tr><td class="small nw">${esc(t.entry_at)}–${esc(t.exit_at)}</td><td><b>${esc(t.label || t.sym)}</b><div class="small muted">${t.seg === "index" ? "Index" : "Stock"} ${esc(t.side || "")}${t.same_day ? ` <span class="cal-tag">expiry today</span>` : ""}</div></td>
+      <td class="r small">${t.entry} → ${t.exit != null ? t.exit : "open"}${pc}${t.peak_pct != null ? `<div class="muted">best ${t.peak_pct > 0 ? "+" : ""}${t.peak_pct}%</div>` : ""}</td>
+      <td class="r nw ${t.net > 0 ? "up" : t.net < 0 ? "down" : ""}"><b>${t.status === "closed" ? rupees(t.net) : "open"}</b></td>
+      <td class="small"><div>${esc(t.why)}</div><div>${chips}</div>${note}</td></tr>`;
+  }).join("");
+  const s = (sg || {}).signals || {};
+  const go = (tab, l, n) => `<a class="chip" href="#/pro?seg=${PRO.seg}&tab=${tab}&day=${day}">${l} ${n}</a>`;
+  const cmp = (l, x) => `<span class="chip ${x && x.net > 0 ? "good" : x && x.net < 0 ? "bad" : ""}">${l} ${x ? rupees(x.net) : "–"}${x && x.n != null ? ` · ${x.n} closed` : ""}</span>`;
+  const dt_ = new Date(day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  el.innerHTML = `<div class="panel" style="margin-top:14px">
+    <h2 style="margin:0 0 6px">${esc(dt_)}</h2>
+    <div style="margin-bottom:8px">${cmp(`Pro · ${PRO.seg === "index" ? "Index" : "Stocks"}`, v.pro)} ${cmp(`Main (${PRO.seg === "index" ? "index" : "stock"} trades)`, v.mainSeg)} ${cmp("Main (all)", v.mainAll)}
+      <a class="small" href="#/calendar?d=${day}">Main's full day →</a></div>
+    <div class="small" style="margin-bottom:6px"><span class="muted">Pro signals that day:</span> ${go("strong", "Strong", (s.strong || []).length)} ${go("watch", "Watch", (s.medium || []).length)} ${go("recorded", "Recorded", (s.low || []).length)}</div>
+    ${mk ? `<h3 style="margin:10px 0 4px">The market</h3><div class="table-wrap"><table class="mini"><thead><tr><th>Index</th><th class="r">Open</th><th class="r">Last</th><th class="r">Day</th><th>Path</th></tr></thead><tbody>${mk}</tbody></table></div>` : ""}
+    <h3 style="margin:14px 0 4px">Every Pro trade and why</h3>
+    ${rows ? `<div class="table-wrap"><table class="mini"><thead><tr><th>Time</th><th>Trade</th><th class="r">Entry → exit</th><th class="r">Net</th><th>Why it made or lost money</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="small muted">No Pro trade this day.</p>`}
+    ${(b.lessons || []).length ? `<h3 style="margin:14px 0 4px">What cost money (rule checks)</h3><ul class="small" style="margin:0 0 0 18px">${b.lessons.map((x) => `<li>${esc(x.text)}</li>`).join("")}</ul>` : ""}
+    ${(b.missed || []).length ? `<h3 style="margin:14px 0 4px">What Pro missed</h3><ul class="small" style="margin:0 0 0 18px">${b.missed.map((m) => `<li>${esc(m.text)}</li>`).join("")}</ul>` : ""}
+    <h3 style="margin:14px 0 4px">AI review</h3>${revHtml}
+    <p style="margin:8px 0 0"><button class="btn" id="pro-cal-ai" ${b.reviewing ? "disabled" : ""}>${b.reviewing ? "Writing the review…" : "Write the AI review now"}</button></p></div>`;
+  const btn = $("#pro-cal-ai");
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = "Writing the review…";
+    try { await api(`/api/live/day/${day}/review`, { method: "POST" }); } catch (e) { toast(e.message); }
+    const poll = async () => { if (state.page !== "pro" || PRO.tab !== "calendar" || PRO.calDay !== day) return; let x; try { x = await api(`/api/live/day/${day}?acct=${acct}`); } catch (_) { return; }
+      if (x.reviewing) setTimeout(poll, 5000); else proCalDay(day); };
+    setTimeout(poll, 5000);
+  };
+}
+async function proCalLoad(month) {
+  const el = $("#pro-cal-grid"); if (!el) return;
+  let c; try { c = await api(`/api/live/calendar?month=${month}`); } catch (e) { el.innerHTML = `<p class="down">${esc(e.message)}</p>`; return; }
+  PRO.calData = c; PRO.calMonth = c.month;
+  $("#pro-cal-month").textContent = new Date(c.month + "-01T00:00:00").toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  $("#pro-cal-sum").innerHTML = proCalSum(c);
+  el.innerHTML = proCalGrid(c);
+  el.querySelectorAll("[data-pcal]").forEach((b) => b.onclick = () => proCalDay(b.dataset.pcal));
+  const withPro = (c.days || []).filter((d) => proCalVals(d).pro);
+  const pick = (c.days || []).some((d) => d.day === PRO.calDay) ? PRO.calDay : withPro.length ? withPro[withPro.length - 1].day : (c.days || []).length ? c.days[c.days.length - 1].day : null;
+  if (pick) proCalDay(pick); else $("#pro-cal-detail").innerHTML = "";
+}
+function proCalendar() {
+  return `<p class="small muted">Every market day: the Pro account (big number, green / red) next to the main account on the same segment (small). Click a day for its Pro trades and why, what Pro missed, the market and the AI review.</p>
+    <div class="cal-bar"><button class="btn" id="pro-cal-prev" aria-label="Previous month">‹</button><b id="pro-cal-month" style="min-width:130px;text-align:center"></b><button class="btn" id="pro-cal-next" aria-label="Next month">›</button></div>
+    <div id="pro-cal-sum"></div><div id="pro-cal-grid"><p class="muted">Loading…</p></div><div id="pro-cal-detail"></div>`;
+}
+function proCalInit() {
+  PRO.calSeg = PRO.seg;
+  const shift = (n) => { const [y, m] = (PRO.calMonth || new Date().toISOString().slice(0, 7)).split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); proCalLoad(d.toISOString().slice(0, 7)); };
+  $("#pro-cal-prev").onclick = () => shift(-1);
+  $("#pro-cal-next").onclick = () => shift(1);
+  proCalLoad(PRO.calMonth || (PRO.day || (PRO.data && PRO.data.day) || new Date().toISOString()).slice(0, 7));
+}
 function proBody(d) {
   const s = d.signals || {}, r = d.rules || {}, ex = r.exit || {};
   const list = (xs, strong, none) => `<ul class="pro-list">${(xs || []).map((x) => proSig(x, strong)).join("") || `<li class="muted small">${none}</li>`}</ul>`;
@@ -4405,6 +4521,7 @@ function proBody(d) {
   if (t === "watch") return `<p class="small muted">Score 75–85: worth watching, not bought. A watch signal that keeps getting stronger shows up in Strong.</p>${list(s.medium, false, `Nothing to watch on ${esc(d.day)}.`)}`;
   if (t === "recorded") return `<p class="small muted">Every other Trend Rider signal Pro scored below 75 on ${esc(d.day)}: recorded and graded, so the Checks tab can tell which checks really work.</p>${list(s.low, false, "Nothing recorded on this day.")}`;
   if (t === "trades") return `${proTrades(d.trades)}<p class="small muted">Rules: strong only · 1 lot · no same-day-expiry buy after ${esc(r.expiry_cutoff || "")} · ${esc(String(r.cooloff_min || 0))} min cool-off after an exit on the same symbol and side · Trend Rider exit + profit lock (at +${esc(String(ex.lock_premium_pct || "–"))}% keep +${esc(String(ex.lock_keep_pct || "–"))}%).</p>`;
+  if (t === "calendar") return proCalendar();
   if (t === "checks") return proFactors(d.factors);
   if (t === "learning") return proLearning(d);
   return `<p class="small muted">Score 85+ with 3+ different groups of checks agreeing: the Pro paper account may buy it (Trades tab).</p>${list(s.strong, true, `No strong signal on ${esc(d.day)}.`)}`;
@@ -4414,12 +4531,14 @@ function proDraw() {
   if (!d) return;
   const s = d.signals || {};
   const n = { strong: (s.strong || []).length, watch: (s.medium || []).length, recorded: (s.low || []).length,
-    trades: (d.trades || {}).open ? `${(d.trades.open || []).length} open` : "", checks: (d.factors || {}).n || "", learning: "" };
+    trades: (d.trades || {}).open ? `${(d.trades.open || []).length} open` : "", calendar: "", checks: (d.factors || {}).n || "", learning: "" };
   $("#pro-tabs").innerHTML = PRO_TABS.map(([k, l]) => `<button data-tab="${k}" aria-pressed="${PRO.tab === k}">${l}${n[k] !== "" && n[k] != null ? ` <small class="muted">${n[k]}</small>` : ""}</button>`).join("");
-  $("#pro-tabs").querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => { PRO.tab = b.dataset.tab; LS.set("proTab", PRO.tab); proDraw(); });
+  $("#pro-tabs").querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => { PRO.tab = b.dataset.tab; LS.set("proTab", PRO.tab); PRO.calSeg = null; proDraw(); });
   const days = d.days && d.days.length ? d.days : [d.day];
   $("#pro-day").innerHTML = days.map((x) => `<option value="${esc(x)}" ${x === d.day ? "selected" : ""}>${esc(x)}</option>`).join("");
+  if (PRO.tab === "calendar" && $("#pro-cal-grid") && PRO.calSeg === PRO.seg) return;      // the 15 s refresh keeps the open day
   $("#pro-body").innerHTML = proBody(d);
+  if (PRO.tab === "calendar") proCalInit();
   qApply(); qStream("pro");
 }
 async function pagePro() {
@@ -4429,7 +4548,7 @@ async function pagePro() {
   PRO.tab = q.get("tab") || PRO.tab || LS.get("proTab", "strong");
   if (!PRO_TABS.some(([k]) => k === PRO.tab)) PRO.tab = "strong";
   PRO.day = q.get("day") || "";
-  PRO.data = null;
+  PRO.data = null; PRO.calSeg = null;
   main.innerHTML = `<h1 class="page-title">Pro <span class="pill">on trial</span></h1>
     <p class="muted" style="margin-top:0">Option buying only. Every check votes together on each Trend Rider signal; <b>strong</b> (85+ and 3+ different groups agreeing) is bought by the Pro paper account, <b>watch</b> (75–85) and the rest are kept here. Paper only: the main account, Focus and Telegram don't change.</p>
     <div class="pro-bar"><div class="seg" role="group" aria-label="Segment"><button data-seg="index" aria-pressed="${PRO.seg === "index"}">Index</button><button data-seg="stock" aria-pressed="${PRO.seg === "stock"}">Stocks</button></div>

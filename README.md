@@ -118,6 +118,27 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 3.03: Pro's own Calendar tab, day by day next to the main account (24 Nov 2026)
+- **Mandeep (24 Nov, 15:11):** "also make the separate calendar tab inside pro and so we can compare it with main one. add
+  all the things as per the pro the main has".
+- **Pro page › Calendar** (Index and Stocks each have their own):
+  - Each market day is green or red by the Pro account's net. Main's number for the **same segment** (its index trades
+    for Pro · Index, its stock trades for Pro · Stocks) is shown small in the same cell, on a phone too.
+  - Month table: Pro, Main on the same segment and Main overall. Each row has net, trades, win % and green / red days.
+    Below it, Pro minus Main for the month.
+  - Click a day to see the same things the main Day calendar shows, for Pro only:
+    - Pro vs Main for that day, and a link to Main's full day.
+    - The day's Strong / Watch / Recorded counts, each linking to its tab.
+    - The market and every Pro trade, with its segment and why it made or lost money.
+    - The rule checks that cost money, what Pro missed, and the AI review (or the button to write it).
+- **Gun only, no bullet:**
+  - `daybook.calendar` splits each account into index / stock (`accounts[x].seg`).
+  - `daybook.build(..., accounts=[...])` builds one day for chosen accounts only.
+  - API: `/api/live/day/{day}?acct=pro_index` (unknown account → 400). The cache keeps each account set separate.
+- Nothing else changes: the main Day calendar, the main account, Focus, alerts and Telegram stay the same.
+- Tests: `tests/test_pro.py` (13). Full suite passed. Headless check on desktop and phone, light and dark: no console
+  errors, no sideways scroll.
+
 ## 3.02: Pro page in tabs: everything Pro watches (24 Nov 2026)
 - **Mandeep (24 Nov, 14:49):** "Pro mein jo alerts aayege jo bhi observery things hai sabke tabs banao pro mein."
 - **Pro page, Index / Stocks, a day list (the latest 20 days with signals), and six tabs:**

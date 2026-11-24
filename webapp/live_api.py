@@ -1121,7 +1121,7 @@ def live_calendar(month: str | None = None):
 
 
 @router.get("/api/live/day/{day}")
-def live_day(day: str):
+def live_day(day: str, acct: str | None = None):
     """One day: the market, every trade of every account with its segment and why it made or lost money, what was
     missed, the lessons and the AI reviews."""
     from live import daybook
@@ -1129,16 +1129,23 @@ def live_day(day: str):
         raise HTTPException(400, "day is YYYY-MM-DD")
     from webapp import memo
     e = engine()
+    accts = None
+    if acct:                                             # 3.03: only these accounts (Pro's calendar)
+        names = {"main", *daybook.book_names()}
+        accts = sorted({a.strip() for a in acct.split(",") if a.strip()})
+        if not accts or any(a not in names for a in accts):
+            raise HTTPException(400, f"unknown account (one of {', '.join(sorted(names))})")
     live_ = day == e.session_day().isoformat() and e.paper
     try:                                                 # 3.00: the same answer until a trade of that day changes
         fp = list(e.store._read("SELECT COUNT(*), COALESCE(SUM(net), 0), MAX(id), COALESCE(SUM(exit), 0) FROM paper "
                                 "WHERE day=?", (day,), one=True) or [])
     except Exception:
         fp = None
+    kw = {"accounts": accts} if accts else {}
     if fp is not None and not live_:
-        b = memo.memo(f"daybook|{day}", fp, lambda: e.day_book(day), ttl=900)
+        b = memo.memo(f"daybook|{day}|{','.join(accts or [])}", fp, lambda: e.day_book(day, **kw), ttl=900)
     else:
-        b = e.day_book(day, open_pnl=_open_today(e) if live_ else None)
+        b = e.day_book(day, open_pnl=_open_today(e) if live_ else None, **kw)
     b = dict(b)
     b["reviews"] = daybook.reviews(e.data_dir, day)
     b["reviewing"] = bool(getattr(e, "_day_review_lock", None) and e._day_review_lock.locked())
