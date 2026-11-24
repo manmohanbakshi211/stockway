@@ -1074,6 +1074,7 @@ function drawSymChart(d) {
 }
 
 /* ---------------- page: Alerts history */
+const AL_PAGE = 150;
 async function pageAlerts() {
   stopPageTimer();
   // 2.29: Act now → Focus (with the other important ones) → All; type chips filter; choices remembered
@@ -1102,7 +1103,19 @@ async function pageAlerts() {
       ${Object.entries(byKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<button class="chip${kind === k ? " on" : ""}" data-k="${esc(k)}" aria-pressed="${kind === k}">${esc(KIND[k] || k)} ${n}</button>`).join("")}
       ${kind && !byKind[kind] ? `<button class="chip on" data-k="${esc(kind)}" aria-pressed="true">${esc(KIND[kind] || kind)} 0</button>` : ""}</div>
     ${d.view === "shadow" && d.shadow ? `<p class="small muted" style="margin:0 0 8px"><span class="pill">shadow</span> What the challenger <b>${esc(d.shadow.label)}</b> picks (or would have picked, on days before it existed). On trial only: the current Focus is still the one that reaches you. <a href="#/scorecard">Compare them →</a></p>` : ""}
-    <ul class="alerts">${shown.map((a) => alertItem(a, true)).join("") || `<li class="muted" style="padding:18px">No alerts for this filter.</li>`}</ul>`;
+    <ul class="alerts" id="al-list">${shown.slice(0, AL_PAGE).map((a) => alertItem(a, true)).join("") || `<li class="muted" style="padding:18px">No alerts for this filter.</li>`}</ul>
+    ${shown.length > AL_PAGE ? `<div class="btn-row" style="margin:10px 0"><button class="btn" id="al-more">Show ${Math.min(AL_PAGE, shown.length - AL_PAGE)} more <small class="muted">(${shown.length - AL_PAGE} left)</small></button></div>` : ""}`;
+  {                                                       // 3.00: 150 at a time (all ~5,000 at once froze the page)
+    let n = AL_PAGE;
+    const more = $("#al-more");
+    if (more) more.onclick = () => {
+      const next = shown.slice(n, n + AL_PAGE); n += next.length;
+      $("#al-list").insertAdjacentHTML("beforeend", next.map((a) => alertItem(a, true)).join(""));
+      bindAlertButtons($("#al-list"));
+      if (n >= shown.length) more.parentElement.remove();
+      else more.innerHTML = `Show ${Math.min(AL_PAGE, shown.length - n)} more <small class="muted">(${shown.length - n} left)</small>`;
+    };
+  }
   $("#al-day").onchange = (e) => go({ day: e.target.value });
   main.querySelectorAll("[data-v]").forEach((b) => b.onclick = () => go({ view: b.dataset.v }));
   main.querySelectorAll("[data-k]").forEach((b) => b.onclick = () => go({ kind: b.dataset.k }));
@@ -4323,6 +4336,83 @@ async function pageCalendar() {
 }
 Object.assign(PAGES, { lens: pageLens, board: pageBoard });
 Object.assign(PAGES, { calendar: pageCalendar });
+
+/* ---------------- 3.01: Stockway Pro v1 (on trial): option buying, every check voting together */
+const PRO = { seg: "index" };
+const PRO_WORDS = { breakout: "Breakout", trend_day: "Trend day", trend: "Trend", momentum: "Momentum", structure: "Levels / lines",
+  vwap: "VWAP", flow: "Order flow / OI", option: "Option (premium / IV)", ema: "EMA 5 / 10 videos", chase: "Not chasing",
+  move_vs_decay: "Move vs decay", tradability: "Tradable option", strength: "Strength vs Nifty", ghanshyam: "Ghanshyam's points",
+  strategies: "Other strategies / patterns", mindgame: "MindGame (all)", forecast: "Candle forecast", pro_mind: "MindGame (proven 3 + 1)",
+  daytype: "Day type (09:45)" };
+const proW = (k) => PRO_WORDS[k] || k;
+function proSig(s, strong) {
+  const dir = s.dir === "up" ? `<span class="up">CALL ▲</span>` : `<span class="down">PUT ▼</span>`;
+  const res = s.result ? ` · ${esc(s.result)} ${s.r != null ? `<b class="${s.r >= 0 ? "up" : "down"}">${s.r > 0 ? "+" : ""}${Number(s.r).toFixed(2)}R</b>` : ""}` : "";
+  const why = Object.entries(s.why || {}).map(([k, v]) => `${esc(proW(k))}: ${esc(v)}`).join(" · ");
+  return `<li class="pro-sig"><div class="pro-sig-h"><b>${esc(s.sym)}</b> ${dir} <span class="pill ${strong ? "good" : ""}">${Number(s.score).toFixed(0)}/100</span>
+      <small class="muted">${esc(s.at)}${s.trigger ? ` · ${esc(s.trigger)}` : ""}${s.stop != null ? ` · stop ${fx(s.stop)}` : ""}${res}</small></div>
+    <div class="small"><span class="muted">With:</span> ${(s.with || []).map((k) => esc(proW(k))).join(", ") || "–"}
+      ${(s.against || []).length ? ` · <span class="muted">Against:</span> <span class="down">${s.against.map((k) => esc(proW(k))).join(", ")}</span>` : ""}
+      ${(s.groups || []).length ? ` · <span class="muted">${s.groups.length} group${s.groups.length > 1 ? "s" : ""}</span>` : ""}</div>
+    ${why ? `<div class="small muted">${why}</div>` : ""}</li>`;
+}
+function proTrades(p) {
+  const open = p.open || [], closed = p.closed || [];
+  const row = (t, live) => `<tr ${live && t.opt_key ? `data-qk="${esc(t.opt_key)}" data-entry="${t.entry}" data-qty="${t.qty || 0}" data-dir="${t.dir || 1}"` : ""}>
+      <td><b>${esc(t.label || t.sym)}</b><br><small class="muted">${t.entry_ts ? hms(t.entry_ts) : ""}${t.reason ? ` · ${esc(t.reason)}` : ""}</small></td>
+      <td class="r nw">${fx(t.entry)}</td><td class="r nw" data-q="now">${fx(live ? t.last : t.exit)}</td>
+      <td class="r nw ${(live ? t.unreal : t.net) >= 0 ? "up" : "down"}" data-q="pnl"><b>${rupees(live ? t.unreal : t.net)}</b></td></tr>`;
+  const net = closed.reduce((s, t) => s + (t.net || 0), 0) + open.reduce((s, t) => s + (t.unreal || 0), 0);
+  return `<p class="small">Today: <b class="${net >= 0 ? "up" : "down"}">${rupees(net)}</b> · ${open.length} open · ${closed.length} closed</p>
+    ${open.length || closed.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>Trade</th><th class="r">Entry</th><th class="r">Now / exit</th><th class="r">P&amp;L</th></tr></thead>
+      <tbody>${open.map((t) => row(t, true)).join("")}${closed.map((t) => row(t, false)).join("")}</tbody></table></div>`
+      : `<p class="muted small">No Pro trade yet. It buys only STRONG signals (above).</p>`}`;
+}
+function proFactors(f) {
+  if (!f || !f.n) return `<p class="muted small">No graded Pro signals yet: this fills in after the first market days (each signal is graded by its own exit).</p>`;
+  const t = f.tiers || {};
+  const tier = (k, l) => t[k] ? `<td>${l}</td><td class="r">${t[k].n}</td><td class="r ${t[k].avg_r >= 0 ? "up" : "down"}">${t[k].avg_r > 0 ? "+" : ""}${t[k].avg_r}R</td><td class="r">${Math.round((t[k].win || 0) * 100)}%</td>` : `<td>${l}</td><td class="r">0</td><td></td><td></td>`;
+  return `<div class="table-wrap"><table class="tbl"><thead><tr><th>Tier</th><th class="r">Signals</th><th class="r">Avg</th><th class="r">Won</th></tr></thead>
+      <tbody><tr>${tier("strong", "Strong")}</tr><tr>${tier("medium", "Watch")}</tr><tr>${tier("low", "Low")}</tr></tbody></table></div>
+    <div class="table-wrap"><table class="tbl"><thead><tr><th>Check</th><th class="r">With</th><th class="r">Avg when with</th><th class="r">Against</th><th class="r">Avg when against</th><th>Verdict</th></tr></thead>
+      <tbody>${(f.factors || []).map((r) => `<tr><td>${esc(proW(r.factor))}</td><td class="r">${r.n_with}</td>
+        <td class="r ${r.avg_with >= 0 ? "up" : "down"}">${r.avg_with != null ? `${r.avg_with > 0 ? "+" : ""}${r.avg_with}R` : "–"}</td><td class="r">${r.n_against}</td>
+        <td class="r ${r.avg_against >= 0 ? "up" : "down"}">${r.avg_against != null ? `${r.avg_against > 0 ? "+" : ""}${r.avg_against}R` : "–"}</td>
+        <td class="small ${r.verdict === "lined up and worked" ? "up" : r.verdict === "did not help" ? "down" : "muted"}">${esc(r.verdict)}</td></tr>`).join("")}</tbody></table></div>
+    <p class="small muted">${f.n} graded signals since ${esc(f.since)}. R = the move in units of the setup's own stop distance.</p>`;
+}
+async function pagePro() {
+  stopPageTimer();
+  const q = new URLSearchParams(location.hash.split("?")[1] || "");
+  if (q.get("seg")) PRO.seg = q.get("seg") === "stock" ? "stock" : "index";
+  main.innerHTML = `<h1 class="page-title">Pro <span class="pill">on trial</span></h1>
+    <p class="muted" style="margin-top:0">Option buying only. Every check votes together on each Trend Rider signal; <b>strong</b> (85+ and 3+ different groups agreeing) is bought by the Pro paper account, <b>watch</b> (75–85) waits here. Paper only: the main account, Focus and Telegram don't change.</p>
+    <div class="seg" role="group" aria-label="Segment"><button data-seg="index" aria-pressed="${PRO.seg === "index"}">Index</button><button data-seg="stock" aria-pressed="${PRO.seg === "stock"}">Stocks</button></div>
+    <div id="pro-body"><p class="muted">Loading…</p></div>`;
+  main.querySelectorAll("[data-seg]").forEach((b) => b.onclick = () => { location.hash = `#/pro?seg=${b.dataset.seg}`; });
+  const seg = PRO.seg;
+  const tick = async (first) => {
+    if (state.page !== "pro" || PRO.seg !== seg) return;
+    try {
+      const [d, p] = await Promise.all([api(`/api/live/pro?seg=${seg}`), api(`/api/live/paper?book=${seg === "index" ? "pro_index" : "pro_stocks"}`).catch(() => ({}))]);
+      if (state.page !== "pro" || PRO.seg !== seg) return;
+      const s = d.signals || {}, r = d.rules || {}, ex = r.exit || {};
+      $("#pro-body").innerHTML = `
+        <section class="pro-block"><h2>Strong <small class="muted">${esc(d.day)}</small></h2>
+          <ul class="pro-list">${(s.strong || []).map((x) => proSig(x, true)).join("") || `<li class="muted small">No strong signal ${d.day ? "on " + esc(d.day) : "yet"}.</li>`}</ul></section>
+        <section class="pro-block"><h2>${seg === "index" ? "Pro · Index" : "Pro · Stocks"} paper account</h2>${proTrades(p || {})}
+          <p class="small muted">Rules: strong only · 1 lot · no same-day-expiry buy after ${esc(r.expiry_cutoff || "")} · ${esc(String(r.cooloff_min || 0))} min cool-off after an exit on the same symbol and side · Trend Rider exit + profit lock (at +${esc(String(ex.lock_premium_pct || "–"))}% keep +${esc(String(ex.lock_keep_pct || "–"))}%).</p></section>
+        <section class="pro-block"><h2>Watch <small class="muted">${(s.medium || []).length} · ${s.low || 0} low not shown</small></h2>
+          <ul class="pro-list">${(s.medium || []).map((x) => proSig(x, false)).join("") || `<li class="muted small">Nothing to watch.</li>`}</ul></section>
+        <section class="pro-block"><h2>Which checks lined up and worked <small class="muted">last 20 market days</small></h2>${proFactors(d.factors)}
+          <p class="small muted">${d.learn && d.learn.challenger ? `Weights being tested since ${esc(d.learn.since)} (used only if they beat today's on 5+ new days): ${esc(Object.entries(d.learn.challenger).map(([k, v]) => `${proW(k)} ${v}`).join(", "))}.` : "Weights learn from new days only: a check's weight moves with 100+ graded signals, and only after the new weights beat the old ones on 5 market days they never saw."}</p></section>`;
+      qApply(); qStream("pro");
+    } catch (e) { if (first) $("#pro-body").innerHTML = `<p class="muted">${esc(e.message)}. Trying again…</p>`; }
+    if (state.page === "pro" && PRO.seg === seg) L.pageTimer = setTimeout(() => tick(false), 15000);
+  };
+  tick(true);
+}
+Object.assign(PAGES, { pro: pagePro });
 
 /* ---------------- 2.30: amounts the way people write them ("40k", "1.5 lakh", "2,00,000") */
 function parseAmount(text) {

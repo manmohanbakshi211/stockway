@@ -237,7 +237,7 @@ class PaperBook:
         if plan and t["und_entry"] and plan.get("style") == "rider" and plan.get("stop") is not None and plan.get("atr"):
             import json as _json                          # 2.85: Trend Rider's own exit (lab/rider_exit.py)
             from lab.rider_exit import RiderPlan, exit_cfg
-            ec = exit_cfg()
+            ec = {**exit_cfg(), **(plan.get("exit") or {})}    # 3.01: an account's own exit settings (Pro: profit lock)
             d_ = 1 if opt["side"] == "CE" else -1
             if d_ * (t["und_entry"] - float(plan["stop"])) <= 0:
                 return self._skip("price already through the setup's stop")
@@ -361,7 +361,7 @@ class PaperBook:
                     lp = mem[1] if mem and mem[0] == t["plan"] else RiderPlan.from_dict(pj)
                     why = lp.check(und.ltp if und and und.ltp else None, inst.ltp, now.timestamp())
                     reason = {"stop": "chart stop", "premium stop": "stop loss", "trail": "trailing stop",
-                              "no move": "no move", "time": "time limit"}.get(why) if why else None
+                              "no move": "no move", "time": "time limit", "profit lock": "profit lock"}.get(why) if why else None
                 else:
                     from lab.exits import LivePlan
                     lp = LivePlan.from_dict(pj)

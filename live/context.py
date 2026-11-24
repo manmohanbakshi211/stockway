@@ -292,8 +292,8 @@ def global_markets(log=print) -> list:
     except ImportError:
         return []
     try:
-        df = yf.download(list(GLOBAL.values()), period="5d", interval="1d", progress=False, group_by="ticker",
-                         auto_adjust=False, threads=4)
+        from .world import _yf                       # 3.00: one thread, one download at a time
+        df = _yf(yf, list(GLOBAL.values()), period="5d", interval="1d", progress=False, group_by="ticker", auto_adjust=False)
     except Exception as e:
         log(f"Global markets failed: {e}")
         return []

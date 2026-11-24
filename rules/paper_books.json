@@ -153,6 +153,44 @@
     "max_lots": 1
    },
    "section": "rider"
+  },
+  "pro_index": {
+   "name": "Pro · Index",
+   "short": "Stockway Pro v1: strong index signals only, 1 lot, trail + profit lock",
+   "explain": "3.01 Stockway Pro v1 (Mandeep, 24 Nov 2026: option buying only, every input voting together, strong checks). Buys only Trend Rider signals that Pro scores STRONG (85+ with 3+ different groups of checks agreeing; rules/pro.json), 1 lot, with the money you set for the app. Not after 11:00 on a same-day expiry; not within 15 minutes of an exit on the same symbol and side. Exit: Trend Rider's (stop beyond the broken level on a 5-minute close, +1R stop to entry, ATR trail, no-move and 15:10 exits, -35% emergency) plus a profit lock: once the option is +50%, out if it falls back to +25%. Paper only, on trial: compare it with the main account day by day on the Day calendar. This account: indices (Nifty, Bank Nifty, Fin Nifty, Midcap Nifty...).",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "rider": true,
+    "pro": true,
+    "segment": "index"
+   },
+   "exit_style": "rider",
+   "paper": {
+    "max_open": 2,
+    "max_trades_day": 6,
+    "max_lots": 1
+   },
+   "section": "pro"
+  },
+  "pro_stocks": {
+   "name": "Pro · Stocks",
+   "short": "Stockway Pro v1: strong F&O stock signals only, 1 lot, trail + profit lock",
+   "explain": "3.01 Stockway Pro v1 (Mandeep, 24 Nov 2026: option buying only, every input voting together, strong checks). Buys only Trend Rider signals that Pro scores STRONG (85+ with 3+ different groups of checks agreeing; rules/pro.json), 1 lot, with the money you set for the app. Not after 11:00 on a same-day expiry; not within 15 minutes of an exit on the same symbol and side. Exit: Trend Rider's (stop beyond the broken level on a 5-minute close, +1R stop to entry, ATR trail, no-move and 15:10 exits, -35% emergency) plus a profit lock: once the option is +50%, out if it falls back to +25%. Paper only, on trial: compare it with the main account day by day on the Day calendar. This account: F&O stocks.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "rider": true,
+    "pro": true,
+    "segment": "stock"
+   },
+   "exit_style": "rider",
+   "paper": {
+    "max_open": 3,
+    "max_trades_day": 8,
+    "max_lots": 1
+   },
+   "section": "pro"
   }
  }
 }

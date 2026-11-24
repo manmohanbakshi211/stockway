@@ -353,6 +353,19 @@ def static_checks(cfg: dict | None = None) -> list:
     except Exception as e:
         dr_ok, dr_det = False, str(e)[:160]
     out.append(_c("day_review", "Day calendar and AI day review (2.98)", dr_ok, dr_det))
+    try:                                                  # 3.01: Stockway Pro v1 (on trial)
+        from . import pro as _pro
+        from .books import cfg as _bcfg
+        pc_ = _pro.cfg()
+        bk_ = (_bcfg().get("books") or {})
+        pro_ok = bool(pc_.get("weights")) and all(b in bk_ and (bk_[b].get("pick") or {}).get("pro") for b in ("pro_index", "pro_stocks"))
+        st_ = _pro._state(Path(__file__).resolve().parents[1] / "data")
+        pro_det = (f"strong {pc_.get('strong')}+ with {pc_.get('min_groups')}+ groups -> Pro · Index / Pro · Stocks (paper, 1 lot); "
+                   f"watch {pc_.get('medium')}+; weights learn after {(pc_.get('learn') or {}).get('at')} from new days only"
+                   + (f"; testing new weights since {st_.get('since')}" if st_.get("challenger") else ""))
+    except Exception as e:
+        pro_ok, pro_det = False, str(e)[:160]
+    out.append(_c("pro", "Stockway Pro v1: option buying, every check voting together (3.01, on trial)", pro_ok, pro_det))
     try:                                                  # 2.83: the multiverse's strict pick rule, in shadow
         from lab import multiverse as _mvx
         src_ = _mvx.strict_rule(_mvx.cfg())

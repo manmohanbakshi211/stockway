@@ -325,7 +325,13 @@ class Books:
             if p.get("syms") and a["sym"] not in p["syms"]:
                 continue
             try:
-                if not a.get("option"):
+                pro_why = None
+                if p.get("pro"):                             # 3.01: Pro accounts: strong only, segment, expiry, cool-off
+                    from . import pro as _pro
+                    pro_why = _pro.block(p, a, now, self.store, bk.source)
+                if pro_why:
+                    why = pro_why
+                elif not a.get("option"):
                     why = "no option price for this signal"
                 elif r.get("stop") is None or not r.get("atr"):
                     why = "no setup stop / ATR on the signal"
@@ -333,10 +339,15 @@ class Books:
                     why = "no live price for the underlying"
                 else:
                     d = dict(a.get("data") or {})
+                    ex_ = p.get("exit")
+                    if ex_ is None and p.get("pro"):                 # 3.01: the profit lock of rules/pro.json
+                        from . import pro as _pro
+                        ex_ = _pro.cfg().get("exit") or None
                     d.update(risk={"verdict": "PASS", "lots": 1},
                              factory={"plan": {"style": "rider", "R": abs(float(a.get("price") or 0) - float(r["stop"])),
                                                "stop": float(r["stop"]), "atr": float(r["atr"]),
-                                               **({"ema": float(r["ema10"])} if r.get("ema10") is not None else {})}})
+                                               **({"ema": float(r["ema10"])} if r.get("ema10") is not None else {}),
+                                               **({"exit": dict(ex_)} if ex_ else {})}})
                     a2 = {**a, "data": d, "severity": max(1, int(a.get("severity") or 1)),
                           "title": (a.get("title") or "Trend Rider")[:200]}
                     before = dict(bk.skipped)

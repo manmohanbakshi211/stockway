@@ -31,6 +31,8 @@ from radar.config import ROOT, SECRET_KEYS, editable_values, load_config, save_u
 
 STATIC = Path(__file__).resolve().parent / "static"
 app = FastAPI(title="Bank Nifty Radar", docs_url=None, redoc_url=None)
+from webapp.fastjson import FastJSONRoute         # noqa: E402  3.00: JSON made in the worker thread, not the event loop
+app.router.route_class = FastJSONRoute
 try:                                    # 2.50 (Mandeep #7, speed): big JSON answers go compressed (the alerts list is
     from starlette.middleware.gzip import GZipMiddleware      # ~2.7 MB plain, a few hundred KB zipped; phone / tunnel)
     app.add_middleware(GZipMiddleware, minimum_size=4096, compresslevel=5)
@@ -303,20 +305,35 @@ _VERSION_CHECK = {"at": 0.0, "result": None}
 RUNNING_VERSION = app_version()       # what this running app was started with
 
 
+def _remote_head():
+    import subprocess
+    remote = None
+    try:
+        out = subprocess.run(["git", "ls-remote", "origin", "HEAD"], cwd=ROOT, capture_output=True, text=True,
+                             timeout=12, env={**__import__("os").environ, "GIT_TERMINAL_PROMPT": "0"})
+        remote = out.stdout.split()[0] if out.returncode == 0 and out.stdout.strip() else None
+    except Exception:
+        remote = None
+    _VERSION_CHECK.update(at=time.time(), result=remote, busy=False)
+
+
+_DISK_VERSION = {"at": 0.0, "v": None}
+
+
 @app.get("/api/version")
 def version_check(force: bool = False):
-    """Compare this copy with the latest version on GitHub (checked at most every 15 minutes)."""
-    import subprocess
-    disk = app_version()
-    if force or time.time() - _VERSION_CHECK["at"] > 900:
-        remote = None
-        try:
-            out = subprocess.run(["git", "ls-remote", "origin", "HEAD"], cwd=ROOT, capture_output=True, text=True,
-                                 timeout=12, env={**__import__("os").environ, "GIT_TERMINAL_PROMPT": "0"})
-            remote = out.stdout.split()[0] if out.returncode == 0 and out.stdout.strip() else None
-        except Exception:
-            remote = None
-        _VERSION_CHECK.update(at=time.time(), result=remote)
+    """Compare this copy with the latest version on GitHub (checked at most every 15 minutes).
+    3.00: the copy on disk is read at most once a minute (it started git for every page's call: ~0.65 s each), and the
+    GitHub check runs in the background (a page never waits up to 12 s for it); force=1 still waits for it."""
+    if force or time.time() - _DISK_VERSION["at"] > 60 or not _DISK_VERSION["v"]:
+        _DISK_VERSION.update(at=time.time(), v=app_version())
+    disk = _DISK_VERSION["v"]
+    if force:
+        _remote_head()
+    elif time.time() - _VERSION_CHECK["at"] > 900 and not _VERSION_CHECK.get("busy"):
+        _VERSION_CHECK["busy"] = True
+        _VERSION_CHECK["at"] = time.time()
+        threading.Thread(target=_remote_head, daemon=True, name="version-check").start()
     remote = _VERSION_CHECK["result"]
     running = RUNNING_VERSION or {}
     if not running.get("full"):
@@ -327,6 +344,8 @@ def version_check(force: bool = False):
         state = "restart"           # downloaded but this window still runs the old one
     elif remote:
         state = "latest"
+    elif _VERSION_CHECK.get("busy"):
+        state = "checking"          # 3.00: the GitHub check is still running in the background
     else:
         state = "offline"
     return {**running, "state": state, "checked_at": _VERSION_CHECK["at"], "latest": remote[:7] if remote else None}

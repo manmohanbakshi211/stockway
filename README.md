@@ -118,6 +118,57 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 3.01: Stockway Pro v1, option buying with every check voting together (24 Nov 2026, on trial)
+- **Mandeep (24 Nov):** "jo rules bane hue hain vo sell wale hain ... humein option buing ka set-up rakhna hai toh vo rules
+  change karke buying ke banao. ab tak ke inputs or sabhi factors ke sath khud banao jo pro v1 mein jaise tum plan kar
+  rhe ho." Checked on the Mac: of the 115 live Strategy Lab rules, 113 are short straddles (sells) and 2 weak expiry-day
+  put buys. They stay recorded and graded (add, don't replace); Pro is the buying setup.
+- **Gun / bullet split:** gun = `live/pro.py` (score, tiers, the two new votes, account rules, after-market report,
+  learning, the Pro page's data), the profit lock in `lab/rider_exit.py` (off unless an account sets it), the Pro page;
+  bullets = `rules/pro.json` (weights, groups, thresholds, MindGame bullets, day-type lifts, expiry cut-off, cool-off,
+  profit lock, learning limits) and two accounts in `rules/paper_books.json`.
+- **How it decides:** Trend Rider's setup (every index and F&O stock, each closed 5-minute bar) passes; every factor has
+  voted (breakout, trend day, trend, momentum, levels / lines, VWAP, order flow / OI, option, the EMA 5 / 10 videos,
+  chase, move vs decay, tradability, strength vs Nifty, Ghanshyam's points, the other strategies / patterns / setups
+  of the last 15 minutes). Pro adds MindGame's proven behaviours only (gap booking, straight run = trap, 15-minute range
+  break; taken_back turned round) and the 09:45 day-type forecast; the candle forecast and the all-bullet MindGame lean
+  get weight 0. Score 0-100; price-made checks count as one group. **Strong** = 85+ and 3+ groups agreeing ->
+  bought; **watch** = 75-85 -> the Pro page; low -> recorded. Every signal keeps its votes.
+- **Pro accounts (paper, 1 lot, the app's capital):** Pro · Index and Pro · Stocks, strong signals of their segment
+  only; no same-day-expiry buy after 11:00; 15-minute cool-off after an exit on the same symbol and side; exit = Trend
+  Rider's (stop on 5-minute closes, +1R to entry, ATR trail, no-move, 15:10, -35% emergency) + profit lock (once +50%,
+  out at +25%). On 23 Nov's real trades the lock alone was worth ~+Rs27,000 and the cool-off ~+Rs36,000 (one day, and
+  the cool-off came from that day: to be proved on new days).
+- **After the close:** "Which checks lined up and worked": per check, the graded signals when it voted with vs
+  against (average R, wins), per tier; also in the AI day review (pro_checks).
+- **Learning from new days only (16:05, market days):** a check's weight moves only with 100+ graded signals, at most
+  25%, as a challenger; it is used only if its strong signals beat the current ones on the next 5 market days (20+
+  strong signals) that it never saw. No backtest.
+- **New: Pro (trial)** in the menu, tabs Index / Stocks: strong signals, the account, watch list, the checks report.
+  System page: "Stockway Pro v1" check.
+- Not changed: the main account, Focus, alerts, Telegram, the Trend Rider account (its exit is exactly as before).
+- Tests: `tests/test_pro.py` (11).
+
+## 3.00: Start-up and screen freezes (24 Nov 2026)
+- **Mandeep (24 Nov):** "pages load mein time lagta hai jab app start bhi rahe or live market ... kabhi kabhi paper
+  trade ki screen number freeze ho jaate hain." Measured on the Mac (2.99, holiday):
+  - **The scenario engine's daily test ran inside the app right after a start** (pattern study 19 s a symbol + 250
+    sessions replayed a symbol, ~80 s of the one Python core): Paper calls took 10.7-16 s in the first 25 s after the
+    00:44 start. **Fix:** it runs in its own low-priority process (`lab/proc.py` job "scenario"), paused in market
+    hours; same code, same file.
+  - **49 Yahoo download threads were stuck** (threads=4 downloads start worker threads that never end; Yahoo slow).
+    **Fix:** one thread, one download at a time, 20 s timeout (`live/world.py` _yf).
+  - **Page answers were turned into JSON on the event loop**, the thread that also streams live prices and quotes
+    (Paper numbers stood still while e.g. the Alerts page's ~450 KB answer was encoded). **Fix:** `webapp/fastjson.py`
+    encodes in the worker thread; the bytes are the same as before.
+  - **/api/version started git for every call** (~0.65 s; the GitHub check up to 12 s): read once a minute, the GitHub
+    check in the background ("Checking for updates…").
+  - **The Scorecard (1.5-2 s) and the day page (1-1.4 s) were worked out on every call:** kept 60 s / until that day's
+    trades change.
+  - **The Alerts page drew all ~5,000 alerts at once:** 150 at a time, "Show more".
+- Lab regression: identical by construction (no file of the Lab table build changed).
+- Tests: `tests/test_speed_300.py` (8); full suite.
+
 ## 2.99: Why it was still slow: measured inside the running app, five causes fixed (23 Nov 2026)
 - **Mandeep (23 Nov, 15:03, on 2.96): "why the system is still slow ... check thoroughly"** (Speed panel: Alerts 3.4-5.2 s,
   chart / multi-timeframe / Fortune 3.6 s together at 13:35, System page 2.8 s, Paper cards ~2 s). Read from the app's

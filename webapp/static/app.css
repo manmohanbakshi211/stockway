@@ -939,3 +939,11 @@ table.gh-acc details summary { cursor: pointer; }
   .cal-day .n { font-size: 12.5px; }
   .cal-day .x, .cal-day .tags { display: none; }
 }
+
+/* 3.01: Stockway Pro page */
+.pro-block { margin: 18px 0 6px; }
+.pro-block h2 { font-size: 1.05rem; margin: 0 0 8px; }
+.pro-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.pro-sig { border: 1px solid var(--rule); border-radius: var(--radius); padding: 8px 10px; background: var(--paper); }
+.pro-sig-h { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.pill.good { background: var(--up-soft); color: var(--up); }

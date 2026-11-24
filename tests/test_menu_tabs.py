@@ -11,7 +11,7 @@ LIVE = (ROOT / "live.js").read_text()
 
 def test_menu_is_short_and_every_page_is_reachable():
     items = re.findall(r'<li><a href="#/([a-z]+)" data-(page|group)="([a-z]+)"', HTML)
-    assert len(items) == 15
+    assert len(items) == 16                                      # 3.01: + Pro (on trial)
     direct = {p for _h, kind, p in items if kind == "page"}
     groups = dict(re.findall(r'(\w+): \{ label: "[^"]+", tabs: \[(.*?)\] \}', APP))
     tabbed = {p for g in groups.values() for p in re.findall(r'\["(\w+)", "', g)}

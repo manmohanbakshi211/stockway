@@ -80,6 +80,23 @@ def _pct(a, b):
     return (a / b - 1) * 100 if a and b else None
 
 
+
+_YF_LOCK = __import__("threading").Lock()
+
+
+def _yf(yf, ticks, wait: float = 30.0, **kw):
+    """3.00: Yahoo downloads on the calling thread (threads=False), one at a time, 20 s timeout. With threads=4 every
+    download started new worker threads that are never ended; when Yahoo was slow they piled up (49 waiting on its
+    cookie lock in the running app on 24 Nov) and they keep the app from closing. Waits up to `wait` s for a download
+    already running, then skips this one."""
+    if not _YF_LOCK.acquire(timeout=max(0.0, float(wait))) if wait else not _YF_LOCK.acquire(blocking=False):
+        raise RuntimeError("another Yahoo download is still running")
+    try:
+        return yf.download(ticks, threads=False, timeout=20, **kw)
+    finally:
+        _YF_LOCK.release()
+
+
 class World:
     def __init__(self, data_dir, log=print, ai=None):
         self.data_dir = Path(data_dir)
@@ -131,7 +148,7 @@ class World:
     def refresh_prices(self):
         import yfinance as yf
         ticks = self._tickers() + [NIFTY] + [v[0] for v in ADR.values()]
-        df = yf.download(ticks, period="5d", interval="1d", progress=False, group_by="ticker", auto_adjust=False, threads=4)
+        df = _yf(yf, ticks, period="5d", interval="1d", progress=False, group_by="ticker", auto_adjust=False)
         names = {t: (n, g, reg) for g, items in ASSETS.items() for n, t, reg in items}
         for t in ticks:
             try:
@@ -278,8 +295,7 @@ class World:
     def _refresh_live_bulk(self):
         import yfinance as yf
         ticks = [t for t in self.rows]
-        df = yf.download(ticks, period="2d", interval="1m", progress=False, group_by="ticker", auto_adjust=False,
-                         threads=4, prepost=False)
+        df = _yf(yf, ticks, period="2d", interval="1m", progress=False, group_by="ticker", auto_adjust=False, prepost=False)
         n_up = 0
         for t in ticks:
             try:
@@ -319,7 +335,7 @@ class World:
         import numpy as np
         import yfinance as yf
         ticks = self._tickers() + [NIFTY]
-        df = yf.download(ticks, period="9mo", interval="1d", progress=False, group_by="ticker", auto_adjust=False, threads=4)
+        df = _yf(yf, ticks, period="9mo", interval="1d", progress=False, group_by="ticker", auto_adjust=False)
         closes = {}
         for t in ticks:
             try:

@@ -1,0 +1,39 @@
+{
+  "about": "Stockway Pro v1 (3.01, Mandeep 24 Nov 2026: option buying only; every input votes together, no separate Ghanshyam / pattern boxes; strong checks; after the close, which check really lined up and worked). The numbers live here (bullets); live/pro.py is the gun. On trial: two paper accounts (Pro · Index, Pro · Stocks) and the Pro page; nothing else you see, Telegram, Focus or the main account changes.",
+  "valid_from": "2026-11-25",
+  "on": true,
+  "telegram": false,
+  "strong": 85,
+  "medium": 75,
+  "min_groups": 3,
+  "weights": {
+    "breakout": 1.5, "trend_day": 1.0, "trend": 1.0, "momentum": 1.0, "structure": 1.0, "vwap": 1.0,
+    "flow": 1.0, "option": 1.0, "ema": 1.0, "chase": 1.0, "move_vs_decay": 1.0, "tradability": 1.0,
+    "strength": 0.5, "ghanshyam": 1.0, "strategies": 1.0,
+    "mindgame": 0.0, "forecast": 0.0,
+    "pro_mind": 1.0, "daytype": 1.0
+  },
+  "weights_why": "forecast 0: the next-candle direction was right 50-51% of the time (the plain 'keeps its colour' rule as good). mindgame 0: its all-bullet lean is replaced by pro_mind (only the bullets that beat a coin flip in the 5-year check, and taken_back turned round). daytype: the 09:45 day-type forecaster (trend days: the 09:45 move pointed the day's way 78-83%).",
+  "groups": {
+    "price": ["breakout", "trend", "momentum", "structure", "vwap", "ema", "chase", "strength"],
+    "day": ["trend_day", "daytype"],
+    "flow": ["flow", "option"],
+    "decay": ["move_vs_decay", "tradability"],
+    "outside": ["ghanshyam", "strategies", "pro_mind"]
+  },
+  "mind": {
+    "tfs": ["5m", "15m"],
+    "use": {"5m": ["gap_booking", "trap_run"], "15m": ["gap_booking", "range_trap"]},
+    "invert": {"5m": ["taken_back"], "15m": ["taken_back"]},
+    "why": "5-year Bank Nifty check: gap_booking 56% / 57%, trap_run 53% (5m), range_trap 58% (15m); taken_back right only 40% / 37%, so its opposite (60-63%) votes."
+  },
+  "daytype": {"trend_lift": 5, "quiet_lift": 10, "index_only": true},
+  "expiry_cutoff": "11:00",
+  "expiry_why": "23 Nov (monthly expiry): the same-day-expiry buys after 11:00 lost 7 of 8 (net -Rs3,013 against what was kept).",
+  "cooloff_min": 15,
+  "cooloff_why": "23 Nov: a second buy on the same index and side 3 minutes after the first one's exit (FINNIFTY 09:35, NIFTY 09:35) never went green: -Rs36K.",
+  "exit": {"lock_premium_pct": 50, "lock_keep_pct": 25},
+  "exit_why": "23 Nov: Bank Nifty PE went +79% and closed -40% (trailing account -Rs13,790); locking +25% once it is +50% would have kept ~+Rs8,300.",
+  "learn": {"min_n": 100, "forward_days": 5, "min_strong": 20, "max_step": 0.25, "days": 60, "at": "16:05"},
+  "learn_why": "Weights learn from new days only: a factor's weight moves only with 100+ graded signals, by 25% at most, and the new weights must beat the old ones on the next 5 market days they never saw before they are used."
+}

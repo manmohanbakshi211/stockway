@@ -296,6 +296,11 @@ class Rider:
         risk = abs(e_ - stop) if stop is not None else None
         side = r["up" if d > 0 else "down"]
         cf = (r.get("conf") or {}).get(d) or {}
+        try:                                               # 3.01: Pro's reading (live/pro.py), kept on the signal
+            from . import pro as _pro
+            prj = _pro.judge(self.e, sym, d, now, {k: cf.get(k) for k in ("score", "label", "with", "against", "no_view")})
+        except Exception:
+            prj = {}
         W = R.FACTOR_WORDS
         conf_txt = (f" Confidence {cf['score']:.0f}/100 ({cf['label']}): saath {', '.join(W.get(k, k) for k in cf['with']) or '-'}"
                     f"; khilaaf {', '.join(W.get(k, k) for k in cf['against']) or '-'}." if cf.get("score") is not None else "")
@@ -316,6 +321,7 @@ class Rider:
                                  "ema_fired": [x["alert"] for x in ((ev.get("fired") or {}).get(d) or [])],
                                  "ema10": ev.get("ema_slow"),
                                  "confidence": {k: cf.get(k) for k in ("score", "label", "with", "against", "no_view", "why")}},
+                       **({"pro": prj} if prj else {}),
                        **({"setup_levels": {"entry": round(e_, 2), "stop": stop, "target": round(e_ + d * 2 * risk, 2),
                                             "rr": 2.0}} if risk else {})}})
         return 1

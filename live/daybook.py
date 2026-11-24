@@ -397,6 +397,13 @@ def build(store, data_dir, base: str, day: str, live_bars: dict | None = None, g
            "net": round(sum(t["net"] for t in closed)), "n": len(closed), "won": sum(t["net"] > 0 for t in closed),
            "open": len(trades) - len(closed), "lessons": lessons, "gaps": [[_hm(a), _hm(b)] for a, b in (gaps or [])]}
     rep["missed"] = missed(store, base, day, pxs, trades, c)
+    try:                                                 # 3.01: Pro's checks that day (graded Trend Rider signals)
+        from . import pro as _pro
+        pf = _pro.factors(store, base, 1, day)
+        if pf.get("n"):
+            rep["pro"] = pf
+    except Exception:
+        pass
     return rep
 
 
@@ -490,7 +497,10 @@ def compact(b: dict, c: dict) -> dict:
                         "exit": t["exit"], "pct": t["pct"], "best_pct": t["peak_pct"], "net": t["net"], "exit_reason": t["reason"],
                         "checks": [ch["text"] for ch in t["chips"]]} for t in trades],
             "missed": [m["text"] for m in b["missed"]], "lessons": [x["text"] for x in b["lessons"]],
-            "app_not_running": b.get("gaps")}
+            "app_not_running": b.get("gaps"),
+            **({"pro_checks": {"tiers": (b.get("pro") or {}).get("tiers"),           # 3.01: which check lined up that day
+                               "checks": [{k: r.get(k) for k in ("factor", "n_with", "avg_with", "n_against", "avg_against", "verdict")}
+                                          for r in ((b.get("pro") or {}).get("factors") or [])[:12]]}} if b.get("pro") else {})}
 
 
 def prompt(sheet: dict, names: list, slot: str) -> str:
@@ -503,7 +513,8 @@ def prompt(sheet: dict, names: list, slot: str) -> str:
             "\"could_take\": [up to 5 lines: trades the system could have taken, when, which way and why], "
             "\"trades\": [{\"id\": trade id, \"note\": one line why it made or lost money}], "
             "\"learn\": [up to 5 specific lessons the system can learn from today], "
-            "\"training\": [up to 5 changes to test in its learning or training: inputs, labels, filters, exits], "
+            "\"training\": [up to 5 changes to test in its learning or training: inputs, labels, filters, exits; if "
+            "pro_checks is given, say which Pro checks lined up and worked today and which did not], "
             "\"ideas\": [up to 3 objects {\"name\": short, \"fact\": one of the fact names below, \"op\": \">\" or \"<\", "
             "\"v\": number, \"why\": one line}] = filters worth testing in the multiverse on days it never saw, "
             "\"next\": one line: what to do differently next session}. "

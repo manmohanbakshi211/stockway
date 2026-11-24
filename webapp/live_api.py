@@ -14,7 +14,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from live.clock import IST
 from radar.config import ROOT, load_config
 
-router = APIRouter()
+from webapp.fastjson import FastJSONRoute     # noqa: E402  3.00: JSON made off the event loop
+
+router = APIRouter(route_class=FastJSONRoute)
 _engine = None
 _lock = threading.Lock()
 
@@ -1125,12 +1127,50 @@ def live_day(day: str):
     from live import daybook
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
         raise HTTPException(400, "day is YYYY-MM-DD")
+    from webapp import memo
     e = engine()
     live_ = day == e.session_day().isoformat() and e.paper
-    b = e.day_book(day, open_pnl=_open_today(e) if live_ else None)
+    try:                                                 # 3.00: the same answer until a trade of that day changes
+        fp = list(e.store._read("SELECT COUNT(*), COALESCE(SUM(net), 0), MAX(id), COALESCE(SUM(exit), 0) FROM paper "
+                                "WHERE day=?", (day,), one=True) or [])
+    except Exception:
+        fp = None
+    if fp is not None and not live_:
+        b = memo.memo(f"daybook|{day}", fp, lambda: e.day_book(day), ttl=900)
+    else:
+        b = e.day_book(day, open_pnl=_open_today(e) if live_ else None)
+    b = dict(b)
     b["reviews"] = daybook.reviews(e.data_dir, day)
     b["reviewing"] = bool(getattr(e, "_day_review_lock", None) and e._day_review_lock.locked())
     return clean(b)
+
+
+@router.get("/api/live/pro")
+def live_pro(seg: str = "index", day: str | None = None):
+    """3.01 Stockway Pro v1: one segment's strong / watch signals of the day (Trend Rider scored by Pro), its paper
+    account, which checks lined up and worked (graded signals, last 20 market days) and the learned weights."""
+    from live import pro
+    from webapp import memo
+    if seg not in ("index", "stock"):
+        raise HTTPException(400, "seg is index or stock")
+    if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(400, "day is YYYY-MM-DD")
+    e = engine()
+    src = e._real_source() if hasattr(e, "_real_source") else (e.source or "upstox")
+    if not day:
+        try:
+            r = e.store._read("SELECT MAX(day) FROM trial_alerts WHERE source=? AND kind='trend_rider'", (src,), one=True)
+            day = (r[0] if r and r[0] else None) or e.session_day().isoformat()
+        except Exception:
+            day = e.session_day().isoformat()
+    c = pro.cfg()
+    st = pro._state(e.data_dir)
+    fac = memo.memo(f"pro_factors|{src}|{day}", None, lambda: pro.factors(e.store, src, 20, day), ttl=60)
+    return clean({"day": day, "seg": seg, "book": "pro_index" if seg == "index" else "pro_stocks",
+                  "rules": {k: c.get(k) for k in ("strong", "medium", "min_groups", "expiry_cutoff", "cooloff_min", "exit", "groups")},
+                  "signals": pro.signals(e.store, src, day, seg), "factors": fac, "weights": pro.weights(e.data_dir),
+                  "learn": {"champion": st.get("champion"), "challenger": st.get("challenger"), "since": st.get("since"),
+                            "check": st.get("check"), "history": (st.get("history") or [])[-5:]}})
 
 
 @router.post("/api/live/day/{day}/review")
@@ -1337,7 +1377,10 @@ def live_context_refresh():
 
 @router.get("/api/live/scorecard")
 def live_scorecard(source: str | None = None):
-    return clean(engine().scorecard_view(source))
+    from webapp import memo
+    e = engine()                                         # 3.00: worked out at most once a minute (was 1.5-2 s a call)
+    day = e.clock.now().date().isoformat() if getattr(e, "clock", None) else ""
+    return memo.memo(f"scorecard|{source}|{day}", None, lambda: clean(e.scorecard_view(source)), ttl=60)
 
 
 @router.get("/api/live/board")

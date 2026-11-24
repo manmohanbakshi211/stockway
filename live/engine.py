@@ -2541,7 +2541,7 @@ class LiveEngine:
                 sc.ensure_history(tok["access_token"], log=self.log, force=force)
                 ev_age = time.time() - ((sc.eval or {}).get("_ts") or 0)
                 if force or not sc.eval or ev_age > 20 * 3600 or not all(before.values()):
-                    sc.run_eval(log=self.log)
+                    sc.run_eval(log=self.log, pause=None if force else self.lab_paused)    # 3.00: own process
         except Exception as ex:
             self.log(f"Scenario engine refresh failed: {ex}")
 
@@ -2750,6 +2750,22 @@ class LiveEngine:
             self.store.put(f"report:{day}", rep)
         return rep
 
+    def _pro_learn_due(self, now: dt.datetime, source: str) -> bool:
+        """3.01: once a market day, after rules/pro.json learn.at (16:05); never for a practice source."""
+        from . import pro
+        at = str((pro.cfg().get("learn") or {}).get("at") or "16:05")
+        today = now.date().isoformat()
+        if now.strftime("%H:%M") < at or is_practice(source) or not SESSION.session(now.date()):
+            return False
+        if ("prolearn", today) in self.brief_done:
+            return False
+        self.brief_done.add(("prolearn", today))
+        return True
+
+    def pro_learn(self, day: str | None = None) -> dict:
+        from . import pro
+        return pro.learn(self.store, self._real_source(), self.data_dir, day, log=self.log)
+
     def _real_source(self) -> str:
         src = self.source or self.cfg()["live"]["source"]
         return self.cfg()["live"]["source"] if is_practice(src) else src
@@ -2880,6 +2896,12 @@ class LiveEngine:
                 except Exception as e:
                     if self._every("day_review_err", 3600, clock_time=False):
                         self.log(f"Day review not started: {e}")
+                try:                                       # 3.01: Pro learns from the day, after the close, once
+                    if self._pro_learn_due(now, self.source or c["source"]):
+                        threading.Thread(target=self.pro_learn, args=(today,), daemon=True, name="pro-learn").start()
+                except Exception as e:
+                    if self._every("pro_learn_err", 3600, clock_time=False):
+                        self.log(f"Pro learning not started: {e}")
                 lab_on = (self.cfg().get("lab") or {}).get("nightly", True)
                 if lab_on and now.time() >= dt.time(16, 15) and ("lab", today) not in self.brief_done and not self.running:
                     self.brief_done.add(("lab", today))

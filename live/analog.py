@@ -248,6 +248,44 @@ def evaluate(lib: Library, last_n: int = 250, checkpoints=range(30, 331, 30), lo
 
 
 # ---------------------------------------------------------------- live service
+def _vix_map_from(hist_dir) -> dict:
+    f = Path(hist_dir) / "INDIAVIX" / "daily.parquet"
+    if not f.exists():
+        return {}
+    import pandas as pd
+    v = pd.read_parquet(f)
+    return {pd.Timestamp(d).date(): float(o) for d, o in zip(v["date"], v["open"])}
+
+
+def eval_job(data_dir, log=print) -> dict:
+    """The scenario engine's daily test (3.00: run by lab/proc.py in its own process): the pattern study and the
+    walk-forward replay of each index's last 250 sessions, written to data/lab/scenario_eval.json."""
+    import pandas as pd
+    hist = Path(data_dir) / "history"
+    vix = _vix_map_from(hist)
+    libs = {}
+    for sym in SYMS:
+        f = hist / sym / "minutes.parquet"
+        libs[sym] = Library(sym, pd.read_parquet(f), vix) if f.exists() else None
+    try:
+        from lab.pattern_study import run as pattern_run
+        pattern_run(libs, data_dir, log=log)
+    except Exception as ex:
+        log(f"Pattern study failed: {ex}")
+    out = {}
+    for sym, lib in libs.items():
+        if lib and len(lib.days) > 300:
+            log(f"Scenario engine: testing on {sym}'s last 250 sessions")
+            out[sym] = evaluate(lib, 250)
+    if out:
+        out["generated"] = dt.datetime.now(IST).isoformat(timespec="seconds")
+        out["_ts"] = time.time()
+        d = Path(data_dir) / "lab"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "scenario_eval.json").write_text(json.dumps(out))
+    return {k: v for k, v in out.items() if k in ("generated", "_ts")}
+
+
 class Scenarios:
     def __init__(self, engine):
         self.e = engine
@@ -272,12 +310,7 @@ class Scenarios:
                 self.eval = {}
 
     def _vix_map(self):
-        f = self.dir / "INDIAVIX" / "daily.parquet"
-        if not f.exists():
-            return {}
-        import pandas as pd
-        v = pd.read_parquet(f)
-        return {pd.Timestamp(d).date(): float(o) for d, o in zip(v["date"], v["open"])}
+        return _vix_map_from(self.dir)
 
     def lib(self, sym) -> Library | None:
         f = self._file(sym)
@@ -341,25 +374,17 @@ class Scenarios:
         finally:
             self.busy = False
 
-    def run_eval(self, log=print):
+    def run_eval(self, log=print, pause=None):
+        """3.00: the daily test runs in its own low-priority process (lab/proc.py job "scenario"): it took ~80 s of the
+        app's one Python core right after a start (pattern study 19 s a symbol + 250 sessions replayed a symbol), and
+        every page waited (Paper 10-16 s at the 00:44 start on 24 Nov). Same code, same file; the app re-reads it."""
         try:
-            from lab.pattern_study import run as pattern_run
-            pattern_run({s: self.lib(s) for s in SYMS}, self.e.data_dir, log=log)
+            from lab import proc
+            out = proc.run("scenario", self.e.data_dir, log=log, pause=pause) or {}
         except Exception as ex:
-            log(f"Pattern study failed: {ex}")
-        out = {}
-        for sym in SYMS:
-            lib = self.lib(sym)
-            if lib and len(lib.days) > 300:
-                log(f"Scenario engine: testing on {sym}'s last 250 sessions")
-                out[sym] = evaluate(lib, 250)
-        if out:
-            out["generated"] = dt.datetime.now(IST).isoformat(timespec="seconds")
-            out["_ts"] = time.time()
-            d = Path(self.e.data_dir) / "lab"
-            d.mkdir(parents=True, exist_ok=True)
-            (d / "scenario_eval.json").write_text(json.dumps(out))
-            self.eval = out
+            log(f"Scenario engine test failed: {ex}")
+            out = {}
+        self._load_eval()
         return out
 
     def live(self, sym, rows, day: dt.date, prev_close: float | None, vix: float | None) -> dict | None:

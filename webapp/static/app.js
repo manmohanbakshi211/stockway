@@ -156,11 +156,13 @@ async function loadVersion(force = false) {
     update: `<span class="v-new">⬆ Update available</span><small>Close the Terminal window, then double-click Start Radar.command again.</small>`,
     restart: `<span class="v-new">⬆ Update downloaded</span><small>Close the Terminal window, then double-click Start Radar.command again.</small>`,
     offline: `<span class="muted">Couldn't check for updates (offline)</span>`,
+    checking: `<span class="muted">Checking for updates…</span>`,
     unknown: `<span class="muted">Version check not available</span>`,
   }[v.state] || "";
   el.innerHTML = `<b>Stockway ${esc(v.name || "")}</b> <span class="muted">· ${esc(v.commit || "")}${v.date ? ", " + esc(v.date) : ""}</span>
     <div class="v-state">${msg} <button class="link-btn small" id="v-check" type="button">Check now</button></div>`;
   $("#v-check").onclick = async (e) => { e.target.textContent = "Checking…"; await loadVersion(true); };
+  if (v.state === "checking" && !force) setTimeout(() => loadVersion(false), 15000);   // 3.00: ask again once it is done
 }
 
 async function loadStatus() {

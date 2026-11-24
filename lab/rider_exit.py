@@ -32,7 +32,8 @@ IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 STYLE = "rider"
 DEFAULT = {"lock_r": 1.0, "lock_buffer_atr": 0.05, "trail_loose_atr": 2.5, "trail_tight_atr": 1.5,
            "reversal_signs_for_tight": 2, "nomove_bars": 3, "nomove_progress_atr": 0.3, "emergency_premium_pct": 35.0,
-           "exit_hhmm": "15:10", "trail_mode": "atr", "ema_trail": {"n": 10, "after_r": 2.0}}
+           "exit_hhmm": "15:10", "trail_mode": "atr", "ema_trail": {"n": 10, "after_r": 2.0},
+           "lock_premium_pct": None, "lock_keep_pct": 25.0}       # 3.01: profit lock on the premium (off by default)
 WORDS = ("stop beyond the broken level + ATR buffer on 5-min closes; at +1R the stop moves to entry; then a trail of "
          "2.5 ATR that tightens to 1.5 ATR on reversal signs; out if no move in 3 bars; emergency stop -35% on the "
          "premium; out by 15:10")
@@ -54,7 +55,8 @@ def _session_start(ts: float) -> float:
 class RiderPlan:
     def __init__(self, s0: float, d: int, stop: float, atr: float, entry: float, t0: float, c: dict | None = None,
                  best: float | None = None, locked: bool = False, bar: int | None = None, cur: list | None = None,
-                 bars: list | None = None, held: int = 0, tight: bool = False, ema: float | None = None):
+                 bars: list | None = None, held: int = 0, tight: bool = False, ema: float | None = None,
+                 bo: float | None = None):
         self.s0, self.d, self.stop, self.atr, self.entry, self.t0 = float(s0), int(d), float(stop), float(atr), float(entry), float(t0)
         self.c = {**DEFAULT, **(c or {})}
         self.R = abs(self.s0 - self.stop)
@@ -65,17 +67,20 @@ class RiderPlan:
         self.cur = cur                  # [o, h, l, c] of the bar being built from ticks
         self.bars = list(bars or [])    # the last closed bars since entry, [o, h, l, c]
         self.ema = float(ema) if ema is not None else None     # 2.89: the trail EMA (trail_mode "ema")
+        self.bo = float(bo) if bo is not None else None        # 3.01: the best option price seen (profit lock)
 
     def to_dict(self) -> dict:
         return {"style": STYLE, "s0": self.s0, "d": self.d, "stop": self.stop, "atr": self.atr, "entry": self.entry,
                 "t0": self.t0, "c": self.c, "best": self.best, "locked": self.locked, "bar": self.bar, "cur": self.cur,
                 "bars": self.bars[-4:], "held": self.held, "tight": self.tight,
-                **({"ema": self.ema} if self.ema is not None else {})}
+                **({"ema": self.ema} if self.ema is not None else {}),
+                **({"bo": self.bo} if self.bo is not None else {})}
 
     @classmethod
     def from_dict(cls, x: dict) -> "RiderPlan":
         return cls(x["s0"], x["d"], x["stop"], x["atr"], x["entry"], x["t0"], x.get("c"), x.get("best"), x.get("locked", False),
-                   x.get("bar"), x.get("cur"), x.get("bars"), x.get("held", 0), x.get("tight", False), x.get("ema"))
+                   x.get("bar"), x.get("cur"), x.get("bars"), x.get("held", 0), x.get("tight", False), x.get("ema"),
+                   x.get("bo"))
 
     # ------------------------------------------------------------------ the rules
     def _signs(self) -> int:
@@ -136,6 +141,12 @@ class RiderPlan:
         c_ = self.c
         if opt and opt <= self.entry * (1 - float(c_["emergency_premium_pct"]) / 100):
             return "premium stop"
+        lp = c_.get("lock_premium_pct")
+        if lp and opt and self.entry > 0:                # 3.01: once +lp% on the premium, keep at least +keep%
+            self.bo = max(self.bo if self.bo is not None else self.entry, float(opt))
+            if self.bo >= self.entry * (1 + float(lp) / 100) and \
+                    opt <= self.entry * (1 + float(c_.get("lock_keep_pct") or 0) / 100):
+                return "profit lock"
         why = None
         if spot and math.isfinite(spot):
             k = int((now_ts - self.st0) // 300)
