@@ -44,6 +44,8 @@ class Rider:
         self.ms = 0.0                        # time of the last pass (for the System page)
         self._packs = (0.0, {})              # 2.90: strategy id -> (strategy file, name), re-read hourly
         self._mind_s = 0.0                   # 2.90: MindGame time spent in this pass (capped)
+        self.warmed = None                   # 3.07: the day the earlier bars were read again after a (re)start
+        self.warm_info: dict = {}
 
     # ------------------------------------------------------------------ inputs
     def _closed(self, sym, day, slot):
@@ -214,6 +216,10 @@ class Rider:
         day = now.date()
         if self.day != day:
             self.day, self.series, self.read, self.fired, self.flow_snap = day, {}, {}, {}, {}
+        if self.warmed != day:                             # 3.07: a late start or a restart: read the day's earlier bars
+            if not self._warm(now, day, slot, c_):
+                self.ms = round((_t.perf_counter() - t_start) * 1000)
+                return 0                                   # today's earlier candles still filling: no signal on half a day
         tod = float(slot * 5)
         try:
             nifty = self._closed("NIFTY", day, slot)
@@ -230,6 +236,116 @@ class Rider:
                     self.e.log(f"Trend Rider {sym} skipped: {ex}")
         self.ms = round((_t.perf_counter() - t_start) * 1000)
         return n
+
+    # ------------------------------------------------------------------ 3.07: warm-up after a late start or a restart
+    def _complete(self, day, slot) -> bool:
+        """Today's 5-minute bars of Nifty are there up to this bar (the gap fill has brought the earlier ones back)."""
+        try:
+            b = self._closed("NIFTY", day, slot)
+        except Exception:
+            return True                                    # can't tell (bad data): never wait on an error
+        return bool(b) and len(b["c"]) >= slot - 1
+
+    def _warm(self, now, day, slot, c_) -> bool:
+        """3.07 (Mandeep, 24 Nov: Pro saw nothing from 09:37 to 10:10 on 23 Nov after two restarts; in 6 replayed days
+        74% of Pro's signals came between 09:15 and 10:15). The first bar after a (re)start in the day:
+          * waits (no signal) until the day's earlier candles are back (live/gapfill.py: today's recording, then
+            Upstox's intraday candles), at most warm_wait_bars bars;
+          * reads the last warm_slots closed bars again for every symbol: the series the EMA videos and the sub-charts
+            use are back (no signal, no trade, no option looked at: those are now, not then);
+          * takes back today's Trend Rider signals from the record, so the two-a-day limit and the cool-down still hold
+            and a restart never buys the same setup twice.
+        True = go on with this bar."""
+        first = int(c_.get("first_slot", 3))
+        if slot <= first + 1 or not getattr(self.e, "metrics", None):
+            self.warmed = day
+            return True
+        tries = self.warm_info.get("tries", 0) if self.warm_info.get("day") == day else 0
+        self.warm_info = {"day": day, "tries": tries + 1}
+        if not self._complete(day, slot) and tries < int(c_.get("warm_wait_bars", 3)):
+            if self.e.charts._rate("rider_warm_wait", 600):
+                self.e.log("Trend Rider: waiting for today's earlier candles before judging (after a late start or a restart)")
+            return False
+        import time as _t
+        t0 = _t.perf_counter()
+        n_rows = 0
+        lo = max(first, slot - int(c_.get("warm_slots", 12)))
+        cap = self._capital()
+        for s in range(lo, slot):
+            try:
+                nifty = self._closed("NIFTY", day, s)
+            except Exception:
+                nifty = None
+            for sym, m in list(self.e.metrics.items()):
+                try:
+                    b = self._closed(sym, day, s)
+                    if not b or len(b["c"]) < 3:
+                        continue
+                    t_last = float(b["t"][-1])
+                    hist = [x.get("ema_now") or [] for x in (self.series.get(sym) or []) if x["t"] < t_last]
+                    r = R.readings(b, self._ctx(sym, m), c_, nifty if sym != "NIFTY" else None, None, None, cap, None,
+                                   {1: None, -1: None}, hist)
+                    self._keep_row(sym, b, r, None, 0)
+                    n_rows += 1
+                except Exception:
+                    continue
+        fired = self._fired_today(day)
+        for (sym, d_), ts in fired.items():
+            self.fired[(sym, d_)] = sorted(set(self.fired.get((sym, d_), [])) | set(ts))
+        self.warmed = day
+        self.warm_info.update(rows=n_rows, bars=slot - lo, signals_back=sum(len(v) for v in fired.values()),
+                              ms=round((_t.perf_counter() - t0) * 1000))
+        if n_rows:
+            self.e.log(f"Trend Rider warmed up: {slot - lo} earlier 5-minute bars read again ({n_rows} rows), "
+                       f"{self.warm_info['signals_back']} signal(s) of today taken back")
+        return True
+
+    def _fired_today(self, day) -> dict:
+        """{(sym, day): [ts]} of today's Trend Rider signals already recorded (empty without a store)."""
+        st = getattr(self.e, "store", None)
+        if st is None:
+            return {}
+        src = getattr(self.e, "source", None)
+        out: dict = {}
+        try:
+            with reading(st) as db:
+                rows = db.execute("SELECT sym, ts FROM trial_alerts WHERE kind=? AND day=? AND source=?",
+                                  (self.KIND, day.isoformat(), src)).fetchall()
+            for sym, ts in rows:
+                out.setdefault((sym, day), []).append(float(ts))
+        except Exception:
+            return {}
+        return out
+
+    def _keep_row(self, sym, b, r, flow, go) -> dict:
+        """One row of today's series for a closed bar (the chart's sub-charts and the EMA videos read these)."""
+        ev = r.get("ema") or {}
+        a_ = r.get("atr") or 0
+        c_last = float(b["c"][-1])
+        bo = r.get("breakout")
+        row = {"t": float(b["t"][-1]), "tds": r["trend_day"].get("score"), "vwap_dist": r["vwap"].get("dist_atr"),
+               "bq": bo["quality"] if bo else None, "bo_dir": bo["dir"] if bo else 0,
+               "chase_up": r["up"]["chase"], "chase_dn": r["down"]["chase"],
+               "ag_up": r["up"]["agree"]["families"], "ag_dn": r["down"]["agree"]["families"],
+               "mvd_up": r["up"]["mvd"], "mvd_dn": r["down"]["mvd"],
+               "trad_up": r["up"]["trad"].get("score"), "trad_dn": r["down"]["trad"].get("score"),
+               "flow": flow, "rs": r.get("rs"), "go": go,
+               # 2.89: the EMA videos (5 EMA alert, 10 EMA pullback), on trial
+               "e5_dist": round((c_last - ev["ema_fast"]) / a_, 3) if ev.get("ema_fast") is not None and a_ else None,
+               "e10_dist": round((c_last - ev["ema_slow"]) / a_, 3) if ev.get("ema_slow") is not None and a_ else None,
+               "ema_now": list(ev.get("now") or []),
+               "ema_fired": [[dd, x["alert"]] for dd in (1, -1) for x in ((ev.get("fired") or {}).get(dd) or [])],
+               "ema_up": bool((ev.get("vote") or {}).get(1)), "ema_dn": bool((ev.get("vote") or {}).get(-1)),
+               "conf_up": ((r.get("conf") or {}).get(1) or {}).get("score"),
+               "conf_dn": ((r.get("conf") or {}).get(-1) or {}).get("score")}
+        ser = self.series.setdefault(sym, [])
+        if ser and ser[-1]["t"] == row["t"]:
+            ser[-1] = row
+        elif not ser or ser[-1]["t"] < row["t"]:
+            ser.append(row)
+        else:                                              # an earlier bar read again (warm-up): in its place
+            ser[:] = sorted([x for x in ser if x["t"] != row["t"]] + [row], key=lambda x: x["t"])
+        return row
 
     def _one(self, sym, m, now, day, slot, tod, nifty, cap, c_, emit) -> int:
         b = self._closed(sym, day, slot)
@@ -257,30 +373,9 @@ class Rider:
             if cc.get("use_in_decision"):                  # only when switched on: the confidence gate decides
                 dec = R.decide(b, r, tod, c_, (up if bo and bo["dir"] > 0 else dn) if bo else None, opts={1: up, -1: dn})
         ev = r.get("ema") or {}
-        a_ = r.get("atr") or 0
-        c_last = float(b["c"][-1])
         self.read[sym] = {"t": float(b["t"][-1]), "tod": tod, "readings": r, "decision": dec,
                           "options": {"up": (up or {}).get("label"), "down": (dn or {}).get("label")}}
-        row = {"t": float(b["t"][-1]), "tds": r["trend_day"].get("score"), "vwap_dist": r["vwap"].get("dist_atr"),
-               "bq": bo["quality"] if bo else None, "bo_dir": bo["dir"] if bo else 0,
-               "chase_up": r["up"]["chase"], "chase_dn": r["down"]["chase"],
-               "ag_up": r["up"]["agree"]["families"], "ag_dn": r["down"]["agree"]["families"],
-               "mvd_up": r["up"]["mvd"], "mvd_dn": r["down"]["mvd"],
-               "trad_up": r["up"]["trad"].get("score"), "trad_dn": r["down"]["trad"].get("score"),
-               "flow": flow, "rs": r.get("rs"), "go": dec["dir"] if dec.get("go") else 0,
-               # 2.89: the EMA videos (5 EMA alert, 10 EMA pullback), on trial
-               "e5_dist": round((c_last - ev["ema_fast"]) / a_, 3) if ev.get("ema_fast") is not None and a_ else None,
-               "e10_dist": round((c_last - ev["ema_slow"]) / a_, 3) if ev.get("ema_slow") is not None and a_ else None,
-               "ema_now": list(ev.get("now") or []),
-               "ema_fired": [[dd, x["alert"]] for dd in (1, -1) for x in ((ev.get("fired") or {}).get(dd) or [])],
-               "ema_up": bool((ev.get("vote") or {}).get(1)), "ema_dn": bool((ev.get("vote") or {}).get(-1)),
-               "conf_up": ((r.get("conf") or {}).get(1) or {}).get("score"),
-               "conf_dn": ((r.get("conf") or {}).get(-1) or {}).get("score")}
-        ser = self.series.setdefault(sym, [])
-        if ser and ser[-1]["t"] == row["t"]:
-            ser[-1] = row
-        else:
-            ser.append(row)
+        self._keep_row(sym, b, r, flow, dec["dir"] if dec.get("go") else 0)
         if not dec.get("go"):
             return 0
         ts = now.timestamp()

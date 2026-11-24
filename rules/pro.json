@@ -35,6 +35,7 @@
   "cooloff_why": "Off from 3.04 (Mandeep: no lock on good signals). Was 15: on 23 Nov a second buy on the same index and side 3 minutes after the first one's exit (FINNIFTY 09:35, NIFTY 09:35) never went green: -Rs36K. One day only; the re-buys are now taken and graded on new days.",
   "exit": {"lock_premium_pct": 50, "lock_keep_pct": 25},
   "exit_why": "23 Nov: Bank Nifty PE went +79% and closed -40% (trailing account -Rs13,790); locking +25% once it is +50% would have kept ~+Rs8,300.",
-  "learn": {"min_n": 100, "forward_days": 5, "min_strong": 20, "max_step": 0.25, "days": 60, "at": "16:05"},
+  "learn": {"min_n": 100, "forward_days": 5, "min_strong": 20, "max_step": 0.25, "days": 60, "at": "16:05", "gate_min_n": 50, "gate_min_edge": 0.25},
+  "learn_gates_why": "3.07: in 6 replayed days 465 of 472 Trend Rider signals scored strong (the signal already needs most checks with it), so weights alone cannot pick; must-have / must-not checks can (stocks: strength with and flow not yet with: +0.40R vs +0.18R). Proposed from graded signals (50+ each side, 0.25R apart), judged on the next 5 market days; a winner is only suggested on the Pro page.",
   "learn_why": "Weights learn from new days only: a factor's weight moves only with 100+ graded signals, by 25% at most, and the new weights must beat the old ones on the next 5 market days they never saw before they are used."
 }

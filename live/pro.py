@@ -179,6 +179,21 @@ def judge(e, sym: str, d: int, now: dt.datetime, conf: dict) -> dict:
 
 
 # ------------------------------------------------------------------ the Pro paper accounts' rules
+def gate(pick: dict, pr: dict) -> str | None:
+    """3.07: an account's must-have (need_with) and must-not (not_with) checks on a signal's Pro reading; None = passes.
+    Pro · Stocks strict (6 replayed days, 453 stock signals): relative strength with us AND order flow not already with
+    us: +0.40R a signal, 60% won, 5 of 5 days up, against +0.18R / 54% / 3 of 5 for every strong one. When the flow is
+    already with us the move has mostly happened (late entry): -0.01R, 48%."""
+    w = set(pr.get("with") or [])
+    for f in pick.get("need_with") or []:
+        if f not in w:
+            return f"needs {f.replace('_', ' ')} with it"
+    for f in pick.get("not_with") or []:
+        if f in w:
+            return f"{f.replace('_', ' ')} already with it (late)"
+    return None
+
+
 def block(pick: dict, a: dict, now: dt.datetime, store, source: str, c: dict | None = None) -> str | None:
     """Why a Pro account does NOT buy this signal (None = it may). pick = the account's rules/paper_books.json pick."""
     c = c or cfg()
@@ -193,6 +208,9 @@ def block(pick: dict, a: dict, now: dt.datetime, store, source: str, c: dict | N
         return "an index (this account buys stocks)"
     if pr.get("label") != "strong":
         return f"Pro score {pr.get('score')} ({pr.get('label')}): not strong"
+    g = gate(pick, pr)                                   # 3.07: the account's must-have / must-not checks
+    if g:
+        return g
     cut = str(pick.get("expiry_cutoff") or c.get("expiry_cutoff") or "")
     exp = str((a.get("option") or {}).get("expiry") or "")[:10]
     if cut and exp == now.date().isoformat() and now.strftime("%H:%M") >= cut:
@@ -252,14 +270,95 @@ def factors(store, source: str, days: int = 20, today: str | None = None) -> dic
     for f, g in fac.items():
         aw, aa = _avg(g["with"]), _avg(g["against"])
         ok = len(g["with"]) >= 5 and len(g["against"]) >= 5
+        rest = g["against"] + g["none"]                  # 3.07: "with" against every signal it was not with
+        an = _avg(rest)
+        ok_rest = len(g["with"]) >= 5 and len(rest) >= 5
+        edge_rest = round(aw - an, 3) if ok_rest and aw is not None and an is not None else None
+        d_ = (aw - aa) if ok else edge_rest
         out.append({"factor": f, "n_with": len(g["with"]), "avg_with": aw, "win_with": _avg([1.0 if r > 0 else 0.0 for r in g["with"]]),
                     "n_against": len(g["against"]), "avg_against": aa, "n_none": len(g["none"]),
+                    "n_not": len(rest), "avg_not": an, "edge_rest": edge_rest,
                     "edge": round(aw - aa, 3) if ok and aw is not None and aa is not None else None,
-                    "verdict": ("lined up and worked" if ok and aw > aa else "did not help" if ok else "too few yet")})
-    out.sort(key=lambda r: (r["edge"] is None, -(r["edge"] or 0)))
+                    "verdict": ("too few yet" if d_ is None else "lined up and worked" if d_ > 0 else "did not help")})
+    out.sort(key=lambda r: (r["edge"] is None and r["edge_rest"] is None, -(r["edge"] if r["edge"] is not None else r["edge_rest"] or 0)))
     return {"days": days, "since": since, "n": len(rows),
             "tiers": {k: {"n": len(v), "avg_r": _avg(v), "win": _avg([1.0 if r > 0 else 0.0 for r in v])} for k, v in tiers.items()},
             "factors": out}
+
+
+# ------------------------------------------------------------------ 3.07: must-have / must-not checks, learned
+def gate_stats(rows: list, seg: str | None = None) -> dict:
+    """Per factor, for one segment: graded signals when it voted with vs when it did not (against or no view)."""
+    out: dict = {}
+    for x in rows:
+        if seg and (x["pro"].get("seg") or ("index" if is_index(x["sym"]) else "stock")) != seg:
+            continue
+        for f, v in (x["pro"].get("votes") or {}).items():
+            g = out.setdefault(f, {"with": [], "not": []})
+            g["with" if v > 0 else "not"].append(x["r"])
+    return {f: {"n_with": len(g["with"]), "avg_with": _avg(g["with"]), "n_not": len(g["not"]), "avg_not": _avg(g["not"])}
+            for f, g in out.items()}
+
+
+def suggest_gates(rows: list, lc: dict) -> dict:
+    """{seg: {"need_with": [...], "not_with": [...]}}: a check whose "with" signals beat the rest by gate_min_edge R (both
+    sides gate_min_n+) is a must-have; one whose "with" signals did that much worse is a must-not (the move had already
+    happened). Proposed only: judged on the market days after, never used on their own."""
+    n_min, e_min = int(lc.get("gate_min_n", 50)), float(lc.get("gate_min_edge", 0.25))
+    out = {}
+    for seg in ("index", "stock"):
+        need, avoid = [], []
+        for f, s in gate_stats(rows, seg).items():
+            if s["n_with"] < n_min or s["n_not"] < n_min or s["avg_with"] is None or s["avg_not"] is None:
+                continue
+            d = s["avg_with"] - s["avg_not"]
+            if d >= e_min:
+                need.append(f)
+            elif d <= -e_min:
+                avoid.append(f)
+        if need or avoid:
+            out[seg] = {"need_with": sorted(need), "not_with": sorted(avoid)}
+    return out
+
+
+def _gates_check(rows: list, gates: dict, c: dict) -> dict:
+    """Strong signals of each segment on the days checked: all of them vs the ones that pass the proposed checks."""
+    out = {}
+    for seg, g in gates.items():
+        al = [x["r"] for x in rows if (x["pro"].get("seg") or ("index" if is_index(x["sym"]) else "stock")) == seg
+              and x["pro"].get("label") == "strong"]
+        ps = [x["r"] for x in rows if (x["pro"].get("seg") or ("index" if is_index(x["sym"]) else "stock")) == seg
+              and x["pro"].get("label") == "strong" and gate(g, x["pro"]) is None]
+        out[seg] = {"all": {"n": len(al), "avg_r": _avg(al)}, "pass": {"n": len(ps), "avg_r": _avg(ps)}}
+    return out
+
+
+def learn_gates(rows_all: list, st: dict, lc: dict, today: str, c: dict, log=print) -> dict:
+    """Nightly, with the weights: an open gate proposal is judged on the days after it was made; a won one becomes the
+    suggestion on the Pro page (adopting it in an account is Mandeep's call); with none open, a new one is proposed."""
+    gc = st.get("gates_challenger")
+    if isinstance(gc, dict) and gc.get("since"):
+        rows = [x for x in rows_all if x["day"] > gc["since"]]
+        days = sorted({x["day"] for x in rows})
+        chk = _gates_check(rows, gc["gates"], c)
+        st["gates_check"] = {"days": len(days), **chk}
+        n_pass = sum(v["pass"]["n"] for v in chk.values())
+        if len(days) >= int(lc.get("forward_days", 5)) and n_pass >= int(lc.get("min_strong", 20)):
+            won = {seg: (v["pass"]["avg_r"] or -9) > (v["all"]["avg_r"] or -9) for seg, v in chk.items() if v["pass"]["n"]}
+            st.setdefault("gates_history", []).append({"day": today, "since": gc["since"], "gates": gc["gates"], "won": won,
+                                                       "days": len(days), "check": chk})
+            ok = {seg: gc["gates"][seg] for seg, w in won.items() if w}
+            if ok:
+                st["gates_suggested"] = {"day": today, "gates": ok, "check": chk}
+                log(f"Pro: checks that did better on {len(days)} new days, suggested on the Pro page: {ok}")
+            st["gates_challenger"] = None
+    if not st.get("gates_challenger"):
+        since = (dt.date.fromisoformat(today) - dt.timedelta(days=int(lc.get("days", 60)) * 7 // 5 + 2)).isoformat()
+        g = suggest_gates([x for x in rows_all if x["day"] >= since], lc)
+        if g:
+            st["gates_challenger"] = {"since": today, "gates": g, "stats": {seg: gate_stats(rows_all, seg) for seg in g}}
+            log(f"Pro: must-have / must-not checks to judge on the next new days: {g}")
+    return st
 
 
 # ------------------------------------------------------------------ learning from new days only
@@ -307,6 +406,10 @@ def learn(store, source: str, data_dir, today: str | None = None, log=print) -> 
         if new:
             st["challenger"], st["since"] = new, today
             log(f"Pro: weights to test on the next new days: {new}")
+    try:                                                 # 3.07: must-have / must-not checks (the score alone saturates)
+        learn_gates(_graded(store, source, "2000-01-01", today), st, lc, today, c, log)
+    except Exception as e:
+        log(f"Pro: check suggestions skipped: {e}")
     st["at"] = time.time()
     try:
         f.write_text(json.dumps(st, indent=1))
@@ -316,9 +419,10 @@ def learn(store, source: str, data_dir, today: str | None = None, log=print) -> 
 
 
 # ------------------------------------------------------------------ the Pro page
-def signals(store, source: str, day: str, seg: str | None = None) -> dict:
+def signals(store, source: str, day: str, seg: str | None = None, pick: dict | None = None) -> dict:
     """One day's Trend Rider signals by Pro tier (strong / medium / low), for one segment. 3.02: the low ones are
-    listed too (the Pro page's "Recorded" tab: everything Pro looked at that day)."""
+    listed too (the Pro page's "Recorded" tab: everything Pro looked at that day). 3.07: pick = an account's
+    must-have / must-not checks: a strong signal that fails them goes to the watch list with the reason."""
     from .store import reading
     with reading(store) as db:
         rows = db.execute("SELECT id, ts, sym, direction, result, r_exit, title, data FROM trial_alerts WHERE source=? "
@@ -336,11 +440,14 @@ def signals(store, source: str, day: str, seg: str | None = None) -> dict:
         if seg and s_ != seg:
             continue
         lab = pr.get("label") if pr.get("label") in ("strong", "medium") else "low"
+        g = gate(pick, pr) if pick and lab == "strong" else None
+        if g:
+            lab = "medium"
         rd = dd.get("rider") or {}
         out[lab].append({"id": i, "at": dt.datetime.fromtimestamp(ts, IST).strftime("%H:%M"), "sym": sym, "dir": d,
                          "score": pr.get("score"), "groups": pr.get("groups"), "with": pr.get("with"),
                          "against": pr.get("against"), "why": pr.get("why"), "trigger": rd.get("trigger"),
-                         "stop": rd.get("stop"), "result": res, "r": r})
+                         "stop": rd.get("stop"), "result": res, "r": r, **({"gate": g} if g else {})})
     out["low_n"] = len(out["low"])
     return out
 

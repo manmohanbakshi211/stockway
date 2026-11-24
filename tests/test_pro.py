@@ -358,3 +358,100 @@ def test_day_book_says_what_the_day_locks_stopped(tmp_path):
     assert b["n"] == 1 and "not graded yet" in b["text"]
     assert any(m.get("what") == "lock" for m in D.build(st, tmp_path, "upstox", day)["missed"])
     assert not any(m.get("what") == "lock" for m in D.build(st, tmp_path, "upstox", day, accounts=["pro_index"])["missed"])
+
+
+def test_pro_stocks_strict_takes_only_strength_with_and_flow_not_yet_with(tmp_path, monkeypatch):
+    """3.07 (6 replayed days, 453 stock signals: strength with + flow not already with = +0.40R, 60% won, 5 of 5 days up;
+    every strong one +0.18R, 54%, 3 of 5)."""
+    sp = B.cfg()["books"]["pro_stocks_strict"]
+    assert sp["pick"]["need_with"] == ["strength"] and sp["pick"]["not_with"] == ["flow"] and sp["review"] == "show"
+    assert sp["paper"]["max_trades_day"] == 99 and sp["exit_style"] == "rider" and sp["section"] == "pro"
+    assert P.gate(sp["pick"], {"with": ["breakout", "strength"]}) is None
+    assert P.gate(sp["pick"], {"with": ["breakout"]}) == "needs strength with it"
+    assert P.gate(sp["pick"], {"with": ["strength", "flow"]}) == "flow already with it (late)"
+    assert P.gate({"segment": "stock"}, {"with": []}) is None                          # Pro · Stocks: no extra checks
+    st = Store(tmp_path / "t.db")
+    bs = B.Books("upstox", st, dict(MAIN), None, log=lambda m: None)
+    now = _t(DAY, 10, 0)
+
+    def stock(i, with_):
+        a = _alert(i=i, sym=f"S{i}", key=f"O{i}", seg="stock")
+        a["data"]["pro"]["with"] = with_
+        return a
+    o1 = bs.offer_rider(stock(1, ["breakout", "strength"]), _state(O1=40.0), now)
+    o2 = bs.offer_rider(stock(2, ["breakout", "strength", "flow"]), _state(O2=40.0), now)
+    o3 = bs.offer_rider(stock(3, ["breakout"]), _state(O3=40.0), now)
+    assert o1["pro_stocks_strict"] == "taken" and o1["pro_stocks"] == "taken"
+    assert o2["pro_stocks_strict"] == "flow already with it (late)" and o2["pro_stocks"] == "taken"
+    assert o3["pro_stocks_strict"] == "needs strength with it" and o3["pro_stocks"] == "taken"
+
+
+def test_pro_page_has_the_strict_account(tmp_path, monkeypatch):
+    import json as _j
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from live.trials import Trials
+    from webapp import live_api
+    st = Store(tmp_path / "t.db")
+    Trials(st, "upstox", log=lambda m: None)
+    for i, w in enumerate((["strength"], ["strength", "flow"])):
+        pr = {"score": 95, "label": "strong", "seg": "stock", "groups": ["price", "day", "decay"], "with": w, "against": []}
+        with st.lock:
+            st.db.execute("INSERT INTO trial_alerts(ts, day, source, sym, kind, direction, title, data) VALUES (?,?,?,?,?,?,?,?)",
+                          (1795400000.0 + i, "2026-11-25", "upstox", f"S{i}", "trend_rider", "up", "t", _j.dumps({"pro": pr})))
+            st.db.commit()
+    e = types.SimpleNamespace(store=st, data_dir=tmp_path, _real_source=lambda: "upstox", session_day=lambda: dt.date(2026, 11, 25))
+    monkeypatch.setattr(live_api, "engine", lambda: e)
+    app = FastAPI()
+    app.include_router(live_api.router)
+    cl = TestClient(app)
+    d = cl.get("/api/live/pro?seg=strict&day=2026-11-25").json()
+    assert d["book"] == "pro_stocks_strict" and d["gates"] == {"need_with": ["strength"], "not_with": ["flow"]}
+    assert [s["sym"] for s in d["signals"]["strong"]] == ["S0"] and d["signals"]["medium"][0]["gate"] == "flow already with it (late)"
+    assert len(cl.get("/api/live/pro?seg=stock&day=2026-11-25").json()["signals"]["strong"]) == 2
+    assert cl.get("/api/live/pro?seg=nope").status_code == 400
+    js = (ROOT / "webapp" / "static" / "live.js").read_text()
+    assert 'strict: { acct: "pro_stocks_strict"' in js and "not bought here:" in js
+
+
+def _g(day, sym, r, with_, seg="stock", label="strong"):
+    votes = {f: (1 if f in with_ else 0) for f in ("breakout", "strength", "flow", "trend")}
+    return {"day": day, "sym": sym, "r": r, "result": "x", "pro": {"votes": votes, "with": list(with_), "seg": seg, "label": label}}
+
+
+def test_pro_learns_must_have_and_must_not_checks_and_only_suggests_them(tmp_path):
+    """3.07: the score saturates (465 of 472 replayed signals strong), so Pro learns which checks a signal must have or
+    must not have yet, judges them on new days, and only suggests a winner."""
+    lc = {**P.cfg()["learn"], "gate_min_n": 20, "gate_min_edge": 0.25, "forward_days": 2, "min_strong": 4}
+    rows = []
+    for i in range(30):
+        rows.append(_g("2026-11-10", f"A{i}", 0.6, ["breakout", "strength"]))           # strength with, flow not: good
+        rows.append(_g("2026-11-10", f"B{i}", -0.4, ["breakout", "strength", "flow"]))  # flow already with: late
+        rows.append(_g("2026-11-10", f"C{i}", -0.5, ["breakout"]))                      # no strength: bad
+    g = P.suggest_gates(rows, lc)
+    assert g == {"stock": {"need_with": ["strength"], "not_with": ["flow"]}}
+    st = P.learn_gates(rows, {}, lc, "2026-11-10", P.cfg(), log=lambda m: None)
+    assert st["gates_challenger"]["gates"] == g and st["gates_challenger"]["since"] == "2026-11-10"
+    new = [_g(d, f"N{d[-2:]}{i}", r, w) for d in ("2026-11-11", "2026-11-12") for i, (r, w) in
+           enumerate([(1.0, ["strength"]), (0.8, ["strength"]), (-1.0, ["strength", "flow"]), (-0.9, [])])]
+    st = P.learn_gates(rows + new, st, lc, "2026-11-12", P.cfg(), log=lambda m: None)
+    assert st["gates_suggested"]["gates"] == g and st["gates_history"][-1]["won"] == {"stock": True}
+    assert st["gates_history"][-1]["check"]["stock"]["pass"] == {"n": 4, "avg_r": 0.9}
+    assert st["gates_challenger"]["since"] == "2026-11-12"                              # the next proposal is open
+    worse = [_g(d, f"W{d[-2:]}{i}", r, w) for d in ("2026-11-13", "2026-11-14") for i, (r, w) in
+             enumerate([(-1.0, ["strength"]), (-0.8, ["strength"]), (1.0, ["strength", "flow"]), (0.9, [])])]
+    st2 = P.learn_gates(rows + new + worse, st, lc, "2026-11-14", P.cfg(), log=lambda m: None)
+    assert st2["gates_history"][-1]["won"] == {"stock": False} and st2["gates_suggested"]["day"] == "2026-11-12"   # kept
+    assert P.cfg()["learn"]["gate_min_n"] == 50 and P.cfg()["learn"]["gate_min_edge"] == 0.25
+
+
+def test_checks_tab_compares_with_against_every_signal_it_was_not_with(tmp_path, monkeypatch):
+    rows = [_g("2026-11-25", f"S{i}", 0.5, ["breakout", "strength"]) for i in range(6)] + \
+           [_g("2026-11-25", f"T{i}", -0.5, ["breakout"]) for i in range(6)]
+    monkeypatch.setattr(P, "_graded", lambda *a, **k: rows)
+    f = {x["factor"]: x for x in P.factors(None, "upstox", 20, "2026-11-25")["factors"]}
+    assert f["strength"]["n_against"] == 0 and f["strength"]["n_not"] == 6 and f["strength"]["avg_not"] == -0.5
+    assert f["strength"]["edge_rest"] == 1.0 and f["strength"]["verdict"] == "lined up and worked"
+    assert f["breakout"]["verdict"] == "too few yet"                                    # always with: nothing to compare
+    js = (ROOT / "webapp" / "static" / "live.js").read_text()
+    assert "function proGates(L_)" in js and "Avg when not with" in js

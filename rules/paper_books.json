@@ -244,6 +244,36 @@
    },
    "section": "pro",
    "review": "show"
+  },
+  "pro_stocks_strict": {
+   "name": "Pro · Stocks strict",
+   "short": "Pro stock signals only with relative strength with us and order flow not already with us",
+   "explain": "3.07 challenger (Mandeep, 24 Nov 2026: 'okay' on the 6-day replay findings). The same strong Pro stock signals as Pro · Stocks, but only when the stock's relative strength votes with the trade AND the order flow is not already with it. 6 replayed days (6, 9, 13, 16, 18, 19 Nov, current code, 453 stock signals): these were +0.40R a signal, 60% won, 5 of 5 days up, about 36 a day; every strong stock signal: +0.18R, 54%, 3 of 5 days. With the flow already with the trade the move has mostly happened (late entry): -0.01R, 48%. Found on those 6 days only: this account tests it on new days next to Pro · Stocks. Same exit, 1 lot, no day locks, the money you set for the app.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "rider": true,
+    "pro": true,
+    "segment": "stock",
+    "need_with": [
+     "strength"
+    ],
+    "not_with": [
+     "flow"
+    ]
+   },
+   "exit_style": "rider",
+   "paper": {
+    "max_open": 99,
+    "max_trades_day": 99,
+    "max_daily_loss_pct": 100,
+    "cooloff_min": 0,
+    "profit_lock": 0,
+    "no_entry_after": "15:00",
+    "max_lots": 1
+   },
+   "section": "pro",
+   "review": "show"
   }
  }
 }

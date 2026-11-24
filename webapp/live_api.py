@@ -1165,8 +1165,8 @@ def live_pro(seg: str = "index", day: str | None = None):
     account, which checks lined up and worked (graded signals, last 20 market days) and the learned weights."""
     from live import pro
     from webapp import memo
-    if seg not in ("index", "stock"):
-        raise HTTPException(400, "seg is index or stock")
+    if seg not in ("index", "stock", "strict"):
+        raise HTTPException(400, "seg is index, stock or strict")
     if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
         raise HTTPException(400, "day is YYYY-MM-DD")
     e = engine()
@@ -1180,13 +1180,19 @@ def live_pro(seg: str = "index", day: str | None = None):
     c = pro.cfg()
     st = pro._state(e.data_dir)
     fac = memo.memo(f"pro_factors|{src}|{day}", None, lambda: pro.factors(e.store, src, 20, day), ttl=60)
-    book = "pro_index" if seg == "index" else "pro_stocks"
-    return clean({"day": day, "seg": seg, "book": book, "days": pro.days(e.store, src),
+    book = {"index": "pro_index", "stock": "pro_stocks", "strict": "pro_stocks_strict"}[seg]
+    from live import books as _bk                         # 3.07: an account's must-have / must-not checks
+    pick = ((_bk.cfg().get("books") or {}).get(book) or {}).get("pick") or {}
+    gates = {k: pick[k] for k in ("need_with", "not_with") if pick.get(k)}
+    return clean({"day": day, "seg": seg, "book": book, "days": pro.days(e.store, src), "gates": gates,
                   "trades": pro.book_history(e.store, f"{src}#{book}"), "base_weights": dict(c.get("weights") or {}),
                   "rules": {k: c.get(k) for k in ("strong", "medium", "min_groups", "expiry_cutoff", "cooloff_min", "exit", "groups")},
-                  "signals": pro.signals(e.store, src, day, seg), "factors": fac, "weights": pro.weights(e.data_dir),
+                  "signals": pro.signals(e.store, src, day, "stock" if seg == "strict" else seg, gates or None),
+                  "factors": fac, "weights": pro.weights(e.data_dir),
                   "learn": {"champion": st.get("champion"), "challenger": st.get("challenger"), "since": st.get("since"),
-                            "check": st.get("check"), "history": (st.get("history") or [])[-5:]}})
+                            "check": st.get("check"), "history": (st.get("history") or [])[-5:],
+                            "gates_challenger": st.get("gates_challenger"), "gates_check": st.get("gates_check"),
+                            "gates_suggested": st.get("gates_suggested"), "gates_history": (st.get("gates_history") or [])[-5:]}})
 
 
 @router.post("/api/live/day/{day}/review")

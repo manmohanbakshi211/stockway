@@ -4434,7 +4434,8 @@ function proSig(s, strong) {
       <small class="muted">${esc(s.at)}${s.trigger ? ` · ${esc(s.trigger)}` : ""}${s.stop != null ? ` · stop ${fx(s.stop)}` : ""}${res}</small></div>
     <div class="small"><span class="muted">With:</span> ${(s.with || []).map((k) => esc(proW(k))).join(", ") || "–"}
       ${(s.against || []).length ? ` · <span class="muted">Against:</span> <span class="down">${s.against.map((k) => esc(proW(k))).join(", ")}</span>` : ""}
-      ${(s.groups || []).length ? ` · <span class="muted">${s.groups.length} group${s.groups.length > 1 ? "s" : ""}</span>` : ""}</div>
+      ${(s.groups || []).length ? ` · <span class="muted">${s.groups.length} group${s.groups.length > 1 ? "s" : ""}</span>` : ""}
+      ${s.gate ? ` · <span class="amber" title="This account's must-have / must-not checks">not bought here: ${esc(s.gate)}</span>` : ""}</div>
     ${why ? `<div class="small muted">${why}</div>` : ""}</li>`;
 }
 function proTradeRows(rows, live) {
@@ -4461,10 +4462,11 @@ function proFactors(f) {
   const tier = (k, l) => t[k] ? `<td>${l}</td><td class="r">${t[k].n}</td><td class="r ${t[k].avg_r >= 0 ? "up" : "down"}">${t[k].avg_r > 0 ? "+" : ""}${t[k].avg_r}R</td><td class="r">${Math.round((t[k].win || 0) * 100)}%</td>` : `<td>${l}</td><td class="r">0</td><td></td><td></td>`;
   return `<div class="table-wrap"><table class="tbl"><thead><tr><th>Tier</th><th class="r">Signals</th><th class="r">Avg</th><th class="r">Won</th></tr></thead>
       <tbody><tr>${tier("strong", "Strong")}</tr><tr>${tier("medium", "Watch")}</tr><tr>${tier("low", "Low")}</tr></tbody></table></div>
-    <div class="table-wrap"><table class="tbl"><thead><tr><th>Check</th><th class="r">With</th><th class="r">Avg when with</th><th class="r">Against</th><th class="r">Avg when against</th><th>Verdict</th></tr></thead>
+    <div class="table-wrap"><table class="tbl"><thead><tr><th>Check</th><th class="r">With</th><th class="r">Avg when with</th><th class="r">Against</th><th class="r">Avg when against</th><th class="r" title="3.07: every signal where this check was not with it (against or no view)">Avg when not with</th><th>Verdict</th></tr></thead>
       <tbody>${(f.factors || []).map((r) => `<tr><td>${esc(proW(r.factor))}</td><td class="r">${r.n_with}</td>
         <td class="r ${r.avg_with >= 0 ? "up" : "down"}">${r.avg_with != null ? `${r.avg_with > 0 ? "+" : ""}${r.avg_with}R` : "–"}</td><td class="r">${r.n_against}</td>
         <td class="r ${r.avg_against >= 0 ? "up" : "down"}">${r.avg_against != null ? `${r.avg_against > 0 ? "+" : ""}${r.avg_against}R` : "–"}</td>
+        <td class="r ${r.avg_not >= 0 ? "up" : "down"}">${r.avg_not != null ? `${r.avg_not > 0 ? "+" : ""}${r.avg_not}R <small class="muted">× ${r.n_not}</small>` : "–"}</td>
         <td class="small ${r.verdict === "lined up and worked" ? "up" : r.verdict === "did not help" ? "down" : "muted"}">${esc(r.verdict)}</td></tr>`).join("")}</tbody></table></div>
     <p class="small muted">${f.n} graded signals since ${esc(f.since)}. R = the move in units of the setup's own stop distance.</p>`;
 }
@@ -4476,14 +4478,30 @@ function proLearning(d) {
     <p class="small">${Object.keys(ch).length ? `Being tested since <b>${esc(L_.since)}</b>${L_.check ? ` · ${L_.check.days} new day(s) so far · strong signals: current ${L_.check.champion.n} (${L_.check.champion.avg_r ?? "–"}R) vs new ${L_.check.challenger.n} (${L_.check.challenger.avg_r ?? "–"}R)` : ""}.` : "Nothing being tested right now (not enough graded signals yet)."}</p>
     <div class="table-wrap"><table class="tbl"><thead><tr><th>Check</th><th class="r">Start</th><th class="r">In use</th><th class="r">Being tested</th></tr></thead>
       <tbody>${keys.map((k) => `<tr><td>${esc(proW(k))}</td><td class="r">${base[k]}</td><td class="r ${use[k] !== base[k] ? "up" : ""}">${use[k] ?? "–"}</td><td class="r">${ch[k] != null ? ch[k] : "–"}</td></tr>`).join("")}</tbody></table></div>
-    ${hist.length ? `<h3 class="pro-h3">Earlier tests</h3><ul class="small">${hist.map((x) => `<li>${esc(x.day)}: ${x.won ? `<b class="up">used</b>` : `<span class="down">dropped</span>`} after ${x.days} new days (new ${x.challenger.avg_r ?? "–"}R vs current ${x.champion.avg_r ?? "–"}R a strong signal)</li>`).join("")}</ul>` : ""}`;
+    ${hist.length ? `<h3 class="pro-h3">Earlier tests</h3><ul class="small">${hist.map((x) => `<li>${esc(x.day)}: ${x.won ? `<b class="up">used</b>` : `<span class="down">dropped</span>`} after ${x.days} new days (new ${x.challenger.avg_r ?? "–"}R vs current ${x.champion.avg_r ?? "–"}R a strong signal)</li>`).join("")}</ul>` : ""}
+    ${proGates(L_)}`;
+}
+/* 3.07: must-have / must-not checks learned from graded signals, judged on new days, only suggested */
+function proGates(L_) {
+  const gs = (g) => Object.entries(g || {}).map(([seg, x]) => `<b>${seg === "index" ? "Index" : "Stocks"}</b>: ${(x.need_with || []).length ? `must have ${x.need_with.map((k) => esc(proW(k))).join(", ")} with it` : ""}${(x.need_with || []).length && (x.not_with || []).length ? "; " : ""}${(x.not_with || []).length ? `skip when ${x.not_with.map((k) => esc(proW(k))).join(", ")} is already with it` : ""}`).join(" · ");
+  const chk = (c) => Object.entries(c || {}).filter(([k]) => k !== "days").map(([seg, v]) => `${seg}: passing ${v.pass.n} (${v.pass.avg_r ?? "–"}R) vs all strong ${v.all.n} (${v.all.avg_r ?? "–"}R)`).join(" · ");
+  const gc = L_.gates_challenger, sg = L_.gates_suggested, gh = L_.gates_history || [];
+  return `<h3 class="pro-h3">Must-have / must-not checks <span class="pill">on trial</span></h3>
+    <p class="small muted">Weights alone can't pick: nearly every Trend Rider signal scores strong. So Pro also learns which checks a signal must have, or must not have yet (from 50+ graded signals each side, 0.25R apart), judges them on the next 5 market days, and only suggests a winner here. Pro · Stocks strict tests one such pair already (strength with, flow not yet with).</p>
+    ${sg ? `<p class="small"><b class="up">Suggested</b> (${esc(sg.day)}, better on new days): ${gs(sg.gates)}. Adopting it in an account is your call.</p>` : ""}
+    ${gc ? `<p class="small">Being judged since <b>${esc(gc.since)}</b>: ${gs(gc.gates)}${L_.gates_check ? ` · ${L_.gates_check.days} new day(s): ${chk(L_.gates_check)}` : ""}</p>` : `<p class="small muted">Nothing being judged yet (needs 50+ graded signals on each side).</p>`}
+    ${gh.length ? `<ul class="small">${gh.map((x) => `<li>${esc(x.day)}: ${gs(x.gates)}: ${Object.entries(x.won || {}).map(([s, w]) => `${s} ${w ? `<b class="up">better</b>` : `<span class="down">not better</span>`}`).join(", ")} after ${x.days} new days</li>`).join("")}</ul>` : ""}`;
 }
 const PRO_TABS = [["strong", "Strong"], ["watch", "Watch"], ["recorded", "Recorded"], ["trades", "Trades"], ["calendar", "Calendar"], ["checks", "Checks"], ["learning", "Learning"]];
 
 /* 3.03 (Mandeep: "make the separate calendar tab inside pro so we can compare it with main one; add all the things as per
    the pro the main has"): Pro's own calendar, every day next to the main account on the same segment. */
+/* 3.07: the Pro page's three accounts (Pro · Stocks strict = the challenger with must-have / must-not checks) */
+const PRO_SEG = { index: { acct: "pro_index", sk: "index", name: "Index" }, stock: { acct: "pro_stocks", sk: "stock", name: "Stocks" },
+  strict: { acct: "pro_stocks_strict", sk: "stock", name: "Stocks strict" } };
+const proSeg = () => PRO_SEG[PRO.seg] || PRO_SEG.index;
 function proCalVals(d) {
-  const acct = PRO.seg === "index" ? "pro_index" : "pro_stocks", sk = PRO.seg === "index" ? "index" : "stock";
+  const acct = proSeg().acct, sk = proSeg().sk;
   const A = d.accounts || {}, pro = A[acct] || null, main = A.main || {};
   return { pro, mainSeg: (main.seg || {})[sk] || null, mainAll: A.main ? main : null };
 }
@@ -4516,9 +4534,9 @@ function proCalSum(c) {
   const add = (f) => days.reduce((s, d) => { const x = f(proCalVals(d)); if (x) { s.net += x.net || 0; s.n += x.n || 0; s.won += x.won || 0; s.d += 1; s.g += (x.net || 0) > 0; s.r += (x.net || 0) < 0; } return s; }, { net: 0, n: 0, won: 0, d: 0, g: 0, r: 0 });
   const pro = add((v) => v.pro), ms = add((v) => v.mainSeg), ma = add((v) => v.mainAll);
   const cell = (l, x) => `<tr><td>${l}</td><td class="r nw ${x.net >= 0 ? "up" : "down"}"><b>${rupees(x.net)}</b></td><td class="r">${x.n}</td><td class="r">${x.n ? Math.round(100 * x.won / x.n) + "%" : "–"}</td><td class="r">${x.g} / ${x.r}</td></tr>`;
-  const segName = PRO.seg === "index" ? "index" : "stock";
+  const segName = proSeg().sk;
   return `<div class="table-wrap"><table class="tbl"><thead><tr><th>This month</th><th class="r">Net</th><th class="r">Trades</th><th class="r">Won</th><th class="r">Green / red days</th></tr></thead>
-    <tbody>${cell(`<b>Pro · ${PRO.seg === "index" ? "Index" : "Stocks"}</b>`, pro)}${cell(`Main account, ${segName} trades`, ms)}${cell("Main account, all trades", ma)}</tbody></table></div>
+    <tbody>${cell(`<b>Pro · ${proSeg().name}</b>`, pro)}${cell(`Main account, ${segName} trades`, ms)}${cell("Main account, all trades", ma)}</tbody></table></div>
     <p class="small" style="margin:6px 0 10px">Pro vs main on ${segName} trades this month: <b class="${pro.net - ms.net >= 0 ? "up" : "down"}">${pro.net - ms.net >= 0 ? "+" : ""}${rupees(pro.net - ms.net)}</b> <span class="muted">(paper, after charges; a few days prove nothing, 20 market days is the bar)</span></p>`;
 }
 async function proCalDay(day) {
@@ -4526,7 +4544,7 @@ async function proCalDay(day) {
   PRO.calDay = day;
   document.querySelectorAll("[data-pcal]").forEach((b) => b.classList.toggle("sel", b.dataset.pcal === day));
   el.innerHTML = `<p class="muted">Loading ${esc(day)}…</p>`;
-  const acct = PRO.seg === "index" ? "pro_index" : "pro_stocks";
+  const acct = proSeg().acct;
   let b, sg;
   try { [b, sg] = await Promise.all([api(`/api/live/day/${day}?acct=${acct}`), api(`/api/live/pro?seg=${PRO.seg}&day=${day}`).catch(() => null)]); }
   catch (e) { el.innerHTML = `<p class="down">${esc(e.message)}</p>`; return; }
@@ -4552,7 +4570,7 @@ async function proCalDay(day) {
   const dt_ = new Date(day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   el.innerHTML = `<div class="panel" style="margin-top:14px">
     <h2 style="margin:0 0 6px">${esc(dt_)}</h2>
-    <div style="margin-bottom:8px">${cmp(`Pro · ${PRO.seg === "index" ? "Index" : "Stocks"}`, v.pro)} ${cmp(`Main (${PRO.seg === "index" ? "index" : "stock"} trades)`, v.mainSeg)} ${cmp("Main (all)", v.mainAll)}
+    <div style="margin-bottom:8px">${cmp(`Pro · ${proSeg().name}`, v.pro)} ${cmp(`Main (${proSeg().sk} trades)`, v.mainSeg)} ${cmp("Main (all)", v.mainAll)}
       <a class="small" href="#/calendar?d=${day}">Main's full day →</a></div>
     <div class="small" style="margin-bottom:6px"><span class="muted">Pro signals that day:</span> ${go("strong", "Strong", (s.strong || []).length)} ${go("watch", "Watch", (s.medium || []).length)} ${go("recorded", "Recorded", (s.low || []).length)}</div>
     ${mk ? `<h3 style="margin:10px 0 4px">The market</h3><div class="table-wrap"><table class="mini"><thead><tr><th>Index</th><th class="r">Open</th><th class="r">Last</th><th class="r">Day</th><th>Path</th></tr></thead><tbody>${mk}</tbody></table></div>` : ""}
@@ -4625,14 +4643,14 @@ function proDraw() {
 async function pagePro() {
   stopPageTimer();
   const q = new URLSearchParams(location.hash.split("?")[1] || "");
-  if (q.get("seg")) PRO.seg = q.get("seg") === "stock" ? "stock" : "index";
+  if (q.get("seg")) PRO.seg = PRO_SEG[q.get("seg")] ? q.get("seg") : "index";
   PRO.tab = q.get("tab") || PRO.tab || LS.get("proTab", "strong");
   if (!PRO_TABS.some(([k]) => k === PRO.tab)) PRO.tab = "strong";
   PRO.day = q.get("day") || "";
   PRO.data = null; PRO.calSeg = null;
   main.innerHTML = `<h1 class="page-title">Pro <span class="pill">on trial</span></h1>
     <p class="muted" style="margin-top:0">Option buying only. Every check votes together on each Trend Rider signal; <b>strong</b> (85+ and 3+ different groups agreeing) is bought by the Pro paper account, <b>watch</b> (75–85) and the rest are kept here. Paper only: the main account, Focus and Telegram don't change.</p>
-    <div class="pro-bar"><div class="seg" role="group" aria-label="Segment"><button data-seg="index" aria-pressed="${PRO.seg === "index"}">Index</button><button data-seg="stock" aria-pressed="${PRO.seg === "stock"}">Stocks</button></div>
+    <div class="pro-bar"><div class="seg" role="group" aria-label="Segment">${Object.entries(PRO_SEG).map(([k, v]) => `<button data-seg="${k}" aria-pressed="${PRO.seg === k}"${k === "strict" ? ` title="Challenger: strong stock signals only with relative strength with us and order flow not already with us"` : ""}>${v.name}</button>`).join("")}</div>
       <label class="small">Day <select id="pro-day"></select></label></div>
     <div class="seg pro-tabs" id="pro-tabs" role="group" aria-label="Pro tabs"></div>
     <div id="pro-body"><p class="muted">Loading…</p></div>`;

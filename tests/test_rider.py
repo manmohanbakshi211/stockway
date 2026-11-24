@@ -130,11 +130,11 @@ def test_the_live_scan_keeps_readings_and_series_and_respects_the_limits(monkeyp
     assert {a["sym"] for a in got} == {"NIFTY", "SBIN"} and all(a["kind"] == "trend_rider" for a in got)
     a = got[0]
     assert a["data"]["setup_levels"]["stop"] == 107.5 and a["data"]["setup_levels"]["target"] > a["price"]
-    assert rd.read["SBIN"]["decision"]["go"] and len(rd.series["SBIN"]) == 1
+    assert rd.read["SBIN"]["decision"]["go"] and len(rd.series["SBIN"]) == 13     # 3.07: 12 earlier bars read again
     assert rd.on_bar(now + dt.timedelta(minutes=5), len(b["c"]), got.append) == 0      # cooldown (15 min)
     rd.on_bar(now + dt.timedelta(minutes=35), len(b["c"]), got.append)
     assert rd.on_bar(now + dt.timedelta(minutes=70), len(b["c"]), got.append) == 0     # two a day per symbol
-    assert len(rd.series["SBIN"]) == 1                                                 # the same bar is one row
+    assert len(rd.series["SBIN"]) == 13                                                # the same bar is one row
     v = rd.view("SBIN")
     assert v["read"]["decision"]["dir"] == 1 and v["series"] and v["config"]["windows"]
 
@@ -145,3 +145,43 @@ def test_a_bad_symbol_is_skipped_and_logged():
     rd = Rider(e)
     assert rd.on_bar(dt.datetime(2026, 11, 19, 10, 0, 5), 9, lambda a: None) == 0
     assert any("Trend Rider NIFTY skipped" in m for m in e.logs)
+
+
+def test_a_restart_in_the_day_warms_up_without_signals_and_keeps_todays_limits(monkeypatch, tmp_path):
+    """3.07 (Mandeep, 24 Nov: after the 09:37 and 10:22 restarts on 23 Nov Pro saw nothing until 10:10; in 6 replayed
+    days 74% of Pro's signals came between 09:15 and 10:15)."""
+    from live.store import Store
+    from live.trials import Trials
+    b = _bars(list(100 + np.arange(14) * 0.6) + [109.5], wick=0.3)
+    e = _engine({"NIFTY": b, "SBIN": b})
+    e.store, e.source = Store(tmp_path / "t.db"), "upstox"
+    Trials(e.store, "upstox", log=lambda m: None)
+    now = dt.datetime(2026, 11, 19, 10, 0, 5)
+    with e.store.lock:                                   # SBIN fired at 09:50 before the restart
+        e.store.db.execute("INSERT INTO trial_alerts(ts, day, source, sym, kind, direction, title, data) VALUES (?,?,?,?,?,?,?,?)",
+                           (now.timestamp() - 600, "2026-11-19", "upstox", "SBIN", "trend_rider", "up", "t", "{}"))
+        e.store.db.commit()
+    monkeypatch.setattr(R, "decide", lambda bars, r, tod, c_=None, opt=None, **kw: {"go": True, "dir": 1, "trigger": "day high",
+                                                                                "level": 108.0, "stop": 107.5, "risk_pct": 10.0,
+                                                                                "fails": [], "why": ["test"]})
+    calls = []
+    real = R.readings
+    monkeypatch.setattr(R, "readings", lambda *a, **k: (calls.append(a[4:6]), real(*a, **k))[1])
+    rd = Rider(e)
+    got = []
+    assert rd.on_bar(now, len(b["c"]), got.append) == 1
+    assert [a["sym"] for a in got] == ["NIFTY"]                       # SBIN fired 10 min ago: the cool-down still holds
+    assert rd.warm_info["bars"] == 12 and rd.warm_info["signals_back"] == 1 and len(rd.series["SBIN"]) == 13
+    assert sum(1 for x in calls if x == (None, None)) == 24          # earlier bars read without any option (those are now)
+    assert any("Trend Rider warmed up" in m for m in e.logs)
+    late = Rider(e)                                                   # the day's earlier candles are still filling
+    half = {k: v[:5] for k, v in b.items()}
+    e.charts.five_min = lambda sym, day: half
+    out = []
+    assert late.on_bar(now, len(b["c"]), out.append) == 0 and not out and late.warmed is None
+    assert any("waiting for today's earlier candles" in m for m in e.logs)
+    for _ in range(3):
+        late.on_bar(now, len(b["c"]), out.append)
+    assert late.warmed == now.date()                                  # never waits more than warm_wait_bars bars
+    early = Rider(_engine({"NIFTY": b}))
+    assert early.on_bar(now.replace(hour=9, minute=31), 4, lambda a: None) >= 0 and early.warmed == now.date() and not early.warm_info

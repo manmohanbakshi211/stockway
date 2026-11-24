@@ -118,6 +118,50 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 3.07: Pro after the 6-day replay: warm-up after a restart, Pro · Stocks strict, learned checks (24 Nov 2026)
+- **Mandeep (24 Nov):** "okay" on the plan after the 6-day replay ("max profit confidence ke sath ke liye kya kya karna hai").
+- **The replay.** 3.06 code, recorded days, every account side by side: 6, 9, 13, 16, 18, 19 Nov, plus 23 Nov.
+  - Results over the six days (net):
+
+    | Account | Net | Green days |
+    |---|---|---|
+    | Main | +₹52,940 | 4/6 |
+    | Trailing | +₹54,847 | 5/6 |
+    | Half book · half trail | +₹39,228 | 5/6 |
+    | Main · no locks | +₹1,84,121 | 3/6 (99 trades a day) |
+    | Pro · Index | +₹11,807 | 4/4 traded days |
+    | Pro · Stocks | +₹78,890 | 3/5 (332 trades) |
+    | Multiverse pick | −₹55,836 | 0/6 |
+
+  - 465 of 472 Trend Rider signals scored strong: the score saturates, so it does not pick.
+  - Stock signals:
+    - Relative strength with the trade and order flow not yet with it: +0.40R, 60% won, 5/5 days up (36 a day).
+    - All strong stock signals: +0.18R, 54%, 3/5 days.
+    - Flow already with the trade: −0.01R (the move had happened).
+  - 74% of the signals came between 09:15 and 10:15.
+  - The 23 Nov full day (no restarts) had one Trend Rider signal, the same FINNIFTY 10:15 put. So that day's 09:31 move
+    was not a Trend Rider setup; the restarts did not cost Pro a signal on 23 Nov.
+- **1. Trend Rider warm-up after a late start or a restart** (`live/rider.py`):
+  - It waits (no signal) until the day's earlier candles are back from the gap fill, at most 3 bars.
+  - It reads the last 12 closed 5-minute bars again: series and EMA videos are rebuilt with no signal, no trade and no
+    option.
+  - It takes back today's recorded Trend Rider signals, so the two-a-day limit and the cool-down hold and a restart
+    never buys the same setup twice.
+  - Logged as "Trend Rider warmed up".
+- **2. New paper account "Pro · Stocks strict"** (challenger):
+  - It takes the same strong stock signals as Pro · Stocks, but only with `strength` with the trade and `flow` not yet
+    with it.
+  - Gun: `pro.gate` (must-have `need_with` / must-not `not_with` on any Pro account). Bullet: `rules/paper_books.json`.
+  - Pro page: a third button, "Stocks strict". Its Strong / Watch tabs show the skipped strong signals with the reason;
+    it also has Trades and Calendar.
+- **3. Pro learns must-have / must-not checks** (`pro.suggest_gates`, `learn_gates`, nightly with the weights):
+  - Proposed from graded signals: 50+ each side, 0.25R apart, per segment.
+  - Judged on the next 5 market days, then only suggested on the Learning tab. Adopting one is Mandeep's call.
+  - The Checks tab adds "Avg when not with" (against or no view): a check that is almost always with can still be judged.
+- Main account, Focus, alerts, Telegram and the Lab are unchanged; the Lab modules are untouched.
+- Tests: `test_rider` (+1, the series counts now include the warm-up), `test_pro` (+4), `test_rider_exit` (accounts
+  list). Full suite: 696 passed.
+
 ## 3.06: Corporate actions of F&O stocks (splits, bonus, dividends), NSE MCP as backup (24 Nov 2026)
 - **Mandeep (24 Nov, 16:57):** "haan ye bhi add karo but ek relevant page mein or system chain mein best jagah place karke
   connect karo".
