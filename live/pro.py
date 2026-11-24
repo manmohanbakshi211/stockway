@@ -312,12 +312,13 @@ def learn(store, source: str, data_dir, today: str | None = None, log=print) -> 
 
 # ------------------------------------------------------------------ the Pro page
 def signals(store, source: str, day: str, seg: str | None = None) -> dict:
-    """Today's Trend Rider signals by Pro tier (strong / medium / low count), for one segment."""
+    """One day's Trend Rider signals by Pro tier (strong / medium / low), for one segment. 3.02: the low ones are
+    listed too (the Pro page's "Recorded" tab: everything Pro looked at that day)."""
     from .store import reading
     with reading(store) as db:
         rows = db.execute("SELECT id, ts, sym, direction, result, r_exit, title, data FROM trial_alerts WHERE source=? "
                           "AND kind='trend_rider' AND day=? ORDER BY ts DESC", (source, day)).fetchall()
-    out = {"strong": [], "medium": [], "low": 0}
+    out = {"strong": [], "medium": [], "low": []}
     for i, ts, sym, d, res, r, title, data in rows:
         try:
             dd = json.loads(data or "{}") or {}
@@ -329,13 +330,38 @@ def signals(store, source: str, day: str, seg: str | None = None) -> dict:
         s_ = pr.get("seg") or ("index" if is_index(sym) else "stock")
         if seg and s_ != seg:
             continue
-        lab = pr.get("label") or "low"
-        if lab == "low":
-            out["low"] += 1
-            continue
+        lab = pr.get("label") if pr.get("label") in ("strong", "medium") else "low"
         rd = dd.get("rider") or {}
         out[lab].append({"id": i, "at": dt.datetime.fromtimestamp(ts, IST).strftime("%H:%M"), "sym": sym, "dir": d,
                          "score": pr.get("score"), "groups": pr.get("groups"), "with": pr.get("with"),
                          "against": pr.get("against"), "why": pr.get("why"), "trigger": rd.get("trigger"),
                          "stop": rd.get("stop"), "result": res, "r": r})
+    out["low_n"] = len(out["low"])
     return out
+
+
+def days(store, source: str, n: int = 20) -> list:
+    """3.02: the latest days with Trend Rider signals (the Pro page's day list)."""
+    from .store import reading
+    with reading(store) as db:
+        return [r[0] for r in db.execute("SELECT DISTINCT day FROM trial_alerts WHERE source=? AND kind='trend_rider' "
+                                         "ORDER BY day DESC LIMIT ?", (source, int(n))).fetchall()]
+
+
+def book_history(store, source: str, limit: int = 300) -> dict:
+    """3.02: a Pro paper account's trades (closed and open), with its day-by-day result (the Pro page's Trades tab)."""
+    rows = store.trades(source=source, limit=limit)
+    closed = [t for t in rows if t.get("status") == "closed"]
+    by: dict = {}
+    for t in closed:
+        d = by.setdefault(t.get("day"), {"day": t.get("day"), "n": 0, "net": 0.0, "won": 0})
+        d["n"] += 1
+        d["net"] += float(t.get("net") or 0)
+        d["won"] += 1 if float(t.get("net") or 0) > 0 else 0
+    keep = ("id", "day", "sym", "label", "side", "entry", "exit", "last", "peak", "net", "reason", "status", "entry_ts",
+            "exit_ts", "opt_key", "qty", "dir")
+    net = sum(float(t.get("net") or 0) for t in closed)
+    return {"n": len(closed), "net": round(net), "won": sum(1 for t in closed if float(t.get("net") or 0) > 0),
+            "open": [{k: t.get(k) for k in keep} for t in rows if t.get("status") == "open"],
+            "days": [{**v, "net": round(v["net"])} for v in sorted(by.values(), key=lambda x: x["day"] or "", reverse=True)],
+            "rows": [{k: t.get(k) for k in keep} for t in closed[:100]]}

@@ -4356,17 +4356,23 @@ function proSig(s, strong) {
       ${(s.groups || []).length ? ` · <span class="muted">${s.groups.length} group${s.groups.length > 1 ? "s" : ""}</span>` : ""}</div>
     ${why ? `<div class="small muted">${why}</div>` : ""}</li>`;
 }
-function proTrades(p) {
-  const open = p.open || [], closed = p.closed || [];
-  const row = (t, live) => `<tr ${live && t.opt_key ? `data-qk="${esc(t.opt_key)}" data-entry="${t.entry}" data-qty="${t.qty || 0}" data-dir="${t.dir || 1}"` : ""}>
-      <td><b>${esc(t.label || t.sym)}</b><br><small class="muted">${t.entry_ts ? hms(t.entry_ts) : ""}${t.reason ? ` · ${esc(t.reason)}` : ""}</small></td>
+function proTradeRows(rows, live) {
+  return rows.map((t) => `<tr ${live && t.opt_key ? `data-qk="${esc(t.opt_key)}" data-entry="${t.entry}" data-qty="${t.qty || 0}" data-dir="${t.dir || 1}"` : ""}>
+      <td><b>${esc(t.label || t.sym)}</b><br><small class="muted">${esc(t.day || "")} ${t.entry_ts ? hms(t.entry_ts) : ""}${t.reason ? ` · ${esc(t.reason)}` : ""}</small></td>
       <td class="r nw">${fx(t.entry)}</td><td class="r nw" data-q="now">${fx(live ? t.last : t.exit)}</td>
-      <td class="r nw ${(live ? t.unreal : t.net) >= 0 ? "up" : "down"}" data-q="pnl"><b>${rupees(live ? t.unreal : t.net)}</b></td></tr>`;
-  const net = closed.reduce((s, t) => s + (t.net || 0), 0) + open.reduce((s, t) => s + (t.unreal || 0), 0);
-  return `<p class="small">Today: <b class="${net >= 0 ? "up" : "down"}">${rupees(net)}</b> · ${open.length} open · ${closed.length} closed</p>
-    ${open.length || closed.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>Trade</th><th class="r">Entry</th><th class="r">Now / exit</th><th class="r">P&amp;L</th></tr></thead>
-      <tbody>${open.map((t) => row(t, true)).join("")}${closed.map((t) => row(t, false)).join("")}</tbody></table></div>`
-      : `<p class="muted small">No Pro trade yet. It buys only STRONG signals (above).</p>`}`;
+      <td class="r nw ${t.peak && t.entry ? "" : "muted"}">${t.peak && t.entry ? fpc((t.peak / t.entry - 1) * 100, 0) : "–"}</td>
+      <td class="r nw ${(t.net || 0) >= 0 ? "up" : "down"}" data-q="pnl"><b>${live ? "open" : rupees(t.net)}</b></td></tr>`).join("");
+}
+function proTrades(h) {
+  h = h || {};
+  const head = `<thead><tr><th>Trade</th><th class="r">Entry</th><th class="r">Now / exit</th><th class="r">Best</th><th class="r">P&amp;L</th></tr></thead>`;
+  const open = h.open || [], rows = h.rows || [], days = h.days || [];
+  return `<p class="small">All days: <b class="${(h.net || 0) >= 0 ? "up" : "down"}">${rupees(h.net || 0)}</b> · ${h.n || 0} closed · ${h.won || 0} won${h.n ? ` (${Math.round(100 * (h.won || 0) / h.n)}%)` : ""} · ${open.length} open</p>
+    ${open.length ? `<h3 class="pro-h3">Open now</h3><div class="table-wrap"><table class="tbl">${head}<tbody>${proTradeRows(open, true)}</tbody></table></div>` : ""}
+    ${days.length ? `<h3 class="pro-h3">Day by day</h3><div class="table-wrap"><table class="tbl"><thead><tr><th>Day</th><th class="r">Trades</th><th class="r">Won</th><th class="r">Net</th></tr></thead>
+      <tbody>${days.map((d) => `<tr><td><a href="#/calendar?d=${esc(d.day)}">${esc(d.day)}</a></td><td class="r">${d.n}</td><td class="r">${d.won}</td><td class="r ${d.net >= 0 ? "up" : "down"}"><b>${rupees(d.net)}</b></td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${rows.length ? `<h3 class="pro-h3">Closed trades</h3><div class="table-wrap"><table class="tbl">${head}<tbody>${proTradeRows(rows, false)}</tbody></table></div>`
+      : `<p class="muted small">No closed Pro trade yet. The account buys only STRONG signals (Strong tab).</p>`}`;
 }
 function proFactors(f) {
   if (!f || !f.n) return `<p class="muted small">No graded Pro signals yet: this fills in after the first market days (each signal is graded by its own exit).</p>`;
@@ -4381,32 +4387,64 @@ function proFactors(f) {
         <td class="small ${r.verdict === "lined up and worked" ? "up" : r.verdict === "did not help" ? "down" : "muted"}">${esc(r.verdict)}</td></tr>`).join("")}</tbody></table></div>
     <p class="small muted">${f.n} graded signals since ${esc(f.since)}. R = the move in units of the setup's own stop distance.</p>`;
 }
+function proLearning(d) {
+  const base = d.base_weights || {}, use = d.weights || {}, L_ = d.learn || {}, ch = L_.challenger || {};
+  const keys = Object.keys(base);
+  const hist = L_.history || [];
+  return `<p class="small muted">Weights learn from new days only: a check's weight moves only with 100+ graded signals, at most 25%, and the new weights are used only after they beat the current ones on 5 market days they never saw.</p>
+    <p class="small">${Object.keys(ch).length ? `Being tested since <b>${esc(L_.since)}</b>${L_.check ? ` · ${L_.check.days} new day(s) so far · strong signals: current ${L_.check.champion.n} (${L_.check.champion.avg_r ?? "–"}R) vs new ${L_.check.challenger.n} (${L_.check.challenger.avg_r ?? "–"}R)` : ""}.` : "Nothing being tested right now (not enough graded signals yet)."}</p>
+    <div class="table-wrap"><table class="tbl"><thead><tr><th>Check</th><th class="r">Start</th><th class="r">In use</th><th class="r">Being tested</th></tr></thead>
+      <tbody>${keys.map((k) => `<tr><td>${esc(proW(k))}</td><td class="r">${base[k]}</td><td class="r ${use[k] !== base[k] ? "up" : ""}">${use[k] ?? "–"}</td><td class="r">${ch[k] != null ? ch[k] : "–"}</td></tr>`).join("")}</tbody></table></div>
+    ${hist.length ? `<h3 class="pro-h3">Earlier tests</h3><ul class="small">${hist.map((x) => `<li>${esc(x.day)}: ${x.won ? `<b class="up">used</b>` : `<span class="down">dropped</span>`} after ${x.days} new days (new ${x.challenger.avg_r ?? "–"}R vs current ${x.champion.avg_r ?? "–"}R a strong signal)</li>`).join("")}</ul>` : ""}`;
+}
+const PRO_TABS = [["strong", "Strong"], ["watch", "Watch"], ["recorded", "Recorded"], ["trades", "Trades"], ["checks", "Checks"], ["learning", "Learning"]];
+function proBody(d) {
+  const s = d.signals || {}, r = d.rules || {}, ex = r.exit || {};
+  const list = (xs, strong, none) => `<ul class="pro-list">${(xs || []).map((x) => proSig(x, strong)).join("") || `<li class="muted small">${none}</li>`}</ul>`;
+  const t = PRO.tab;
+  if (t === "watch") return `<p class="small muted">Score 75–85: worth watching, not bought. A watch signal that keeps getting stronger shows up in Strong.</p>${list(s.medium, false, `Nothing to watch on ${esc(d.day)}.`)}`;
+  if (t === "recorded") return `<p class="small muted">Every other Trend Rider signal Pro scored below 75 on ${esc(d.day)}: recorded and graded, so the Checks tab can tell which checks really work.</p>${list(s.low, false, "Nothing recorded on this day.")}`;
+  if (t === "trades") return `${proTrades(d.trades)}<p class="small muted">Rules: strong only · 1 lot · no same-day-expiry buy after ${esc(r.expiry_cutoff || "")} · ${esc(String(r.cooloff_min || 0))} min cool-off after an exit on the same symbol and side · Trend Rider exit + profit lock (at +${esc(String(ex.lock_premium_pct || "–"))}% keep +${esc(String(ex.lock_keep_pct || "–"))}%).</p>`;
+  if (t === "checks") return proFactors(d.factors);
+  if (t === "learning") return proLearning(d);
+  return `<p class="small muted">Score 85+ with 3+ different groups of checks agreeing: the Pro paper account may buy it (Trades tab).</p>${list(s.strong, true, `No strong signal on ${esc(d.day)}.`)}`;
+}
+function proDraw() {
+  const d = PRO.data;
+  if (!d) return;
+  const s = d.signals || {};
+  const n = { strong: (s.strong || []).length, watch: (s.medium || []).length, recorded: (s.low || []).length,
+    trades: (d.trades || {}).open ? `${(d.trades.open || []).length} open` : "", checks: (d.factors || {}).n || "", learning: "" };
+  $("#pro-tabs").innerHTML = PRO_TABS.map(([k, l]) => `<button data-tab="${k}" aria-pressed="${PRO.tab === k}">${l}${n[k] !== "" && n[k] != null ? ` <small class="muted">${n[k]}</small>` : ""}</button>`).join("");
+  $("#pro-tabs").querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => { PRO.tab = b.dataset.tab; LS.set("proTab", PRO.tab); proDraw(); });
+  const days = d.days && d.days.length ? d.days : [d.day];
+  $("#pro-day").innerHTML = days.map((x) => `<option value="${esc(x)}" ${x === d.day ? "selected" : ""}>${esc(x)}</option>`).join("");
+  $("#pro-body").innerHTML = proBody(d);
+  qApply(); qStream("pro");
+}
 async function pagePro() {
   stopPageTimer();
   const q = new URLSearchParams(location.hash.split("?")[1] || "");
   if (q.get("seg")) PRO.seg = q.get("seg") === "stock" ? "stock" : "index";
+  PRO.tab = q.get("tab") || PRO.tab || LS.get("proTab", "strong");
+  if (!PRO_TABS.some(([k]) => k === PRO.tab)) PRO.tab = "strong";
+  PRO.day = q.get("day") || "";
+  PRO.data = null;
   main.innerHTML = `<h1 class="page-title">Pro <span class="pill">on trial</span></h1>
-    <p class="muted" style="margin-top:0">Option buying only. Every check votes together on each Trend Rider signal; <b>strong</b> (85+ and 3+ different groups agreeing) is bought by the Pro paper account, <b>watch</b> (75–85) waits here. Paper only: the main account, Focus and Telegram don't change.</p>
-    <div class="seg" role="group" aria-label="Segment"><button data-seg="index" aria-pressed="${PRO.seg === "index"}">Index</button><button data-seg="stock" aria-pressed="${PRO.seg === "stock"}">Stocks</button></div>
+    <p class="muted" style="margin-top:0">Option buying only. Every check votes together on each Trend Rider signal; <b>strong</b> (85+ and 3+ different groups agreeing) is bought by the Pro paper account, <b>watch</b> (75–85) and the rest are kept here. Paper only: the main account, Focus and Telegram don't change.</p>
+    <div class="pro-bar"><div class="seg" role="group" aria-label="Segment"><button data-seg="index" aria-pressed="${PRO.seg === "index"}">Index</button><button data-seg="stock" aria-pressed="${PRO.seg === "stock"}">Stocks</button></div>
+      <label class="small">Day <select id="pro-day"></select></label></div>
+    <div class="seg pro-tabs" id="pro-tabs" role="group" aria-label="Pro tabs"></div>
     <div id="pro-body"><p class="muted">Loading…</p></div>`;
-  main.querySelectorAll("[data-seg]").forEach((b) => b.onclick = () => { location.hash = `#/pro?seg=${b.dataset.seg}`; });
-  const seg = PRO.seg;
+  main.querySelectorAll("[data-seg]").forEach((b) => b.onclick = () => { location.hash = `#/pro?seg=${b.dataset.seg}&tab=${PRO.tab}`; });
+  $("#pro-day").onchange = (e) => { location.hash = `#/pro?seg=${PRO.seg}&tab=${PRO.tab}&day=${e.target.value}`; };
+  const seg = PRO.seg, day = PRO.day;
   const tick = async (first) => {
     if (state.page !== "pro" || PRO.seg !== seg) return;
     try {
-      const [d, p] = await Promise.all([api(`/api/live/pro?seg=${seg}`), api(`/api/live/paper?book=${seg === "index" ? "pro_index" : "pro_stocks"}`).catch(() => ({}))]);
+      const d = await api(`/api/live/pro?seg=${seg}${day ? `&day=${encodeURIComponent(day)}` : ""}`);
       if (state.page !== "pro" || PRO.seg !== seg) return;
-      const s = d.signals || {}, r = d.rules || {}, ex = r.exit || {};
-      $("#pro-body").innerHTML = `
-        <section class="pro-block"><h2>Strong <small class="muted">${esc(d.day)}</small></h2>
-          <ul class="pro-list">${(s.strong || []).map((x) => proSig(x, true)).join("") || `<li class="muted small">No strong signal ${d.day ? "on " + esc(d.day) : "yet"}.</li>`}</ul></section>
-        <section class="pro-block"><h2>${seg === "index" ? "Pro · Index" : "Pro · Stocks"} paper account</h2>${proTrades(p || {})}
-          <p class="small muted">Rules: strong only · 1 lot · no same-day-expiry buy after ${esc(r.expiry_cutoff || "")} · ${esc(String(r.cooloff_min || 0))} min cool-off after an exit on the same symbol and side · Trend Rider exit + profit lock (at +${esc(String(ex.lock_premium_pct || "–"))}% keep +${esc(String(ex.lock_keep_pct || "–"))}%).</p></section>
-        <section class="pro-block"><h2>Watch <small class="muted">${(s.medium || []).length} · ${s.low || 0} low not shown</small></h2>
-          <ul class="pro-list">${(s.medium || []).map((x) => proSig(x, false)).join("") || `<li class="muted small">Nothing to watch.</li>`}</ul></section>
-        <section class="pro-block"><h2>Which checks lined up and worked <small class="muted">last 20 market days</small></h2>${proFactors(d.factors)}
-          <p class="small muted">${d.learn && d.learn.challenger ? `Weights being tested since ${esc(d.learn.since)} (used only if they beat today's on 5+ new days): ${esc(Object.entries(d.learn.challenger).map(([k, v]) => `${proW(k)} ${v}`).join(", "))}.` : "Weights learn from new days only: a check's weight moves with 100+ graded signals, and only after the new weights beat the old ones on 5 market days they never saw."}</p></section>`;
-      qApply(); qStream("pro");
+      PRO.data = d; proDraw();
     } catch (e) { if (first) $("#pro-body").innerHTML = `<p class="muted">${esc(e.message)}. Trying again…</p>`; }
     if (state.page === "pro" && PRO.seg === seg) L.pageTimer = setTimeout(() => tick(false), 15000);
   };

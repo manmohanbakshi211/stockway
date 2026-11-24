@@ -118,6 +118,19 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 3.02: Pro page in tabs: everything Pro watches (24 Nov 2026)
+- **Mandeep (24 Nov, 14:49):** "Pro mein jo alerts aayege jo bhi observery things hai sabke tabs banao pro mein."
+- **Pro page, Index / Stocks, a day list (the latest 20 days with signals), and six tabs:**
+  - **Strong:** score 85+ with 3+ groups: what the Pro account may buy.
+  - **Watch:** 75-85, not bought.
+  - **Recorded:** every other signal Pro scored that day (listed now, not just counted), each with its votes.
+  - **Trades:** the Pro account's open trades (live prices), result day by day (links to the Day calendar), closed trades
+    with the best % reached.
+  - **Checks:** which checks lined up and worked (last 20 market days), per tier.
+  - **Learning:** each check's starting weight, the weight in use, the one being tested, and earlier tests.
+- API: `/api/live/pro` adds `days`, `trades`, `base_weights`, and lists the low signals (`signals.low`, `low_n`).
+- Nothing else changes. Tests: `tests/test_pro.py` (12); full suite; headless desktop + phone, light and dark.
+
 ## 3.01: Stockway Pro v1, option buying with every check voting together (24 Nov 2026, on trial)
 - **Mandeep (24 Nov):** "jo rules bane hue hain vo sell wale hain ... humein option buing ka set-up rakhna hai toh vo rules
   change karke buying ke banao. ab tak ke inputs or sabhi factors ke sath khud banao jo pro v1 mein jaise tum plan kar

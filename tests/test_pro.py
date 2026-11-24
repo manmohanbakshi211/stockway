@@ -221,3 +221,42 @@ def test_pro_page_and_api(tmp_path, monkeypatch):
     assert c.get("/api/live/pro?seg=x").status_code == 400
     js = (ROOT / "webapp" / "static" / "live.js").read_text()
     assert "Object.assign(PAGES, { pro: pagePro })" in js and 'href="#/pro"' in (ROOT / "webapp" / "static" / "index.html").read_text()
+
+
+def test_pro_page_has_a_tab_for_everything_it_watches(tmp_path, monkeypatch):
+    """3.02 (Mandeep, 24 Nov: "Pro mein jo alerts aayege jo bhi observery things hai sabke tabs banao pro mein")."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from webapp import live_api, memo
+    st = Store(tmp_path / "t.db")
+    _graded(st, [("2026-11-24", "NIFTY", {"breakout": 1}, "strong", 1.0), ("2026-11-25", "NIFTY", {"breakout": 1}, "strong", 1.0),
+                 ("2026-11-25", "BANKNIFTY", {"breakout": -1}, "low", -1.0), ("2026-11-25", "FINNIFTY", {"breakout": 1}, "medium", 0.5)])
+    st.add_trade({"source": "upstox#pro_index", "day": "2026-11-25", "sym": "NIFTY", "label": "NIFTY 25650 CE", "status": "closed",
+                  "net": 2500.0, "entry": 100.0, "exit": 140.0, "reason": "profit lock"})
+    st.add_trade({"source": "upstox#pro_index", "day": "2026-11-25", "sym": "NIFTY", "label": "NIFTY 25700 CE", "status": "open",
+                  "entry": 90.0, "opt_key": "K1", "qty": 75, "dir": 1})
+    st.add_trade({"source": "upstox#pro_stocks", "day": "2026-11-25", "sym": "TCS", "status": "closed", "net": -500.0, "entry": 1.0, "exit": 0.5})
+    e = types.SimpleNamespace(store=st, data_dir=tmp_path, source="upstox", _real_source=lambda: "upstox",
+                              session_day=lambda: dt.date(2026, 11, 25))
+    monkeypatch.setattr(live_api, "engine", lambda: e)
+    for k in list(memo._mem):
+        memo._mem.pop(k, None)
+    app = FastAPI()
+    app.include_router(live_api.router)
+    c = TestClient(app)
+    d = c.get("/api/live/pro?seg=index").json()
+    sg = d["signals"]
+    assert [x["sym"] for x in sg["strong"]] == ["NIFTY"] and [x["sym"] for x in sg["medium"]] == ["FINNIFTY"]
+    assert [x["sym"] for x in sg["low"]] == ["BANKNIFTY"] and sg["low_n"] == 1            # the low ones are listed too
+    assert d["days"] == ["2026-11-25", "2026-11-24"]
+    tr = d["trades"]
+    assert tr["n"] == 1 and tr["net"] == 2500 and tr["won"] == 1 and [t["opt_key"] for t in tr["open"]] == ["K1"]
+    assert tr["days"] == [{"day": "2026-11-25", "n": 1, "net": 2500, "won": 1}]            # the stocks account is separate
+    assert d["base_weights"]["breakout"] == 1.5 and "challenger" in d["learn"]
+    old = c.get("/api/live/pro?seg=index&day=2026-11-24").json()
+    assert old["day"] == "2026-11-24" and [x["sym"] for x in old["signals"]["strong"]] == ["NIFTY"] and old["signals"]["low"] == []
+    js = (ROOT / "webapp" / "static" / "live.js").read_text()
+    for tab in ('["strong", "Strong"]', '["watch", "Watch"]', '["recorded", "Recorded"]', '["trades", "Trades"]',
+                '["checks", "Checks"]', '["learning", "Learning"]'):
+        assert tab in js
+    assert 'id="pro-tabs"' in js and 'id="pro-day"' in js and "function proLearning(d)" in js and "function proFactors(f)" in js

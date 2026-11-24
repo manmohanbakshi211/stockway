@@ -947,3 +947,6 @@ table.gh-acc details summary { cursor: pointer; }
 .pro-sig { border: 1px solid var(--rule); border-radius: var(--radius); padding: 8px 10px; background: var(--paper); }
 .pro-sig-h { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .pill.good { background: var(--up-soft); color: var(--up); }
+.pro-bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 4px 0 10px; }
+.pro-tabs { flex-wrap: wrap; margin: 0 0 10px; }
+.pro-h3 { font-size: .95rem; margin: 14px 0 6px; }

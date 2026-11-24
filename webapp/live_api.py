@@ -1166,7 +1166,9 @@ def live_pro(seg: str = "index", day: str | None = None):
     c = pro.cfg()
     st = pro._state(e.data_dir)
     fac = memo.memo(f"pro_factors|{src}|{day}", None, lambda: pro.factors(e.store, src, 20, day), ttl=60)
-    return clean({"day": day, "seg": seg, "book": "pro_index" if seg == "index" else "pro_stocks",
+    book = "pro_index" if seg == "index" else "pro_stocks"
+    return clean({"day": day, "seg": seg, "book": book, "days": pro.days(e.store, src),
+                  "trades": pro.book_history(e.store, f"{src}#{book}"), "base_weights": dict(c.get("weights") or {}),
                   "rules": {k: c.get(k) for k in ("strong", "medium", "min_groups", "expiry_cutoff", "cooloff_min", "exit", "groups")},
                   "signals": pro.signals(e.store, src, day, seg), "factors": fac, "weights": pro.weights(e.data_dir),
                   "learn": {"champion": st.get("champion"), "challenger": st.get("challenger"), "since": st.get("since"),
