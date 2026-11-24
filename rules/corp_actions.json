@@ -1,0 +1,15 @@
+{
+  "about": "3.06 corporate actions of F&O stocks (Mandeep, 24 Nov 2026: 'haan ye bhi add karo but ek relevant page mein or system chain mein best jagah place karke connect karo'). Splits, bonus issues, dividends, rights, buybacks, demergers with their ex-dates. On a split / bonus ex-date NSE adjusts the stock's option strikes and lot size and the chart shows a price jump that is not a real move; on an ex-dividend date the stock opens lower by about the dividend. Information and warnings only (event risk on alerts, Market context page, the stock's line, Day calendar chip): nothing is blocked.",
+  "on": true,
+  "past_days": 370,
+  "ahead_days": 60,
+  "refresh_hours": 6,
+  "dividend_warn_pct": 1.0,
+  "warn_days": 1,
+  "mcp": {
+    "on": true,
+    "url": "https://mcp.nseindia.in/bhavcopy/cm/mcp",
+    "pace_s": 1.5,
+    "why": "NSE's official MCP server (public, no login, read-only): get_corporate_actions per stock with the exact ex-date and adjustment factor, past dates only. Used when NSE's website does not answer, for the F&O stocks. NSE: for educational and research use."
+  }
+}

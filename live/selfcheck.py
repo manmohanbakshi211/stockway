@@ -388,6 +388,18 @@ def static_checks(cfg: dict | None = None) -> list:
     except Exception as e:
         gr_ok, gr_det = False, str(e)[:160]
     out.append(_c("grade", "Honest grade of alert types and fewer repeats shown (3.05)", gr_ok, gr_det))
+    try:                                                  # 3.06: corporate actions (NSE website, NSE MCP backup)
+        from . import corpact as _ca
+        cc_ = _ca.cfg()
+        j_ = _ca.load(Path(__file__).resolve().parents[1] / "data")
+        ca_ok = not _ca._C.get("error") and bool(cc_.get("on", True))
+        age_ = f"{(time.time() - j_['updated']) / 3600:.0f} h ago" if j_.get("updated") else "not yet (a minute after the scanner starts)"
+        ca_det = (f"{len(j_.get('rows') or [])} ex-dates of F&O stocks, from {j_.get('source') or '–'}, updated {age_}"
+                  f"{'; last try: ' + str(j_['error'])[:80] if j_.get('error') else ''}; NSE website every {cc_.get('refresh_hours')} h, "
+                  f"NSE MCP backup {'on' if (cc_.get('mcp') or {}).get('on', True) else 'off'}; warnings on alerts only")
+    except Exception as e:
+        ca_ok, ca_det = False, str(e)[:160]
+    out.append(_c("corp_actions", "Corporate actions of F&O stocks: splits, bonus, dividends (3.06)", ca_ok, ca_det))
     try:                                                  # 2.83: the multiverse's strict pick rule, in shadow
         from lab import multiverse as _mvx
         src_ = _mvx.strict_rule(_mvx.cfg())

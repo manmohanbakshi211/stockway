@@ -496,6 +496,11 @@ class LiveEngine:
         self.ranker = Ranker(self.data_dir, self.source, self.log)
         if self.source != "sim":
             self.context.fo_symbols = set(self.uni.underlyings)
+            if not is_practice(self.source):
+                try:                                     # 3.06: corporate actions as soon as the F&O list is known
+                    self.context.corp_refresh()          # (its own thread; at most every refresh_hours)
+                except Exception as e:
+                    self.log(f"Corporate actions not started: {e}")
         self.words = symbol_words(self.uni)
         for n in self.news.items:
             n["syms"] = match_symbols(n["title"], self.words)
@@ -2287,6 +2292,13 @@ class LiveEngine:
                 out["event"] = ev
                 facts["res_days"] = ev["days"] if ev.get("results") else None
                 facts["event_days"] = ev["days"]
+            try:                                         # 3.06: the stock's next corporate action (shown, not a fact)
+                from . import corpact
+                ca = corpact.near(self.data_dir, sym, today, days=10)
+                if ca:
+                    out["corp"] = {**ca[0], **corpact.words(ca[0], (m or {}).get("spot"))}
+            except Exception:
+                pass
         if u and u.is_index:
             try:
                 from lab.rules import events_named

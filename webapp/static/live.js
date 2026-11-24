@@ -402,9 +402,10 @@ function eventLine(r) {
 }
 
 function bigLine(b) {
-  if (!b || !(b.line || b.event || b.index_event)) return "";
+  if (!b || !(b.line || b.event || b.index_event || b.corp)) return "";
   const ev = b.event ? `${b.event.results ? "Results" : esc(b.event.purpose || "Board meeting")} ${b.event.days === 0 ? "today" : b.event.days === 1 ? "tomorrow" : `in ${b.event.days} trading days`} (${esc(b.event.date.slice(5))})` : "";
-  const parts = [b.line ? esc(b.line) : "", ev ? `<span class="${b.event.days <= 1 ? "amber" : ""}">${ev}</span>` : "", b.index_event ? `<span class="amber">${esc(b.index_event)} today</span>` : ""].filter(Boolean);
+  const ca = b.corp ? `<span class="${b.corp.days <= 1 && b.corp.level !== "low" ? "amber" : ""}" title="${esc(b.corp.purpose || "")}">${esc(b.corp.what || "")}</span>` : "";   // 3.06
+  const parts = [b.line ? esc(b.line) : "", ev ? `<span class="${b.event.days <= 1 ? "amber" : ""}">${ev}</span>` : "", ca, b.index_event ? `<span class="amber">${esc(b.index_event)} today</span>` : ""].filter(Boolean);
   return `<p class="small muted" style="margin:2px 0 6px" title="Information only: recorded with every alert and tested by a challenger model before it can change scores or Focus">🔭 ${parts.join(" · ")}</p>`;
 }
 
@@ -1519,6 +1520,26 @@ async function drawNewsRadar() {
     <p class="note">News alerts still use the keyword tone. The AI takes over only if it is clearly right more often, on your say-so.</p>`;
 }
 
+/* 3.06 corporate actions of the F&O stocks (live/corpact.py): splits, bonus, dividends... with their ex-dates */
+function corpBox(v) {
+  if (!v) return "";
+  const K = v.kinds || {};
+  const what = (r) => r.kind === "split" || r.kind === "bonus" ? "Option strikes and lot size adjusted; chart jump is not a real move"
+    : r.kind === "dividend" ? `Opens about ${r.amount ? "₹" + r.amount : "the dividend"} lower (calls lose, puts gain)` : r.kind === "rights" || r.kind === "demerger" ? "Price can jump on the ex-date" : "";
+  const row = (r, up) => `<tr><td class="nw">${esc(r.ex_date.slice(5))}${up && r.days != null ? `<br><small class="muted">${r.days === 0 ? "today" : r.days === 1 ? "tomorrow" : `in ${r.days} days`}</small>` : ""}</td>
+    <td><a href="#/sym?s=${encodeURIComponent(r.sym)}"><b>${esc(r.sym)}</b></a></td>
+    <td><span class="pill ${r.kind === "split" || r.kind === "bonus" ? "p-amber" : ""}">${esc(K[r.kind] || r.kind)}</span> ${r.ratio ? esc(r.ratio) : r.amount ? "₹" + esc(String(r.amount)) : ""}<div class="small muted">${esc((r.purpose || "").slice(0, 70))}</div></td>
+    <td class="small">${esc(what(r))}</td></tr>`;
+  const up = (v.upcoming || []).slice(0, 40), rec = (v.recent || []).slice(0, 15);
+  const src = v.source === "nse_mcp" ? "NSE's MCP server (past ex-dates only: NSE's website did not answer)" : v.source === "nse" ? "NSE" : "";
+  return `<h2>Corporate actions <span class="muted small">F&amp;O stocks, ex-dates${src ? ` · from ${esc(src)}` : ""}${v.updated ? ` · ${new Date(v.updated * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}</span></h2>
+    <p class="small muted" style="margin-top:-6px">On a split or bonus ex-date NSE adjusts the stock's options, and the chart shows a jump that is not a real move. On an ex-dividend date the stock opens lower by about the dividend. Alerts on these stocks show it as event risk; the Day calendar marks trades made that day. Information only: nothing is blocked.</p>
+    ${v.error && !up.length && !rec.length ? `<p class="small down">${esc(v.error)}</p>` : ""}
+    <div class="table-wrap"><table class="mini"><thead><tr><th>Ex-date</th><th>Stock</th><th>Action</th><th>What it means</th></tr></thead>
+      <tbody>${up.map((r) => row(r, true)).join("") || `<tr><td colspan="4" class="muted small">No ex-date in the next 30 days${v.n ? "" : " (the list loads a minute after the scanner starts)"}.</td></tr>`}</tbody></table></div>
+    ${rec.length ? `<details style="margin-top:6px"><summary class="small">Last 10 days (${rec.length})</summary><div class="table-wrap"><table class="mini"><tbody>${rec.map((r) => row(r, false)).join("")}</tbody></table></div></details>` : ""}`;
+}
+
 async function pageContext(auto = false) {
   stopPageTimer();
   let c;
@@ -1550,6 +1571,7 @@ async function pageContext(auto = false) {
       </div>
       <div><h2 style="margin-top:0">Global markets</h2><div class="table-wrap"><table><thead><tr><th>Market</th><th class="r">Last</th><th class="r">Change</th><th>As of</th></tr></thead><tbody>${glob || `<tr><td colspan="4" class="muted">Loading…</td></tr>`}</tbody></table></div></div>
     </div>
+    ${corpBox(c.corp)}
     <h2>Big deals today <span class="muted small">bulk and block deals${c.deals_fo.length ? " in F&amp;O stocks" : ""}</span></h2>
     <div class="table-wrap"><table><thead><tr><th>Stock</th><th>Buyer / seller</th><th>Side</th><th class="r">Price</th><th class="r">Value</th></tr></thead><tbody>${deals || `<tr><td colspan="5" class="muted">None yet. NSE publishes these after market hours.</td></tr>`}</tbody></table></div>
     <h2>Company filings, live <span class="muted small">F&amp;O stocks, from NSE</span></h2>
@@ -4043,7 +4065,8 @@ async function pageSystem() {
           <tr><td>Claude</td><td>Notes, Ask Stockway, Lab ideas, ebook / transcript reading</td><td>Your Claude plan's usage</td><td>Claude Code on this Mac</td></tr>
           <tr><td>Telegram</td><td>Alerts and notices on your phone</td><td>–</td><td>Bot token (once)</td></tr>
           <tr><td>Yahoo Finance</td><td>World markets, VIX history</td><td>Free, unofficial</td><td>None</td></tr>
-          <tr><td>NSE</td><td>Filings, insider trades, ban list, end-of-day files</td><td>Free</td><td>None</td></tr>
+          <tr><td>NSE</td><td>Filings, insider trades, ban list, end-of-day files, corporate actions (splits, bonus, dividends)</td><td>Free</td><td>None</td></tr>
+          <tr><td>NSE MCP (official)</td><td>Backup for corporate actions when NSE's website does not answer (past ex-dates, F&amp;O stocks)</td><td>Free, public, read-only; one stock every 1.5 s; NSE: for educational and research use</td><td>None</td></tr>
           <tr><td>RBI, SEBI, PIB, NSE / BSE circulars</td><td>Official news and orders: event risk on alerts, Telegram for high-impact ones</td><td>Free RSS, read every 2 min in market hours</td><td>None</td></tr>
         </tbody></table></div>
         <p class="small muted" style="margin:6px 0 0">Live prices come only from Upstox; Dhan is never a second price feed, so the two can't disagree in the scanner. Market data only: no orders anywhere.</p></div>

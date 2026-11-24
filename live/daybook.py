@@ -361,10 +361,20 @@ def build(store, data_dir, base: str, day: str, live_bars: dict | None = None, g
             dups[r["alert_id"]] += 1
     names = {"main": "Main account", **book_names()}
     from . import registry
+    try:                                                 # 3.06: the stocks with an ex-date this day (corporate actions)
+        from . import corpact
+        corp_day = corpact.on_day(data_dir, day) if rows else {}
+    except Exception:
+        corp_day = {}
     trades = []
     for r in rows:
         a = alerts.get(r.get("alert_id"))
         dg = diagnose(r, a, pxs.get(r["sym"]), end_ts, c, gaps or [], dups.get(r.get("alert_id"), 0))
+        for ca in corp_day.get(r["sym"], [])[:2]:
+            dg["chips"].append(_chip("corp", f"{corpact.KINDS.get(ca['kind'], 'Corporate action')} ex-date today"
+                                             f"{' ₹' + format(ca['amount'], 'g') if ca.get('amount') else ''}"
+                                             f"{' ' + ca['ratio'] if ca.get('ratio') else ''}: the open gap was the corporate "
+                                             f"action, not a real move", "info"))
         acct = _acct(r["source"], base)
         trades.append({"id": r["id"], "account": acct, "account_name": names.get(acct, acct), "sym": r["sym"],
                        "label": r["label"], "kind": r["kind"], "kind_name": registry.label(r["kind"]) if r["kind"] else "",

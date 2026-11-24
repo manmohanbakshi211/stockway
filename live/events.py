@@ -287,6 +287,19 @@ class EventEngine:
                         add("high" if ev.get("results") else "medium", what)
             except Exception:
                 pass
+        # 3.06: corporate actions (split / bonus / dividend ...) with an ex-date today or the next trading day
+        if u and not is_index and getattr(self.e, "data_dir", None) is not None:
+            try:
+                from . import corpact
+                near_ = corpact.near(self.e.data_dir, sym, today)
+                if near_:
+                    m_ = (getattr(self.e, "metrics", None) or {}).get(sym) or {}
+                    for r in near_[:2]:
+                        w_ = corpact.words(r, m_.get("spot"))
+                        add(w_["level"], w_["what"], w_.get("warn"))
+                    facts["ev_corp_d"] = near_[0]["days"]
+            except Exception:
+                pass
         # expiry day, ban list, holiday tomorrow
         try:
             if u and u.near_expiry(today) == today:

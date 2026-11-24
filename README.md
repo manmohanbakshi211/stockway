@@ -118,6 +118,40 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 3.06: Corporate actions of F&O stocks (splits, bonus, dividends), NSE MCP as backup (24 Nov 2026)
+- **Mandeep (24 Nov, 16:57):** "haan ye bhi add karo but ek relevant page mein or system chain mein best jagah place karke
+  connect karo".
+- **NSE MCP check (before):**
+  - NSE's official MCP has two public servers with no login: bhavcopy (21 tools) and live cash-market data (15 tools).
+  - It has no F&O, option chain, OI or intraday candles. Live data is 1–5 min late. NSE says it is for educational and
+    research use.
+  - So it is not a price source for the app. It is used only as the backup for corporate actions.
+- **Where it sits in the chain (information and warnings only, never a block):**
+  1. **Data** (`live/corpact.py`, `rules/corp_actions.json`):
+     - NSE's website corporate-actions list comes through the same NSE session as the filings and results calendar.
+       It covers ex-dates from 370 days back to 60 days ahead, refreshed every 6 h in its own thread, starting as soon
+       as the F&O list is known.
+     - If the website does not answer, NSE's MCP server `get_corporate_actions` is asked per F&O stock (past
+       ex-dates, one every 1.5 s).
+     - The data is kept in `data/corp_actions.json`. Splits, bonus issues, dividends (₹ a share), rights, buybacks and
+       demergers are read from NSE's wording, with the ratio and price factor.
+  2. **Alerts** (`live/events.py`): event risk on that stock's alerts on the ex-date and the trading day before.
+     - Split / bonus: high. NSE adjusts the option strikes and lot size, and the chart shows a jump that is not a real
+       move.
+     - Dividend of 1% or more of the price: medium. The stock opens about ₹X lower; calls lose, puts gain.
+     - Fact `ev_corp_d` is recorded only; no model uses it.
+  3. **The alert's bigger-picture line:** the stock's next corporate action within 10 trading days.
+  4. **Market context page** (Market & news): "Corporate actions" panel with the next 30 days and the last 10 days,
+     showing ex-date, stock, action and what it means.
+  5. **Day calendar:** a chip on a trade made on its stock's ex-date ("the open gap was the corporate action, not a real
+     move"). The AI review reads it too.
+  6. **System page:** NSE row updated and an "NSE MCP (official)" row added. Self-check: `corp_actions`.
+- Checked for real: NSE MCP for RELIANCE, INFY and BEL returned the right ex-dates and amounts. NSE's website was not
+  reachable from the build machine (403), so its wording is handled leniently, with tests on NSE's own formats.
+- Main account, Focus, Pro, paper trades, Telegram and the Lab are unchanged; the Lab modules are untouched.
+- Tests: `tests/test_corp_306.py` (16). Full suite passed. Headless check of the Market context and System pages on
+  desktop and phone, light and dark.
+
 ## 3.05: Exit, noise, honest grading, accounts scorecard (24 Nov 2026)
 - **Mandeep (24 Nov, 16:07):** "okay sab karo" (on the four improvements proposed from the Mac data).
 - **1. "Half book · half trail" (new paper account, challenger).**

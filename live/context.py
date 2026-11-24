@@ -11,6 +11,7 @@ import datetime as dt
 import io
 import json
 import re
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -233,6 +234,10 @@ class NSE:
     def announcements(self):
         return self.api("/api/corporate-announcements?index=equities") or []
 
+    def corp_actions(self, frm: dt.date, to: dt.date):
+        """3.06: NSE's corporate-actions list (splits, bonus, dividends, rights...) for ex-dates frm..to (raw rows)."""
+        return self.api(f"/api/corporates-corporateActions?index=equities&from_date={frm:%d-%m-%Y}&to_date={to:%d-%m-%Y}")
+
     def events(self) -> list:
         """Upcoming board meetings (results, dividends, splits, fund raising) from NSE's event calendar, with the
         board-meetings list as a fallback: [{sym, date, purpose}]."""
@@ -399,7 +404,37 @@ class Context:
             ev = self._do("events", self.nse.events)
             if ev:
                 self.events_cal = ev
+        self.corp_refresh()
         self._save_cache()
+
+    def corp_refresh(self, force: bool = False):
+        """3.06: corporate actions of the F&O stocks (live/corpact.py) in their own thread: the NSE MCP backup can take a
+        few minutes (one stock at a time, paced) and must never hold up the other context refreshes."""
+        from . import corpact
+        c = corpact.cfg()
+        if not c.get("on", True) or getattr(self, "_corp_busy", False) or not self.fo_symbols:
+            return False                                 # no F&O list yet: the engine asks again when it has one
+        last = (corpact.load(self.data_dir).get("updated") or 0)
+        tried = getattr(self, "_corp_tried", 0)
+        if not force and (time.time() - last < float(c["refresh_hours"]) * 3600 or time.time() - tried < 1800):
+            return False
+        self._corp_busy, self._corp_tried = True, time.time()
+
+        def run():
+            try:
+                syms = set(self.fo_symbols or set())
+                j = corpact.refresh(self.data_dir, syms, site=self.nse.corp_actions, today=dt.datetime.now(IST).date(), log=self.log)
+                if j.get("updated") and not j.get("error"):
+                    self.updated["corp_actions"] = j["updated"]
+                    self.errors.pop("corp_actions", None)
+                elif j.get("error"):
+                    self.errors["corp_actions"] = j["error"]
+            except Exception as e:
+                self.errors["corp_actions"] = str(e)[:120]
+            finally:
+                self._corp_busy = False
+        threading.Thread(target=run, daemon=True, name="corp-actions").start()
+        return True
 
     def refresh_global(self):
         g = global_markets(self.log)
@@ -472,7 +507,12 @@ class Context:
             near = sorted([{"sym": s, **v} for s, v in syms.items() if not v["ban"] and v["pct"] >= 75 and
                            (not self.fo_symbols or s in self.fo_symbols)], key=lambda d: -d["pct"])[:20]
         fo_deals = [d for d in self.deals if not self.fo_symbols or d["sym"] in self.fo_symbols]
-        return {"participants": self.participants, "fii_dii": self.fii_dii, "ban": ban, "near_ban": near,
+        try:                                             # 3.06: corporate actions of the F&O stocks
+            from . import corpact
+            corp = corpact.view(self.data_dir, dt.datetime.now(IST).date(), self.fo_symbols or None)
+        except Exception as e:
+            corp = {"upcoming": [], "recent": [], "error": str(e)[:120]}
+        return {"participants": self.participants, "fii_dii": self.fii_dii, "ban": ban, "near_ban": near, "corp": corp,
                 "mwpl_date": self.mwpl["date"] if self.mwpl else None, "deals_fo": fo_deals[:40], "deals_all": self.deals[:60],
                 "filings": self.filings[:60], "global": self.global_, "errors": self.errors,
                 "updated": {k: v for k, v in self.updated.items()}}
