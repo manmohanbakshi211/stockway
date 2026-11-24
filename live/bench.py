@@ -77,9 +77,11 @@ def _validate(name: str, spec: dict) -> dict:
             raise ValueError(f"bad leg {l}")
         out.append({"side": side, "offset": off, "q": q})
     ex = spec.get("exit") or {}
-    for k in ("target_pct", "stop_pct", "hold_min"):
+    for k in ("target_pct", "stop_pct", "hold_min", "trail_after_pct", "trail_pct"):   # 3.05: trailing stop on the premium
         if ex.get(k) is not None and not (isinstance(ex[k], (int, float)) and ex[k] > 0):
             raise ValueError(f"exit {k} must be a positive number or null")
+    if bool(ex.get("trail_pct")) != bool(ex.get("trail_after_pct")):
+        raise ValueError("a trailing exit needs both trail_after_pct and trail_pct")
     s = {"label": str(spec.get("label") or name), "legs": out, "exit": dict(ex), "since": spec.get("since")}
     s["family"] = family_of(s)
     return s
@@ -322,6 +324,8 @@ class Bench:
                    "data": json.dumps({"open_legs": p_open, "legs": [{k: l[k] for k in ("key", "side", "strike", "q")} for l in info],
                                        "money": mon}, default=str)}
             row["_legs"], row["_peak"], row["_low"], row["_basis"] = legs, px, px, basis
+            if ex.get("trail_pct"):                   # 3.05: once the premium is up trail_after_pct, the stop trails
+                row["_trail"] = (float(ex["trail_after_pct"]) / 100, float(ex["trail_pct"]) / 100)
             rows.append(row)
         if not rows:
             return 0
@@ -434,7 +438,14 @@ class Bench:
             r["_last"] = v
             r["_peak"], r["_low"] = max(r["_peak"], v), min(r["_low"], v)
             held = (now_ts - r["ts"]) / 60
-            why = ("target" if v >= r["target"] else "stop loss" if v <= r["stop"] else
+            tr = r.get("_trail")
+            if tr:                                    # 3.05: trail_pct of the premium paid behind the best price
+                b0 = r.get("_basis") or abs(r["entry"]) or 1
+                if r["_peak"] - r["entry"] >= tr[0] * b0:
+                    ts_ = r["_peak"] - tr[1] * b0
+                    if ts_ > r["stop"]:
+                        r["stop"], r["_trailing"] = round(ts_, 2), True
+            why = ("target" if v >= r["target"] else ("trailing stop" if r.get("_trailing") else "stop loss") if v <= r["stop"] else
                    "end of day" if force or hm >= exit_time else "time limit" if held >= r["hold_min"] else None)
             if not why:
                 keep.append(r)

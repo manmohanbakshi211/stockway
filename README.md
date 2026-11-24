@@ -118,6 +118,53 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 3.05: Exit, noise, honest grading, accounts scorecard (24 Nov 2026)
+- **Mandeep (24 Nov, 16:07):** "okay sab karo" (on the four improvements proposed from the Mac data).
+- **1. "Half book · half trail" (new paper account, challenger).**
+  - Data, same 63 trades (12–23 Nov): the main account made +Rs13,410 and Trailing exit made +Rs1,23,461. The gain came
+    from a few big runners (19 Nov Bank Nifty: +Rs40.8K against +Rs6.9K). The trailing exit gave back more on 18 and
+    23 Nov.
+  - The new account takes the main account's trades (same alert, moment and lots). Half the lots (rounded down) exit
+    exactly like the main account; the rest trail like the Trailing exit account. One lot is trailed.
+  - Gun: `PaperBook.try_open(leg=...)` lets the two legs of one alert share a symbol (mode `leg:book` / `leg:trail`).
+    `Books.split_lots` / `_split_open` split the trade. Bullet: `split` in `rules/paper_books.json`.
+- **2. Fewer repeats on the Alerts page (all still saved).**
+  - Alerts went from 1,042 (16 Nov) to 5,551 (23 Nov). An expiry-day IV-spike burst alone was 2,150.
+  - The Alerts page now shows one alert per stock every 30 minutes (60 for no-direction alerts), unless a stronger or
+    Focus one comes. "Show them" shows every alert; a single stock's search shows all of its alerts.
+  - On real data 23 Nov, 3,464 of 5,551 are shown. Nothing changes in what is saved, graded, paper traded, sent to the
+    Lab or to Telegram (Telegram already gets Focus alerts only).
+  - Gun: `live/repeats.py`. Bullet: `rules/alert_repeats.json`.
+- **3. Honest grade of every alert type (on trial, Scorecard page).**
+  - It uses the last 20 market days of the test bench (1 lot, ask in / bid out, every charge).
+  - For each alert type, indices and stocks apart, it shows:
+    - the median rupees a trade, the win % and the plain average;
+    - the average with each trade capped at ±100% of the premium;
+    - the 1-hour option move, as median and average.
+  - It shows both the main exit and a new trailing exit.
+  - Mac bench 27 Oct–23 Nov: only 9 of 58 alert types with 50+ trades had a positive median, all on indices.
+  - New bench style `buy_trail`:
+    - The stop is −25% of the premium.
+    - Once the option is +20%, the stop trails 25% of the premium paid behind the best price.
+    - There is no fixed target; the trade is out at the close.
+    - Gun: trailing support in `live/bench.py` (`trail_after_pct` / `trail_pct`).
+  - Finished days are summarised once into `data/bench_cache/*__grade.json.gz`. The grade is worked out in the
+    background (`/api/live/grades`). Focus, Pro, the accounts and Telegram do not use it yet.
+  - Gun: `live/grade.py`. Bullet: `rules/grade.json`.
+- **4. Paper accounts scorecard against the main account (Paper page).**
+  - Each account counts from its first trade, on every day the app traded, against the main account's net on the same
+    days, with days ahead / behind.
+  - After 20 market days it gets a verdict. Behind the main account and losing money means the account is switched off
+    after the close (16:10). Its trades stay in every record, and "Turn back on" keeps it on for good.
+  - Pro accounts only get the verdict (`review: "show"`).
+  - Today every account is still learning (1–8 market days); the first verdicts come around mid-December.
+  - Gun: `books.scorecard / apply_review / keep_on`, `engine.accounts_review`, and the new checks in `live/selfcheck.py`.
+- Main account, Focus, alerts, Telegram and the Lab are unchanged; the Lab modules are untouched (regression identical
+  by construction).
+- Tests: `test_split_305` (2), `test_repeats_305` (2), `test_grade_305` (3), `test_review_305` (2). Bench style counts
+  were updated for `buy_trail`. Full suite passed. Headless check of the Alerts, Scorecard and Paper pages on desktop
+  and phone, light and dark: no console errors, no sideways scroll.
+
 ## 3.04: No lock on a good signal: Pro without day locks, a "Main · no locks" challenger (24 Nov 2026)
 - **Mandeep (24 Nov, 15:36):** "humein na koi aisa lock nahi chahiye ki aache alert ya opportunity aaye market time me
   toh system trade hi na le. humein market situation dekhni hai but opportunity miss nahi karni".

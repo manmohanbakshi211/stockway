@@ -1,0 +1,9 @@
+{
+  "about": "3.05 honest grade of every alert type (Mandeep, 24 Nov 2026: 'okay sab karo' on: grade by median and win %, a single trade's effect capped, and with the trailing exit, not the 60-minute hold). On trial: shown on the Scorecard page, used by nothing else yet (Focus, Pro and the accounts are unchanged).",
+  "days": 20,
+  "styles": {"buy": "Main exit", "buy_trail": "Trailing"},
+  "cap_pct": 100,
+  "min_n": 50,
+  "edge": {"min_median": 0, "min_win_pct": 50},
+  "why": "Mac bench 27 Oct-23 Nov, 1 lot, ask in / bid out, every charge, the main account's exit: of 58 alert types with 50+ trades only 9 had a positive median, all of them on indices. The plain average hides this: a few huge winners (or one bad price) pull it up while most trades lose."
+}

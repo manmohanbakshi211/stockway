@@ -39,7 +39,7 @@ def test_bench_fills_like_the_paper_account(tmp_path):
     n = b.add({"sym": "NIFTY", "kind": "orb", "direction": "up", "option": OPT, "id": 7}, e, now, CFG)
     # 2.30's option buy + debit spread, and (2.31) the styles whose strikes are there: 1 OTM, hold-the-day. No puts in
     # this chain, so the credit spread and the sales are skipped; no strike below 23800, so the 1-ITM buy is skipped.
-    assert n == 4 and {r["style"] for r in b.open} == {"buy", "spread", "buy_otm", "buy_day"}
+    assert n == 5 and {r["style"] for r in b.open} == {"buy", "spread", "buy_otm", "buy_day", "buy_trail"}   # 3.05: + trailing
     assert b.add({"sym": "NIFTY", "kind": "orb", "direction": "up", "option": OPT}, e, now, CFG) == 0   # cooldown
     buy = next(r for r in b.open if r["style"] == "buy")
     spr = next(r for r in b.open if r["style"] == "spread")

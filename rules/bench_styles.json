@@ -10,6 +10,7 @@
   "credit": {"label": "Credit spread", "legs": [{"side": "against", "offset": 0, "q": -1}, {"side": "against", "offset": 2, "q": 1}],
              "exit": {}, "since": "2026-11-04"},
   "sell": {"label": "Sell ATM", "legs": [{"side": "against", "offset": 0, "q": -1}], "exit": {}, "since": "2026-11-04"},
+  "buy_trail": {"label": "Buy ATM, trailing", "legs": [{"side": "with", "offset": 0, "q": 1}], "exit": {"target_pct": 500, "stop_pct": 25, "trail_after_pct": 20, "trail_pct": 25, "to_close": true}, "since": "2026-11-25", "why": "3.05 (Mandeep 24 Nov: grade alerts with the trailing exit too): stop -25% of the premium; once the premium is +20%, the stop trails 25% of the premium paid behind the best price; no fixed target, out at the close. A premium version of the Trailing exit account (which trails 2.5 x the 5-minute ATR of the underlying)."},
   "sell_day": {"label": "Sell 1 OTM, hold the day", "legs": [{"side": "against", "offset": 1, "q": -1}],
                "exit": {"target_pct": 50, "stop_pct": 50, "to_close": true}, "since": "2026-11-04"}
  }

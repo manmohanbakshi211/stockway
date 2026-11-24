@@ -114,9 +114,11 @@ class PaperBook:
             s.add(alert["sym"])
         return s
 
-    def try_open(self, alert: dict, state, now: dt.datetime, manual=False, override=False) -> int | None:
+    def try_open(self, alert: dict, state, now: dt.datetime, manual=False, override=False, leg: str | None = None) -> int | None:
         """manual: you clicked Paper trade (needs PASS); override: you confirmed taking a soft BLOCK (1 lot, tagged).
-        Automatic trades need PASS, unless aggressive mode is on: then every directional idea is taken (tagged)."""
+        Automatic trades need PASS, unless aggressive mode is on: then every directional idea is taken (tagged).
+        leg (3.05): one part of a trade split in two by its exit ("book" / "trail"); the second leg may open on a symbol
+        the first leg already holds, nothing else differs."""
         c = self.cfg
         opt = alert.get("option")
         if not opt:
@@ -135,7 +137,9 @@ class PaperBook:
                 return None                               # never on pre-open or after-close prices
         opens = self.open_trades()
         cap = int(c.get("aggressive_max_open") or 15) if aggressive else int(c["max_open"])
-        if any(t["sym"] == alert["sym"] for t in opens) or (not manual and len(opens) >= cap):
+        held = any(t["sym"] == alert["sym"] and not (leg and alert.get("id") is not None and t.get("alert_id") == alert.get("id")
+                                                     and str(t.get("mode") or "").startswith("leg:")) for t in opens)
+        if held or (not manual and len(opens) >= cap):
             return None
         keep = int(c.get("index_slots") or 0)             # 2.59: slots kept for the indices (0 = as before)
         if keep and not manual and not alert.get("is_index"):
@@ -168,7 +172,7 @@ class PaperBook:
         return self._open(state, now, sym=alert["sym"], kind=alert["kind"], opt=opt, entry=entry, ltp=inst.ltp, lots=lots,
                           direction=1, manual=manual_code, alert_id=alert.get("id"), und_key=alert.get("und_key"),
                           why=alert.get("title", ""), exit=ex, plan=fac.get("plan"),
-                          tag=(((alert.get("data") or {}).get("pack") or {}).get("variant")))
+                          tag=(((alert.get("data") or {}).get("pack") or {}).get("variant")), leg=leg)
 
     def open_manual(self, state, now: dt.datetime, *, sym: str, opt: dict, direction: int, lots: int = 1,
                     und_key: str | None = None, kind="manual") -> dict:
@@ -196,7 +200,7 @@ class PaperBook:
         return {"opened": tid}
 
     def _open(self, state, now, *, sym, kind, opt, entry, ltp, lots, direction, manual, alert_id=None, und_key=None, why="",
-              exit=None, plan=None, strict=False, tag=None):
+              exit=None, plan=None, strict=False, tag=None, leg=None):
         c = self.cfg
         und = state.get(und_key) if und_key else None
         # 2.48: never more money than the account has free (Mandeep, 10 Nov: "sometimes it is taking trades more than
@@ -257,6 +261,8 @@ class PaperBook:
             t["hold_max"] = STYLES[plan["style"]]["max"]
         if tag:                                           # 2.69: which strategy-file strategy took it (Ghanshyam page)
             t["mode"] = f"pack:{tag}"
+        if leg:                                           # 3.05: which part of a split trade
+            t["mode"] = f"leg:{leg}"
         if kind == "factory":                             # remember which Strategy Lab rule took it (for its live record)
             import re as _re
             mm = _re.search(r"\b(S[0-9a-f]{8})\b", why or "")

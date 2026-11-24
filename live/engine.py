@@ -2762,6 +2762,26 @@ class LiveEngine:
         self.brief_done.add(("prolearn", today))
         return True
 
+    def _review_due(self, now: dt.datetime, source: str) -> bool:
+        """3.05: once a market day after the close (rules/paper_books.json review.at); never for a practice source."""
+        from .books import review_cfg
+        today = now.date().isoformat()
+        if now.strftime("%H:%M") < str(review_cfg()["at"]) or is_practice(source) or not SESSION.session(now.date()):
+            return False
+        if ("review", today) in self.brief_done:
+            return False
+        self.brief_done.add(("review", today))
+        return True
+
+    def accounts_review(self, day: str | None = None) -> list:
+        from . import books as B
+        day = day or self.clock.now().date().isoformat()
+        rows = B.scorecard(self.store, self._real_source(), day)
+        new = B.apply_review(self.data_dir, rows, day, log=self.log)
+        if new and getattr(self, "books", None) is not None and self.paper:
+            self.books.load(self.paper.cfg, self.cfg()["live"].get("books"))
+        return new
+
     def pro_learn(self, day: str | None = None) -> dict:
         from . import pro
         return pro.learn(self.store, self._real_source(), self.data_dir, day, log=self.log)
@@ -2896,6 +2916,12 @@ class LiveEngine:
                 except Exception as e:
                     if self._every("day_review_err", 3600, clock_time=False):
                         self.log(f"Day review not started: {e}")
+                try:                                       # 3.05: the accounts' scorecard against the main account
+                    if self._review_due(now, self.source or c["source"]):
+                        threading.Thread(target=self.accounts_review, args=(today,), daemon=True, name="accounts-review").start()
+                except Exception as e:
+                    if self._every("review_err", 3600, clock_time=False):
+                        self.log(f"Accounts scorecard not started: {e}")
                 try:                                       # 3.01: Pro learns from the day, after the close, once
                     if self._pro_learn_due(now, self.source or c["source"]):
                         threading.Thread(target=self.pro_learn, args=(today,), daemon=True, name="pro-learn").start()

@@ -1,6 +1,13 @@
 {
  "about": "2.49: extra paper accounts next to your main one (Mandeep, 10 Nov 2026, points 14 and 15). Each has its own money and its own trades (saved as source '<feed>#<id>', never mixed with the main account, the scorecard or the test bench). Paper only: nothing here can place a real order. 'pick' = which alerts the account takes; 'paper' = its account rules (same names as the main account's); capital null = the same as your main capital. Change the numbers here; old trades keep the rules they were taken with. 2.56: 'exit_style' (a chart exit from lab/exits.py STYLES) gives an account its own exit for every trade; pick.same_as_main takes the main account's alert types and strength. 2.56.2: pick.mirror_main takes exactly the main account's trades (same alert, same lots); the main account's limits decide. 2.58: pick.multiverse takes test-bench signals that match the multiverse's live picks (data/multiverse.json), with the pick's strike and exit. 2.59: paper.index_slots keeps that many open-trade slots for the indices (0 = as before). 2.73: pick.situation takes Strategy Lab rule signals only when the market situation picker (lab/situation.py) says they fit today.",
  "valid_from": "2026-11-11",
+ "review": {
+  "min_days": 20,
+  "retire": true,
+  "at": "16:10",
+  "file": "accounts_review.json",
+  "why": "3.05 (Mandeep, 24 Nov 2026: 'okay sab karo' on: after 20 market days every account against the main account on the same days; the losers switched off, their record kept). Retire = behind the main account over its days AND losing money. An account with review 'show' only gets the verdict (Pro: your call)."
+ },
  "books": {
   "best": {
    "name": "Best only",
@@ -61,6 +68,24 @@
     "risk_pass": true
    },
    "exit_style": "chand",
+   "paper": {}
+  },
+  "halftrail": {
+   "name": "Half book · half trail",
+   "short": "Same trades as the main account: half the lots exit like the main account, the rest trail",
+   "explain": "3.05 (Mandeep, 24 Nov 2026: 'okay sab karo'). Takes exactly the trades the main account takes (same alert, same moment, same number of lots) and splits each in two: half the lots (rounded down) exit exactly like the main account (its target, stop and time limit), the rest exit like the Trailing exit account (stop 1.5 x the 5-minute ATR, then a stop 2.5 x ATR behind the best price, no fixed target). One lot: trailed. Why: on the same 63 trades (12-23 Nov) the main account made +Rs13,410 and the Trailing exit account +Rs1,23,461, but the gain came from a few big runners (19 Nov Bank Nifty +Rs40.8K against +Rs6.9K) and the trailing exit gave back more on 18 and 23 Nov. This account books sure profit on half and lets the other half run. Paper only; switching the main account is your call.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "same_as_main": true,
+    "mirror_main": true,
+    "risk_pass": true
+   },
+   "exit_style": "chand",
+   "split": {
+    "book_frac": 0.5,
+    "one_lot": "trail"
+   },
    "paper": {}
   },
   "mvpick": {
@@ -193,7 +218,8 @@
     "no_entry_after": "15:00",
     "max_lots": 1
    },
-   "section": "pro"
+   "section": "pro",
+   "review": "show"
   },
   "pro_stocks": {
    "name": "Pro · Stocks",
@@ -216,7 +242,8 @@
     "no_entry_after": "15:00",
     "max_lots": 1
    },
-   "section": "pro"
+   "section": "pro",
+   "review": "show"
   }
  }
 }

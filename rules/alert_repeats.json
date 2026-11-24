@@ -1,0 +1,7 @@
+{
+  "about": "3.05 (Mandeep, 24 Nov 2026: alerts were 1,042 on 16 Nov and 5,551 on 23 Nov; 'okay sab karo' on: one alert per stock every 30 minutes unless a stronger one comes, every alert still recorded). Only what the Alerts page shows by default: every alert is still saved, graded, sent to the paper accounts, the Lab and Telegram exactly as before. Real data 23 Nov: 5,551 alerts, 3,464 shown.",
+  "on": true,
+  "window_min": 30,
+  "neutral_window_min": 60,
+  "keep_focus": true
+}

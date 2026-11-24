@@ -804,7 +804,7 @@ def _alerts_fp(e, day):
 
 @router.get("/api/live/alerts")
 def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1, source: str | None = None, limit: int = 1000,
-                focus: bool = False, view: str | None = None):
+                focus: bool = False, view: str | None = None, repeats: bool = False):
     """view (2.29, the Alerts page): act = act-now alerts; focus = Focus plus the other important ones (severity 2+,
     not demoted); all = everything. Counts for all three come back with any of them."""
     e = engine()
@@ -829,6 +829,12 @@ def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1
         pick = {"act": lambda a: a["severity"] >= 3,
                 "focus": lambda a: _focus(a) or (a["severity"] >= 2 and not (a.get("data") or {}).get("muted")),
                 "all": lambda a: True}
+        from live import repeats as _rep                 # 3.05: one alert per stock per 30 min shown (all still saved)
+        rep = _rep.mark(al) if not sym else set()       # one symbol asked for: show its every alert
+        hidden = {k: sum(1 for a in al if a["id"] in rep and f(a)) for k, f in pick.items()}
+        if not repeats and rep:
+            pick = {k: (lambda a, f=f: f(a) and a["id"] not in rep) for k, f in pick.items()}
+        mark("repeats")
         shadow = None
         try:                                     # 2.37: what the main shadow Focus version picked (live) or would have (replayed)
             from live import focuslab
@@ -858,7 +864,8 @@ def live_alerts(day: str | None = None, sym: str | None = None, min_sev: int = 1
                 a["data"] = {k: v for k, v in a["data"].items() if k != "focus_ch"}
         days_ = e.store.alert_days(60)
         mark("days list")
-        res = clean({"day": day, "alerts": out, "total": len(al), "counts": counts, "view": view, "days": days_, "shadow": shadow})
+        res = clean({"day": day, "alerts": out, "total": len(al), "counts": counts, "view": view, "days": days_, "shadow": shadow,
+                     "repeats": {"shown": bool(repeats), "hidden": hidden.get(view, 0), "window_min": _rep.cfg().get("window_min")}})
         mark("counts and packing")
         return res
     al = e.store.alerts(day=day, sym=sym.upper() if sym else None, min_sev=min_sev, source=source,
@@ -1327,7 +1334,7 @@ def _books(src: str):
         return e.books, True
     lc = e.cfg()["live"]
     main = e.paper.cfg if e.paper else PaperBook(e.store, src, lc.get("paper")).cfg if lc.get("paper") else dict(DEFAULTS)
-    return Books(src, e.store, main, lc.get("books"), log=lambda m: None), False
+    return Books(src, e.store, main, lc.get("books"), log=lambda m: None, data_dir=e.data_dir), False
 
 
 @router.get("/api/live/paper")
@@ -1390,6 +1397,17 @@ def live_scorecard(source: str | None = None):
     e = engine()                                         # 3.00: worked out at most once a minute (was 1.5-2 s a call)
     day = e.clock.now().date().isoformat() if getattr(e, "clock", None) else ""
     return memo.memo(f"scorecard|{source}|{day}", None, lambda: clean(e.scorecard_view(source)), ttl=60)
+
+
+@router.get("/api/live/grades")
+def live_grades(source: str | None = None):
+    """3.05: honest grade of every alert type (live/grade.py, on trial): median rupees a trade, win %, capped average,
+    the main exit and the trailing exit, from the test bench. Worked out in the background; finished days cached."""
+    from live import grade
+    e = engine()
+    src = source or e.source or e.cfg()["live"].get("source") or "upstox"
+    today = e.clock.now().date().isoformat() if getattr(e, "clock", None) else dt.date.today().isoformat()
+    return clean(grade.view(e.store, src, today))
 
 
 @router.get("/api/live/board")
@@ -1579,8 +1597,26 @@ def live_paper_books(source: str | None = None, days: int | None = None):
     src = source or (e.source if e.paper else e.cfg()["live"]["source"])
     bs, _ = _books(src)
     main = (e.paper.cfg if e.paper else (e.cfg()["live"].get("paper") or {})) or {}
+    try:                                                 # 3.05: the scorecard against the main account
+        rev = B.scorecard(e.store, src, e.clock.now().date().isoformat() if getattr(e, "clock", None) else None)
+    except Exception:
+        rev = []
     return clean({"books": bs.list(), "compare": B.compare(e.store, src, main, bs, days=days), "days": days,
-                  "file_error": B._C.get("error")})
+                  "file_error": B._C.get("error"), "review": rev, "review_rules": B.review_cfg(),
+                  "retired": B.retired(e.data_dir)})
+
+
+@router.post("/api/live/paper/books/{bid}/keep")
+def live_paper_book_keep(bid: str):
+    """3.05: turn an account the scorecard switched off back on (never switched off by it again). Paper only."""
+    from live import books as B
+    if bid not in (B.cfg().get("books") or {}):
+        raise HTTPException(404, f"No paper account '{bid}'")
+    e = engine()
+    j = B.keep_on(e.data_dir, bid)
+    if getattr(e, "books", None) is not None and e.paper:
+        e.books.load(e.paper.cfg, e.cfg()["live"].get("books"))
+    return {"ok": True, "book": bid, "kept": j["kept"]}
 
 
 @router.post("/api/live/paper/books/{bid}")

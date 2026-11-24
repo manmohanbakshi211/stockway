@@ -1084,14 +1084,17 @@ async function pageAlerts() {
   const sym = params.has("sym") ? params.get("sym") : LS.get("alertsSym", "");
   const kind = params.has("kind") ? params.get("kind") : LS.get("alertsKind", "");
   const day = params.get("day") || "latest";
-  LS.set("alertsView", view); LS.set("alertsSym", sym); LS.set("alertsKind", kind);
-  const d = await api(`/api/live/alerts?day=${day}&view=${view}${sym ? `&sym=${encodeURIComponent(sym)}` : ""}`);
+  const rep = params.has("rep") ? params.get("rep") === "1" : LS.get("alertsRep", "0") === "1";   // 3.05: repeats shown?
+  LS.set("alertsView", view); LS.set("alertsSym", sym); LS.set("alertsKind", kind); LS.set("alertsRep", rep ? "1" : "0");
+  const d = await api(`/api/live/alerts?day=${day}&view=${view}${sym ? `&sym=${encodeURIComponent(sym)}` : ""}${rep ? "&repeats=1" : ""}`);
   if (d.shadow) VIEWS.push(["shadow", "Shadow Focus", `On trial: ${d.shadow.label}. Recorded only: nothing you see, get on Telegram or paper-trade changes`]);
   const cnt = d.counts || {};
   const byKind = {};
   d.alerts.forEach((a) => { byKind[a.kind] = (byKind[a.kind] || 0) + 1; });
   const shown = kind ? d.alerts.filter((a) => a.kind === kind) : d.alerts;
-  const go = (p) => { const q = new URLSearchParams({ day: d.day || "", view, sym, kind, ...p }); location.hash = `#/alerts?${q}`; };
+  const go = (p) => { const q = new URLSearchParams({ day: d.day || "", view, sym, kind, rep: rep ? "1" : "0", ...p }); location.hash = `#/alerts?${q}`; };
+  const R = d.repeats || {};
+  const repLine = R.hidden ? `<p class="small muted" style="margin:0 0 8px">${rep ? `Showing every alert, repeats included (${R.hidden}).` : `${R.hidden} repeat${R.hidden > 1 ? "s" : ""} hidden: one alert per stock every ${esc(String(R.window_min || 30))} minutes unless a stronger or Focus one comes. All are still saved, graded and paper traded as before.`} <button class="link-btn small" id="al-rep">${rep ? "Hide repeats" : "Show them"}</button></p>` : "";
   const vName = (VIEWS.find((v) => v[0] === (d.view || view)) || VIEWS[1])[1];
   main.innerHTML = `<h1 class="page-title">Alerts</h1><p class="lede">Every alert, saved by day. ${d.day ? `${shown.length} ${esc(vName.toLowerCase())}${kind ? ` · ${esc(KIND[kind] || kind)}` : ""} (of ${d.total}) on ${new Date(d.day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}.` : "None yet: they appear here as the scanner finds them."}</p>
     <div class="toolbar"><div class="btn-row">
@@ -1102,6 +1105,7 @@ async function pageAlerts() {
       <button class="chip${kind ? "" : " on"}" data-k="" aria-pressed="${!kind}">All types ${d.alerts.length}</button>
       ${Object.entries(byKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<button class="chip${kind === k ? " on" : ""}" data-k="${esc(k)}" aria-pressed="${kind === k}">${esc(KIND[k] || k)} ${n}</button>`).join("")}
       ${kind && !byKind[kind] ? `<button class="chip on" data-k="${esc(kind)}" aria-pressed="true">${esc(KIND[kind] || kind)} 0</button>` : ""}</div>
+    ${repLine}
     ${d.view === "shadow" && d.shadow ? `<p class="small muted" style="margin:0 0 8px"><span class="pill">shadow</span> What the challenger <b>${esc(d.shadow.label)}</b> picks (or would have picked, on days before it existed). On trial only: the current Focus is still the one that reaches you. <a href="#/scorecard">Compare them →</a></p>` : ""}
     <ul class="alerts" id="al-list">${shown.slice(0, AL_PAGE).map((a) => alertItem(a, true)).join("") || `<li class="muted" style="padding:18px">No alerts for this filter.</li>`}</ul>
     ${shown.length > AL_PAGE ? `<div class="btn-row" style="margin:10px 0"><button class="btn" id="al-more">Show ${Math.min(AL_PAGE, shown.length - AL_PAGE)} more <small class="muted">(${shown.length - AL_PAGE} left)</small></button></div>` : ""}`;
@@ -1117,6 +1121,7 @@ async function pageAlerts() {
     };
   }
   $("#al-day").onchange = (e) => go({ day: e.target.value });
+  const rb = $("#al-rep"); if (rb) rb.onclick = () => go({ rep: rep ? "0" : "1" });
   main.querySelectorAll("[data-v]").forEach((b) => b.onclick = () => go({ view: b.dataset.v }));
   main.querySelectorAll("[data-k]").forEach((b) => b.onclick = () => go({ kind: b.dataset.k }));
   $("#al-sym").onchange = (e) => go({ sym: e.target.value.trim().toUpperCase() });
@@ -1178,6 +1183,25 @@ function bookTabs() {
   if (!bs.length) return "";
   const all = [{ id: "main", name: "Main account" }, ...bs.filter((b) => !b.error || b.name)];
   return `<div class="seg pp-tabs" role="group" aria-label="Paper account">${all.map((b) => `<button data-book="${esc(b.id)}" aria-pressed="${L.paperBook === b.id}">${esc(b.name)}</button>`).join("")}</div>`;
+}
+
+/* 3.05 (Mandeep: "okay sab karo"): every account against the main account on the same days; after 20 market days the
+   ones behind and losing money are switched off (their record kept), the rest get a verdict */
+const REV_V = { ahead: ["p-up", "Ahead of main"], behind: ["p-down", "Behind main"], level: ["", "Level"], learning: ["", "Learning"], "no trades yet": ["", "No trades"] };
+function bookReview() {
+  const B_ = L.books || {}, rows = B_.review || [], ret = (B_.retired || {}).retired || {}, need = (B_.review_rules || {}).min_days || 20;
+  if (!rows.length) return "";
+  const tr = rows.map((r) => { const v = REV_V[r.verdict] || ["", r.verdict], off = ret[r.id];
+    return `<tr><td><b>${esc(r.name)}</b>${r.mode === "show" ? ` <small class="muted">your call</small>` : ""}${off ? `<br><small class="down">Switched off ${esc(off.since)}</small>` : ""}</td>
+      <td class="r">${r.days ? `${r.days}<small class="muted"> / ${need}</small>` : "–"}</td>
+      <td class="r nw ${!r.days ? "muted" : (r.net || 0) >= 0 ? "up" : "down"}">${r.days ? rupees(r.net) : "–"}</td>
+      <td class="r nw">${r.days ? rupees(r.main_net) : "–"}</td>
+      <td class="r nw ${!r.days ? "muted" : (r.diff || 0) >= 0 ? "up" : "down"}"><b>${r.days ? (r.diff >= 0 ? "+" : "") + rupees(r.diff) : "–"}</b></td>
+      <td class="r">${r.days ? `${r.ahead_days} / ${r.behind_days}` : "–"}</td>
+      <td class="nw">${off ? `<button class="link-btn small" data-keep="${esc(r.id)}">Turn back on</button>` : v[0] ? `<span class="pill ${v[0]}">${v[1]}</span>` : `<span class="muted small">${v[1]}</span>`}</td></tr>`; }).join("");
+  return `<h2>Scorecard against the main account</h2>
+    <p class="muted small" style="margin-top:-6px">Each account from its first trade, on the same days as the main account (every day the app traded). After ${need} market days: ahead or behind. An account behind the main one <b>and</b> losing money is switched off after the close; its trades stay in every record and you can turn it back on. Pro accounts only get the verdict: that call is yours.</p>
+    <div class="table-wrap"><table class="mini"><thead><tr><th>Account</th><th class="r">Days</th><th class="r">Its net</th><th class="r">Main, same days</th><th class="r">Difference</th><th class="r">Days ahead / behind</th><th>Verdict</th></tr></thead><tbody>${tr}</tbody></table></div>`;
 }
 
 function bookCompare() {
@@ -1285,11 +1309,13 @@ function drawPaper(p, first) {
     <h2>Closed trades <span class="muted small">${p.closed.length.toLocaleString("en-IN")}</span></h2>
     <div class="table-wrap"><table class="pp-closed"><thead><tr><th>Option</th><th>Stock</th><th>When</th><th class="r">Price</th><th>Exit</th><th class="r">Charges</th><th class="r">Net</th></tr></thead><tbody>${closed || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>
     ${p.closed.length > nShow ? `<p style="margin:8px 0 0"><button class="btn" id="pp-all">${allClosed ? `Show the latest ${nShow} only` : `Show all ${p.closed.length.toLocaleString("en-IN")} closed trades`}</button></p>` : ""}
-    ${isMain ? bookCompare() : ""}
+    ${isMain ? bookCompare() + bookReview() : ""}
     <p class="note">Paper only: no order ever reaches a broker. Charges are real (brokerage, STT, exchange, GST, stamp). Target +${s.target_pct}% / stop −${s.stop_pct}% on the option; alert trades exit after ${s.max_hold_min} min, all by ${esc(s.exit_time)}. ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : p.source === "replay" ? "<b>Showing replay trades (a recorded day played again).</b>" : ""}</p>`;
   main.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => { try { await post(`/api/live/paper/${b.dataset.close}/close`, {}); toast("Closed"); pagePaper(); } catch (e) { toast(e.message); } });
   main.querySelectorAll("[data-close-book]").forEach((b) => b.onclick = async () => { b.disabled = true;
     try { const r = await post(`/api/live/paper/books/${encodeURIComponent(p.book)}/${b.dataset.closeBook}/close`, {}); toast(`Closed · ${rupees(r.net)}`); L.ppTotAt = 0; pagePaper(); } catch (e) { toast(e.message); b.disabled = false; } });
+  main.querySelectorAll("[data-keep]").forEach((b) => b.onclick = async () => { b.disabled = true;
+    try { await post(`/api/live/paper/books/${encodeURIComponent(b.dataset.keep)}/keep`, {}); toast("Turned back on"); L.books = null; pagePaper(); } catch (e) { toast(e.message); b.disabled = false; } });
   main.querySelectorAll("[data-book]").forEach((b) => b.onclick = () => { L.paperBook = b.dataset.book; L.paperAll = false;
     location.hash = L.paperBook === "main" ? "#/paper" : `#/paper?b=${encodeURIComponent(L.paperBook)}`; });
   { const f = $("#bk-cap-form"); if (f) f.onsubmit = async (ev) => { ev.preventDefault();
@@ -1606,6 +1632,7 @@ async function pageScorecard() {
       ${(m.drivers || []).length ? `<p class="small muted">What matters most so far: ${m.drivers.map((d) => esc(d.feature)).join(", ")}.</p>` : ""}
       ${(m.models || []).length ? `<p class="small">Models compared on the same unseen days: ${m.models.map((x) => `${esc(x.name)} <b>${x.auc}</b>${x.chosen ? " ✓ in use" : ""}${x.champion ? " (champion)" : ""}`).join(" · ")}. A challenger replaces the champion only if it is 0.02 AUC better.</p>` : ""}</div>
     ${exitBoardLive(sc.exits)}
+    <div id="grade-box"></div>
     <div id="trials-box"></div>
     <div id="focus-shadow-box"></div>
     <p class="note">${esc(sc.rule)} Alert types under 45% of decided cases (20+) are demoted automatically: out of Focus, no Telegram, no auto paper trade.</p>
@@ -1616,9 +1643,40 @@ async function pageScorecard() {
     <h2>Latest graded alerts</h2>
     <div class="table-wrap"><table><thead><tr><th>When</th><th>Alert</th><th>Result</th><th class="r" title="Price move in the alert's favour">In favour 5m</th><th class="r">15m</th><th class="r">60m</th><th class="r">Option best / worst</th></tr></thead><tbody>${recent || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>`;
   bindAIReview(main);
+  gradeLoad(sc.source, 0);
   api(`/api/live/trials${sc.source ? `?source=${sc.source}` : ""}`).then((t) => { const el = $("#trials-box"); if (el) el.innerHTML = trialsBox(t); }).catch(() => {});
   credBox(sc.source);
   api(`/api/live/focus_shadow?days=10${sc.source ? `&source=${sc.source}` : ""}`).then((f) => { const el = $("#focus-shadow-box"); if (el) el.innerHTML = focusShadowBox(f); }).catch(() => {});
+}
+
+/* 3.05 honest grade (live/grade.py, on trial): median rupees a trade, win %, capped average, main exit vs trailing */
+const GRADE_V = { edge: ["p-up", "Edge"], "no edge": ["p-down", "No edge"], unclear: ["", "Unclear"], "too few": ["", "Too few"] };
+function gradeBox(g) {
+  if (!g) return "";
+  if (!(g.rows || []).length) return `<div class="panel tight" style="margin-top:14px"><h3>Honest grade <span class="pill">on trial</span></h3><p class="small muted">${g.computing ? "Working it out from the test bench (first time after a start: up to a minute)…" : esc(g.error || "No bench trades yet.")}</p></div>`;
+  const s = g.summary || {}, st = g.styles || {};
+  const one = (x) => x && x.n ? `<b class="${x.median > 0 ? "up" : x.median < 0 ? "down" : ""}">${rupees(x.median)}</b><br><small class="muted">${x.win_pct}% won</small>` : `<span class="muted small">from 25 Nov</span>`;
+  const row = (r) => { const b = r.buy || {}, o = r.o60;
+    const v = GRADE_V[r.verdict] || ["", r.verdict];
+    return `<tr><td><b>${esc(KIND[r.kind] || r.kind)}</b> <span class="muted small">${r.is_index ? "indices" : "stocks"}</span></td>
+      <td class="r">${(b.n || 0).toLocaleString("en-IN")}</td><td class="r">${b.n ? b.win_pct + "%" : "–"}</td>
+      <td class="r nw">${b.n ? `<b class="${b.median > 0 ? "up" : b.median < 0 ? "down" : ""}">${rupees(b.median)}</b>` : "–"}</td>
+      <td class="r nw">${b.n ? rupees(b.avg) : "–"}</td><td class="r">${b.capped_pct != null ? fpc(b.capped_pct, 1) : "–"}</td>
+      <td class="r nw">${one(r.buy_trail)}</td>
+      <td class="r small nw">${o ? `${fpc(o.median, 1)} / ${fpc(o.avg, 1)}` : "–"}</td>
+      <td>${v[0] ? `<span class="pill ${v[0]}">${v[1]}</span>` : `<span class="muted small">${v[1]}</span>`}</td></tr>`; };
+  const rows = g.rows || [], top = rows.slice(0, 20), rest = rows.slice(20);
+  const head = `<thead><tr><th>Alert</th><th class="r">Trades</th><th class="r">Won</th><th class="r" title="What the middle trade made: half did better, half worse">Median ₹</th><th class="r" title="The plain average: a few big winners or one bad price can pull it far from what a trade usually does">Average ₹</th><th class="r" title="Average % of the premium, each trade counted at most ±${esc(String((g.rules || {}).cap_pct || 100))}%">Capped avg</th><th class="r">${esc(st.buy_trail || "Trailing")}</th><th class="r" title="The option's move an hour after the alert: median / average">1 h option</th><th>Verdict</th></tr></thead>`;
+  return `<div class="panel tight" style="margin-top:14px"><h3>Honest grade <span class="pill">on trial</span>${g.computing ? ` <small class="muted">updating…</small>` : ""}</h3>
+    <p class="small">Last ${(g.days || []).length} market days (${esc(g.from || "")} to ${esc(g.to || "")}), every alert paper-traded 1 lot on the test bench: ask in, bid out, every charge. <b>${s.edge || 0} of ${s.types || 0}</b> alert types have an edge (the median trade made money and ${esc(String(((g.rules || {}).edge || {}).min_win_pct ?? 50))}%+ won): <b>${s.edge_index || 0}</b> on indices, <b>${s.edge_stock || 0}</b> on stocks. "${esc(st.buy || "Main exit")}" is the main account's exit; "${esc(st.buy_trail || "Trailing")}" trails the premium (from 25 Nov). Recorded only: Focus, Pro, the paper accounts and Telegram do not use it yet.</p>
+    <div class="table-wrap"><table class="mini">${head}<tbody>${top.map(row).join("")}</tbody></table></div>
+    ${rest.length ? `<details style="margin-top:6px"><summary class="small">The other ${rest.length} alert types</summary><div class="table-wrap"><table class="mini">${head}<tbody>${rest.map(row).join("")}</tbody></table></div></details>` : ""}</div>`;
+}
+async function gradeLoad(src, tries) {
+  let g; try { g = await api(`/api/live/grades${src ? `?source=${src}` : ""}`); } catch (_) { return; }
+  const el = $("#grade-box"); if (!el || state.page !== "scorecard") return;
+  el.innerHTML = gradeBox(g);
+  if (g.computing && tries < 30) setTimeout(() => gradeLoad(src, tries + 1), 4000);
 }
 
 /* 2.37 shadow Focus: the current Focus vs the challenger versions on the same alerts (live/focuslab.py) */

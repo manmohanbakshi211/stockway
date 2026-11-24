@@ -86,12 +86,14 @@ def test_alerts_views_and_counts(tmp_path, monkeypatch):
         e.store.add_alert({"ts": 1_000_000 + i, "day": day, "source": "upstox", "sym": "NIFTY", "kind": "orb", "direction": "up",
                            "severity": sev, "title": f"a{i}", "detail": "", "price": 1, "data": {"muted": muted, "focus": focus}})
     monkeypatch.setattr(live_api, "engine", lambda: e)
-    act = live_api.live_alerts(day=day, view="act")
-    foc = live_api.live_alerts(day=day, view="focus")
-    al = live_api.live_alerts(day=day, view="all")
+    act = live_api.live_alerts(day=day, view="act", repeats=True)          # 3.05: every alert, repeats included
+    foc = live_api.live_alerts(day=day, view="focus", repeats=True)
+    al = live_api.live_alerts(day=day, view="all", repeats=True)
     assert act["counts"] == foc["counts"] == al["counts"]
     assert len(act["alerts"]) == 2 and len(al["alerts"]) == 5
     assert {a["title"] for a in foc["alerts"]} == {"a0", "a1", "a2"}         # focus + important, not the demoted one
+    d = live_api.live_alerts(day=day, view="all")                          # 3.05: one per stock per 30 min by default
+    assert [a["title"] for a in d["alerts"]] == ["a0"] and d["repeats"]["hidden"] == 4 and d["total"] == 5
 
 
 def test_long_history_candles_and_periods(tmp_path, monkeypatch):

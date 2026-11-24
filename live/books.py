@@ -63,9 +63,14 @@ class Books:
     # ------------------------------------------------------------------ loading (each account on its own)
     def load(self, main_cfg: dict, user_books: dict | None = None):
         books, specs = {}, {}
+        ret = retired(self.data_dir).get("retired") or {} if self.data_dir else {}
+        self.retired = {}
         for bid, sp in (cfg().get("books") or {}).items():
             try:
                 if not sp.get("on", True):
+                    continue
+                if bid in ret:                            # 3.05: switched off by the scorecard (its record is kept)
+                    self.retired[bid] = ret[bid]
                     continue
                 mine = (user_books or {}).get(bid) or {}
                 cap = float(mine.get("capital") or sp.get("capital") or main_cfg.get("capital") or 500000)
@@ -190,6 +195,8 @@ class Books:
                         why = "risk check: " + "; ".join((risk.get("reasons") or ["not PASS"])[:1])
                     elif sp.get("exit_style") and not ((a.get("data") or {}).get("plan_R") or {}).get(sp["exit_style"]):
                         why = "no chart risk for this alert (trailing exit needs 5-minute bars)"
+                    elif sp.get("split") and sp.get("exit_style"):   # 3.05: part booked with the main exit, the rest trailed
+                        why = self._split_open(bk, sp, a, risk, state, now)
                     else:
                         a2 = {**a, "data": {**(a.get("data") or {}), "risk": risk}}
                         if sp.get("exit_style"):              # 2.56: this account's own exit, the same for every alert
@@ -361,6 +368,34 @@ class Books:
                 self.log(f"Paper account {bid} skipped a Trend Rider signal: {e}")
         return out
 
+    @staticmethod
+    def split_lots(lots: int, sp: dict) -> list:
+        """3.05: [(leg, lots)] of a split account: book_frac of the lots (rounded down, at least 1 when there are 2+) with
+        the main exit, the rest with the account's trailing exit; one lot goes to one_lot ("trail" or "book")."""
+        lots = max(1, int(lots or 1))
+        s = sp.get("split") or {}
+        if lots == 1:
+            return [(str(s.get("one_lot") or "trail"), 1)]
+        book = max(1, int(lots * float(s.get("book_frac", 0.5))))
+        book = min(book, lots - 1)
+        return [("book", book), ("trail", lots - book)]
+
+    def _split_open(self, bk, sp: dict, a: dict, risk: dict, state, now) -> str | None:
+        """Open the legs of a split trade; None when at least one leg opened, else why not."""
+        st = sp["exit_style"]
+        before = dict(bk.skipped)
+        opened = 0
+        for leg, n in self.split_lots(int(risk.get("lots") or 1), sp):
+            d = {**(a.get("data") or {}), "risk": {**risk, "verdict": "PASS", "lots": n}}
+            if leg == "trail":
+                d["factory"] = {"plan": {"style": st, "R": float(a["data"]["plan_R"][st])}}
+            # the book leg keeps the alert as the main account got it: the main exit (target / stop / time, or a Lab
+            # rule's own exit)
+            if bk.try_open({**a, "data": d}, state, now, leg=leg):
+                opened += 1
+        new = [k for k, v in bk.skipped.items() if v > before.get(k, 0)]
+        return None if opened else (new[0] if new else "account rules (open trades, trades a day, time)")
+
     def _count(self, bid, now, why):
         day = now.date().isoformat()
         t = self.today.get(bid)
@@ -449,6 +484,100 @@ def stats(trades: list, capital: float, target_pct: float | None = None, compoun
             "worst_day": round(min(days.values()), 2) if days else None, "target_days": hit if target_pct else None,
             "since": min(days) if days else None, "return_pct": round(net / capital * 100, 2) if capital else None,
             "open": sum(1 for t in trades if t["status"] == "open")}
+
+
+# ------------------------------------------------------------------ 3.05: the scorecard against the main account
+REVIEW = {"min_days": 20, "retire": True, "at": "16:10", "file": "accounts_review.json"}
+
+
+def review_cfg() -> dict:
+    return {**REVIEW, **(cfg().get("review") or {})}
+
+
+def retired(data_dir) -> dict:
+    """{"retired": {account: {"since", "why"}}, "kept": [accounts you turned back on]} (data/accounts_review.json)."""
+    try:
+        j = json.loads((Path(data_dir) / review_cfg()["file"]).read_text())
+        return {"retired": dict(j.get("retired") or {}), "kept": list(j.get("kept") or []), "day": j.get("day")}
+    except Exception:
+        return {"retired": {}, "kept": [], "day": None}
+
+
+def _save_review(data_dir, j: dict):
+    f = Path(data_dir) / review_cfg()["file"]
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(j, indent=1))
+    tmp.replace(f)
+
+
+def scorecard(store, source: str, today: str | None = None, c: dict | None = None) -> list:
+    """Every extra account against the main account on the same days (Mandeep, 24 Nov 2026: "okay sab karo"): from the
+    account's first trade day, every day the app traded anything; the account's net, the main account's net on those
+    days, days ahead / behind. After min_days such days: ahead or behind; behind AND losing money = retire (unless the
+    account's review is "show": then only the verdict, the decision is yours)."""
+    from .store import reading
+    c = c or review_cfg()
+    today = today or dt.datetime.now(IST).date().isoformat()
+    with reading(store) as db:
+        rows = db.execute("SELECT source, day, SUM(net), COUNT(*) FROM paper WHERE status='closed' AND day <= ? AND "
+                          "(source=? OR source LIKE ?) GROUP BY source, day", (today, source, source + "#%")).fetchall()
+    per: dict = {}
+    days_all = set()
+    for src, day, net, n in rows:
+        per.setdefault(src, {})[day] = (float(net or 0), int(n))
+        days_all.add(day)
+    days_all = sorted(days_all)
+    main = per.get(source, {})
+    out = []
+    for bid, sp in (cfg().get("books") or {}).items():
+        if not sp.get("on", True):
+            continue
+        mine = per.get(f"{source}#{bid}", {})
+        if not mine:
+            out.append({"id": bid, "name": sp.get("name") or bid, "days": 0, "verdict": "no trades yet", "retire": False})
+            continue
+        start = min(mine)
+        ds = [d for d in days_all if d >= start]
+        net = sum(mine.get(d, (0.0, 0))[0] for d in ds)
+        mnet = sum(main.get(d, (0.0, 0))[0] for d in ds)
+        ahead = sum(1 for d in ds if mine.get(d, (0.0, 0))[0] > main.get(d, (0.0, 0))[0])
+        behind = sum(1 for d in ds if mine.get(d, (0.0, 0))[0] < main.get(d, (0.0, 0))[0])
+        full = len(ds) >= int(c["min_days"])
+        verdict = ("ahead" if net > mnet else "behind" if net < mnet else "level") if full else "learning"
+        mode = sp.get("review", "auto")
+        out.append({"id": bid, "name": sp.get("name") or bid, "since": start, "days": len(ds), "need": int(c["min_days"]),
+                    "trades": sum(mine.get(d, (0.0, 0))[1] for d in ds), "net": round(net), "main_net": round(mnet),
+                    "diff": round(net - mnet), "ahead_days": ahead, "behind_days": behind, "verdict": verdict,
+                    "mode": mode, "retire": bool(c.get("retire", True)) and mode == "auto" and verdict == "behind" and net < 0})
+    return out
+
+
+def apply_review(data_dir, rows: list, today: str, log=print) -> list:
+    """Switch off the accounts the scorecard says to retire (not the ones you turned back on). Their trades stay."""
+    j = retired(data_dir)
+    new = []
+    for r in rows:
+        if r.get("retire") and r["id"] not in j["retired"] and r["id"] not in j["kept"]:
+            j["retired"][r["id"]] = {"since": today, "why": f"{r['days']} market days: {r['net']:+,} against the main account's "
+                                                           f"{r['main_net']:+,} on the same days ({r['ahead_days']} days ahead, "
+                                                           f"{r['behind_days']} behind)"}
+            new.append(r["id"])
+    j["day"] = today
+    _save_review(data_dir, j)
+    for bid in new:
+        log(f"Paper account {bid} switched off by the scorecard: {j['retired'][bid]['why']}. Its record is kept; turn it "
+            f"back on from the Paper page.")
+    return new
+
+
+def keep_on(data_dir, bid: str) -> dict:
+    """You turned a retired account back on: it is never switched off by the scorecard again."""
+    j = retired(data_dir)
+    j["retired"].pop(bid, None)
+    if bid not in j["kept"]:
+        j["kept"].append(bid)
+    _save_review(data_dir, j)
+    return j
 
 
 def compare(store, source: str, main_cfg: dict, books: "Books | None", days: int | None = None) -> list:

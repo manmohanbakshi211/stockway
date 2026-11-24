@@ -366,6 +366,28 @@ def static_checks(cfg: dict | None = None) -> list:
     except Exception as e:
         pro_ok, pro_det = False, str(e)[:160]
     out.append(_c("pro", "Stockway Pro v1: option buying, every check voting together (3.01, on trial)", pro_ok, pro_det))
+    try:                                                  # 3.05: the accounts' scorecard against the main account
+        from . import books as _bk
+        from .engine import LiveEngine as _LE
+        rc_ = _bk.review_cfg()
+        rv_ok = hasattr(_LE, "_review_due") and hasattr(_LE, "accounts_review") and int(rc_.get("min_days") or 0) > 0
+        rt_ = _bk.retired(Path(__file__).resolve().parents[1] / "data")
+        rv_det = (f"after {rc_.get('at')} on market days; verdict after {rc_.get('min_days')} market days; behind the main account "
+                  f"and losing = switched off{' (off now)' if not rc_.get('retire', True) else ''}; switched off now: "
+                  f"{', '.join(rt_['retired']) or 'none'}; paper only")
+    except Exception as e:
+        rv_ok, rv_det = False, str(e)[:160]
+    out.append(_c("accounts_review", "Paper accounts scorecard against the main account (3.05)", rv_ok, rv_det))
+    try:                                                  # 3.05: honest grade + repeats hidden on the Alerts page
+        from . import grade as _gr, repeats as _rp
+        g_, r_ = _gr.cfg(), _rp.cfg()
+        gr_ok = bool(g_.get("styles")) and not _gr._C.get("error") and not _rp._C.get("error")
+        gr_det = (f"honest grade (on trial): last {g_.get('days')} market days, median / win % / capped, styles "
+                  f"{', '.join(g_.get('styles') or {})}; Alerts page: one alert per stock every {r_.get('window_min')} min "
+                  f"{'on' if r_.get('on', True) else 'off'} (all still saved and traded)")
+    except Exception as e:
+        gr_ok, gr_det = False, str(e)[:160]
+    out.append(_c("grade", "Honest grade of alert types and fewer repeats shown (3.05)", gr_ok, gr_det))
     try:                                                  # 2.83: the multiverse's strict pick rule, in shadow
         from lab import multiverse as _mvx
         src_ = _mvx.strict_rule(_mvx.cfg())

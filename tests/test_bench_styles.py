@@ -47,7 +47,7 @@ def test_every_style_on_a_full_chain(tmp_path):
     b = B.Bench(Store(tmp_path / "live.db"), "upstox")
     n = b.add({"sym": "NIFTY", "kind": "orb", "direction": "up", "option": OPT, "severity": 3,
                "data": {"score": 70, "conviction": 80, "focus": True}}, e, NOW, CFG)
-    assert n == len(B.STYLES) == 8
+    assert n == len(B.STYLES) == 9                                  # 3.05: + buy_trail
     r = {x["style"]: x for x in b.open}
     assert {x["family"] for x in b.open} == {"buy", "mixed", "sell"}
     assert r["buy"]["entry"] == 100 and r["buy_otm"]["entry"] == 75 and r["buy_itm"]["entry"] == 125
