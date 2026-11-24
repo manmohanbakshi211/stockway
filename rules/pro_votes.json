@@ -1,0 +1,117 @@
+{
+ "about": "3.08 Vote Lab (Mandeep, 25 Nov 2026: the transcripts' best use, everything together). Every vote here is computed on every Trend Rider / Pro signal by live/provotes.py and recorded with the signal's Pro votes as x_<name> with weight 0: the score and the trades do not change. The Pro page's Checks tab and the nightly learned checks (3.07, 50+ signals each side, 0.25R edge, then judged on new days) grade them. 7 replayed days (claude/v2_fusion.md): only as_vwap2_stretch (used by Pro v2 as its no-chase check, rules/pro_v2.json) and gh_pause (a plus point in Pro v2's ranking) helped; the rest showed no edge or the opposite. A new book, video or course adds its votes here.",
+ "valid_from": "2026-11-25",
+ "on": true,
+ "votes": {
+  "ema_stack_5_10": {
+   "source": "EMA videos",
+   "words": "Price, 5 EMA and 10 EMA stacked the trade's way",
+   "on": true
+  },
+  "ema10_pullback": {
+   "source": "EMA videos",
+   "words": "10 EMA pullback: a dip to the rising 10 EMA, then back with the trend",
+   "on": true
+  },
+  "ema5_stretched": {
+   "source": "EMA videos",
+   "words": "5 EMA alert candle: the signal bar fully beyond the 5 EMA (stretched; the video's reversal sign)",
+   "on": true
+  },
+  "gh_3touch": {
+   "source": "Ghanshyam",
+   "words": "The broken level was touched 2+ times before (3 touches with the break)",
+   "on": true
+  },
+  "gh_pause": {
+   "source": "Ghanshyam",
+   "words": "A pause at the level before the break (2+ of the last 4 closes just below it)",
+   "on": true
+  },
+  "gh_longrun": {
+   "source": "Ghanshyam",
+   "words": "A long run into the level (1.5+ ATR in 3 bars): his 'skip after a long run'",
+   "on": true
+  },
+  "gh_roundfig": {
+   "source": "Ghanshyam",
+   "words": "A round figure just ahead (within 0.3 ATR)",
+   "on": true
+  },
+  "gh_with_morning": {
+   "source": "Ghanshyam",
+   "words": "With the day's move since the open (full size with the trend, half against)",
+   "on": true
+  },
+  "gh_near_yclose": {
+   "source": "Ghanshyam",
+   "words": "Too close to yesterday's close (within 0.3 ATR)",
+   "on": true
+  },
+  "as_pivot_zone": {
+   "source": "Aseem 51 + PDFs",
+   "words": "Beyond R1 / S1 (2.2); between S1 and R1 = sideways",
+   "on": true
+  },
+  "as_daily_sweep": {
+   "source": "Aseem 51 + PDFs",
+   "words": "Daily candle liquidity sweep: yesterday's low taken and back above (high for puts)",
+   "on": true
+  },
+  "as_supertrend": {
+   "source": "Aseem 51 + PDFs",
+   "words": "Supertrend 7,3 on 5-minute bars agrees (2.2)",
+   "on": true
+  },
+  "as_ema_9_21": {
+   "source": "Aseem 51 + PDFs",
+   "words": "EMA 9 above / below EMA 21 the trade's way (7.1)",
+   "on": true
+  },
+  "as_rsi15_side": {
+   "source": "Aseem 51 + PDFs",
+   "words": "15-minute RSI on the trade's side of 50 (double RSI, 2.6)",
+   "on": true
+  },
+  "as_dow": {
+   "source": "Aseem 51 + PDFs",
+   "words": "Dow theory: higher highs and higher lows (lower for puts) (3.1)",
+   "on": true
+  },
+  "as_vwap2_stretch": {
+   "source": "Aseem 51 + PDFs",
+   "words": "Already beyond VWAP +/- 2 sigma the trade's way (2.3 band): a late entry",
+   "on": true
+  },
+  "as_retest": {
+   "source": "Aseem 51 + PDFs",
+   "words": "A retest of the broken level, not the first break (7.4 / James Berry)",
+   "on": true
+  },
+  "cd_strong_body": {
+   "source": "Candles",
+   "words": "Signal candle with a strong body (60%+ of its range) the trade's way",
+   "on": true
+  },
+  "cd_wick_against": {
+   "source": "Candles",
+   "words": "A long wick against the trade on the signal candle",
+   "on": true
+  },
+  "cd_doji": {
+   "source": "Candles",
+   "words": "A doji signal candle",
+   "on": true
+  },
+  "cd_engulf": {
+   "source": "Candles",
+   "words": "Engulfing candle the trade's way",
+   "on": true
+  },
+  "cd_inside_break": {
+   "source": "Candles",
+   "words": "An inside bar broken the trade's way",
+   "on": true
+  }
+ }
+}

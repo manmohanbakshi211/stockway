@@ -58,6 +58,8 @@ class Books:
         self.errors: dict[str, str] = {}
         self.today: dict[str, dict] = {}
         self._pack_seen: dict = {}                                # 2.69: strategy-file signals taken today
+        self.rank_ok = False          # 3.08: the engine flushes ranked signals after each scan (Pro v2); else at once
+        self.pending: dict = {}       # 3.08: account -> [(rank, order, signal)] waiting for this bar's flush
         self.load(main_cfg, user_books)
 
     # ------------------------------------------------------------------ loading (each account on its own)
@@ -79,18 +81,24 @@ class Books:
                 if (sp.get("pick") or {}).get("same_as_main"):    # 2.56: the main account's alerts, only the exit differs
                     pc.update(kinds=main_cfg.get("kinds") or "all", min_severity=int(main_cfg.get("min_severity") or 2))
                 if (sp.get("pick") or {}).get("multiverse") or (sp.get("pick") or {}).get("pack_prefix") \
-                        or (sp.get("pick") or {}).get("rider"):
-                    pc.update(kinds="all", min_severity=1)        # 2.58 / 2.69 / 2.85: the picks / file / setup decide
+                        or (sp.get("pick") or {}).get("rider") or (sp.get("pick") or {}).get("early"):
+                    pc.update(kinds="all", min_severity=1)        # 2.58 / 2.69 / 2.85 / 3.08: the picks / file / setup decide
                 if (sp.get("pick") or {}).get("mirror_main"):     # 2.56.2: the main account's own trades decide; its
                     pc.update(kinds="all", min_severity=1, max_open=99, max_trades_day=99,    # limits already applied
                               max_daily_loss_pct=100, cooloff_min=0)
                 if sp.get("exit_style"):
                     from lab.exits import STYLES
                     from lab.rider_exit import STYLE as RIDER
-                    if sp["exit_style"] not in STYLES and sp["exit_style"] != RIDER:
+                    from lab.chart_exit import STYLE as CHART, RUNNERS
+                    if sp["exit_style"] not in STYLES and sp["exit_style"] not in (RIDER, CHART):
                         raise ValueError(f"unknown exit_style {sp['exit_style']!r}")
                     if sp["exit_style"] == RIDER and not (sp.get("pick") or {}).get("rider"):
                         raise ValueError("exit_style 'rider' needs pick.rider (Trend Rider signals carry its stop)")
+                    if sp["exit_style"] == CHART:             # 3.08: Pro v2's chart exit needs a setup's stop and level
+                        if not ((sp.get("pick") or {}).get("rider") or (sp.get("pick") or {}).get("early")):
+                            raise ValueError("exit_style 'chart' needs pick.rider or pick.early")
+                        if (sp.get("exit") or {}).get("runner", "bar5") not in RUNNERS:
+                            raise ValueError(f"unknown runner {(sp.get('exit') or {}).get('runner')!r}")
                 old = self.books.get(bid)
                 if old is not None:                       # keep today's skip counts across a settings reload
                     old.cfg = pc
@@ -180,8 +188,8 @@ class Books:
             try:
                 sp = self.specs[bid]
                 if (sp.get("pick") or {}).get("multiverse") or (sp.get("pick") or {}).get("pack_prefix") \
-                        or (sp.get("pick") or {}).get("rider"):
-                    continue                                  # 2.58 / 2.69 / 2.85: their own signals, not alerts
+                        or (sp.get("pick") or {}).get("rider") or (sp.get("pick") or {}).get("early"):
+                    continue                                  # 2.58 / 2.69 / 2.85 / 3.08: their own signals, not alerts
                 mirror = bool((sp.get("pick") or {}).get("mirror_main"))
                 ds = self.day_state(bid, state, now) if (sp.get("day_target_pct") or sp.get("day_stop_pct")
                                                           or sp.get("compound")) else None
@@ -332,6 +340,25 @@ class Books:
             if p.get("syms") and a["sym"] not in p["syms"]:
                 continue
             try:
+                if p.get("v2"):                              # 3.08: Pro v2: its own checks, ranking, lots and chart exit
+                    from . import pro2 as _p2
+                    why = _p2.check(p, a, now, self.store, bk.source, self.source)
+                    if why is None and not a.get("option"):
+                        why = "no option price for this signal"
+                    elif why is None and (r.get("stop") is None or not r.get("atr")):
+                        why = "no setup stop / ATR on the signal"
+                    elif why is None and not a.get("und_key"):
+                        why = "no live price for the underlying"
+                    if why is None and self.rank_ok and p.get("rank", _p2.cfg().get("rank", True)):
+                        q = self.pending.setdefault(bid, [])
+                        q.append((_p2.rank(a), len(q), a))
+                        out[bid] = "queued"
+                        continue
+                    if why is None:
+                        why = self._open_chart(bid, bk, a, state, now, r)
+                    self._count(bid, now, why)
+                    out[bid] = "taken" if why is None else why
+                    continue
                 pro_why = None
                 if p.get("pro"):                             # 3.01: Pro accounts: strong only, segment, expiry, cool-off
                     from . import pro as _pro
@@ -366,6 +393,110 @@ class Books:
             except Exception as e:
                 self.errors[bid] = str(e)
                 self.log(f"Paper account {bid} skipped a Trend Rider signal: {e}")
+        return out
+
+    # ------------------------------------------------------------------ 3.08: Stockway Pro v2 (chart exit, ranking, lots)
+    def has_chart(self) -> bool:
+        return any(sp.get("exit_style") == "chart" for sp in self.specs.values())
+
+    def flush_rider(self, state, now: dt.datetime) -> dict:
+        """The signals of one bar that waited for the ranking: best first, each opened while the money lasts."""
+        out = {}
+        pend, self.pending = self.pending, {}
+        for bid, q in pend.items():
+            bk = self.books.get(bid)
+            if bk is None:
+                continue
+            for _, _, a in sorted(q, key=lambda x: (-x[0], x[1])):
+                try:
+                    why = self._open_chart(bid, bk, a, state, now, (a.get("data") or {}).get("rider") or {})
+                except Exception as e:
+                    why = f"error: {e}"
+                    self.log(f"Paper account {bid} skipped a ranked signal: {e}")
+                self._count(bid, now, why)
+                out.setdefault(bid, []).append((a.get("sym"), "taken" if why is None else why))
+        return out
+
+    def _open_chart(self, bid: str, bk, a: dict, state, now: dt.datetime, r: dict, want: int | None = None) -> str | None:
+        """Open a Pro v2 trade with the lots the free money covers (want, else 1). Chart exit: one trade whose lots all
+        ride (split_at_t1 true: two parts, one sold at T1); exit_style "rider" (Trend Rider's exit, v1's): the lots on
+        one trade. None when opened, else why not."""
+        sp = self.specs[bid]
+        from . import pro2 as _p2
+        want = int(want or (sp.get("lots") or {}).get("want") or (_p2.cfg().get("lots") or {}).get("want") or 1)
+        opt = a.get("option") or {}
+        inst = state.get(opt.get("key")) if state is not None and opt.get("key") else None
+        px = (inst.ask or inst.ltp) if inst is not None and getattr(inst, "ltp", None) else None
+        if px and want >= 2:
+            per = bk.need(float(px), int(opt.get("lot") or 1), 1, None)
+            if per <= 0 or bk.free_cash(state) < 2 * per:
+                want = 1
+        if sp.get("exit_style") == "rider":               # Trend Rider's own exit (v1's), the lots on one trade
+            plan = {"style": "rider", "R": abs(float(a.get("price") or 0) - float(r["stop"])), "stop": float(r["stop"]),
+                    "atr": float(r["atr"]), **({"ema": float(r["ema10"])} if r.get("ema10") is not None else {}),
+                    **({"exit": dict(sp["exit"])} if sp.get("exit") else {})}
+            d = dict(a.get("data") or {})
+            d.update(risk={"verdict": "PASS", "lots": max(1, want)}, factory={"plan": plan})
+            before = dict(bk.skipped)
+            tid = bk.try_open({**a, "data": d, "severity": max(1, int(a.get("severity") or 1)),
+                               "title": (a.get("title") or "Pro v2")[:200]}, state, now)
+            new = [k for k, v in bk.skipped.items() if v > before.get(k, 0)]
+            return None if tid else (new[0] if new else "account rules (open trades, time, money)")
+        plan = {"style": "chart", "stop": float(r["stop"]), "atr": float(r.get("atr") or 0), "level": r.get("level"),
+                "named": a.get("chart_named") or [], "exit": dict(sp.get("exit") or {}),
+                **({"ema": float(r["ema10"])} if r.get("ema10") is not None else {})}
+        before = dict(bk.skipped)
+        from lab.chart_exit import cfg as _ccfg
+        split = bool(_ccfg(plan["exit"]).get("split_at_t1", False))
+        if want >= 2 and split:                           # two parts: one sold at T1, one rides
+            legs = [("t1", "t1", 1), ("run", "run", 1)]
+        else:                                             # 3.08 replay: selling a part at T1 added ~nothing; all ride
+            legs = [(None, "solo", max(1, want))]
+        opened = 0
+        for leg, role, n in legs:
+            d = dict(a.get("data") or {})
+            d.update(risk={"verdict": "PASS", "lots": n}, factory={"plan": {**plan, "role": role}})
+            a2 = {**a, "data": d, "severity": max(1, int(a.get("severity") or 1)), "title": (a.get("title") or "Pro v2")[:200]}
+            if bk.try_open(a2, state, now, leg=leg):
+                opened += 1
+            elif leg == "t1":
+                break                                     # the first part did not open: no second part
+        new = [k for k, v in bk.skipped.items() if v > before.get(k, 0)]
+        return None if opened else (new[0] if new else "account rules (open trades, time, money)")
+
+    # ------------------------------------------------------------------ 3.08: the 09:20-09:30 early-breakout account
+    def has_early(self) -> bool:
+        return any((sp.get("pick") or {}).get("early") for sp in self.specs.values())
+
+    def offer_early(self, a: dict, state, now: dt.datetime) -> dict:
+        """An early-breakout signal (live/early.py, on trial): accounts with pick.early buy it, 1 lot, chart exit (the
+        account's exit settings: stop on 1- or 5-minute closes). pick.trigger_tf: which trigger the account takes."""
+        out = {}
+        e_ = (a.get("data") or {}).get("early") or {}
+        for bid, bk in list(self.books.items()):
+            p = self.specs[bid].get("pick") or {}
+            if not p.get("early"):
+                continue
+            try:
+                seg = "index" if a.get("is_index") else "stock"
+                if p.get("segment") and p["segment"] != seg:
+                    why = f"a{'n index' if seg == 'index' else ' stock'} (this account buys {p['segment']})"
+                elif str(p.get("trigger_tf") or "1m") != str(e_.get("tf") or "1m"):
+                    why = f"a {e_.get('tf')} trigger (this account takes {p.get('trigger_tf') or '1m'})"
+                elif e_.get("label") != "strong":
+                    why = f"early score {e_.get('score')}: not strong"
+                elif not a.get("option"):
+                    why = "no option price for this signal"
+                elif not a.get("und_key"):
+                    why = "no live price for the underlying"
+                else:
+                    r = {"stop": e_.get("stop"), "atr": e_.get("atr"), "level": e_.get("level")}
+                    why = self._open_chart(bid, bk, a, state, now, r, want=int((self.specs[bid].get("lots") or {}).get("want") or 1))
+                self._count(bid, now, why)
+                out[bid] = "taken" if why is None else why
+            except Exception as e:
+                self.errors[bid] = str(e)
+                self.log(f"Paper account {bid} skipped an early-breakout signal: {e}")
         return out
 
     @staticmethod

@@ -1159,14 +1159,18 @@ def live_day(day: str, acct: str | None = None):
     return clean(b)
 
 
+SEG_BOOK = {"index": "pro_index", "stock": "pro_stocks", "strict": "pro_stocks_strict",      # 3.07
+            "v2index": "pro2_index", "v2stock": "pro2_stocks", "v2early": "pro2_early"}            # 3.08: Pro v2
+
+
 @router.get("/api/live/pro")
 def live_pro(seg: str = "index", day: str | None = None):
     """3.01 Stockway Pro v1: one segment's strong / watch signals of the day (Trend Rider scored by Pro), its paper
     account, which checks lined up and worked (graded signals, last 20 market days) and the learned weights."""
     from live import pro
     from webapp import memo
-    if seg not in ("index", "stock", "strict"):
-        raise HTTPException(400, "seg is index, stock or strict")
+    if seg not in SEG_BOOK:
+        raise HTTPException(400, "seg is one of " + ", ".join(SEG_BOOK))
     if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
         raise HTTPException(400, "day is YYYY-MM-DD")
     e = engine()
@@ -1180,19 +1184,32 @@ def live_pro(seg: str = "index", day: str | None = None):
     c = pro.cfg()
     st = pro._state(e.data_dir)
     fac = memo.memo(f"pro_factors|{src}|{day}", None, lambda: pro.factors(e.store, src, 20, day), ttl=60)
-    book = {"index": "pro_index", "stock": "pro_stocks", "strict": "pro_stocks_strict"}[seg]
+    book = SEG_BOOK[seg]
     from live import books as _bk                         # 3.07: an account's must-have / must-not checks
     pick = ((_bk.cfg().get("books") or {}).get(book) or {}).get("pick") or {}
     gates = {k: pick[k] for k in ("need_with", "not_with") if pick.get(k)}
-    return clean({"day": day, "seg": seg, "book": book, "days": pro.days(e.store, src), "gates": gates,
-                  "trades": pro.book_history(e.store, f"{src}#{book}"), "base_weights": dict(c.get("weights") or {}),
-                  "rules": {k: c.get(k) for k in ("strong", "medium", "min_groups", "expiry_cutoff", "cooloff_min", "exit", "groups")},
-                  "signals": pro.signals(e.store, src, day, "stock" if seg == "strict" else seg, gates or None),
-                  "factors": fac, "weights": pro.weights(e.data_dir),
-                  "learn": {"champion": st.get("champion"), "challenger": st.get("challenger"), "since": st.get("since"),
-                            "check": st.get("check"), "history": (st.get("history") or [])[-5:],
-                            "gates_challenger": st.get("gates_challenger"), "gates_check": st.get("gates_check"),
-                            "gates_suggested": st.get("gates_suggested"), "gates_history": (st.get("gates_history") or [])[-5:]}})
+    v2 = {}
+    if seg.startswith("v2"):                              # 3.08: Pro v2: its checks, the Vote Lab's names, the comparison
+        from live import pro2
+        if seg == "v2early":
+            sig = pro2.early_signals(e.store, src, day)
+        else:
+            sig = pro2.signals(e.store, src, day, "index" if seg == "v2index" else "stock", pick)
+        v2 = {"v2": pro2.words(), "signals": sig,
+              "compare": pro2.compare(e.store, src, ["pro2_index", "pro2_stocks", "pro2_stocks_rider", "pro2_early", "pro_index",
+                                                      "pro_stocks", "pro_stocks_strict", "trail", "main"])}
+    from live import provotes as _pv
+    out = {"day": day, "seg": seg, "book": book, "days": pro.days(e.store, src), "gates": gates, "votes": _pv.names(),
+           "trades": pro.book_history(e.store, f"{src}#{book}"), "base_weights": dict(c.get("weights") or {}),
+           "rules": {k: c.get(k) for k in ("strong", "medium", "min_groups", "expiry_cutoff", "cooloff_min", "exit", "groups")},
+           "signals": None if v2 else pro.signals(e.store, src, day, "stock" if seg == "strict" else seg, gates or None),
+           "factors": fac, "weights": pro.weights(e.data_dir),
+           "learn": {"champion": st.get("champion"), "challenger": st.get("challenger"), "since": st.get("since"),
+                     "check": st.get("check"), "history": (st.get("history") or [])[-5:],
+                     "gates_challenger": st.get("gates_challenger"), "gates_check": st.get("gates_check"),
+                     "gates_suggested": st.get("gates_suggested"), "gates_history": (st.get("gates_history") or [])[-5:]}}
+    out.update(v2)
+    return clean(out)
 
 
 @router.post("/api/live/day/{day}/review")

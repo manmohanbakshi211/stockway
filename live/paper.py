@@ -63,7 +63,8 @@ def _settled(plan_json: str | None) -> str | None:
         return plan_json
     if not isinstance(x, dict):
         return plan_json
-    x.pop("cur", None)
+    for k in ("cur", "cur1", "best", "bo"):          # 3.08: the chart exit's bars in progress and its best prices
+        x.pop(k, None)
     return _json.dumps(x, sort_keys=True)
 
 
@@ -137,8 +138,10 @@ class PaperBook:
                 return None                               # never on pre-open or after-close prices
         opens = self.open_trades()
         cap = int(c.get("aggressive_max_open") or 15) if aggressive else int(c["max_open"])
-        held = any(t["sym"] == alert["sym"] and not (leg and alert.get("id") is not None and t.get("alert_id") == alert.get("id")
-                                                     and str(t.get("mode") or "").startswith("leg:")) for t in opens)
+        held = any(t["sym"] == alert["sym"] and not (leg and str(t.get("mode") or "").startswith("leg:") and (
+            (alert.get("id") is not None and t.get("alert_id") == alert.get("id"))
+            or (alert.get("id") is None and abs(float(t.get("entry_ts") or 0) - now.timestamp()) < 1)))   # 3.08: legs of a signal
+                   for t in opens)
         if held or (not manual and len(opens) >= cap):
             return None
         keep = int(c.get("index_slots") or 0)             # 2.59: slots kept for the indices (0 = as before)
@@ -251,6 +254,22 @@ class PaperBook:
             t["target"] = round(entry * 100, 2)            # no premium target: the trail decides
             t["stop"] = round(entry * (1 - float(ec["emergency_premium_pct"]) / 100), 2)
             t["hold_max"] = 400                           # the rider's own no-move / time rules decide
+        elif plan and t["und_entry"] and plan.get("style") == "chart" and plan.get("stop") is not None:
+            import json as _json                          # 3.08: Pro v2's chart-level exit (lab/chart_exit.py)
+            from lab.chart_exit import ChartPlan, cfg as _ccfg, targets as _targets
+            ec = _ccfg(plan.get("exit"))
+            d_ = 1 if opt["side"] == "CE" else -1
+            s0 = float(t["und_entry"])
+            if d_ * (s0 - float(plan["stop"])) <= 0:
+                return self._skip("price already through the setup's stop")
+            atr = float(plan.get("atr") or 0) or abs(s0 - float(plan["stop"]))
+            t1, t2 = _targets(s0, d_, atr, float(plan["stop"]), plan.get("named") or [], ec)
+            cp = ChartPlan(s0, d_, float(plan["stop"]), atr, entry, now.timestamp(), t1, t2, plan.get("level"),
+                           plan.get("role") or "solo", ec, ema=plan.get("ema"))
+            t["plan"] = _json.dumps(cp.to_dict())
+            t["target"] = round(entry * 100, 2)            # no premium target: the chart decides
+            t["stop"] = round(entry * (1 - float(ec["emergency_premium_pct"]) / 100), 2)
+            t["hold_max"] = 400
         elif plan and t["und_entry"] and plan.get("R"):   # chart-level exit: stop / target on the underlying (lab/exits.py)
             import json as _json
             from lab.exits import PREM_STOP, STYLES, LivePlan
@@ -368,6 +387,13 @@ class PaperBook:
                     why = lp.check(und.ltp if und and und.ltp else None, inst.ltp, now.timestamp())
                     reason = {"stop": "chart stop", "premium stop": "stop loss", "trail": "trailing stop",
                               "no move": "no move", "time": "time limit", "profit lock": "profit lock"}.get(why) if why else None
+                elif pj.get("style") == "chart":          # 3.08: Pro v2's chart-level exit; bars in progress kept in memory
+                    from lab.chart_exit import ChartPlan, REASONS
+                    rider = True
+                    mem = self._mem.get(t["id"])
+                    lp = mem[1] if mem and mem[0] == t["plan"] else ChartPlan.from_dict(pj)
+                    why = lp.check(und.ltp if und and und.ltp else None, inst.ltp, now.timestamp())
+                    reason = REASONS.get(why) if why else None
                 else:
                     from lab.exits import LivePlan
                     lp = LivePlan.from_dict(pj)

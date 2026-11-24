@@ -4424,8 +4424,12 @@ const PRO_WORDS = { breakout: "Breakout", trend_day: "Trend day", trend: "Trend"
   vwap: "VWAP", flow: "Order flow / OI", option: "Option (premium / IV)", ema: "EMA 5 / 10 videos", chase: "Not chasing",
   move_vs_decay: "Move vs decay", tradability: "Tradable option", strength: "Strength vs Nifty", ghanshyam: "Ghanshyam's points",
   strategies: "Other strategies / patterns", mindgame: "MindGame (all)", forecast: "Candle forecast", pro_mind: "MindGame (proven 3 + 1)",
-  daytype: "Day type (09:45)" };
-const proW = (k) => PRO_WORDS[k] || k;
+  daytype: "Day type (09:45)",
+  /* 3.08: the early breakout's checks */
+  first_candle: "Strong first candle", gap_same_way: "Gap and first candle the same way", vwap_side: "Right side of VWAP",
+  index_with: "Index with it", flow_with: "Order flow with it", option_ok: "Tradable option", no_chase: "Not chasing" };
+/* 3.08: the Vote Lab's votes are named in rules/pro_votes.json (x_<name> on a signal) */
+const proW = (k) => PRO_WORDS[k] || (String(k).startsWith("x_") && PRO.data && (PRO.data.votes || {})[k.slice(2)] ? PRO.data.votes[k.slice(2)].words : k);
 function proSig(s, strong) {
   const dir = s.dir === "up" ? `<span class="up">CALL ▲</span>` : `<span class="down">PUT ▼</span>`;
   const res = s.result ? ` · ${esc(s.result)} ${s.r != null ? `<b class="${s.r >= 0 ? "up" : "down"}">${s.r > 0 ? "+" : ""}${Number(s.r).toFixed(2)}R</b>` : ""}` : "";
@@ -4456,19 +4460,43 @@ function proTrades(h) {
     ${rows.length ? `<h3 class="pro-h3">Closed trades</h3><div class="table-wrap"><table class="tbl">${head}<tbody>${proTradeRows(rows, false)}</tbody></table></div>`
       : `<p class="muted small">No closed Pro trade yet. The account buys only STRONG signals (Strong tab).</p>`}`;
 }
-function proFactors(f) {
+function proFactors(f, votes) {
   if (!f || !f.n) return `<p class="muted small">No graded Pro signals yet: this fills in after the first market days (each signal is graded by its own exit).</p>`;
+  const lab = (f.factors || []).filter((r) => String(r.factor).startsWith("x_"));
+  const own = { ...f, factors: (f.factors || []).filter((r) => !String(r.factor).startsWith("x_")) };
+  return proFactorTable(own) + (lab.length ? `<h3 class="pro-h3">Vote Lab <span class="pill">recorded only</span></h3>
+    <p class="small muted">Every book, video and course turned into votes on the same signals (EMA 5 / 10 videos, Ghanshyam's points, Aseem's 51 strategies and the PDFs, candle patterns). They don't change the score or any trade; a vote is used only after it wins on new days (7 replayed days: only "beyond VWAP ± 2σ" and "a pause at the level" helped, and Pro v2 uses those two).</p>
+    ${proFactorTable({ ...f, factors: lab }, votes, true)}` : "");
+}
+function proFactorTable(f, votes, isLab) {
   const t = f.tiers || {};
   const tier = (k, l) => t[k] ? `<td>${l}</td><td class="r">${t[k].n}</td><td class="r ${t[k].avg_r >= 0 ? "up" : "down"}">${t[k].avg_r > 0 ? "+" : ""}${t[k].avg_r}R</td><td class="r">${Math.round((t[k].win || 0) * 100)}%</td>` : `<td>${l}</td><td class="r">0</td><td></td><td></td>`;
-  return `<div class="table-wrap"><table class="tbl"><thead><tr><th>Tier</th><th class="r">Signals</th><th class="r">Avg</th><th class="r">Won</th></tr></thead>
-      <tbody><tr>${tier("strong", "Strong")}</tr><tr>${tier("medium", "Watch")}</tr><tr>${tier("low", "Low")}</tr></tbody></table></div>
-    <div class="table-wrap"><table class="tbl"><thead><tr><th>Check</th><th class="r">With</th><th class="r">Avg when with</th><th class="r">Against</th><th class="r">Avg when against</th><th class="r" title="3.07: every signal where this check was not with it (against or no view)">Avg when not with</th><th>Verdict</th></tr></thead>
-      <tbody>${(f.factors || []).map((r) => `<tr><td>${esc(proW(r.factor))}</td><td class="r">${r.n_with}</td>
+  const src = (k) => isLab && votes && votes[String(k).slice(2)] ? `<br><small class="muted">${esc(votes[String(k).slice(2)].source)}</small>` : "";
+  return `${isLab ? "" : `<div class="table-wrap"><table class="tbl"><thead><tr><th>Tier</th><th class="r">Signals</th><th class="r">Avg</th><th class="r">Won</th></tr></thead>
+      <tbody><tr>${tier("strong", "Strong")}</tr><tr>${tier("medium", "Watch")}</tr><tr>${tier("low", "Low")}</tr></tbody></table></div>`}
+    <div class="table-wrap"><table class="tbl"><thead><tr><th>${isLab ? "Vote" : "Check"}</th><th class="r">With</th><th class="r">Avg when with</th><th class="r">Against</th><th class="r">Avg when against</th><th class="r" title="3.07: every signal where this check was not with it (against or no view)">Avg when not with</th><th>Verdict</th></tr></thead>
+      <tbody>${(f.factors || []).map((r) => `<tr><td>${esc(proW(r.factor))}${src(r.factor)}</td><td class="r">${r.n_with}</td>
         <td class="r ${r.avg_with >= 0 ? "up" : "down"}">${r.avg_with != null ? `${r.avg_with > 0 ? "+" : ""}${r.avg_with}R` : "–"}</td><td class="r">${r.n_against}</td>
         <td class="r ${r.avg_against >= 0 ? "up" : "down"}">${r.avg_against != null ? `${r.avg_against > 0 ? "+" : ""}${r.avg_against}R` : "–"}</td>
         <td class="r ${r.avg_not >= 0 ? "up" : "down"}">${r.avg_not != null ? `${r.avg_not > 0 ? "+" : ""}${r.avg_not}R <small class="muted">× ${r.n_not}</small>` : "–"}</td>
         <td class="small ${r.verdict === "lined up and worked" ? "up" : r.verdict === "did not help" ? "down" : "muted"}">${esc(r.verdict)}</td></tr>`).join("")}</tbody></table></div>
-    <p class="small muted">${f.n} graded signals since ${esc(f.since)}. R = the move in units of the setup's own stop distance.</p>`;
+    ${isLab ? "" : `<p class="small muted">${f.n} graded signals since ${esc(f.since)}. R = the move in units of the setup's own stop distance.</p>`}`;
+}
+/* 3.08: Pro v2's rules and every account side by side */
+const PRO_ACCT = { pro2_index: "Pro v2 · Index", pro2_stocks: "Pro v2 · Stocks", pro2_stocks_rider: "Pro v2 · Stocks, rider exit (challenger)",
+  pro2_early: "Pro v2 · Early", pro_index: "Pro v1 · Index",
+  pro_stocks: "Pro v1 · Stocks", pro_stocks_strict: "Pro v1 · Stocks strict", trail: "Trailing exit", main: "Main account" };
+function proV2(d) {
+  const w = d.v2 || {}, cmp = d.compare || [];
+  const rows = cmp.map((x) => `<tr${x.acct === proSeg().acct ? ` class="sel"` : ""}><td>${x.acct === proSeg().acct ? "<b>" : ""}${esc(PRO_ACCT[x.acct] || x.acct)}${x.acct === proSeg().acct ? "</b>" : ""}</td>
+      <td class="r nw ${x.net >= 0 ? "up" : "down"}"><b>${rupees(x.net)}</b></td><td class="r">${x.n}</td><td class="r">${x.n ? Math.round(100 * x.won / x.n) + "%" : "–"}</td>
+      <td class="r">${x.green} / ${x.red}</td><td class="r nw ${x.worst < 0 ? "down" : ""}">${x.days ? rupees(x.worst) : "–"}</td></tr>`).join("");
+  return `<h3 class="pro-h3">Pro v2 rules</h3><ul class="small" style="margin:0 0 0 18px">
+      <li><b>Stocks:</b> ${esc(w.stocks || "")}</li><li><b>Index:</b> ${esc(w.index || "")}</li><li><b>Ranking:</b> ${esc(w.rank || "")}</li>
+      <li><b>Size:</b> ${esc(w.size || "")}</li><li><b>Exit:</b> ${esc(w.exit || "")}</li>
+      <li><b>On trial:</b> 09:45–11:00 fresh breaks only ${w.midmorning ? "<b class=\"up\">on</b>" : "off"} · after 3 losses on one side, fresh breaks only ${w.same_side ? "<b class=\"up\">on</b>" : "off"}</li></ul>
+    ${rows ? `<h3 class="pro-h3">Every account, all days</h3><div class="table-wrap"><table class="tbl"><thead><tr><th>Account</th><th class="r">Net</th><th class="r">Trades</th><th class="r">Won</th><th class="r">Green / red days</th><th class="r">Worst day</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="small muted">Paper, after charges. A 2-lot v2 trade is two rows (one part sold at T1). 20 market days is the bar before any change to the main account (your call).</p>` : ""}`;
 }
 function proLearning(d) {
   const base = d.base_weights || {}, use = d.weights || {}, L_ = d.learn || {}, ch = L_.challenger || {};
@@ -4498,12 +4526,15 @@ const PRO_TABS = [["strong", "Strong"], ["watch", "Watch"], ["recorded", "Record
    the pro the main has"): Pro's own calendar, every day next to the main account on the same segment. */
 /* 3.07: the Pro page's three accounts (Pro · Stocks strict = the challenger with must-have / must-not checks) */
 const PRO_SEG = { index: { acct: "pro_index", sk: "index", name: "Index" }, stock: { acct: "pro_stocks", sk: "stock", name: "Stocks" },
-  strict: { acct: "pro_stocks_strict", sk: "stock", name: "Stocks strict" } };
+  strict: { acct: "pro_stocks_strict", sk: "stock", name: "Stocks strict" },
+  /* 3.08: Stockway Pro v2 (its own accounts; v1 above stays as the control) */
+  v2index: { acct: "pro2_index", sk: "index", name: "v2 Index", v2: true }, v2stock: { acct: "pro2_stocks", sk: "stock", name: "v2 Stocks", v2: true },
+  v2early: { acct: "pro2_early", sk: "all", name: "v2 Early", v2: true } };
 const proSeg = () => PRO_SEG[PRO.seg] || PRO_SEG.index;
 function proCalVals(d) {
   const acct = proSeg().acct, sk = proSeg().sk;
   const A = d.accounts || {}, pro = A[acct] || null, main = A.main || {};
-  return { pro, mainSeg: (main.seg || {})[sk] || null, mainAll: A.main ? main : null };
+  return { pro, mainSeg: sk === "all" ? (A.main ? main : null) : (main.seg || {})[sk] || null, mainAll: A.main ? main : null };
 }
 function proCalGrid(c) {
   const [y, m] = c.month.split("-").map(Number);
@@ -4619,10 +4650,13 @@ function proBody(d) {
   const t = PRO.tab;
   if (t === "watch") return `<p class="small muted">Score 75–85: worth watching, not bought. A watch signal that keeps getting stronger shows up in Strong.</p>${list(s.medium, false, `Nothing to watch on ${esc(d.day)}.`)}`;
   if (t === "recorded") return `<p class="small muted">Every other Trend Rider signal Pro scored below 75 on ${esc(d.day)}: recorded and graded, so the Checks tab can tell which checks really work.</p>${list(s.low, false, "Nothing recorded on this day.")}`;
+  if (t === "trades" && proSeg().v2) return `${proTrades(d.trades)}${proV2(d)}`;
   if (t === "trades") return `${proTrades(d.trades)}<p class="small muted">Rules: strong only · 1 lot · no day locks (no trades-a-day count, no day loss stop${Number(r.cooloff_min || 0) ? `, but a ${esc(String(r.cooloff_min))} min cool-off after an exit on the same symbol and side` : ", no cool-off"}; the money set in the app is the only limit) · after ${esc(r.expiry_cutoff || "")} on a same-day expiry: bought unless the time-decay check votes against · Trend Rider exit + profit lock (at +${esc(String(ex.lock_premium_pct || "–"))}% keep +${esc(String(ex.lock_keep_pct || "–"))}%).</p>`;
   if (t === "calendar") return proCalendar();
-  if (t === "checks") return proFactors(d.factors);
+  if (t === "checks") return proFactors(d.factors, d.votes);
   if (t === "learning") return proLearning(d);
+  if (PRO.seg === "v2early") return `<p class="small muted">09:20–09:30 only: a close beyond the first 5-minute candle that also went through a key level, with the first candle strong, gap and candle the same way, a tradable option, no chase and a score of 85+. Pro v2 · Early buys these, 1 lot.</p>${list(s.strong, true, `No strong early breakout on ${esc(d.day)}.`)}`;
+  if (proSeg().v2) return `<p class="small muted">Strong (85+, 3+ groups)${PRO.seg === "v2stock" ? ", strength with, flow not already with, a main-account PASS on the same stock and side in the last 15 minutes and not beyond VWAP ± 2σ" : ""}: Pro v2 may buy it (Trades tab). A strong one these checks skip is on the Watch tab with the reason.</p>${list(s.strong, true, `No strong signal on ${esc(d.day)}.`)}`;
   return `<p class="small muted">Score 85+ with 3+ different groups of checks agreeing: the Pro paper account may buy it (Trades tab).</p>${list(s.strong, true, `No strong signal on ${esc(d.day)}.`)}`;
 }
 function proDraw() {
@@ -4649,8 +4683,8 @@ async function pagePro() {
   PRO.day = q.get("day") || "";
   PRO.data = null; PRO.calSeg = null;
   main.innerHTML = `<h1 class="page-title">Pro <span class="pill">on trial</span></h1>
-    <p class="muted" style="margin-top:0">Option buying only. Every check votes together on each Trend Rider signal; <b>strong</b> (85+ and 3+ different groups agreeing) is bought by the Pro paper account, <b>watch</b> (75–85) and the rest are kept here. Paper only: the main account, Focus and Telegram don't change.</p>
-    <div class="pro-bar"><div class="seg" role="group" aria-label="Segment">${Object.entries(PRO_SEG).map(([k, v]) => `<button data-seg="${k}" aria-pressed="${PRO.seg === k}"${k === "strict" ? ` title="Challenger: strong stock signals only with relative strength with us and order flow not already with us"` : ""}>${v.name}</button>`).join("")}</div>
+    <p class="muted" style="margin-top:0">Option buying only. Every check votes together on each Trend Rider signal; <b>strong</b> (85+ and 3+ different groups agreeing) is bought by the Pro paper account, <b>watch</b> (75–85) and the rest are kept here. <b>v2</b> buys only confirmed entries and exits from the chart (support / resistance), 2 lots when the money covers them; v1 runs next to it as the control. Paper only: the main account, Focus and Telegram don't change.</p>
+    <div class="pro-bar"><div class="seg" role="group" aria-label="Segment">${Object.entries(PRO_SEG).map(([k, v]) => `<button data-seg="${k}" aria-pressed="${PRO.seg === k}"${k === "strict" ? ` title="Challenger: strong stock signals only with relative strength with us and order flow not already with us"` : v.v2 ? ` title="Stockway Pro v2 (3.08): confirmed entries, exits from the chart"` : ""}>${v.name}</button>`).join("")}</div>
       <label class="small">Day <select id="pro-day"></select></label></div>
     <div class="seg pro-tabs" id="pro-tabs" role="group" aria-label="Pro tabs"></div>
     <div id="pro-body"><p class="muted">Loading…</p></div>`;

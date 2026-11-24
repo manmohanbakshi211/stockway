@@ -268,6 +268,8 @@ class LiveEngine:
         self.charts = ChartData(self)
         from .rider import Rider                     # 2.84: Trend Rider indicators for every index and F&O stock (on trial)
         self.rider = Rider(self)
+        from .early import Early                     # 3.08: 09:20-09:30 breakouts for Pro v2 (on trial)
+        self.early = Early(self)
         from .edgebook import EdgeBook
         self.edge = EdgeBook(self.data_dir)
         from .analog import Scenarios
@@ -432,6 +434,7 @@ class LiveEngine:
             from .books import Books
             self.books = Books(self.source, self.store, self.paper.cfg, lc.get("books"), self.log, on_open=self._keep_live,
                                risk_for=self.risk_for, data_dir=self.data_dir)
+            self.books.rank_ok = True                # 3.08: Pro v2's ranked signals are opened after each scan (_rider_flush)
         except Exception as e:
             self.books = None
             self.log(f"Extra paper accounts not loaded: {e}")
@@ -992,7 +995,14 @@ class LiveEngine:
                 except Exception as e:
                     if self._every("setup_err", 300, clock_time=False):
                         self.log(f"Setup scan error: {e}")
+                self._rider_flush(now)
                 self._prof["Setup / Lab rules scan"] = time.perf_counter() - t1
+            if open_ and getattr(self, "early", None) is not None:   # 3.08: 09:20-09:30 breakouts (on trial)
+                try:
+                    self.early.on_minute(now, lambda a, now=now, lc=lc: self._emit_safe(a, now, lc))
+                except Exception as e:
+                    if self._every("early_err", 600, clock_time=False):
+                        self.log(f"Early breakout check failed: {e}")
             if self.cdl is not None and open_:
                 self._guard("Candle scanner", self.cdl.tick, now)
             if self._every("vault_bars", 1800):              # 2.96: its own thread (it held the loop 11.7 s after a restart)
@@ -2001,6 +2011,12 @@ class LiveEngine:
             except Exception as e:
                 if self._every("rider_paper_err", 600, clock_time=False):
                     self.log(f"Trend Rider paper account skipped a signal: {e}")
+        if a.get("kind") == "early_breakout":        # 3.08: Pro v2 · Early (rules/paper_books.json "pro2_early")
+            try:
+                self._early_offer(a, now)
+            except Exception as e:
+                if self._every("early_paper_err", 600, clock_time=False):
+                    self.log(f"Early breakout paper account skipped a signal: {e}")
 
     def _rider_offer(self, a, now):
         """2.85: a Trend Rider signal for the paper accounts with pick.rider. The stop is on the index / stock price the
@@ -2016,7 +2032,33 @@ class LiveEngine:
         i = self.state.get(u.key) if u and self.state is not None else None
         a2 = {**a, "option": self._suggest(a["sym"], a["direction"]), "is_index": bool(u and u.is_index),
               "und_key": u.key if i is not None and i.ltp else None}
+        if getattr(bs, "has_chart", lambda: False)():
+            a2["chart_named"] = self._chart_named(a["sym"], now)
         return bs.offer_rider(a2, self.state, now)
+
+    def _chart_named(self, sym, now) -> list:
+        """3.08: the support / resistance known now for Pro v2's chart exit (lab/chart_exit.named_levels)."""
+        try:
+            from lab.chart_exit import named_levels
+            return named_levels((self.daily or {}).get(sym), self.charts.five_min(sym, now.date()), now.timestamp(),
+                                now.date().isoformat())
+        except Exception:
+            return []
+
+    def _early_offer(self, a, now):
+        """3.08: an early-breakout signal for the accounts with pick.early. Paper only."""
+        bs = getattr(self, "books", None)
+        if bs is None or not self.paper or not getattr(bs, "has_early", lambda: False)():
+            return {}
+        if a.get("direction") not in ("up", "down"):
+            return {}
+        if self.dguard is not None and self.dguard.symbol_problem(a["sym"]):
+            return {}
+        u = self.uni.underlyings.get(a["sym"]) if self.uni else None
+        i = self.state.get(u.key) if u and self.state is not None else None
+        a2 = {**a, "option": self._suggest(a["sym"], a["direction"]), "is_index": bool(u and u.is_index),
+              "und_key": u.key if i is not None and i.ltp else None, "chart_named": self._chart_named(a["sym"], now)}
+        return bs.offer_early(a2, self.state, now)
 
     def _emit(self, a, now, lc):
         if registry.is_shadow(a.get("kind")):
@@ -2436,8 +2478,21 @@ class LiveEngine:
             self._emit_safe(a, now, lc)
             n += 1
         if n:
+            self._rider_flush(now)
             self._prof["Setup / Lab rules alerts"] = time.perf_counter() - t1
         return n
+
+    def _rider_flush(self, now):
+        """3.08: Pro v2's signals of the bar just scanned, best score first, opened while the money lasts. Paper only."""
+        bs = getattr(self, "books", None)
+        if bs is None or not getattr(bs, "pending", None):
+            return {}
+        try:
+            return bs.flush_rider(self.state, now)
+        except Exception as e:
+            if self._every("rider_flush_err", 600, clock_time=False):
+                self.log(f"Pro v2 ranked signals skipped: {e}")
+            return {}
 
     def _scan_wait(self, timeout: float = 30.0):
         """2.81: lets a running scan finish and raises what it found (end of day: before the day is closed)."""

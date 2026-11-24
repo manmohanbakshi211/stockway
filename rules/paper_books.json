@@ -274,6 +274,143 @@
    },
    "section": "pro",
    "review": "show"
+  },
+  "pro2_index": {
+   "name": "Pro v2 · Index",
+   "short": "Stockway Pro v2: strong index signals, 1 lot, chart-level exit (10 EMA runner, profit lock)",
+   "explain": "3.08 Stockway Pro v2 (Mandeep, 25 Nov 2026: 'entry exit koi percentage se nahi chart ... price levels, indicators, resistance support se'). The same strong Pro index signals as Pro · Index (v1 stays as the control), 1 lot, exit from the chart: the setup's stop on a 5-minute close; T1 / T2 = the next support / resistance zones (yesterday's high / low / close, pivots, last week, 20-day, today's range, round numbers); before T1 out on a failed breakout or no move in 30 minutes; at T1 the stop goes to the entry level and then follows the 10 EMA of the 5-minute closes; profit lock +20% -> keep +5%; emergency -35%; out by 15:10 (rules/pro_v2.json). 7-day replay with the real engine: every index version was about flat or lost (14 signals, 29% won): this one +Rs842, v1 -Rs250, 2 lots -Rs9,126 to -Rs15,178. Index entries are the weak part of Pro: judged on new days. No day locks. Paper only, on trial.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "rider": true,
+    "pro": true,
+    "v2": true,
+    "segment": "index",
+    "early_book": "pro2_early"
+   },
+   "exit_style": "chart",
+   "paper": {
+    "max_open": 99,
+    "max_trades_day": 99,
+    "max_daily_loss_pct": 100,
+    "cooloff_min": 0,
+    "profit_lock": 0,
+    "no_entry_after": "15:00",
+    "max_lots": 1
+   },
+   "section": "pro",
+   "review": "show",
+   "exit": {
+    "runner": "ema10",
+    "lock_premium_pct": 20,
+    "lock_keep_pct": 5
+   },
+   "lots": {
+    "want": 1
+   }
+  },
+  "pro2_stocks": {
+   "name": "Pro v2 · Stocks",
+   "short": "Stockway Pro v2: confirmed strong stock signals, not chasing, 2 lots when the money covers them, chart-level exit",
+   "explain": "3.08 Stockway Pro v2. Strong Pro stock signals only when (1) relative strength is with the trade and order flow not already with it (the strict checks), (2) the main account's risk check passed an alert on the same stock and side in the last 15 minutes (confirmed), (3) the price is not already beyond VWAP +/- 2 sigma the trade's way (Aseem's band as a no-chase check, from the Vote Lab). Signals of one bar: the best score first (a pause at the level before the break, Ghanshyam's point, adds a bonus). 2 lots when the free money covers both, else 1; exit from the chart: the setup's stop on a 5-minute close; T1 / T2 from support / resistance; before T1 out on a failed breakout or no move in 30 minutes; after T1 the stop goes to the entry level and follows the 10 EMA of the 5-minute closes; emergency -35%; out by 15:10. 7-day replay with the real engine: 25 entries, +Rs41,410 a lot (Rs1,656 a lot a trade, PF 3.49, green 2 of 4 traded days, worst day -Rs6,544 a lot) against Pro · Stocks strict's 188 trades +Rs69,128 (Rs368 a trade) and the trailing account's Rs1,338 a lot a trade. A stock bought in the 09:20-09:30 window is not bought again that day. No day locks. Paper only, on trial.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "rider": true,
+    "pro": true,
+    "v2": true,
+    "segment": "stock",
+    "need_with": [
+     "strength"
+    ],
+    "not_with": [
+     "flow"
+    ],
+    "early_book": "pro2_early"
+   },
+   "exit_style": "chart",
+   "paper": {
+    "max_open": 99,
+    "max_trades_day": 99,
+    "max_daily_loss_pct": 100,
+    "cooloff_min": 0,
+    "profit_lock": 0,
+    "no_entry_after": "15:00",
+    "max_lots": 2
+   },
+   "section": "pro",
+   "review": "show",
+   "exit": {
+    "runner": "ema10"
+   },
+   "lots": {
+    "want": 2
+   }
+  },
+  "pro2_stocks_rider": {
+   "name": "Pro v2 · Stocks rider exit",
+   "short": "Challenger: Pro v2's confirmed stock entries with Trend Rider's exit, 2 lots",
+   "explain": "3.08 challenger to Pro v2 · Stocks: the same confirmed, not-chasing stock entries, but Trend Rider's own exit (stop beyond the broken level on a 5-minute close, +1R stop to entry, ATR trail, no-move, 15:10), no profit lock, 2 lots on one trade when the money covers them. 7-day replay: +Rs71,113 at 2 lots (Rs1,422 a lot a trade, PF 3.18), second to the chart exit with the 10 EMA runner per lot. The new market days decide between them. Paper only, on trial.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "rider": true,
+    "pro": true,
+    "v2": true,
+    "segment": "stock",
+    "need_with": [
+     "strength"
+    ],
+    "not_with": [
+     "flow"
+    ],
+    "early_book": "pro2_early"
+   },
+   "exit_style": "rider",
+   "lots": {
+    "want": 2
+   },
+   "paper": {
+    "max_open": 99,
+    "max_trades_day": 99,
+    "max_daily_loss_pct": 100,
+    "cooloff_min": 0,
+    "profit_lock": 0,
+    "no_entry_after": "15:00",
+    "max_lots": 2
+   },
+   "section": "pro",
+   "review": "show"
+  },
+  "pro2_early": {
+   "name": "Pro v2 · Early",
+   "short": "Pro v2: strong breakouts of the first 5-minute candle between 09:20 and 09:30, 1 lot, chart-level exit",
+   "explain": "3.08 (Mandeep, 25 Nov 2026: 'kyi baar strong move 9:20 se 9:30 mein hi mil jaate hai 5 min ke candle ke baad'). Trend Rider's first signal is at 09:30; this account looks at 09:20-09:30 only: a 1-minute close beyond the first 5-minute candle's high (calls) / low (puts) that also went through a key level (yesterday's high / low / close, pivot, R1 / S1, CPR, last week, a round number), with a strong score (the first candle strong, gap and candle the same way, the right side of VWAP, the index with it or the stock far stronger, order flow with it, a tradable option, no chase; 85+). 1 lot; stop at the middle of the first candle on 1-minute closes; then the chart-level exit (T1 / T2 from the levels). Index and stocks. The main account's 09:20-09:30 trades: replay +Rs44,767, live -Rs20,474: a risky window, so 1 lot and its own account (switch it off alone if it fails). Paper only, on trial. 7-day replay with the real engine: +Rs21,988 on 105 trades (PF 1.35, worst day -Rs3,330) but green on only 2 of 6 days: the 20 live days decide.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "early": true,
+    "trigger_tf": "1m"
+   },
+   "exit_style": "chart",
+   "exit": {
+    "stop_on": "1m",
+    "runner": "bar5"
+   },
+   "lots": {
+    "want": 1
+   },
+   "paper": {
+    "max_open": 99,
+    "max_trades_day": 99,
+    "max_daily_loss_pct": 100,
+    "cooloff_min": 0,
+    "profit_lock": 0,
+    "no_entry_after": "15:00",
+    "max_lots": 1
+   },
+   "section": "pro",
+   "review": "show"
   }
  }
 }

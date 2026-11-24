@@ -267,7 +267,7 @@ def test_pro_page_has_a_tab_for_everything_it_watches(tmp_path, monkeypatch):
     for tab in ('["strong", "Strong"]', '["watch", "Watch"]', '["recorded", "Recorded"]', '["trades", "Trades"]',
                 '["checks", "Checks"]', '["learning", "Learning"]'):
         assert tab in js
-    assert 'id="pro-tabs"' in js and 'id="pro-day"' in js and "function proLearning(d)" in js and "function proFactors(f)" in js
+    assert 'id="pro-tabs"' in js and 'id="pro-day"' in js and "function proLearning(d)" in js and "function proFactors(f, votes)" in js   # 3.08: + the Vote Lab
 
 
 def test_pro_calendar_compares_with_the_main_account_day_by_day(tmp_path, monkeypatch):

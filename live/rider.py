@@ -396,6 +396,17 @@ class Rider:
             prj = _pro.judge(self.e, sym, d, now, {k: cf.get(k) for k in ("score", "label", "with", "against", "no_view")})
         except Exception:
             prj = {}
+        xv = {}
+        try:                                               # 3.08: the Vote Lab (live/provotes.py): recorded, weight 0
+            from . import provotes as _pv
+            dly = (getattr(self.e, "daily", None) or {}).get(sym) or {}
+            th = (getattr(self.e.charts, "__dict__", {}).get("_tfh") or {}).get((sym, day))
+            xv = _pv.compute(b, d, dec.get("level"), r.get("atr"), dly.get("prev"),
+                             (th[1][-2:] if th and th[1] else None))          # earlier days only when already held
+            if prj:
+                prj.setdefault("votes", {}).update(_pv.as_pro_votes(xv))
+        except Exception:
+            xv = {}
         W = R.FACTOR_WORDS
         conf_txt = (f" Confidence {cf['score']:.0f}/100 ({cf['label']}): saath {', '.join(W.get(k, k) for k in cf['with']) or '-'}"
                     f"; khilaaf {', '.join(W.get(k, k) for k in cf['against']) or '-'}." if cf.get("score") is not None else "")
@@ -417,6 +428,7 @@ class Rider:
                                  "ema10": ev.get("ema_slow"),
                                  "confidence": {k: cf.get(k) for k in ("score", "label", "with", "against", "no_view", "why")}},
                        **({"pro": prj} if prj else {}),
+                       **({"votes2": xv} if xv else {}),
                        **({"setup_levels": {"entry": round(e_, 2), "stop": stop, "target": round(e_ + d * 2 * risk, 2),
                                             "rr": 2.0}} if risk else {})}})
         return 1

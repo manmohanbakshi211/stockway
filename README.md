@@ -118,6 +118,71 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 3.08: Stockway Pro v2: confirmed entries, exits from the chart, the 09:20 window, the Vote Lab (25 Nov 2026, on trial)
+- **Mandeep (25 Nov):** "entry exit koi percentage se nahi chart, index/stock price levels, indicators, Resistance support
+  ... Strong signal, valuable trades, high profit low loss and max green days ... itna strict bhi na ho ki opportunities
+  hi na le"; then "okay apne suggestions ke saath V2 banao pura ek sath complete".
+- **v1 is not changed** (Pro · Index / Stocks / Stocks strict): it is the control. v2 is four new paper accounts on the
+  Pro page (buttons "v2 Index", "v2 Stocks", "v2 Early"), all paper, no day locks, the money set in the app is the limit.
+- **Entries (gun `live/pro2.py`, bullets `rules/pro_v2.json`):**
+  - Index: Pro's strong index signals, 1 lot.
+  - Stocks: strong + strength with + flow not already with + **confirmed** (the main account's risk check passed an alert
+    on the same stock and side in the 15 minutes before) + **not beyond VWAP ± 2σ** the trade's way (no chase).
+  - Several signals on one 5-minute bar: the best score first (a pause at the level before the break adds 5 points).
+  - Stocks: 2 lots when the free money covers them, else 1.
+  - On trial, off: 09:45-11:00 fresh breaks only; after 3 losses on one side, fresh breaks only (no effect on the replay).
+- **Exit from the chart (gun `lab/chart_exit.py`, style `chart`):** the setup's stop on a 5-minute close; T1 / T2 = the
+  next support / resistance zones (yesterday's high / low / close, pivots, last week, 20-day, today's range, round
+  numbers); before T1 out on a failed breakout (a close back through the broken level) or no move in 30 minutes; at T1 the
+  stop goes to the entry level, then the runner: `ema10` (the 10 EMA video; default), `chand` (Chandelier, the trailing
+  account's) or `bar5` (behind the last 5-minute bar, out at T2); emergency −35%; out by 15:10. Optional profit lock on a
+  1-lot trade; optional two parts (one sold at T1).
+- **Pro v2 · Stocks rider exit** (challenger): the same entries with Trend Rider's own exit, 2 lots.
+- **Pro v2 · Early, 09:20-09:30 (gun `live/early.py`, trial alert `early_breakout`):** a 1-minute close beyond the first
+  5-minute candle that also went through a key level; the first candle strong, gap and candle the same way, a tradable
+  option and no chase are musts; then a score of 85+ (VWAP side, the index with it or the stock far stronger, order flow).
+  1 lot, stop at the middle of the first candle on 1-minute closes, then the chart exit. A stock bought there is not
+  bought again that day by v2.
+- **Vote Lab (gun `live/provotes.py`, bullets `rules/pro_votes.json`):** 22 votes from the EMA videos, Ghanshyam's course,
+  Aseem's 51 strategies and the PDFs, and candle patterns, computed on every Trend Rider signal and recorded as `x_` votes
+  with weight 0 (the score and the trades do not change). The Checks tab grades them; the nightly learned checks (3.07)
+  can propose them. A new transcript becomes votes here, not a new strategy.
+- **Replay check (`tools/replay_check.py`):** replays recorded days with the current code in temporary folders (a copy of
+  live.db, the recordings linked, no tokens, no Telegram, no AI, no network jobs), scores every account and compares with
+  a saved baseline. `--books` replays another accounts file (the variant test below) without touching yours. Two replays
+  of the same code can differ a little (at 30x the main account's alerts and a signal's bar can shift): on 19 Nov one run
+  had AMBER (+₹26K a lot) in Pro v2 and the next did not, so judge accounts over several days, not one trade.
+- **How the defaults were chosen: 7 recorded days with the real engine** (6, 9, 13, 16, 18, 19, 23 Nov; 17 variant
+  accounts side by side):
+
+  | Account (7 days) | Trades | Net | Per lot a trade | Green days | Worst day |
+  |---|---|---|---|---|---|
+  | Trailing exit | 39 | +₹1,01,661 | ₹1,338 | 5/7 | −₹6,718 |
+  | Main | 80 | +₹78,787 | ₹532 | 5/7 | −₹22,571 |
+  | Pro v1 · Stocks strict | 188 | +₹69,128 | ₹368 | 3/5 | −₹13,469 |
+  | v2 stocks, chart exit, 10 EMA runner (1 lot) | 25 | +₹41,410 | **₹1,656** | 2/4 | −₹6,544 |
+  | v2 stocks, Trend Rider exit (2 lots) | 25 | +₹71,113 | ₹1,422 | 2/4 | −₹11,768 |
+  | v2 stocks, Chandelier runner (1 lot) | 25 | +₹33,452 | ₹1,338 | 2/4 | −₹6,544 |
+  | v2 stocks, bar runner sold at T2 (1 lot) | 25 | +₹9,338 | ₹374 | 2/4 | −₹6,544 |
+  | v2 index, best (10 EMA + lock, 1 lot) | 14 | +₹842 | ₹60 | 2/5 | −₹6,045 |
+  | Pro v1 · Index | 14 | −₹250 | −₹18 | 2/5 | −₹9,067 |
+  | v2 Early (1-minute trigger and stop) | 105 | +₹21,988 | ₹209 | 2/6 | −₹3,330 |
+
+  - The v2 stock entries pay about 4× Pro v1 · Stocks strict per lot with 25 trades instead of 188.
+  - Selling one of two lots at T1 added about ₹0, so all lots ride. Index: every version was about flat or lost.
+  - The early window is positive but green on only 2 of 6 days; the 5-minute triggers lost.
+  - **Not yet better than the trailing account on green days.** These are the days the rules were chosen on: the 20
+    new market days decide (pass bar: profit after charges, PF 1.3+, 40+ trades, more than 55% green days, drawdown
+    under 10%).
+- **A correction:** the earlier v1-vs-v2 exit estimate (24-25 Nov chat) took a put trade's underlying the wrong way; with
+  that fixed the index numbers fell (v2 exit +₹6,040 a lot, not +₹18,119). The engine replay above does not have that
+  error (the trade's side decides the direction).
+- Paper only. Main account, Focus, alerts, Telegram, risk check, capital and the Lab are unchanged; `lab/factory.py` and
+  `lab/exits.py` untouched.
+- Tests: `tests/test_pro2_308.py` (20), `test_pro` and `test_rider_exit` (account lists). Full suite: 716 passed. System
+  page: check `pro_v2`. Lab regression: identical to 3.07 (`lab/factory.py`, `lab/exits.py` and the table build untouched).
+  Pro page checked headless at desktop and phone width, light and dark: no console errors, no sideways scroll.
+
 ## 3.07: Pro after the 6-day replay: warm-up after a restart, Pro · Stocks strict, learned checks (24 Nov 2026)
 - **Mandeep (24 Nov):** "okay" on the plan after the 6-day replay ("max profit confidence ke sath ke liye kya kya karna hai").
 - **The replay.** 3.06 code, recorded days, every account side by side: 6, 9, 13, 16, 18, 19 Nov, plus 23 Nov.

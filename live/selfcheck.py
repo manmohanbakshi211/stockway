@@ -466,6 +466,27 @@ def static_checks(cfg: dict | None = None) -> list:
                   and "strict" in (_bk.cfg().get("books") or {}),
                   f"pass bar: {sc['min_trades']}+ learn trades, t at the multiple-testing bar, {sc['min_hold']}+ holdout trades, "
                   f"beats coin flips (one every {sc['coin_every_min']} min, bench only); runs after {sc['run_after']}"))
+    try:                                                  # 3.08: Stockway Pro v2 (entries, chart exit, early window, Vote Lab)
+        from lab import chart_exit as _cx
+        from live import early as _ea, pro2 as _p2, provotes as _pv, rider as _rd
+        p2c = _p2.cfg()
+        bk2 = _bk.cfg().get("books") or {}
+        acc = [k for k in ("pro2_index", "pro2_stocks", "pro2_early") if k in bk2]
+        p2_ok = (len(acc) == 3 and all((bk2[k].get("pick") or {}).get("v2") or (bk2[k].get("pick") or {}).get("early") for k in acc)
+                 and "self.early.on_minute(" in inspect.getsource(_eng.LiveEngine._loop)
+                 and "_rider_flush(" in inspect.getsource(_eng.LiveEngine._scan_drain)
+                 and "ChartPlan" in inspect.getsource(__import__("live.paper", fromlist=["PaperBook"]).PaperBook._update)
+                 and "provotes" in inspect.getsource(_rd.Rider._one) and _reg.is_shadow(_ea.KIND)
+                 and (p2c.get("exit") or {}).get("runner", "bar5") in _cx.RUNNERS and len(_pv.names()) >= 10)
+        p2_det = (f"accounts {', '.join(bk2[k]['name'] for k in acc)}: stocks need a main-account PASS in "
+                  f"{(p2c.get('confirm_main') or {}).get('minutes')} min and no VWAP ± 2σ chase; chart exit (runner "
+                  f"{(p2c.get('exit') or {}).get('runner')}); early window {(p2c.get('early') or {}).get('from')}-"
+                  f"{(p2c.get('early') or {}).get('to')}; Vote Lab {len(_pv.names())} votes recorded (rules/pro_v2.json, "
+                  "rules/pro_votes.json); paper only")
+    except Exception as e:
+        p2_ok, p2_det = False, str(e)[:160]
+    out.append(_c("pro_v2", "Stockway Pro v2: confirmed entries, chart-level exit, 09:20-09:30 early breakouts, Vote Lab (3.08)",
+                  p2_ok, p2_det))
     return out
 
 

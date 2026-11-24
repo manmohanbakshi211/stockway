@@ -1,0 +1,89 @@
+{
+ "about": "3.08 Stockway Pro v2 (Mandeep, 25 Nov 2026: 'okay apne suggestions ke saath V2 banao pura ek sath complete'). The numbers of live/pro2.py (entries), lab/chart_exit.py (exit) and live/early.py (09:20-09:30 breakouts). v1 (rules/pro.json, the Pro · Index / Stocks / Stocks strict accounts) is not changed: it is the control. Chosen on a 7-day replay with the real engine (tools/replay_check.py: 6, 9, 13, 16, 18, 19, 23 Nov; 17 variant accounts side by side; claude/v2_fusion.md) and judged on new market days: the accounts are paper, on trial.",
+ "valid_from": "2026-11-25",
+ "on": true,
+ "confirm_main": {
+  "stock": true,
+  "index": false,
+  "minutes": 15,
+  "why": "Stock signals with a main-account PASS alert on the same stock and side in the 15 minutes before: +0.33R and 64% won (all strong), +0.50R and 71% with the strict checks; with no main alert at all -0.07R and 43% (7 replayed days)."
+ },
+ "no_stretch": {
+  "stock": true,
+  "index": false,
+  "vote": "x_as_vwap2_stretch",
+  "why": "Aseem's VWAP 2-sigma band as a no-chase check: signals already beyond it the trade's way averaged -0.02R vs +0.28R (4 of 5 days; inside the strict ones 0.17R vs 0.52R). With it the confirmed stocks + index (2 lots) went +Rs82,899 -> +Rs91,221 with 45 -> 31 trades and a worst day -Rs11,946 -> -Rs4,576."
+ },
+ "pause_bonus": {
+  "vote": "x_gh_pause",
+  "points": 5,
+  "why": "Ghanshyam's pause at the level before the break: +0.31R inside the strict signals (4 of 5 days, not proven): a plus point in the ranking, not a must."
+ },
+ "midmorning": {
+  "on": false,
+  "from": "09:45",
+  "to": "11:00",
+  "why": "On trial (the variant test decides): 09:45-11:00 was the weak window (Pro stocks -Rs36K on 142 trades); a stock there needs a fresh break, not a retest. 7-day replay: no effect (the confirmed entries were not retests in that window); stays off."
+ },
+ "same_side": {
+  "on": false,
+  "losses": 3,
+  "why": "On trial: 6 Nov, 10 confirmed calls on a strong up day, all lost. After 3 losses on one side the next stock trade on that side needs a fresh break. 7-day replay: no effect; stays off."
+ },
+ "rank": true,
+ "lots": {
+  "want": 2,
+  "why": "2 lots when the free money covers them, else 1 (stocks). The index account takes 1 lot (rules/paper_books.json): every index variant was flat or lost on the replay, 2 lots only doubled it."
+ },
+ "exit": {
+  "runner": "ema10",
+  "split_at_t1": false,
+  "t1_min_atr": 0.25,
+  "levels_n": 6,
+  "stop_on": "5m",
+  "failed_breakout": true,
+  "nomove_bars": 6,
+  "chand_atr": 2.5,
+  "ema_n": 10,
+  "emergency_premium_pct": 35.0,
+  "exit_hhmm": "15:10",
+  "lock_premium_pct": null,
+  "lock_keep_pct": 5.0,
+  "why": "7-day engine replay, the same confirmed stock entries (25), per lot: chart exit with the 10 EMA runner +Rs1,656 a trade (PF 3.49, worst day -Rs6,544 a lot), Trend Rider's exit +Rs1,422 (PF 3.18), Chandelier runner +Rs1,338, 5-minute-bar runner sold at T2 +Rs374. Selling one of two lots at T1 added ~Rs0 (so split_at_t1 is off: all lots ride). Index: every exit flat or losing (14 signals, 29% won)."
+ },
+ "early": {
+  "on": true,
+  "from": "09:20",
+  "to": "09:30",
+  "min_score": 85,
+  "musts": [
+   "first_candle",
+   "gap_same_way",
+   "option_ok",
+   "no_chase"
+  ],
+  "level_names": [
+   "Yesterday's high",
+   "Yesterday's low",
+   "Yesterday's close",
+   "Pivot",
+   "R1",
+   "S1",
+   "CPR top",
+   "CPR bottom",
+   "Last week's high",
+   "Last week's low",
+   "Round number"
+  ],
+  "first_min_body": 0.5,
+  "first_close_zone": 0.3,
+  "first_min_range_datr": 0.12,
+  "chase_max_first": 0.6,
+  "max_spread_pct": 4.0,
+  "min_premium": 3.0,
+  "stop": "mid",
+  "max_premium_risk_pct": 30.0,
+  "index_lead_x": 2.0,
+  "why": "Mandeep (25 Nov): 'kyi baar strong move 9:20 se 9:30 mein hi mil jaate hai'. A 1-minute close beyond the first 5-minute candle AND through a key level, with a strong first candle, gap and candle the same way, the right side of VWAP, the index with it (or the stock far stronger), order flow with it, a tradable option and no chase. 1 lot, its own account; the main account's 09:20-09:30 trades: replay +Rs44,767 (20 of 36 won), live -Rs20,474 (4 of 11). First replay (19 Nov) with the score alone: 64 strong 1-minute signals in ten minutes (the price-made checks agree on most breakouts), so the first candle's strength, gap and candle the same way, a tradable option and no chase are musts. 7-day engine replay: 1-minute trigger with 1-minute stop +Rs21,988 on 105 trades (PF 1.35, worst day -Rs3,330) but green on only 2 of 6 days (18 and 19 Nov carry it); 1-minute trigger, 5-minute stop +Rs8,327; the 5-minute triggers lost (-Rs38,721, -Rs47,988). On trial: the 20 live days decide."
+ }
+}

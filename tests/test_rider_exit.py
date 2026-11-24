@@ -118,7 +118,9 @@ def test_rider_account_loads_and_takes_only_rider_signals(tmp_path):
     assert "rider" in bs.books and bs.has_rider() and bs.books["rider"].cfg["capital"] == MAIN["capital"]
     now = _t(DAY, 10, 0)
     out = bs.offer_rider(_rider_alert(), _state(O1=40.0), now)
-    assert out["rider"] == "taken" and set(out) == {"rider", "pro_index", "pro_stocks", "pro_stocks_strict"}   # + Pro (3.01, 3.07)
+    assert out["rider"] == "taken" and set(out) == {"rider", "pro_index", "pro_stocks", "pro_stocks_strict",
+                                                    "pro2_index", "pro2_stocks", "pro2_stocks_rider"}   # + Pro v1, v2 (3.08)
+    assert all(out[k] != "taken" for k in ("pro2_index", "pro2_stocks", "pro2_stocks_rider"))   # no Pro reading: v2 never buys
     t = st.trades(source="upstox#rider")[0]
     plan = json.loads(t["plan"])
     assert plan["style"] == "rider" and plan["stop"] == 495.0 and plan["atr"] == 2.0 and t["lots"] == 1
