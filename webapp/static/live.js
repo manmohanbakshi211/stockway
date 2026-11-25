@@ -1252,6 +1252,16 @@ function skippedLine(sk) {
   return `<div class="note">Not taken today: ${e.map(([k, n]) => `<b>${n}</b> × ${esc(k)}`).join(" · ")}. Paper trades never use more than the free money and never open outside an NSE session or on an old price.</div>`;
 }
 
+/* 3.09: a chart exit waits for the stock / index price, not a premium %: show that (the stored premium target of a chart
+   exit is only a placeholder and its premium stop only the emergency one) */
+function exitCell(t) {
+  const v = t.exit_view;
+  if (!v || v.stop == null) return `${fx(t.target)} / ${fx(t.stop)}`;
+  const und = esc(t.sym || ""), side = v.d > 0 ? "below" : "above";
+  const tgt = v.target != null ? `${v.hit1 ? "T2" : (v.t1 != null ? "T1" : "target")} ${fx(v.target)}` : "no fixed target · trails";
+  return `<span title="${esc(v.words || "")}">${und} ${tgt}<br><small class="muted">stop: ${und} ${side} ${fx(v.stop)} · emergency ${fx(t.stop)}</small></span>`;
+}
+
 function drawPaper(p, first) {
   const s = p.settings || {}, A = p.account || {};
   const mode = (t) => t.manual === 3 ? ` · <span class="amber">aggressive</span>` : t.manual === 2 ? ` · <span class="down">override</span>` : t.manual === 4 ? " · by you (chain/chart)" : t.manual ? " · by you" : " · auto";
@@ -1271,7 +1281,7 @@ function drawPaper(p, first) {
   const open = p.open.map((t) => {
     const chg = t.last && t.entry ? (t.last / t.entry - 1) * 100 : null;
     return `<tr data-qk="${esc(t.opt_key || "")}" data-entry="${t.entry}" data-qty="${(t.lot || 0) * (t.lots || 0)}" data-dir="${t.dir || 1}"><td>${sideTag(t)} <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(KIND[t.kind] || t.kind)}${mode(t)}</small><br>${sizeLine(t)}${links(t)}</td><td>${stockNow(t)}</td><td>${esc((t.day || "").slice(5))} ${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r" data-q="now">${fx(t.last)} ${fpc(chg, 1)}${t.px_ts ? `<br><small class="muted" title="Exchange time of this price">at ${hms(t.px_ts)}</small>` : ""}</td>
-      <td class="r">${fx(t.target)} / ${fx(t.stop)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}" data-q="pnl"><b>${rupees(t.unreal)}</b></td><td>${p.book ? `<button class="link-btn" data-close-book="${t.id}">Exit</button>` : `<button class="link-btn" data-close="${t.id}">Exit</button>`}</td></tr>`;
+      <td class="r">${exitCell(t)}</td><td class="r ${t.unreal >= 0 ? "up" : "down"}" data-q="pnl"><b>${rupees(t.unreal)}</b></td><td>${p.book ? `<button class="link-btn" data-close-book="${t.id}">Exit</button>` : `<button class="link-btn" data-close="${t.id}">Exit</button>`}</td></tr>`;
   }).join("");
   // 2.40: the latest 25 closed trades (the rest one tap away), dates short and on one line
   const shortDay = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" }); } catch (_) { return d; } };
@@ -1311,7 +1321,7 @@ function drawPaper(p, first) {
     <div class="table-wrap"><table class="pp-closed"><thead><tr><th>Option</th><th>Stock</th><th>When</th><th class="r">Price</th><th>Exit</th><th class="r">Charges</th><th class="r">Net</th></tr></thead><tbody>${closed || `<tr><td colspan="7" class="muted">None yet.</td></tr>`}</tbody></table></div>
     ${p.closed.length > nShow ? `<p style="margin:8px 0 0"><button class="btn" id="pp-all">${allClosed ? `Show the latest ${nShow} only` : `Show all ${p.closed.length.toLocaleString("en-IN")} closed trades`}</button></p>` : ""}
     ${isMain ? bookCompare() + bookReview() : ""}
-    <p class="note">Paper only: no order ever reaches a broker. Charges are real (brokerage, STT, exchange, GST, stamp). Target +${s.target_pct}% / stop −${s.stop_pct}% on the option; alert trades exit after ${s.max_hold_min} min, all by ${esc(s.exit_time)}. ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : p.source === "replay" ? "<b>Showing replay trades (a recorded day played again).</b>" : ""}</p>`;
+    <p class="note">Paper only: no order ever reaches a broker. Charges are real (brokerage, STT, exchange, GST, stamp). ${p.exit_words ? `Exit on the chart of the stock or index (the base since 26 Nov), on its 5-minute ATR: ${esc(p.exit_words)}; no time limit; all out by ${esc(s.exit_time)}. The old +${s.target_pct}% / −${s.stop_pct}% / ${s.max_hold_min} min exit keeps running on the same trades in "Main · old exit (%)", to compare.` : `Target +${s.target_pct}% / stop −${s.stop_pct}% on the option; alert trades exit after ${s.max_hold_min} min, all by ${esc(s.exit_time)}.`} ${p.source === "sim" ? "<b>Showing simulator trades.</b>" : p.source === "replay" ? "<b>Showing replay trades (a recorded day played again).</b>" : ""}</p>`;
   main.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => { try { await post(`/api/live/paper/${b.dataset.close}/close`, {}); toast("Closed"); pagePaper(); } catch (e) { toast(e.message); } });
   main.querySelectorAll("[data-close-book]").forEach((b) => b.onclick = async () => { b.disabled = true;
     try { const r = await post(`/api/live/paper/books/${encodeURIComponent(p.book)}/${b.dataset.closeBook}/close`, {}); toast(`Closed · ${rupees(r.net)}`); L.ppTotAt = 0; pagePaper(); } catch (e) { toast(e.message); b.disabled = false; } });
@@ -1449,7 +1459,7 @@ async function pageConnect() {
       <label class="field">Stop trading for the day after losing<select id="s-pdl">${[2, 3, 4, 5].map((v) => `<option value="${v}" ${Number(s["live.paper.max_daily_loss_pct"] ?? 3) === v ? "selected" : ""}>${v}% of capital</option>`).join("")}</select></label>
       <label class="field">Max trades per day<select id="s-pmt">${[5, 8, 12, 20].map((v) => `<option ${Number(s["live.paper.max_trades_day"] ?? 12) === v ? "selected" : ""}>${v}</option>`).join("")}</select></label>
       <label class="field">Stop loss<select id="s-pstop">${[10, 15, 20, 25, 30, 40].map((v) => `<option value="${v}" ${Number(s["live.paper.stop_pct"] || 20) === v ? "selected" : ""}>−${v}% on premium</option>`).join("")}</select></label>
-    </div></div>
+    </div><p class="small muted" style="margin:8px 0 0">Since 26 Nov automatic paper trades exit on the chart (stop and trail from the stock's or index's 5-minute ATR, rules/paper_exit.json). Target and Stop loss above apply to trades you place yourself, to the "Main · old exit (%)" account and to lot sizing.</p></div>
     <div class="btn-row" style="margin-top:18px"><button class="btn primary" id="all-save" type="button">Save all</button></div>`;
   const collect = () => ({
     "live.upstox_api_key": $("#s-ukey").value.trim(), "live.upstox_api_secret": $("#s-usec").value.trim(),
@@ -3924,7 +3934,7 @@ function drawGhanshyam(d, first) {
   const a = d.account || {}, A = a.account || {}, T = d.totals || {};
   const cls = (v) => (v || 0) >= 0 ? "up" : "down";
   const open = (a.open || []).map((t) => `<tr data-qk="${esc(t.opt_key || "")}" data-entry="${t.entry}" data-qty="${(t.lot || 0) * (t.lots || 0)}" data-dir="${t.dir || 1}"><td><span class="pill ${(t.dir || 1) > 0 ? "p-up" : "p-down"}">BUY</span> <b>${esc(t.label)}</b> × ${t.lots}<br><small class="muted">${esc(t.strategy || "")}</small></td>
-      <td>${esc(t.sym)}</td><td>${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r" data-q="now">${fx(t.last)}</td><td class="r">${fx(t.target)} / ${fx(t.stop)}</td>
+      <td>${esc(t.sym)}</td><td>${hm(t.entry_ts)}</td><td class="r">${fx(t.entry)}</td><td class="r" data-q="now">${fx(t.last)}</td><td class="r">${exitCell(t)}</td>
       <td class="r ${t.unreal >= 0 ? "up" : "down"}" data-q="pnl"><b>${rupees(t.unreal)}</b></td><td><button class="link-btn" data-gh-close="${t.id}">Exit</button></td></tr>`).join("");
   const closed = (a.closed || []).slice(0, 15).map((t) => `<tr><td><b>${esc(t.label)}</b>${t.strategy ? `<br><small class="muted">${esc(t.strategy)}</small>` : ""}</td><td>${esc(t.sym)}</td><td class="nw">${esc((t.day || "").slice(5))} ${hm(t.entry_ts)}–${hm(t.exit_ts)}</td>
       <td class="r nw">${fx(t.entry)} → ${fx(t.exit)}</td><td class="nw">${esc(t.reason || "")}</td><td class="r ${t.net >= 0 ? "up" : "down"}"><b>${rupees(t.net)}</b></td></tr>`).join("");

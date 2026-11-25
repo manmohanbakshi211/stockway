@@ -7,6 +7,7 @@ import collections
 import datetime as dt
 import html
 import json
+import math
 import sys
 import threading
 import time
@@ -101,6 +102,21 @@ def _short_net(e) -> str:
     import re
     m = re.search(r"host='([^']+)'", str(e))
     return f"{m.group(1)} unreachable" if m else type(e).__name__
+
+
+_PE: dict = {"m": None, "v": {}}
+
+
+def paper_exit() -> dict:
+    """3.09: rules/paper_exit.json, the base exit of every paper trade (re-read when the file changes)."""
+    f = Path(__file__).resolve().parents[1] / "rules" / "paper_exit.json"
+    try:
+        m = f.stat().st_mtime
+        if _PE["m"] != m:
+            _PE.update(m=m, v=json.loads(f.read_text()))
+    except Exception:
+        return {}
+    return _PE["v"]
 
 
 class LiveEngine:
@@ -430,6 +446,10 @@ class LiveEngine:
             make_feed = lambda: self._make_router(tok)       # 2.52: Upstox main + Kite backup / cross-check
         day = self.clock.now().date().isoformat()
         self.paper = PaperBook(self.store, self.source, lc.get("paper"), self.log, on_open=self._keep_live)
+        if not (lc.get("paper") or {}).get("exit_style"):  # 3.09: the base exit of every paper trade is on the chart
+            pe = paper_exit()
+            if pe.get("style"):
+                self.paper.cfg["exit_style"] = pe["style"]
         try:                                         # 2.49: extra paper accounts (Best only, 3% a day); never block the main one
             from .books import Books
             self.books = Books(self.source, self.store, self.paper.cfg, lc.get("books"), self.log, on_open=self._keep_live,
@@ -1375,25 +1395,41 @@ class LiveEngine:
 
     def trade_plan(self, a, m, now):
         """Entry, stop-loss and targets for an alert, set on the chart the way pro traders do (lab/exits.py), plus the
-        risk in each exit style for shadow grading. Shown as "Pro plan (testing)"; paper trades keep their exits."""
+        risk in each exit style for shadow grading. 3.09: the risk of the base style (rules/paper_exit.json) is the stop of
+        the paper trades; the swing stop and levels (data.chart) are the booked half's exit in "Half book · half trail"."""
         from lab import exits
         if not m or a.get("direction") not in ("up", "down") or not m.get("spot"):
             return None, None, None
         b = self.charts.five_min(a["sym"], now.date())
-        if not b:
-            return None, None, None
         t0 = self.charts._session_start(now.date())
-        n = max(0, min(len(b["c"]), int((now.timestamp() - t0) // 300)))      # closed 5-minute bars only
+        n = max(0, min(len(b["c"]), int((now.timestamp() - t0) // 300))) if b else 0     # closed 5-minute bars only
         if n < 3:
-            return None, None, None
-        h, l, c = (np.asarray(b[k][:n], float) for k in ("h", "l", "c"))
-        atr = exits.atr14(h, l, c)[-1]
-        if not np.isfinite(atr):                         # before 10:25: average true range of the bars so far
-            pc = np.r_[c[0], c[:-1]]
-            atr = float(np.nanmean(np.maximum(h - l, np.maximum(abs(h - pc), abs(l - pc)))))
+            # 3.09: before three 5-minute bars: the ATR of the 1-minute bars so far x sqrt(5), so the first trades of the
+            # day also get a chart stop (rules/paper_exit.json "early_atr_from_1min")
+            rows = [r for r in (self.charts.today_bars(a["sym"]) or []) if t0 <= r[0] and r[0] + 60 <= now.timestamp() + 1]
+            if not paper_exit().get("early_atr_from_1min", True) or len(rows) < 5:
+                return None, None, None
+            r1 = np.asarray(rows, float)
+            h1, l1, c1 = r1[:, 2], r1[:, 3], r1[:, 4]
+            pc1 = np.r_[c1[0], c1[:-1]]
+            atr = float(np.mean(np.maximum(h1 - l1, np.maximum(abs(h1 - pc1), abs(l1 - pc1)))[-14:])) * math.sqrt(5)
+            h, l, c = np.array([h1[-5:].max()]), np.array([l1[-5:].min()]), np.array([c1[-1]])
+        else:
+            h, l, c = (np.asarray(b[k][:n], float) for k in ("h", "l", "c"))
+            atr = exits.atr14(h, l, c)[-1]
+            if not np.isfinite(atr):                     # before 10:25: average true range of the bars so far
+                pc = np.r_[c[0], c[:-1]]
+                atr = float(np.nanmean(np.maximum(h - l, np.maximum(abs(h - pc), abs(l - pc)))))
         d = 1 if a["direction"] == "up" else -1
         s0 = float(m["spot"])
         R = {st: exits.risk_pts(st, s0, d, atr, l[-1], h[-1]) for st in exits.STYLES}
+        try:                                             # 3.09: a swing-structure stop and the levels, for chart exits
+            from lab.chart_exit import swing_stop
+            ss = swing_stop(list(h), list(l), d, s0, float(atr), paper_exit().get("swing"))
+            a["data"] = {**(a.get("data") or {}), "chart": {"stop": ss, "atr": round(float(atr), 4),
+                                                            "named": self._chart_named(a["sym"], now)}}
+        except Exception:
+            pass
         o = a.get("option") or {}
         style = self.best_style()
         pc = self.paper.cfg if self.paper else {}       # 2.48: your capital and risk (was a fixed ₹40K account)
@@ -1404,7 +1440,12 @@ class LiveEngine:
         return p, {k: v for k, v in R.items() if np.isfinite(v)}, s0
 
     def best_style(self) -> str:
-        """The chart-exit style shown on alerts: the Lab's best on holdout (random entries), else ATR 2R."""
+        """The chart-exit style shown on alerts: the paper trades' base exit (3.09, rules/paper_exit.json), else the Lab's
+        best on holdout (random entries), else ATR 2R."""
+        from lab import exits as _ex
+        base = (self.paper.cfg.get("exit_style") if self.paper else None) or paper_exit().get("style")
+        if base in _ex.STYLES:
+            return base
         c = getattr(self, "_best_style", None)
         if c and time.time() - c[1] < 600:
             return c[0]

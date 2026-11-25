@@ -247,6 +247,12 @@ class Health:
     def _summary(self, now, t, c, trading, in_mkt):
         if not trading or now.strftime("%H:%M") < str(c["daily_summary_at"]) or self.summary_day == now.date():
             return
+        try:                                                # 3.09: a sim / replay session is practice: the day's
+            from .practice import is_practice               # recording summary is not its to send (found by the
+            if is_practice(getattr(self.e, "source", None)):    # replay test run after the summary time)
+                return
+        except Exception:
+            pass
         if now.strftime("%H:%M") > "18:00":                 # app opened late: no stale summary
             self.summary_day = now.date()
             return

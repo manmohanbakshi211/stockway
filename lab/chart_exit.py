@@ -229,3 +229,21 @@ class ChartPlan:
     def levels(self) -> dict:
         return {"stop": round(self.stop, 2), "target": round(self.t2 if self.hit1 else self.t1, 2), "t1": self.t1,
                 "t2": self.t2, "hit1": self.hit1, "role": self.role}
+
+
+def swing_stop(h, l, d: int, s0: float, atr: float, c: dict | None = None) -> float:
+    """3.09: a structure stop for a trade with no setup stop of its own: just beyond the nearest confirmed 5-minute swing
+    low (calls) / high (puts) that lies min_atr-max_atr ATRs from the price; none -> default_atr ATRs (rules/paper_exit.json
+    "swing")."""
+    c = {"min_atr": 0.75, "max_atr": 2.0, "buffer_atr": 0.1, "default_atr": 1.5, **(c or {})}
+    k = 2
+    cands = []
+    h, l = list(h or []), list(l or [])
+    for i in range(k, len(h) - k):
+        if d > 0 and l[i] == min(l[i - k:i + k + 1]) and c["min_atr"] * atr <= s0 - l[i] <= c["max_atr"] * atr:
+            cands.append(l[i] - c["buffer_atr"] * atr)
+        if d < 0 and h[i] == max(h[i - k:i + k + 1]) and c["min_atr"] * atr <= h[i] - s0 <= c["max_atr"] * atr:
+            cands.append(h[i] + c["buffer_atr"] * atr)
+    if cands:
+        return round(max(cands) if d > 0 else min(cands), 2)
+    return round(s0 - d * c["default_atr"] * atr, 2)

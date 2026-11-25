@@ -1357,7 +1357,16 @@ def _books(src: str):
         return e.books, True
     lc = e.cfg()["live"]
     main = e.paper.cfg if e.paper else PaperBook(e.store, src, lc.get("paper")).cfg if lc.get("paper") else dict(DEFAULTS)
-    return Books(src, e.store, main, lc.get("books"), log=lambda m: None, data_dir=e.data_dir), False
+    return Books(src, e.store, _with_base_exit(main), lc.get("books"), log=lambda m: None, data_dir=e.data_dir), False
+
+
+def _with_base_exit(c: dict) -> dict:
+    """3.09: a read-only copy of the paper settings carries the base exit the running engine uses (rules/paper_exit.json)."""
+    if c.get("exit_style"):
+        return c
+    from live.engine import paper_exit
+    st = paper_exit().get("style")
+    return {**c, "exit_style": st} if st else c
 
 
 @router.get("/api/live/paper")
@@ -1378,6 +1387,8 @@ def live_paper(source: str | None = None, book: str | None = None):
         out["aggressive"] = False
         return clean({**out, "source": src})
     book = e.paper if e.paper and e.source == src else PaperBook(e.store, src, e.cfg()["live"].get("paper"))
+    if book is not e.paper:
+        book.cfg = _with_base_exit(book.cfg)
     out = book.summary(e.state if e.paper is book else None)
     seen = {}                                          # 2.48: one look-up per symbol (was one per trade: slow)
     for t in out["open"] + out["closed"]:              # the underlying's price and day move, for the tables

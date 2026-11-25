@@ -59,7 +59,7 @@
   "trail": {
    "name": "Trailing exit",
    "short": "Same trades as the main account, trailing exit",
-   "explain": "Takes exactly the trades the main account takes (2.56.2: the same alert, the same number of lots, at the same moment) and differs only in how it exits: stop 1.5 x the 5-minute ATR of the index or stock, then a stop that trails 2.5 x ATR behind the best price, no fixed target, out by the day's exit time. Only in the first minutes after the scanner starts (no 5-minute bars yet) can it miss a trade. Why: on 15,370 graded alerts (2-9 Nov) this exit made +2.0% more on the option per trade than the +30% / -20% premium exit, better on 5 of 6 days. Your call (11 Nov): test it here first; if it keeps beating the main account, switching the main account is your decision.",
+   "explain": "Takes exactly the trades the main account takes (2.56.2: the same alert, the same number of lots, at the same moment) and differs only in how it exits: stop 1.5 x the 5-minute ATR of the index or stock, then a stop that trails 2.5 x ATR behind the best price, no fixed target, out by the day's exit time. Only in the first minutes after the scanner starts (no 5-minute bars yet) can it miss a trade. Why: on 15,370 graded alerts (2-9 Nov) this exit made +2.0% more on the option per trade than the +30% / -20% premium exit, better on 5 of 6 days. Your call (11 Nov): test it here first; if it keeps beating the main account, switching the main account is your decision. 3.09: this exit is now the base exit of the main account and every paper account that had a premium % exit (rules/paper_exit.json), so from 26 Nov the main account and this one exit the same way; this account keeps its own record since 11 Nov.",
    "on": true,
    "capital": null,
    "pick": {
@@ -73,7 +73,7 @@
   "halftrail": {
    "name": "Half book · half trail",
    "short": "Same trades as the main account: half the lots exit like the main account, the rest trail",
-   "explain": "3.05 (Mandeep, 24 Nov 2026: 'okay sab karo'). Takes exactly the trades the main account takes (same alert, same moment, same number of lots) and splits each in two: half the lots (rounded down) exit exactly like the main account (its target, stop and time limit), the rest exit like the Trailing exit account (stop 1.5 x the 5-minute ATR, then a stop 2.5 x ATR behind the best price, no fixed target). One lot: trailed. Why: on the same 63 trades (12-23 Nov) the main account made +Rs13,410 and the Trailing exit account +Rs1,23,461, but the gain came from a few big runners (19 Nov Bank Nifty +Rs40.8K against +Rs6.9K) and the trailing exit gave back more on 18 and 23 Nov. This account books sure profit on half and lets the other half run. Paper only; switching the main account is your call.",
+   "explain": "3.05 (Mandeep, 24 Nov 2026: 'okay sab karo'). Takes exactly the trades the main account takes (same alert, same moment, same number of lots) and splits each in two: half the lots (rounded down) exit exactly like the main account (its target, stop and time limit), the rest exit like the Trailing exit account (stop 1.5 x the 5-minute ATR, then a stop 2.5 x ATR behind the best price, no fixed target). One lot: trailed. Why: on the same 63 trades (12-23 Nov) the main account made +Rs13,410 and the Trailing exit account +Rs1,23,461, but the gain came from a few big runners (19 Nov Bank Nifty +Rs40.8K against +Rs6.9K) and the trailing exit gave back more on 18 and 23 Nov. This account books sure profit on half and lets the other half run. Paper only; switching the main account is your call. 3.09 (the base exit is now on the chart): the booked half is sold at the next support / resistance level (T1) with a swing-structure stop on a 5-minute close, not at +30% of the premium; the other half trails 2.5 x ATR as before.",
    "on": true,
    "capital": null,
    "pick": {
@@ -87,6 +87,21 @@
     "one_lot": "trail"
    },
    "paper": {}
+  },
+  "main_pct": {
+   "name": "Main · old exit (%)",
+   "short": "The main account's trades with the old premium exit (+30% target / -20% stop / 60 minutes), to compare",
+   "explain": "3.09 (Mandeep, 25 Nov 2026: the stop and target of every paper trade come from the chart, not a % of the premium, as the base). This account keeps the old way on exactly the main account's trades (same alert, same lots, same moment): target +30%, stop -20% of the premium, out after 60 minutes. Its record against the main account shows what the chart exit changes. Paper only.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "same_as_main": true,
+    "mirror_main": true,
+    "risk_pass": true
+   },
+   "exit_style": "premium",
+   "paper": {},
+   "review": "show"
   },
   "mvpick": {
    "name": "Multiverse pick",

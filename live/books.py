@@ -30,6 +30,15 @@ FILE = Path(__file__).resolve().parents[1] / "rules" / "paper_books.json"
 _C: dict = {}
 
 
+def _paper_exit() -> dict:
+    """3.09: rules/paper_exit.json (the base exit of every paper trade)."""
+    try:
+        from .engine import paper_exit
+        return paper_exit()
+    except Exception:
+        return {}
+
+
 def cfg() -> dict:
     try:
         mt = FILE.stat().st_mtime
@@ -86,7 +95,9 @@ class Books:
                 if (sp.get("pick") or {}).get("mirror_main"):     # 2.56.2: the main account's own trades decide; its
                     pc.update(kinds="all", min_severity=1, max_open=99, max_trades_day=99,    # limits already applied
                               max_daily_loss_pct=100, cooloff_min=0)
-                if sp.get("exit_style"):
+                if sp.get("exit_style") == "premium":            # 3.09: the old premium % exit, kept on one account to compare
+                    pc["exit_style"] = "premium"
+                elif sp.get("exit_style"):
                     from lab.exits import STYLES
                     from lab.rider_exit import STYLE as RIDER
                     from lab.chart_exit import STYLE as CHART, RUNNERS
@@ -201,13 +212,14 @@ class Books:
                         risk = {**risk, "verdict": "PASS", "lots": int(main.get("lots") or 1)}
                     if (sp.get("pick") or {}).get("risk_pass") and risk.get("verdict") != "PASS":
                         why = "risk check: " + "; ".join((risk.get("reasons") or ["not PASS"])[:1])
-                    elif sp.get("exit_style") and not ((a.get("data") or {}).get("plan_R") or {}).get(sp["exit_style"]):
+                    elif sp.get("exit_style") and sp["exit_style"] != "premium" \
+                            and not ((a.get("data") or {}).get("plan_R") or {}).get(sp["exit_style"]):
                         why = "no chart risk for this alert (trailing exit needs 5-minute bars)"
                     elif sp.get("split") and sp.get("exit_style"):   # 3.05: part booked with the main exit, the rest trailed
                         why = self._split_open(bk, sp, a, risk, state, now)
                     else:
                         a2 = {**a, "data": {**(a.get("data") or {}), "risk": risk}}
-                        if sp.get("exit_style"):              # 2.56: this account's own exit, the same for every alert
+                        if sp.get("exit_style") and sp["exit_style"] != "premium":   # 2.56: its own exit, every alert
                             st = sp["exit_style"]
                             a2["data"]["factory"] = {"plan": {"style": st, "R": float(a["data"]["plan_R"][st])}}
                         before = dict(bk.skipped)
@@ -520,8 +532,13 @@ class Books:
             d = {**(a.get("data") or {}), "risk": {**risk, "verdict": "PASS", "lots": n}}
             if leg == "trail":
                 d["factory"] = {"plan": {"style": st, "R": float(a["data"]["plan_R"][st])}}
-            # the book leg keeps the alert as the main account got it: the main exit (target / stop / time, or a Lab
-            # rule's own exit)
+            else:                                     # 3.09: the booked part is sold at the next support / resistance
+                ch = (a.get("data") or {}).get("chart") or {}            # (T1) with a swing stop, not at +30% of premium
+                bl = _paper_exit().get("book_leg") or {}
+                if ch.get("stop") is not None and ch.get("atr") and bl.get("style", "chart") == "chart":
+                    d["factory"] = {"plan": {"style": "chart", "stop": float(ch["stop"]), "atr": float(ch["atr"]), "level": None,
+                                             "named": ch.get("named") or [], "role": "t1", "exit": dict(bl.get("exit") or {})}}
+            # without chart levels the booked part takes the account's base exit (rules/paper_exit.json)
             if bk.try_open({**a, "data": d}, state, now, leg=leg):
                 opened += 1
         new = [k for k, v in bk.skipped.items() if v > before.get(k, 0)]

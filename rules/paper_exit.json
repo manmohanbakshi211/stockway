@@ -1,0 +1,24 @@
+{
+ "about": "3.09 the base exit of every paper trade (Mandeep, 25 Nov 2026: 'stoploss capital percentage nahi scalping ke hisab se chart, price, or baaki jo bhi valuable factors hain uske hisab se banao. ye test mein nahi by default sab trades ke liye apply karo ... ye hi ab base rahega. har paper trade ke liye'). Read by the engine (live/engine.py) for the main account and every paper account that had a premium % exit (target +30% / stop -20% / 60 minutes): they now exit on the chart of the index or stock. Accounts with their own chart exit (Trend Rider, Pro, Pro v2, Trailing) keep theirs; trades you place by hand keep yours; the 'Main · old exit' account keeps the old premium exit on the same trades, to compare.",
+ "valid_from": "2026-11-26",
+ "style": "chand",
+ "style_words": "stop 1.5 x the 5-minute ATR of the index or stock (on its price, not the premium), then a stop that trails 2.5 x ATR behind the best price; no fixed % target, no 60-minute limit; out by 15:15; the option -40% is the only premium stop (emergency).",
+ "why": "Tested before it was made the base (minute by minute on the recorded prices, the same entry minute and option): main's 81 real trades of 11-25 Nov: premium exit -Rs13,669, this exit +Rs61,028; Index slot's 37: -Rs25,010 -> +Rs34,191; Ghanshyam's 25: +Rs1,039 -> +Rs14,655; 'Main · no locks' on 25 Nov (79): -Rs41,871 -> -Rs56,761 (a bad day for stock alerts either way). Of six chart exits it was the most consistent; a version with a swing stop and a breakeven at the next resistance did best on main's own trades (+Rs1,04,707) but worse on the others, and ATR 1:3 with breakeven lost on all four (claude/stockway_status.md). The trailing account uses this exit since 11 Nov: +Rs1,20,338 live.",
+ "early_atr_from_1min": true,
+ "early_atr_why": "Before three 5-minute bars exist (09:15-09:30) the ATR comes from the 1-minute bars so far (x sqrt 5), so the first trades also get a chart stop.",
+ "book_leg": {
+  "style": "chart",
+  "exit": {
+   "nomove_bars": 999,
+   "failed_breakout": false,
+   "exit_hhmm": "15:15"
+  },
+  "why": "'Half book · half trail': the booked half is now sold at the next support / resistance level (T1, lab/chart_exit.py) with a swing-structure stop on the chart, not at +30% of the premium; the other half trails as before."
+ },
+ "swing": {
+  "min_atr": 0.75,
+  "max_atr": 2.0,
+  "buffer_atr": 0.1,
+  "default_atr": 1.5
+ }
+}

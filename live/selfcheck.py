@@ -487,6 +487,18 @@ def static_checks(cfg: dict | None = None) -> list:
         p2_ok, p2_det = False, str(e)[:160]
     out.append(_c("pro_v2", "Stockway Pro v2: confirmed entries, chart-level exit, 09:20-09:30 early breakouts, Vote Lab (3.08)",
                   p2_ok, p2_det))
+    try:                                                  # 3.09: the base exit of every paper trade, on the chart
+        from lab import exits as _bx
+        from live import books as _bk3, engine as _eng3, paper as _pap3
+        pe_ = _eng3.paper_exit()
+        sp3 = (_bk3.cfg().get("books") or {}).get("main_pct") or {}
+        bx_ok = (pe_.get("style") in _bx.STYLES and "exit_style" in inspect.getsource(_pap3.PaperBook.try_open)
+                 and sp3.get("exit_style") == "premium" and bool((sp3.get("pick") or {}).get("mirror_main")))
+        bx_det = (f"every automatic paper trade exits on the chart: {_bx.spec_of(pe_['style'])['words']} (rules/paper_exit.json, "
+                  f"from {pe_.get('valid_from')}); the old premium exit runs on '{sp3.get('name')}' to compare")
+    except Exception as e:
+        bx_ok, bx_det = False, str(e)[:160]
+    out.append(_c("base_exit", "Base exit of paper trades on the chart (3.09)", bx_ok, bx_det))
     return out
 
 

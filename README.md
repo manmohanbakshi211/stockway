@@ -101,7 +101,9 @@ FII/DII cash flows, F&O ban and near-ban stocks, bulk and block deals, live comp
 12 trades.
 
 Each alert suggests the at-the-money option in its direction. Strong alerts are paper-traded
-automatically (1 lot, +30% target, −20% stop, exit by 3:15 PM, real charges). The **Paper trades**
+automatically (real charges). Since 3.09 they exit on the chart of the stock or index: stop 1.5 × its 5-minute ATR,
+then a stop trailing 2.5 ATR behind the best price, no fixed % target, all out by 3:15 PM (rules/paper_exit.json); the
+old +30% / −20% / 60 min exit runs on the "Main · old exit (%)" account to compare. The **Paper trades**
 page shows which alert types actually make money. Use that before risking real money.
 
 **AI (optional): your Claude Pro plan works here.** Live setup → 4. AI → "Claude: my Pro / Max plan". Stockway
@@ -117,6 +119,60 @@ which AI is connected ("Powered by Claude Opus · your Pro plan"). Other choices
 Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
+
+## 3.09: the base exit of every paper trade comes from the chart, not a % of the premium (25 Nov 2026)
+- **Mandeep (25 Nov):** "bhot saare trades time limit par band hote hai ... stoploss capital percentage nahi scalping ke
+  hisab se chart, price, or baaki jo bhi valuable factors hain uske hisab se banao. ye test mein nahi by default sab
+  trades ke liye apply karo ... ye hi ab base rahega. har paper trade ke liye."
+- **Champion vs challenger, on the same trades (11-25 Nov, real entries, recorded minute prices of the index / stock and
+  the option bid):**
+
+  | Trades | premium exit (+30% / -20% / 60 min, or the account's own) | Chandelier on the chart (new base) |
+  |---|---|---|
+  | Main, 81 | -Rs13,669 | **+Rs61,028** |
+  | Index slot, 37 | -Rs25,010 | **+Rs34,191** |
+  | Ghanshyam, 25 | +Rs1,039 | **+Rs14,655** |
+  | Main · no locks, 25 Nov only, 79 | -Rs41,871 | -Rs56,761 (a bad day for stock alerts either way) |
+  | **All** | **-Rs79,511** | **+Rs53,113** |
+
+  Of six chart exits it was the most consistent. A swing stop with breakeven at the next resistance did best on Main
+  (+Rs1,04,707) but worse elsewhere (+Rs42.1K in all); ATR 1:3 with breakeven lost on all four (-Rs160.2K); the no-move rule
+  and the 10 EMA / 5-minute-bar runners hurt on alert trades.
+- **What changed (bullet `rules/paper_exit.json`, valid from 26 Nov; gun: `PaperBook.try_open`, `LiveEngine.trade_plan`):**
+  - Every automatic paper trade of the main account and of every account that had a premium % exit (Index slot, Main ·
+    no locks, Best only, 3% a day, Ghanshyam, Multiverse pick, Strategy Lab picks, Strict ...) exits on the chart of the
+    index or stock: stop 1.5 x its 5-minute ATR, then a stop 2.5 ATR behind the best price, no fixed % target, no
+    60-minute limit, out by 15:15; the option -40% is only an emergency stop. A Strategy Lab rule's own % exit list or a
+    multiverse pick's exit becomes this exit too (the pick still chooses the trade and the strike).
+  - No chart stop yet, no automatic trade ("no chart stop yet" in the skip reasons).
+  - 09:15-09:30: before three 5-minute bars exist the ATR comes from the 1-minute bars so far (x sqrt 5), so the first
+    trades also get a chart stop (`early_atr_from_1min`). The per-style shadow grading (plan_outcomes) now also has
+    these early alerts.
+  - Accounts with their own chart exit keep it: Trend Rider, Pro, Pro v2, Trailing (whose exit this is, since 11 Nov:
+    +Rs1,20,338 live). From 26 Nov Trailing and Main exit the same way; Trailing keeps its own record.
+  - **Half book · half trail:** the booked half is sold at the next support / resistance (T1 of `lab/chart_exit.py`,
+    role `t1`) with a swing-structure stop on a 5-minute close (`swing_stop`: just beyond the nearest confirmed 5-minute
+    swing 0.75-2 ATR away, else 1.5 ATR), not at +30% of the premium; the other half trails as before.
+  - Trades you place yourself keep your Target / Stop loss settings; lot sizing still uses Stop loss for now.
+  - Trades now stay open longer (no 60-minute limit), so the main account's limit of 6 open trades can turn away more
+    alerts than before ("open trades" in the skip reasons); the per-trade test above assumed every trade was taken.
+    The limit is unchanged (Mandeep decides).
+  - The alert's plan ("Pro plan") shows the base style, so the alert and the paper trade say the same thing.
+- **The old exit is kept as a challenger, not deleted:** new account **"Main · old exit (%)"** (`main_pct`) takes exactly
+  the main account's trades (same alert, lots and moment) with +30% / -20% / 60 minutes. Never retired automatically
+  (`review: show`). Setting `live.paper.exit_style: premium` in config.yaml turns the base off.
+- **Paper pages:** the Target / stop column of a chart-exit trade shows what it waits for in the index's or stock's
+  price ("no fixed target · trails", "stop: INDIANB below ...", the emergency premium stop), not the entry x 100
+  placeholder; the note under the table says which exit runs. System & logins lists the base exit (`base_exit`).
+- **Fix found by the tests:** a replay run after the day's summary time sent "the live scanner did not run today" to
+  Telegram (`live/health.py`); a sim / replay session no longer sends the recording summary (3.08 had the same bug).
+- **Checks:** full tests (new `tests/test_base_exit_309.py`: 13); Lab regression on the Mac's bar table (1,077,006 rows):
+  **3763 of 3763** saved rules identical, as with 3.08 (no Lab scoring code changed); Paper, account, Ghanshyam and Live
+  setup pages opened headless at desktop and phone width: no console errors, no sideways scroll.
+- **Evaluated, not built (waits for Mandeep's OK):** a day lock on Trailing (exit everything once the day's profit falls
+  25% from its peak). On the 9 live days: +Rs1,20,338 (4/9 green) -> +Rs73,483 (6/9) with a Rs3K arm and trading on,
+  +Rs55,152 (7/9) when it also stops for the day; most of the cost is 19 Nov (+Rs80.2K -> +Rs4.7K, locked at 10:12).
+  Suggested as a challenger account "Trailing · day lock (75%)", not a replacement.
 
 ## 3.08: Stockway Pro v2: confirmed entries, exits from the chart, the 09:20 window, the Vote Lab (25 Nov 2026, on trial)
 - **Mandeep (25 Nov):** "entry exit koi percentage se nahi chart, index/stock price levels, indicators, Resistance support

@@ -54,6 +54,51 @@ def costs(entry: float, exit: float, qty: int) -> float:
 VER = [0]                               # 2.72: bumps on every paper open / close (the pages refresh at once)
 
 
+def _exit_words(c: dict) -> str | None:
+    """3.09: the base exit of this account in words (None: the premium % exit)."""
+    st = (c or {}).get("exit_style")
+    if not st or st == "premium":
+        return None
+    try:
+        from lab.exits import spec_of
+        return spec_of(st)["words"]
+    except Exception:
+        return None
+
+
+def exit_view(t: dict) -> dict | None:
+    """3.09: what a chart-exit trade is really waiting for, in the underlying's price (the stored premium target of a
+    chart exit is only a placeholder, entry x 100, and its premium stop only the emergency one)."""
+    import json as _json
+    try:
+        pj = _json.loads(t.get("plan") or "null")
+    except Exception:
+        return None
+    if not isinstance(pj, dict):
+        return None
+    st = pj.get("style")
+    d = int(pj.get("d") or (1 if t.get("side") == "CE" else -1))
+    try:
+        if st == "rider":
+            from lab.rider_exit import RiderPlan
+            lv = RiderPlan.from_dict(pj).levels()
+            return {"style": "rider", "stop": lv["stop"], "target": None, "d": d,
+                    "words": "Trend Rider exit: stop on a 5-minute close, then an ATR trail"}
+        if st == "chart":
+            from lab.chart_exit import ChartPlan
+            lv = ChartPlan.from_dict(pj).levels()
+            return {"style": "chart", "stop": lv["stop"], "target": lv["target"], "t1": lv["t1"], "t2": lv["t2"],
+                    "hit1": lv["hit1"], "d": d, "words": "chart exit: stop on a 5-minute close, targets at support / resistance"}
+        if st:
+            from lab.exits import LivePlan, spec_of
+            lp = LivePlan.from_dict(pj)
+            lv = lp.levels()
+            return {"style": st, "stop": lv["stop"], "target": lv.get("target"), "d": d, "words": spec_of(st)["words"]}
+    except Exception:
+        return None
+    return None
+
+
 def _settled(plan_json: str | None) -> str | None:
     """2.85: a Trend Rider plan without the 5-minute bar still being built from ticks (what must be saved at once)."""
     import json as _json
@@ -172,9 +217,18 @@ class PaperBook:
             lots = 1
         fac = (alert.get("data") or {}).get("factory") or {}
         ex = fac.get("exit")                              # a Strategy Lab rule brings its own exit
+        plan = fac.get("plan")
+        base = c.get("exit_style")
+        if not plan and not manual and base and base != "premium" and not fac.get("premium"):
+            # 3.09: the base exit of every paper trade is on the chart (rules/paper_exit.json): a premium % exit (the
+            # account's +30% / -20% / 60 min, or a rule's own % list) becomes the chart exit; no chart stop yet = no trade
+            R = ((alert.get("data") or {}).get("plan_R") or {}).get(base)
+            if not R:
+                return self._skip("no chart stop yet (the 5-minute ATR is not ready)")
+            plan, ex = {"style": base, "R": float(R)}, None
         return self._open(state, now, sym=alert["sym"], kind=alert["kind"], opt=opt, entry=entry, ltp=inst.ltp, lots=lots,
                           direction=1, manual=manual_code, alert_id=alert.get("id"), und_key=alert.get("und_key"),
-                          why=alert.get("title", ""), exit=ex, plan=fac.get("plan"),
+                          why=alert.get("title", ""), exit=ex, plan=plan,
                           tag=(((alert.get("data") or {}).get("pack") or {}).get("variant")), leg=leg)
 
     def open_manual(self, state, now: dt.datetime, *, sym: str, opt: dict, direction: int, lots: int = 1,
@@ -504,6 +558,9 @@ class PaperBook:
             und = state.get(t["und_key"]) if state and t.get("und_key") else None
             if und and und.ltp:
                 t["und_last"] = und.ltp
+            ev = exit_view(t)
+            if ev:
+                t["exit_view"] = ev
         by = {}
         for t in closed:
             b = by.setdefault(t["kind"], {"kind": t["kind"], "n": 0, "wins": 0, "net": 0.0})
@@ -523,6 +580,6 @@ class PaperBook:
         return {"open": opened, "closed": closed[:200], "by_kind": sorted(by.values(), key=lambda b: -b["net"]),
                 "equity": eq, "n": n, "win_rate": round(wins / n * 100) if n else None,
                 "net": round(sum(t["net"] for t in closed), 2), "costs": round(sum(t["costs"] or 0 for t in closed), 2),
-                "unreal": round(sum(t["unreal"] for t in opened), 2), "settings": self.cfg,
+                "unreal": round(sum(t["unreal"] for t in opened), 2), "settings": self.cfg, "exit_words": _exit_words(self.cfg),
                 "account": self.account(trades, opened), "skipped_today": dict(self.skipped),
                 "guard": self.guard(dt.datetime.now(IST) if state is None else (state.clock.now() if getattr(state, "clock", None) else dt.datetime.now(IST)))}
