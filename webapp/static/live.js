@@ -4783,15 +4783,37 @@ async function drawAnalyst() {
 
 /* 2.66: the day-type forecaster (lab/daytype.py): trend / range / quiet day from the 09:45 facts, judged walk-forward */
 const DT_NAME = { NIFTY: "Nifty", BANKNIFTY: "Bank Nifty" };
+/* 3.10: the read again at 10:15 ... 12:15 (the 09:45 facts cannot spot a trend day; the morning's own path can) */
+function dayTypeReads(dt) {
+  const reads = (dt && dt.reads) || [];
+  if (!reads.length) return "";
+  const last = {};
+  reads.forEach((r) => { if (!last[r.sym] || r.at > last[r.sym].at) last[r.sym] = r; });
+  const one = (r) => { const p = r.probs || {}, side = r.dir_hint > 0 ? "up" : r.dir_hint < 0 ? "down" : "";
+    const call = r.trend_call
+      ? `<b class="${side}">trend day likely${side ? `, ${side}` : ""}</b> <span class="muted">(p ${Math.round(p.trend || 0)}%; calls like this were right ${r.right_when_called}% of the time on days the model never saw, and the move so far pointed the day's way ${r.dir_right}%)</span>`
+      : `no trend-day call <span class="muted">(p ${Math.round(p.trend || 0)}%${r.threshold ? `; a call needs ${Math.round(r.threshold * 100)}%` : "; no honest call at this time"})</span>`;
+    return `<b>${esc(DT_NAME[r.sym] || r.sym)}</b> at ${esc(r.hhmm || "")}: ${call}${r.label ? ` → was <b class="${r.label === "trend" ? "up" : ""}">${esc(r.label)}</b>` : ""}`; };
+  return `<p class="small" style="margin:6px 0 0">🧭 <b>Day type as the morning unfolds</b> <span class="muted">information only · the latest read</span><br>${Object.values(last).map(one).join("<br>")}</p>`;
+}
 function dayTypeLine(dt) {
   const rows = (dt && dt.rows) || [];
-  if (!rows.length) return "";
+  if (!rows.length) return dayTypeReads(dt);
   const pc = (v) => v == null ? "–" : `${Math.round(v)}%`;
   const one = (r) => { const p = r.probs || {}, u = r.usual || {};
     const up = (p.trend || 0) >= (u.trend || 0) + 10, qu = (p.quiet || 0) >= (u.quiet || 0) + 10;
     const lean = up && r.dir_hint ? ` <span class="${r.dir_hint > 0 ? "up" : "down"}" title="On past trend days the move by 09:45 pointed the day's way about 8 times in 10">${r.dir_hint > 0 ? "↑ so far" : "↓ so far"}</span>` : "";
     return `<b>${esc(DT_NAME[r.sym] || r.sym)}</b>: <span class="${up ? "up" : ""}">trend ${pc(p.trend)}</span> <span class="muted">(usual ${pc(u.trend)})</span>${lean} · range ${pc(p.range)} · <span class="${qu ? "amber" : ""}">quiet ${pc(p.quiet)}</span> <span class="muted">(usual ${pc(u.quiet)})</span>${r.label ? ` → was <b class="${r.right ? "up" : "down"}">${esc(r.label)}</b>` : ""}${r.late ? ` <span class="muted">(app started late)</span>` : ""}`; };
-  return `<p class="small" style="margin:6px 0 0">🔮 <b>Day type from the 09:45 facts</b> <span class="muted">${rows.some((r) => r.trusted) ? "trusted" : "on trial, information only"}${dt.live_graded ? ` · live ${dt.live_graded} day${dt.live_graded === 1 ? "" : "s"}, ${dt.live_right}% right` : ""}</span><br>${rows.map(one).join("<br>")}</p>`;
+  return `<p class="small" style="margin:6px 0 0">🔮 <b>Day type from the 09:45 facts</b> <span class="muted">${rows.some((r) => r.trusted) ? "trusted" : "on trial, information only"}${dt.live_graded ? ` · live ${dt.live_graded} day${dt.live_graded === 1 ? "" : "s"}, ${dt.live_right}% right` : ""}</span><br>${rows.map(one).join("<br>")}</p>${dayTypeReads(dt)}`;
+}
+/* 3.10: each later checkpoint on unseen days: when it calls a trend day, how often it was right and how many it caught */
+function ckTable(ck) {
+  const rows = Object.values(ck || {}).filter((x) => x && x.walk).sort((a, b) => a.at - b.at);
+  if (!rows.length) return "";
+  return `<table class="tbl small" style="margin-top:6px"><thead><tr><th>Read at</th><th class="r">Unseen days</th><th class="r">Skill</th><th class="r">Trend call from</th><th class="r">Right when called</th><th class="r">Trend days caught</th><th class="r">Direction so far right</th></tr></thead><tbody>${rows.map((x) => { const c = x.call || {};
+    return `<tr><td>${esc(x.hhmm)}</td><td class="r">${x.walk.tested_days}</td><td class="r">${x.walk.logloss_skill > 0 ? "+" : ""}${x.walk.logloss_skill}%</td>
+      <td class="r">${c.threshold != null ? `p ≥ ${Math.round(c.threshold * 100)}%` : "<span class=\"muted\">no honest call</span>"}</td>
+      <td class="r">${c.right != null ? `<b>${c.right}%</b>` : "–"}</td><td class="r">${c.caught != null ? `${c.caught}%` : "–"}</td><td class="r">${x.dir_right != null ? `${x.dir_right}%` : "–"}</td></tr>`; }).join("")}</tbody></table>`;
 }
 async function drawDayType() {
   const el = $("#bd-daytype"); if (!el) return;
@@ -4803,14 +4825,17 @@ async function drawDayType() {
     const ch = (r.runs || []).filter((x) => x.tested_days).map((x) => `${esc(x.model)} ${sg(x.logloss_skill)}`).join(" · ");
     return `<li><b>${k === "5y" ? "5-year Lab" : "1-year Lab"}</b> <span class="muted">(${(r.syms || []).map((s) => DT_NAME[s] || s).join(", ")}, ${r.days} index days, ${esc(r.first || "")} to ${esc(r.last || "")})</span>: ${w.tested_days} unseen days, ${sg(w.logloss_skill)} better than the usual shares.
       The 20% most trend-like mornings trended <b>${w.trend_top20}%</b> (all days ${w.trend_all}%, least trend-like 20%: ${w.trend_bottom20}%); the 20% most quiet-looking were quiet <b>${w.quiet_top20}%</b> (all days ${w.quiet_all}%).
-      <span class="muted">Models tried: ${ch}. ${r.trusted ? "Clears the walk-forward trust rule; trusted only after 20+ live days agree too." : "Below the walk-forward trust rule: on trial."}</span></li>`; }).join("");
+      <span class="muted">Models tried: ${ch}. ${r.trusted ? "Clears the walk-forward trust rule; trusted only after 20+ live days agree too." : "Below the walk-forward trust rule: on trial."}</span>${ckTable(r.checkpoints)}</li>`; }).join("");
   const lv = d.live || {};
   const rec = (lv.recent || []).slice(0, 6).map((r) => `${esc(r.day)} ${esc(DT_NAME[r.sym] || r.sym)}: said ${esc(r.call)}, was <b class="${r.right ? "up" : "down"}">${esc(r.label)}</b>`).join(" · ");
-  el.innerHTML = `<div class="toolbar" style="margin:0"><h3 style="margin:0">Day-type forecaster <span class="muted small">trend / range / quiet day, from the 09:45 facts · on trial</span></h3>
+  const lck = Object.values(lv.checkpoints || {}).sort((a, b) => String(a.hhmm).localeCompare(String(b.hhmm)))
+    .map((k) => `${esc(k.hhmm)}: ${k.graded} graded, ${k.trend_calls} trend call${k.trend_calls === 1 ? "" : "s"}${k.trend_calls ? ` (${k.right_calls} right)` : ""}, ${k.trend_days} real trend day${k.trend_days === 1 ? "" : "s"}`).join(" · ");
+  el.innerHTML = `<div class="toolbar" style="margin:0"><h3 style="margin:0">Day-type forecaster <span class="muted small">trend / range / quiet day, from the 09:45 facts and again at 10:15-12:15 · on trial</span></h3>
       <button class="btn" id="dt-run" title="Learn again from the Lab's bar tables (a few seconds)">Run now</button></div>
     <p class="small muted" style="margin:4px 0">Trend day = moved cleanly and wider than a usual day; quiet = under 60% of a usual day's range; range = the rest. Each month is forecast only by a model trained on the months before it.</p>
     <ul class="small mv-list">${labs}</ul>
-    <p class="small"><b>Live:</b> ${lv.graded ? `${lv.graded} graded day${lv.graded === 1 ? "" : "s"}, ${lv.right_pct}% right${lv.skill != null ? `, ${sg(lv.skill)} vs the usual shares` : ""}. ${rec}` : "the first forecast comes at 09:45 on the next market day, graded at the close."}</p>`;
+    <p class="small"><b>Live:</b> ${lv.graded ? `${lv.graded} graded day${lv.graded === 1 ? "" : "s"}, ${lv.right_pct}% right${lv.skill != null ? `, ${sg(lv.skill)} vs the usual shares` : ""}. ${rec}` : "the first forecast comes at 09:45 on the next market day, graded at the close."}</p>
+    ${lck ? `<p class="small"><b>Live, later reads:</b> ${lck}</p>` : `<p class="small muted">Later reads (10:15-12:15) start on the next market day after the nightly Lab has learnt them.</p>`}`;
   const b = $("#dt-run"); if (b) b.onclick = async () => { b.disabled = true; try { await post("/api/daytype/run", {}); toast("Learning: this panel updates in a few seconds"); setTimeout(drawDayType, 15000); } catch (e) { toast(e.message); b.disabled = false; } };
 }
 

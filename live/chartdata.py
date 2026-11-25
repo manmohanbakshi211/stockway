@@ -379,7 +379,7 @@ class ChartData:
         rows = getattr(self, "_dt_rows", None)
         if rows is None:
             rows = self._dt_rows = DT.live_load(self.e.data_dir)
-        row = next((r for r in rows if r.get("day") == day and r.get("sym") == sym), None)
+        row = next((r for r in rows if r.get("day") == day and r.get("sym") == sym and r.get("at") in (None, 30)), None)
         changed = False
         if row is None:
             fv = {k: float(v[at]) for k, v in f.items()
@@ -394,12 +394,46 @@ class ChartData:
             pr = p["probs"]
             self.e.log(f"Day type {sym} (09:45, on trial): trend {pr['trend']:.0f}% (usual {p['usual']['trend']:.0f}%), "
                        f"range {pr['range']:.0f}%, quiet {pr['quiet']:.0f}%")
-        if not row.get("label") and slot > end:
+        for ck in c.get("checkpoints") or []:             # 3.10: the read again at 10:15, 10:45 ... (information only)
+            try:
+                bi = int(ck) // 5 - 1
+                if slot <= bi or slot > bi + 6:               # only around its own bar (no stale reads after a late start)
+                    continue
+                if any(r.get("day") == day and r.get("sym") == sym and r.get("at") == int(ck) for r in rows):
+                    continue
+                fv = {k: float(v[bi]) for k, v in f.items()
+                      if isinstance(v, np.ndarray) and len(v) > bi and np.issubdtype(v.dtype, np.number)}
+                from lab import dhan_hist
+                q = DT.predict_at([self.e.data_dir, dhan_hist.root(self.e.data_dir)], sym, fv, int(ck))
+                if not q:
+                    continue
+                rk = {"day": day, "sym": sym, "made": now.timestamp(), "late": slot > bi + 3, **q}
+                rows.append(rk)
+                changed = True
+                DT.set_now(sym, day, rk)
+                side = "up" if q["dir_hint"] > 0 else "down" if q["dir_hint"] < 0 else "flat"
+                self.e.log(f"Day type {sym} at {q['hhmm']}: " + (
+                    f"TREND DAY likely, {side} (p {q['probs']['trend']:.0f}%; calls like this were right {q['right_when_called']}% "
+                    f"of the time on unseen days)" if q["trend_call"] else
+                    f"no trend day call (p {q['probs']['trend']:.0f}%" + (f", needs {q['threshold'] * 100:.0f}%)" if q.get("threshold") else
+                                                                           ", no honest call at this time)")))
+            except Exception as ex:
+                if self._rate(f"daytype_ck:{sym}", 1800):
+                    self.e.log(f"Day-type read for {sym} skipped: {ex}")
+        latest = max((r for r in rows if r.get("day") == day and r.get("sym") == sym and r.get("at") not in (None, 30)),
+                     key=lambda r: r["at"], default=None)
+        if latest:                                        # after a restart the day's latest read is today's read again
+            DT.set_now(sym, day, latest)
+        if slot > end:                                    # the close: every forecast of the day gets its real label
             last = {k: float(f[k][end]) for k in ("gap", "day_ret", "day_range") if k in f and len(f[k]) > end}
-            DT.grade(row, last, c)
-            changed = bool(row.get("label"))
+            for r in rows:
+                if r.get("day") == day and r.get("sym") == sym and not r.get("label") and r.get("med20") is not None:
+                    DT.grade(r, last, c)
+                    changed = changed or bool(r.get("label"))
         if changed:
-            DT.live_save(self.e.data_dir, rows)
+            from .practice import is_practice
+            if not is_practice(getattr(self.e, "source", None)):   # 3.10: a sim / replay never writes the real record
+                DT.live_save(self.e.data_dir, rows)
 
     def _add_new_facts(self, f: dict, sym, now, slot: int, m: dict, bars: tuple, prem: list, rules: list):
         """Adds the 2.47 facts (lab/tfacts.py and the option momentum facts) to f, the same as the Lab's bar table.

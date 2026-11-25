@@ -120,6 +120,52 @@ Only prices and public headlines are sent.
 
 Costs: Upstox data is free with an account. Claude uses the plan you already have. Gemini free tier is free. Telegram is free.
 
+## 3.10: the day type read during the morning; "Trailing · protect" and "Trailing · day type" (26 Nov 2026, on trial)
+- **Mandeep (26 Nov):** "trailing ke liye kya aisa best karein jo bade profitable traders karte hain ki profit mein aakar
+  loss na le" ... "different day type par kaisa kaam karega" ... "ye sab solve karo".
+- **Why the morning call said "range" every day:** the 09:45 forecaster calls the most likely class, and at 09:45 a
+  trend day never is: on 501 unseen days (1-year Lab) its trend calls were right 37% of the time (all days 30%) and it
+  caught none of the 150 trend days. The live record agreed: "range" on all 9 days 11-25 Nov, including the trend days
+  19 and 23 Nov. Kept as it is (add, don't replace).
+- **The read again at 10:15, 10:45, 11:15, 11:45 and 12:15 (`lab/daytype.py` checkpoints, `rules/daytype.json`):** the
+  same model and facts at later bars, walk-forward by month. On days it never saw, with p(trend) >= 0.45:
+
+  | Read at | Right when it calls a trend day (1y / 5y Lab) | Trend days caught (1y) | Move so far = the day's direction |
+  |---|---|---|---|
+  | 09:45 (old) | 38% / 50% | 8% | 83% |
+  | 10:15 | 56% / 54% | 33% | 89% |
+  | 10:45 | 60% / 60% | 41% | 91% |
+  | 11:15 | 62% / 63% | 49% | 92% |
+  | 11:45 | 65% / 66% | 55% | 96% |
+  | 12:15 | 67% / 69% | 65% | 96% |
+
+  (all days: 30% trend days in the 1-year Lab, 32% in the 5-year Lab's 1,395 unseen days). Each checkpoint keeps the
+  p(trend) that was right at least 55% of the time on unseen days and caught the most (`trend_call`); no such level =
+  no call at that time. Learnt each night with the 09:45 model, and once at start-up when the model file has no
+  checkpoints yet (`LiveEngine.daytype_first`). Live: one read per index per checkpoint, saved and graded at the close
+  (`data/daytype_live.json`, "at"), shown on the board ("Day type as the morning unfolds") with its own live record.
+  A sim / replay keeps its reads to itself.
+- **Trailing: where the profit goes (74 real trades, 11-25 Nov, minute prices):** winners kept 82% of their best open
+  profit; of 47 losers only 12 had been +1R (-Rs10.4K). The giveback is big trades open at the day's peak (Rs92.6K)
+  more than trades after it (Rs10.9K): 23 Nov BANKNIFTY PE 09:31, 3 lots, +Rs26.3K at 09:35 -> -Rs13.8K (premium 292 ->
+  671 -> back; stop 1.3% wide). Fills at the open were fine (0.6% over the next minute's mid, as later in the day); the
+  only rule that fixed 23 Nov was a fit to that one trade, so nothing was built for the opening minutes.
+- **Rules tested on the same trades (total / green days of 9 / worst day):** actual +Rs1,20,338 / 4 / -Rs9.8K;
+  **lock +0.5R once +1.5R and stop at most 0.8% of the price +Rs1,23,713 / 5 / -Rs8.8K** (the app's own LivePlan code
+  replayed minute by minute; without protect it gives the actual +Rs1,20,338 exactly); breakeven after +1R
+  +Rs1,13,462; book half at +1R +Rs96,838; premium "no loss after +20%" +Rs87,054; keep 75% of a trade's best after
+  +Rs5K +Rs66,975; day locks +Rs48K to +Rs91K. By day type: trend days unchanged (+Rs82.8K), range days -Rs15.1K ->
+  -Rs11.2K, 12 Nov -Rs1.8K, 17 Nov turns green.
+- **New challengers (mirror the main account's trades, `rules/paper_books.json`, never retired automatically):**
+  - **Trailing · protect** (`trail_protect`): the chand exit + `protect` {lock_at_r 1.5, lock_keep_r 0.5, max_stop_pct 0.8}.
+  - **Trailing · day type** (`trail_daytype`): the same, but no lock while today's read calls a trend day the trade's
+    way, and once a trend day is called, alerts against it are not taken (`skip_against_trend_day`). Nifty's read for
+    stocks and the other indices, Bank Nifty's for Bank Nifty. Not testable on the 9 recorded days (no reads then).
+  - Gun: `LivePlan` takes an optional `protect` (off = byte-for-byte the old plan); the Paper page says it in words.
+- **Checks:** full tests 739 passed (new `tests/test_daytype_310.py`: 10); Lab regression **3763 of 3763** identical (lab/exits.py
+  changed); board, Paper and System pages opened headless at desktop and phone width: no console errors, no sideways
+  scroll; System & logins lists `daytype_reads`.
+
 ## 3.09: the base exit of every paper trade comes from the chart, not a % of the premium (25 Nov 2026)
 - **Mandeep (25 Nov):** "bhot saare trades time limit par band hote hai ... stoploss capital percentage nahi scalping ke
   hisab se chart, price, or baaki jo bhi valuable factors hain uske hisab se banao. ye test mein nahi by default sab

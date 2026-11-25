@@ -569,6 +569,7 @@ class LiveEngine:
         threading.Thread(target=self._paper_watch, args=(token,), daemon=True, name="paper-watch").start()
         threading.Thread(target=self._warm_charts, args=(token,), daemon=True, name="chart-warmup").start()
         threading.Thread(target=self.situation_learn, args=(False,), daemon=True, name="situation-first").start()
+        threading.Thread(target=self.daytype_first, daemon=True, name="daytype-first").start()
         threading.Thread(target=self._vault_loop, args=(token,), daemon=True, name="data-vault").start()
         threading.Thread(target=self._nextcandle_loop, args=(token,), daemon=True, name="next-candle").start()
         self._loop()
@@ -856,6 +857,32 @@ class LiveEngine:
             return {"error": str(e)[:160]}
         finally:
             self._sit_busy = False
+
+    def daytype_first(self) -> dict:
+        """3.10: the day-type reads at 10:15-12:15 need the forecaster learnt with checkpoints; a model file from before
+        3.10 has none, so it learns once now (its own low-priority process) instead of waiting for the nightly Lab."""
+        from lab import dhan_hist, proc
+        from .practice import is_practice
+        if is_practice(self.source) or getattr(self, "_dt_busy", False):
+            return {"skipped": True}
+        self._dt_busy = True
+        out = {}
+        try:
+            for d in (self.data_dir, dhan_hist.root(self.data_dir)):
+                try:
+                    info = json.loads((Path(d) / "daytype.json").read_text())
+                except Exception:
+                    info = None
+                if info and "checkpoints" in info:
+                    continue
+                if not (Path(d) / "lab" / "factory_bars.parquet").exists():
+                    continue
+                out[str(d)] = proc.run("daytype", d, log=lambda m: self.log(f"Day type: {m}")) or {}
+        except Exception as e:
+            self.log(f"Day-type first learning failed: {e}")
+        finally:
+            self._dt_busy = False
+        return out
 
     def _warm_charts(self, token):
         """2.72: earlier days' bars for the Lab rules check, fetched before the first scan (see ChartData.warm)."""

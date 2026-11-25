@@ -30,6 +30,17 @@ FILE = Path(__file__).resolve().parents[1] / "rules" / "paper_books.json"
 _C: dict = {}
 
 
+def _against_trend(a: dict, now) -> bool:
+    """3.10: today's day-type read calls a trend day and this alert trades the other way."""
+    try:
+        from lab.daytype import ctx_index, trend_now
+        r = trend_now(ctx_index(a.get("sym")), now.timestamp())
+        d = 1 if a.get("direction") == "up" else -1
+        return bool(r and r.get("dir") and r["dir"] != d)
+    except Exception:
+        return False
+
+
 def _paper_exit() -> dict:
     """3.09: rules/paper_exit.json (the base exit of every paper trade)."""
     try:
@@ -215,6 +226,8 @@ class Books:
                     elif sp.get("exit_style") and sp["exit_style"] != "premium" \
                             and not ((a.get("data") or {}).get("plan_R") or {}).get(sp["exit_style"]):
                         why = "no chart risk for this alert (trailing exit needs 5-minute bars)"
+                    elif (sp.get("pick") or {}).get("skip_against_trend_day") and _against_trend(a, now):
+                        why = "against today's trend day (day-type read)"
                     elif sp.get("split") and sp.get("exit_style"):   # 3.05: part booked with the main exit, the rest trailed
                         why = self._split_open(bk, sp, a, risk, state, now)
                     else:
@@ -222,6 +235,9 @@ class Books:
                         if sp.get("exit_style") and sp["exit_style"] != "premium":   # 2.56: its own exit, every alert
                             st = sp["exit_style"]
                             a2["data"]["factory"] = {"plan": {"style": st, "R": float(a["data"]["plan_R"][st])}}
+                            if sp.get("protect"):         # 3.10: this account's profit protection (bullet)
+                                from lab.daytype import ctx_index
+                                a2["data"]["factory"]["plan"]["protect"] = {**sp["protect"], "ctx": ctx_index(a.get("sym"))}
                         before = dict(bk.skipped)
                         tid = bk.try_open(a2, state, now)
                         new = [k for k, v in bk.skipped.items() if v > before.get(k, 0)]

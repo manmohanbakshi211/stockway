@@ -329,28 +329,50 @@ def first_exit(style: str, spot, opt, s0: float, entry: float, d: int, R: float,
 class LivePlan:
     """The same exit, tick by tick, for paper trades and live shadow grading."""
 
-    def __init__(self, style: str, s0: float, d: int, R: float, entry: float, t0: float, best: float = 0.0):
+    def __init__(self, style: str, s0: float, d: int, R: float, entry: float, t0: float, best: float = 0.0,
+                 protect: dict | None = None):
         self.style, self.s0, self.d, self.R, self.entry, self.t0, self.best = style, s0, d, R, entry, t0, best
+        self.protect = protect or None                   # 3.10: optional profit protection (an account's bullet)
+        self._now = None
 
     def to_dict(self) -> dict:
-        return {"style": self.style, "s0": self.s0, "d": self.d, "R": self.R, "entry": self.entry, "t0": self.t0, "best": self.best}
+        out = {"style": self.style, "s0": self.s0, "d": self.d, "R": self.R, "entry": self.entry, "t0": self.t0, "best": self.best}
+        if self.protect:
+            out["protect"] = self.protect
+        return out
 
     @classmethod
     def from_dict(cls, x: dict) -> "LivePlan":
-        return cls(x["style"], x["s0"], x["d"], x["R"], x["entry"], x["t0"], x.get("best", 0.0))
+        return cls(x["style"], x["s0"], x["d"], x["R"], x["entry"], x["t0"], x.get("best", 0.0), x.get("protect"))
+
+    def _trend_with_me(self) -> bool:
+        """3.10: today's day-type read (lab/daytype.py) calls a trend day the trade's way: let it run, no lock."""
+        try:
+            from . import daytype
+            r = daytype.trend_now(self.protect.get("ctx") or "NIFTY", self._now)
+            return bool(r and r.get("dir") == self.d)
+        except Exception:
+            return False
 
     def stop_move(self) -> float:
         st = spec_of(self.style)
         stop = -self.R
+        pr = self.protect
+        if pr and pr.get("max_stop_pct"):                 # 3.10: a stop never wider than this % of the price
+            stop = max(stop, -float(pr["max_stop_pct"]) / 100 * self.s0)
         if st["be_at"] and self.best >= st["be_at"] * self.R:
             stop = 0.0
         if st["trail_atr"]:
             stop = max(stop, self.best - st["trail_atr"] * self.R / st["stop"][1])
+        if pr and pr.get("lock_at_r") and self.best >= float(pr["lock_at_r"]) * self.R \
+                and not (pr.get("unless_trend") and self._trend_with_me()):
+            stop = max(stop, float(pr.get("lock_keep_r", 0.5)) * self.R)    # 3.10: once +lock_at_r R, keep +lock_keep_r R
         return stop
 
     def check(self, spot: float | None, opt: float | None, now_ts: float) -> str | None:
         st = spec_of(self.style)
         why = None
+        self._now = now_ts
         if opt and opt <= self.entry * (1 - PREM_STOP / 100):
             why = "premium stop"
         if spot:

@@ -70,6 +70,48 @@
    "exit_style": "chand",
    "paper": {}
   },
+  "trail_protect": {
+   "name": "Trailing · protect",
+   "short": "Trailing exit that keeps +0.5R once a trade is +1.5R, and a stop never wider than 0.8% of the price",
+   "explain": "3.10 (Mandeep, 26 Nov: 'profit mein aakar loss na le'): the trailing account's trades (same alert, lots and moment as the main account) with two protections on the same chart exit: once the stock / index is 1.5R in favour the stop never falls below +0.5R, and the first stop is never wider than 0.8% of its price. On Trailing's 74 real trades (11-25 Nov, minute prices): +Rs1.24 lakh vs +Rs1,20,338, green days 5 of 9 vs 4, worst day -Rs8.8K vs -Rs9.8K; trend days unchanged (19 Nov +Rs80.2K), range days less red. Premium % locks, booking half at +1R and keeping 75% of a trade's best all earned less on the same trades (claude/stockway_status.md). On trial: compare with Trailing over 20 market days. Paper only.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "same_as_main": true,
+    "mirror_main": true,
+    "risk_pass": true
+   },
+   "exit_style": "chand",
+   "protect": {
+    "lock_at_r": 1.5,
+    "lock_keep_r": 0.5,
+    "max_stop_pct": 0.8
+   },
+   "paper": {},
+   "review": "show"
+  },
+  "trail_daytype": {
+   "name": "Trailing · day type",
+   "short": "Trailing · protect, but no lock and no counter-trend trades once the day-type read calls a trend day",
+   "explain": "3.10 (Mandeep, 26 Nov: 'different day type par kaisa kaam karega ... ye sab solve karo'): the 09:45 forecast cannot spot a trend day, but the same model at 10:15-12:15 can (on days it never saw, its trend-day calls were right 56-69%; the move so far pointed the day's way 89-96%). This account is Trailing · protect, except: while today's read calls a trend day the trade's way, the +0.5R lock is off (a trend day's winners run); and once a trend day is called, alerts against it are not taken. Nifty's read for stocks and the other indices, Bank Nifty's for Bank Nifty. Not testable on the 9 recorded days (no reads then): on trial from 26 Nov. Paper only.",
+   "on": true,
+   "capital": null,
+   "pick": {
+    "same_as_main": true,
+    "mirror_main": true,
+    "risk_pass": true,
+    "skip_against_trend_day": true
+   },
+   "exit_style": "chand",
+   "protect": {
+    "lock_at_r": 1.5,
+    "lock_keep_r": 0.5,
+    "max_stop_pct": 0.8,
+    "unless_trend": true
+   },
+   "paper": {},
+   "review": "show"
+  },
   "halftrail": {
    "name": "Half book · half trail",
    "short": "Same trades as the main account: half the lots exit like the main account, the rest trail",

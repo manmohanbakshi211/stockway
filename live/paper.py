@@ -93,7 +93,13 @@ def exit_view(t: dict) -> dict | None:
             from lab.exits import LivePlan, spec_of
             lp = LivePlan.from_dict(pj)
             lv = lp.levels()
-            return {"style": st, "stop": lv["stop"], "target": lv.get("target"), "d": d, "words": spec_of(st)["words"]}
+            w = spec_of(st)["words"]
+            pr = lp.protect or {}
+            if pr:                                        # 3.10: an account's profit protection
+                w += (f"; keeps +{pr.get('lock_keep_r', 0.5)}R once +{pr.get('lock_at_r')}R" if pr.get("lock_at_r") else "") \
+                    + (f"; stop at most {pr['max_stop_pct']}% of the price" if pr.get("max_stop_pct") else "") \
+                    + ("; no lock while today's day-type read calls a trend day its way" if pr.get("unless_trend") else "")
+            return {"style": st, "stop": lv["stop"], "target": lv.get("target"), "d": d, "words": w}
     except Exception:
         return None
     return None
@@ -327,7 +333,8 @@ class PaperBook:
         elif plan and t["und_entry"] and plan.get("R"):   # chart-level exit: stop / target on the underlying (lab/exits.py)
             import json as _json
             from lab.exits import PREM_STOP, STYLES, LivePlan
-            lp = LivePlan(plan["style"], t["und_entry"], 1 if opt["side"] == "CE" else -1, float(plan["R"]), entry, now.timestamp())
+            lp = LivePlan(plan["style"], t["und_entry"], 1 if opt["side"] == "CE" else -1, float(plan["R"]), entry, now.timestamp(),
+                          protect=plan.get("protect"))
             t["plan"] = _json.dumps(lp.to_dict())
             t["target"] = round(entry * 100, 2)            # the chart target decides, not a premium %
             t["stop"] = round(entry * (1 - PREM_STOP / 100), 2)

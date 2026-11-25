@@ -92,6 +92,16 @@ def static_checks(cfg: dict | None = None) -> list:
                       bool(dc.get("facts")) and bool(dc.get("models")),
                       f"{len(dc['facts'])} facts, models tried each night: {', '.join(dc['models'])}; walk-forward by month; "
                       f"forecast at 09:45 for {', '.join(dc.get('syms') or [])}, graded at the close; nothing trades on it"))
+        cks = dc.get("checkpoints") or []                 # 3.10: the reads at 10:15-12:15 and the two accounts that use them
+        from live import books as _bk10
+        bb = _bk10.cfg().get("books") or {}
+        ok10 = (bool(cks) and callable(getattr(_dt, "predict_at", None)) and (bb.get("trail_protect") or {}).get("protect")
+                and ((bb.get("trail_daytype") or {}).get("protect") or {}).get("unless_trend"))
+        out.append(_c("daytype_reads", "Day-type reads at " + ", ".join(_dt._hhmm(int(x)) for x in cks) + " (3.10, on trial)", bool(ok10),
+                      f"the 09:45 model again later in the morning; a trend-day call only where it was right "
+                      f"{(dc.get('trend_call') or {}).get('min_right', 55)}%+ of the time on unseen days; used only by the paper "
+                      f"accounts '{(bb.get('trail_daytype') or {}).get('name')}' (and shown on the board); "
+                      f"'{(bb.get('trail_protect') or {}).get('name')}' keeps +0.5R once +1.5R"))
     except Exception as e:
         out.append(_c("daytype", "Day-type forecaster", False, f"could not load: {e}"))
     try:                                             # 2.65: evening AI analyst

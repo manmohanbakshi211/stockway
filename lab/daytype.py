@@ -111,8 +111,9 @@ def _proba(m, X) -> np.ndarray:
     return out
 
 
-def walk(t, cols: list, name: str, spec: dict, c: dict) -> dict:
-    """Month-by-month walk-forward of one model next to the earlier months' base rates."""
+def walk(t, cols: list, name: str, spec: dict, c: dict, preds: bool = False) -> dict:
+    """Month-by-month walk-forward of one model next to the earlier months' base rates (preds: also the unseen-day
+    probabilities and labels, for the 3.10 checkpoints' trend-call threshold)."""
     X = t[cols].to_numpy(np.float32)
     y = np.array([CLASSES.index(v) for v in t["label"]])
     month = t["date"].astype(str).str[:7].to_numpy()
@@ -143,7 +144,7 @@ def walk(t, cols: list, name: str, spec: dict, c: dict) -> dict:
         by[cl] = {"called": int(cc.sum()), "real": int(rr.sum()),
                   "right_when_called": round(100 * float((cc & rr).sum()) / cc.sum(), 1) if cc.any() else None,
                   "caught": round(100 * float((cc & rr).sum()) / rr.sum(), 1) if rr.any() else None}
-    return {"model": name, "tested_days": int(len(Y)), "months": len(set(M)),
+    out = {"model": name, "tested_days": int(len(Y)), "months": len(set(M)),
             "logloss_skill": round((1 - ll / llb) * 100, 1),
             "accuracy": round(100 * float((called == Y).mean()), 1),
             "base_accuracy": round(100 * float((B.argmax(1) == Y).mean()), 1),
@@ -151,6 +152,73 @@ def walk(t, cols: list, name: str, spec: dict, c: dict) -> dict:
             "trend_top20": round(100 * float((Y[top_t] == 0).mean()), 1),
             "trend_bottom20": round(100 * float((Y[bot_t] == 0).mean()), 1),
             "quiet_top20": round(100 * float((Y[top_q] == 2).mean()), 1), "by_class": by}
+    if preds:
+        out["_P"], out["_Y"] = P, Y
+    return out
+
+
+def trend_threshold(P, Y, c: dict) -> dict:
+    """3.10: the lowest p(trend) at which a "trend day" call was right often enough on days the model never saw
+    (rules/daytype.json "trend_call": min_right % of the calls, at least min_called calls); the one catching the most
+    trend days wins (equal: the one right more often). None: at this time of day the model cannot call a trend day honestly."""
+    tc = c.get("trend_call") or {}
+    best = None
+    for th in tc.get("grid") or [0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]:
+        cl = P[:, 0] >= th
+        n = int(cl.sum())
+        if n < int(tc.get("min_called", 30)):
+            continue
+        right = 100 * float((Y[cl] == 0).mean())
+        caught = 100 * float((cl & (Y == 0)).sum()) / max(1, int((Y == 0).sum()))
+        if right >= float(tc.get("min_right", 55)) and (best is None or (caught, right) > (best["caught"], best["right"])):
+            best = {"threshold": th, "called": n, "right": round(right, 1), "caught": round(caught, 1),
+                    "called_share": round(100 * n / len(Y), 1)}
+    return best or {"threshold": None}
+
+
+def learn_checkpoints(df, c: dict, log=print) -> tuple[dict, dict]:
+    """3.10 (Mandeep, 26 Nov: "ye sab solve karo"): the same forecaster at later times of the morning
+    (rules/daytype.json "checkpoints", minutes after the open). At 09:45 it cannot spot a trend day (its trend calls
+    were right 37% of the time, all days 30%); by 10:45-12:15 the day's own path says much more. Each checkpoint:
+    walk-forward by month, the best model, and the p(trend) above which a trend-day call was right min_right % of
+    the time on unseen days. Returns (models for the joblib, summary for daytype.json)."""
+    models, summary = {}, {}
+    for at in c.get("checkpoints") or []:
+        try:
+            ck = {**c, "at_tod": int(at)}
+            t, cols = table(df, ck)
+            cols = [k for k in cols if t[k].notna().mean() >= float(c.get("min_fact_share", 0.5))]
+            if len(t) < int(c.get("min_days", 120)):
+                summary[str(at)] = {"note": f"needs {c.get('min_days', 120)}+ index days (has {len(t)})"}
+                continue
+            runs = [walk(t, cols, name, spec, ck, preds=True) for name, spec in (c.get("models") or {"logit": {}}).items()]
+            ok = [w for w in runs if w.get("tested_days")]
+            if not ok:
+                continue
+            champ = max(ok, key=lambda w: w["logloss_skill"])
+            thr = trend_threshold(champ.pop("_P"), champ.pop("_Y"), c)
+            for w in runs:
+                w.pop("_P", None), w.pop("_Y", None)
+            X = t[cols].to_numpy(np.float32)
+            y = np.array([CLASSES.index(v) for v in t["label"]])
+            m = make_model(champ["model"], (c.get("models") or {}).get(champ["model"]) or {}).fit(X, y)
+            mv = np.sign(t["day_ret"].fillna(0) - t["gap"].fillna(0)).to_numpy()
+            tr = (t["label"] == "trend").to_numpy()
+            info = {"at": int(at), "hhmm": _hhmm(int(at)), "walk": champ, "call": thr,
+                    "dir_right": round(100 * float((mv == t["trend_dir"].to_numpy())[tr].mean()), 1) if tr.any() else None}
+            models[str(at)] = {"model": m, "cols": cols, "info": info}
+            summary[str(at)] = info
+            log(f"Day type at {info['hhmm']}: {champ['tested_days']} unseen days, skill {champ['logloss_skill']:+.1f}%; "
+                + (f"trend-day call from p >= {thr['threshold']:.2f}: right {thr['right']}%, caught {thr['caught']}% of trend days"
+                   if thr.get("threshold") is not None else "no honest trend-day call yet"))
+        except Exception as e:                            # one checkpoint failing never stops the rest
+            summary[str(at)] = {"error": str(e)[:160]}
+    return models, summary
+
+
+def _hhmm(at: int) -> str:
+    m = 9 * 60 + 15 + int(at)
+    return f"{m // 60:02d}:{m % 60:02d}"
 
 
 def trusted(w: dict, c: dict) -> bool:
@@ -206,9 +274,10 @@ def learn(data_dir, log=print, df=None, c: dict | None = None) -> dict:
            "share": {k: round(float((t["label"] == k).mean()) * 100, 1) for k in CLASSES},
            "runs": runs, "champion": champ["model"], "walk": champ, "trusted": trusted(champ, c),
            "trend_dir_hint": round(float(hint.mean()) * 100, 1) if len(tr_days) else None}
+    ck_models, res["checkpoints"] = learn_checkpoints(df, c, log=log)
     try:
         import joblib
-        joblib.dump({"model": model, "cols": cols, "med20": med, "info": res}, data_dir / MODEL)
+        joblib.dump({"model": model, "cols": cols, "med20": med, "info": res, "checkpoints": ck_models}, data_dir / MODEL)
     except Exception as e:
         res["save_error"] = str(e)[:120]
     log(f"Day type: {len(t)} index days; champion {champ['model']}: {champ['tested_days']} unseen days, "
@@ -271,6 +340,59 @@ def predict(dirs, sym: str, f_now: dict) -> dict | None:
             "days": best["info"].get("days")}
 
 
+def predict_at(dirs, sym: str, f_now: dict, at: int) -> dict | None:
+    """3.10: the read at a later checkpoint (minutes after the open). Of the models that have this checkpoint, the one
+    with the best walk-forward skill there answers; trend_call only where the threshold cleared min_right."""
+    best = None
+    for d in dirs if isinstance(dirs, (list, tuple)) else [dirs]:
+        o = _load(Path(d) / MODEL)
+        ck = ((o or {}).get("checkpoints") or {}).get(str(at))
+        if o and ck and sym in (o.get("med20") or {}):
+            if best is None or (ck["info"]["walk"].get("logloss_skill") or -99) > (best[1]["info"]["walk"].get("logloss_skill") or -99):
+                best = (o, ck)
+    if best is None:
+        return None
+    o, ck = best
+    vals = {k: float(v) for k, v in f_now.items() if isinstance(v, (int, float, np.floating)) and not isinstance(v, bool)}
+    vals.update(derive(vals, o["med20"].get(sym), sym))
+    x = np.array([[vals[k] if k in vals and math.isfinite(vals[k]) else np.nan for k in ck["cols"]]], np.float32)
+    pr = _proba(ck["model"], x)[0]
+    probs = {k: round(float(v) * 100, 1) for k, v in zip(CLASSES, pr)}
+    info = ck["info"]
+    th = (info.get("call") or {}).get("threshold")
+    tcall = th is not None and pr[0] >= th
+    return {"at": int(at), "hhmm": info.get("hhmm"), "probs": probs, "trend_call": bool(tcall),
+            "call": "trend" if tcall else ("range" if probs["range"] >= probs["quiet"] else "quiet"),
+            "threshold": th, "right_when_called": (info.get("call") or {}).get("right"),
+            "caught": (info.get("call") or {}).get("caught"), "dir_right": info.get("dir_right"),
+            "skill": info["walk"].get("logloss_skill"), "usual": o["info"].get("share"),
+            "dir_hint": int(np.sign(vals.get("day_ret", 0) - vals.get("gap", 0))), "med20": o["med20"].get(sym),
+            "model": info["walk"].get("model"), "trusted": bool(o["info"].get("trusted")), "days": o["info"].get("days")}
+
+
+NOW: dict = {}           # 3.10: the latest read per index today (set by live/chartdata.py; read by paper exits / accounts)
+
+
+def set_now(sym: str, day: str, row: dict):
+    NOW[sym] = {"day": day, "at": row.get("hhmm"), "trend": bool(row.get("trend_call")), "dir": int(row.get("dir_hint") or 0),
+                "p": (row.get("probs") or {}).get("trend")}
+
+
+def trend_now(sym: str, ts: float | None = None) -> dict | None:
+    """Today's read for this index when it calls a trend day (with its direction), else None."""
+    import datetime as _dt
+    r = NOW.get(sym)
+    if not r or not r.get("trend") or not r.get("dir"):
+        return None
+    day = _dt.datetime.fromtimestamp(ts if ts else time.time(), _dt.timezone(_dt.timedelta(hours=5, minutes=30))).date().isoformat()
+    return r if r.get("day") == day else None
+
+
+def ctx_index(sym: str) -> str:
+    """The index whose day type a trade follows: Bank Nifty for its own options, Nifty for everything else."""
+    return "BANKNIFTY" if sym == "BANKNIFTY" else "NIFTY"
+
+
 # ------------------------------------------------------------------ live record (graded at the close)
 def live_load(data_dir) -> list:
     try:
@@ -298,7 +420,8 @@ def grade(row: dict, f_last: dict, c: dict) -> dict:
 
 
 def live_view(data_dir) -> dict:
-    rows = live_load(data_dir)
+    allr = live_load(data_dir)
+    rows = [r for r in allr if r.get("at") in (None, 30)]      # the 09:45 forecast's own record (3.10: checkpoints apart)
     g = [r for r in rows if r.get("label")]
     out = {"forecasts": len(rows), "graded": len(g), "today": [r for r in rows[-4:] if not r.get("label")]}
     if g:
@@ -309,6 +432,18 @@ def live_view(data_dir) -> dict:
             llb = -np.mean([math.log(max(1e-4, (r["usual"].get(r["label"]) or 0) / 100)) for r in usual])
             out["skill"] = round((1 - ll / llb) * 100, 1) if llb else None
         out["recent"] = g[-10:][::-1]
+    ck = {}
+    for r in allr:                                         # 3.10: each later checkpoint's live trend-day calls
+        if r.get("at") in (None, 30) or not r.get("label"):
+            continue
+        k = ck.setdefault(str(r["at"]), {"hhmm": r.get("hhmm"), "graded": 0, "trend_calls": 0, "right_calls": 0, "trend_days": 0, "caught": 0})
+        k["graded"] += 1
+        k["trend_days"] += r["label"] == "trend"
+        if r.get("trend_call"):
+            k["trend_calls"] += 1
+            k["right_calls"] += r["label"] == "trend"
+            k["caught"] += r["label"] == "trend"
+    out["checkpoints"] = ck
     return out
 
 
@@ -320,8 +455,12 @@ def today(data_dir, day: str) -> dict:
     ok_live = lv["graded"] >= int((c.get("trust") or {}).get("min_live_days", 20)) and (lv.get("skill") or 0) > 0
     rows = [dict({k: r.get(k) for k in ("sym", "probs", "call", "usual", "dir_hint", "late", "label", "right", "skill",
                                         "trend_top20", "trend_all", "model")}, trusted=bool(ok_live and r.get("trusted")))
-            for r in live_load(data_dir) if r.get("day") == day]
-    return {"rows": rows, "live_graded": lv["graded"], "live_right": lv.get("right_pct"), "live_skill": lv.get("skill")}
+            for r in live_load(data_dir) if r.get("day") == day and r.get("at") in (None, 30)]
+    reads = [{k: r.get(k) for k in ("sym", "at", "hhmm", "probs", "trend_call", "call", "threshold", "right_when_called",
+                                    "caught", "dir_hint", "dir_right", "label", "right")}
+             for r in live_load(data_dir) if r.get("day") == day and r.get("at") not in (None, 30)]
+    return {"rows": rows, "reads": reads, "live_graded": lv["graded"], "live_right": lv.get("right_pct"),
+            "live_skill": lv.get("skill"), "checkpoints": lv.get("checkpoints")}
 
 
 def view(data_dir, dirs=None) -> dict:
